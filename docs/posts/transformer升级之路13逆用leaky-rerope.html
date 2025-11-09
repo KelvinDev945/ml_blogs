@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer升级之路：13、逆用Leaky ReRoPE | ML & Math Blog Posts</title>
+    <meta name="description" content="Transformer升级之路：13、逆用Leaky ReRoPE
+原文链接: https://spaces.ac.cn/archives/9728
+发布日期: 
+
+上周在《Transformer升级之路：12、无限外推的ReRoPE？》中，笔者提出了ReRoPE和Leaky ReRoPE，诸多实验结果表明，它们能够在几乎不损失训练效果的情况下免微调地扩展LLM的Context长度，并且实现了“l...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">Transformer升级之路：13、逆用Leaky ReRoPE</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/9728" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                <span class="tag"><i class="fas fa-tag"></i> 位置编码</span>
+                <span class="tag"><i class="fas fa-tag"></i> 泛化</span>
+                <span class="tag"><i class="fas fa-tag"></i> 外推</span>
+                <span class="tag"><i class="fas fa-tag"></i> rope</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="transformer13leaky-rerope">Transformer升级之路：13、逆用Leaky ReRoPE</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9728">https://spaces.ac.cn/archives/9728</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>上周在<a href="/archives/9708">《Transformer升级之路：12、无限外推的ReRoPE？》</a>中，笔者提出了ReRoPE和Leaky ReRoPE，诸多实验结果表明，它们能够在几乎不损失训练效果的情况下免微调地扩展LLM的Context长度，并且实现了“longer context, lower loss”的理想特性，此外跟NTK-aware Scaled RoPE不同的是，其中ReRoPE似乎还有表现出了无限的Context处理能力。</p>
+<p>总之，ReRoPE看起来相当让人满意，但美中不足的是会增加推理成本，具体表现为第一步推理需要算两次Attention，以及后续每步推理需要重新计算位置编码。本文试图通过在训练中逆用Leaky ReRoPE的方法来解决这个问题。</p>
+<h2 id="_1">回顾</h2>
+<p>让我们不厌其烦地重温一下：RoPE形式上是一种绝对位置编码，但实际达到的效果是相对位置编码，对应的相对位置矩阵是：<br />
+\begin{equation}\begin{pmatrix}0 &amp; \\<br />
+1 &amp; 0 &amp; \\<br />
+2 &amp; 1 &amp; 0 &amp;\\<br />
+3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
+\ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
+\ddots &amp; \ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
+\ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\<br />
+\small{L - 2} &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\<br />
+\small{L - 1} &amp; \small{L - 2} &amp; \ddots &amp; \ddots &amp; \ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
+\end{pmatrix}\label{eq:rope}\end{equation}<br />
+为了在保留局域性的同时避免Long Context导致位置越界问题，Leaky ReRoPE将推理阶段的相对位置矩阵改为：<br />
+\begin{equation}\begin{pmatrix}<br />
+\color{red}{0} &amp; \\<br />
+\color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \\<br />
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{\small{w + \frac{L-1-w}{k}}} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\end{pmatrix}\label{eq:leaky-rerope}\end{equation}<br />
+其中$w$是窗口宽度，大概取训练长度的$\frac{1}{4}$到$\frac{1}{2}$，$k$用来调节可处理的最大长度，一般使得$w + \frac{L-1-w}{k}$不超过训练长度的一半为佳。至于ReRoPE，则是直接取了$k\to\infty$的极限：<br />
+\begin{equation}\begin{pmatrix}<br />
+\color{red}{0} &amp; \\<br />
+\color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{w} &amp; \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \\<br />
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\end{pmatrix}\label{eq:rerope}\end{equation}</p>
+<h2 id="_2">反转</h2>
+<p>从上一篇的评测结果来看，作为一种免训练的外推方案，ReRoPE和Leaky ReRoPE的效果都是相当让人满意的，既没有损失训练长度内的效果，又实现了“Longer Context, Lower Loss”。唯一美中不足的是，它们的推理速度相比原本的Attention来说是变慢的，并且目前尚不兼容Flash Attention等加速技术。</p>
+<p>那么，能否反过来呢？ReRoPE/Leaky ReRoPE在训练阶段是正常速度的RoPE，推理阶段则是变慢了，反过来也就是说：能否让训练阶段变慢，让推理阶段变为常规的RoPE？可能有读者疑惑：为什么会想要让训练阶段变慢？训练成本不是更高吗？这是因为ReRoPE/Leaky ReRoPE是一种长度外推方法，场景是“Train Short, Test Long”，训练速度的变慢是短期的、可控的，推理速度的变慢才是长期的、难顶的，所以相较之下，如果是同等程度的变慢的话，我们更愿意将变慢的部分放到训练阶段。</p>
+<p>让我们再看一下Leaky ReRoPE，它在训练阶段的相对位置矩阵是步长为1的式$\eqref{eq:rope}$，推理阶段则在$w$的窗口内使用$1$的步长，在窗口外使用$\frac{1}{k} &lt; 1$的步长，即式$\eqref{eq:leaky-rerope}$，换句话说， <em>差别是推理阶段窗口外使用更小的步长</em> 。如果我们反过来，在训练阶段使用Leaky ReRoPE，并让它窗口外的步长大于$1$，那么按照“推理阶段窗口外使用更小的步长”的原则，推理阶段窗口外是否就可以使用等于$1$的步长，从而退化为RoPE了？</p>
+<p>笔者将以上想法称之为“InvLeaky ReRoPE（Inverse Leaky ReRoPE）”。事不宜迟，我们马上做实验测试。</p>
+<h2 id="_3">实验</h2>
+<p>继续之前的“<a href="/archives/8934">GAU</a> + <a href="/archives/8978">Deep Norm</a> + <a href="/archives/9512">Tiger</a> + 语言模型”实验组合，在训练阶段使用$k=1/16, w=128$的Leaky ReRoPE，在推理阶段使用正常的RoPE，测试结果如下：</p>
+<p>\begin{array}{c|cc}<br />
+\hline<br />
+\text{测试长度} &amp; 512(\text{训练}) &amp; 4096(\text{重复}) &amp; 4096(\text{不重复})\\<br />
+\hline<br />
+\text{Baseline} &amp; 49.41\% &amp; 24.17\% &amp; 23.16\% \\<br />
+\text{Baseline-}\log n &amp; 49.40\% &amp; 24.60\% &amp; 24.02\% \\<br />
+\hline<br />
+\text{NTK-RoPE-fixed} &amp; 49.41\% &amp; 51.86\% &amp; 39.61\% \\<br />
+\text{NTK-RoPE-}\log n^{\color{red}{\dagger}}\text{-fixed} &amp; 49.41\% &amp; 55.94\% &amp; 41.11\% \\<br />
+\text{NTK-RoPE-}\log n\text{-fixed} &amp; 49.40\% &amp; 62.85\% &amp; 44.14\% \\<br />
+\text{NTK-RoPE-mixed} &amp; 49.41\% &amp; 53.09\% &amp; 40.12\% \\<br />
+\text{NTK-RoPE-}\log n^{\color{red}{\dagger}}\text{-mixed} &amp; 49.41\% &amp; 59.11\% &amp; 42.38\% \\<br />
+\text{NTK-RoPE-}\log n\text{-mixed} &amp; 49.40\% &amp; 68.91\% &amp; 45.41\% \\<br />
+\hline<br />
+\text{ReRoPE-w256} &amp; 49.41\% &amp; 77.90\% &amp; 48.48\% \\<br />
+\text{ReRoPE-w256-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 82.40\% &amp; 48.85\% \\<br />
+\text{ReRoPE-w256-}\log n &amp; 49.40\% &amp; \boldsymbol{85.12\%} &amp; \boldsymbol{49.07\%} \\<br />
+\hline<br />
+\text{InvLeaky ReRoPE-w128-}\log n &amp; 49.38\% &amp; 82.25\% &amp; 48.32\% \\<br />
+\text{InvLeaky ReRoPE-w128-b8-}\log n &amp; 49.62\% &amp; 81.15\% &amp; 48.85\% \\<br />
+\hline<br />
+\text{HFWA} &amp; 48.70\% &amp; 80.84\% &amp; 48.15\% \\<br />
+\hline<br />
+\end{array}</p>
+<p>其中$\text{b8}$是指RoPE的频率底数从10000换成了80000。可以看到，“Leaky ReRoPE → RoPE”的InvLeaky ReRoPE虽然效果上不如“RoPE → ReRoPE/Leaky ReRoPE”，但依然胜过了HFWA，并且由于推理阶段是常规的RoPE，可以套用现成的加速技术，因此依然是有相当竞争力的。此外，笔者对$k,w,b$等参数做了一些简单的调参，发现最优解基本上就是以上两个组合了，即“$k$设置为‘扩展倍数的2倍的倒数’、$w$设置为训练长度的$\frac{1}{4}$、$b$可选乘以扩展倍数”。</p>
+<p>那么，InvLeaky ReRoPE对训练速度有多大影响呢？在上述实验中，模型是1亿参数量，训练长度是512，每1000步的训练时间从330秒增加到了350秒，增加不到10%，当然这里边有GAU的原因，因为GAU是单头的注意力，本就比多头注意力快。如果多头注意力或者训练长度更长的话，增加幅度应该会大一些，但目测应该不超过50%都是可以接受的。</p>
+<h2 id="_4">小结</h2>
+<p>本文提出了Leaky ReRoPE的“逆用”做法，通过在训练阶段使用更大步长的Leaky ReRoPE，使得推理阶段可以退回常规的RoPE，从而可以保持推理速度不变，实验结果显示这种做法还是有一定的竞争力的。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9728">https://spaces.ac.cn/archives/9728</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Aug. 14, 2023). 《Transformer升级之路：13、逆用Leaky ReRoPE 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9728">https://spaces.ac.cn/archives/9728</a></p>
+<p>@online{kexuefm-9728,<br />
+title={Transformer升级之路：13、逆用Leaky ReRoPE},<br />
+author={苏剑林},<br />
+year={2023},<br />
+month={Aug},<br />
+url={\url{https://spaces.ac.cn/archives/9728}},<br />
+} </p>
+<hr />
+<h2 id="_5">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>

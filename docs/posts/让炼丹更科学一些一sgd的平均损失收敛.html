@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>让炼丹更科学一些（一）：SGD的平均损失收敛 | ML & Math Blog Posts</title>
+    <meta name="description" content="让炼丹更科学一些（一）：SGD的平均损失收敛
+原文链接: https://spaces.ac.cn/archives/9902
+发布日期: 
+
+很多时候我们将深度学习模型的训练过程戏称为“炼丹”，因为整个过程跟古代的炼丹术一样，看上去有一定的科学依据，但整体却给人一种“玄之又玄”的感觉。尽管本站之前也关注过一些优化器相关的工作，甚至也写过《从动力学角度看优化算法》系列，但都是比较表面的介绍，并没有...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">让炼丹更科学一些（一）：SGD的平均损失收敛</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/9902" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> 优化器</span>
+                <span class="tag"><i class="fas fa-tag"></i> 不等式</span>
+                <span class="tag"><i class="fas fa-tag"></i> 优化器</span>
+                <span class="tag"><i class="fas fa-tag"></i> sgd</span>
+                <span class="tag"><i class="fas fa-tag"></i> 炼丹</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="sgd">让炼丹更科学一些（一）：SGD的平均损失收敛</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9902">https://spaces.ac.cn/archives/9902</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>很多时候我们将深度学习模型的训练过程戏称为“炼丹”，因为整个过程跟古代的炼丹术一样，看上去有一定的科学依据，但整体却给人一种“玄之又玄”的感觉。尽管本站之前也关注过一些<a href="/tag/%E4%BC%98%E5%8C%96%E5%99%A8/">优化器</a>相关的工作，甚至也写过<a href="/search/%E4%BB%8E%E5%8A%A8%E5%8A%9B%E5%AD%A6%E8%A7%92%E5%BA%A6%E7%9C%8B%E4%BC%98%E5%8C%96%E7%AE%97%E6%B3%95/">《从动力学角度看优化算法》</a>系列，但都是比较表面的介绍，并没有涉及到更深入的理论。为了让以后的炼丹更科学一些，笔者决定去补习一些优化相关的理论结果，争取让炼丹之路多点理论支撑。</p>
+<p>在本文中，我们将学习随机梯度下降（SGD）的一个非常基础的收敛结论。虽然现在看来，该结论显得很粗糙且不实用，但它是优化器收敛性证明的一次非常重要的尝试，特别是它考虑了我们实际使用的是 <em>随机</em> 梯度下降（SGD）而不是 <em>全量</em> 梯度下降（GD）这一特性，使得结论更加具有参考意义。</p>
+<h2 id="_1">问题设置</h2>
+<p>设损失函数是$L(\boldsymbol{x},\boldsymbol{\theta})$，其实$\boldsymbol{x}$是训练集，而$\boldsymbol{\theta}\in\mathbb{R}^d$是训练参数。受限于算力，我们通常只能执行随机梯度下降（SGD），即每步只能采样一个训练子集来计算损失函数并更新参数，假设采样是独立同分布的，第$t$步采样到的子集为$\boldsymbol{x}<em T_to_infty="T\to\infty">t$，那么我们可以合理地认为实际优化的最终目标是<br />
+\begin{equation}L(\boldsymbol{\theta}) = \lim</em>}\frac{1}{T}\sum_{t=1}^T L(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t,\boldsymbol{\theta})\label{eq:loss}\end{equation}<br />
+实际情况下，我们也只能训练有限步，所以我们假设$T$是一个足够大的正整常数。我们的目标是寻找$L(\boldsymbol{\theta})$的最小值点，即希望找到$\boldsymbol{\theta}^<em>$：<br />
+\begin{equation}\boldsymbol{\theta}^</em> = \mathop{\text{argmin}}</em>}\in\mathbb{R}^d} L(\boldsymbol{\theta})\label{eq:argmin}\end{equation<br />
+现在，我们考虑如下SGD迭代：<br />
+\begin{equation}\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">{t+1} = \boldsymbol{\theta}_t - \eta_t \boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t)\label{eq:sgd}\end{equation}<br />
+其中$\eta_t &gt; 0$是学习率，其中$\boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta})\triangleq \nabla</em>^*$。}}L(\boldsymbol{x}_t,\boldsymbol{\theta})$是$L(\boldsymbol{x}_t,\boldsymbol{\theta})$关于$\boldsymbol{\theta}$的梯度。我们的任务就是分析如此迭代下去，$\boldsymbol{\theta}_t$是否能够收敛到到目标点$\boldsymbol{\theta</p>
+<h2 id="_2">结论初探</h2>
+<p>首先，我们给出最终要证明的不等式：在适当的假设之下，有<br />
+\begin{equation}\frac{1}{T}\sum_{t=1}^T L(\boldsymbol{x}<em t="1">t,\boldsymbol{\theta}_t) - \frac{1}{T}\sum</em>}^T L(\boldsymbol{x<em t="1">t,\boldsymbol{\theta}^*)\leq \frac{D^2}{2T\eta_T} + \frac{G^2}{2T}\sum</em>}^T\eta_t\label{neq:core}\end{equation</p>
+<p>其中$D,G$是跟优化过程无关的常数。后面我们会逐一介绍“适当的假设”具体是什么，在此之前我们先来观察一下不等式$\eqref{neq:core}$所表达的具体含义：</p>
+<blockquote>
+<p>1、左端第一项，是优化过程中每一步的损失函数的平均结果；</p>
+<p>2、左端第二项，根据式$\eqref{eq:loss}$，当$T$足够大时可以认为它就是$L(\boldsymbol{\theta}^*)$；</p>
+<p>3、左端合并起来，就是优化过程中损失函数的平均与损失函数的理论最小值之差；</p>
+<p>4、右端是一个只与学习率策略$\{\eta_t\}$有关的式子。</p>
+</blockquote>
+<p>综合1、2、3、4点，不等式$\eqref{neq:core}$就是说：在适当的假设之下，SGD的平均损失与我们要寻找的理想目标的差距，可以被一个只与学习率策略有关的式子控制，如果我们可以选择适当的学习率让该式趋于零，那么意味着SGD的平均损失一定能收敛到理论最优点。（当然，从理论上来说，该结论只能保证找到损失函数的最小值$L(\boldsymbol{\theta}^<em>)$，但无法保证找到具体的最小值点$\boldsymbol{\theta}^</em>$。）</p>
+<p>说白了，这就是关于SGD在什么情况下会收敛的一个理论结果。对了，不等式$\eqref{neq:core}$左端有一个特别的名字，叫做“遗憾”（Regret，有些教程也直接翻译为“悔”）。</p>
+<h2 id="_3">两个例子</h2>
+<p>例如，假设学习率是常数$\eta$，那么我们有不等式$\eqref{neq:core}$右端有<br />
+\begin{equation}\frac{D^2}{2T\eta} + \frac{G^2}{2T}\sum_{t=1}^T\eta = \frac{D^2}{2T\eta} + \frac{G^2\eta}{2}\geq \frac{DG}{\sqrt{T}}\end{equation}<br />
+等号成立时$\eta=\frac{D}{G\sqrt{T}}$，也就是说学习率取常数$\frac{D}{G\sqrt{T}}$，那么就有<br />
+\begin{equation}\frac{1}{T}\sum_{t=1}^T L(\boldsymbol{x}<em t="1">t,\boldsymbol{\theta}_t) - \frac{1}{T}\sum</em>}^T L(\boldsymbol{x}_t,\boldsymbol{\theta}^*)\leq \frac{DG}{\sqrt{T}}\label{neq:case-1}\end{equation<br />
+当$T\to\infty$时，右端趋于零，这意味着当训练步数$T$足够大时，将学习率设为常数$\frac{D}{G\sqrt{T}}$，就可以让SGD迭代的平均与理论最优点的差距任意小。</p>
+<p>另一个例子是考虑衰减策略$\eta_t = \frac{\alpha}{\sqrt{t}}$，利用<br />
+\begin{equation}\sum_{t=1}^T \frac{1}{\sqrt{t}} = 1+\sum_{t=2}^T \frac{1}{\sqrt{t}}\leq 1+\sum_{t=2}^T \frac{2}{\sqrt{t-1} + \sqrt{t}}=1+\sum_{t=2}^T 2(\sqrt{t}-\sqrt{t-1})=2\sqrt{T}-1 &lt; 2\sqrt{T}\end{equation}<br />
+代入式$\eqref{neq:core}$得到<br />
+\begin{equation}\frac{1}{T}\sum_{t=1}^T L(\boldsymbol{x}<em t="1">t,\boldsymbol{\theta}_t) - \frac{1}{T}\sum</em>}^T L(\boldsymbol{x}_t,\boldsymbol{\theta}^*) &lt; \frac{D^2}{2\alpha\sqrt{T}} + \frac{G^2\alpha}{\sqrt{T}}\label{neq:case-2}\end{equation<br />
+式$\eqref{neq:case-2}$和式$\eqref{neq:case-1}$关于$T$都是$\mathcal{O}\left(\frac{1}{\sqrt{T}}\right)$的，因此理论上它们都能收敛。跟式$\eqref{neq:case-1}$相比，式$\eqref{neq:case-2}$的常数更大，这意味着$\eta_t\equiv\frac{D}{G\sqrt{T}}$的收敛速度很可能比$\eta_t = \frac{\alpha}{\sqrt{t}}$快。然而，在实际中我们更愿意用后者，因为前者的需要提前确定训练总步数$T$，训练完就结束了并且精度也固定了，后者并没有这些限制，甚至$\alpha$也不需要调，直接$\eta_t = \frac{1}{\sqrt{t}}$就可以持续训练下去，并且理论上平均损失与理论最小值的差距会越来越小。</p>
+<p>可即便如此，$\eta_t = \frac{1}{\sqrt{t}}$这种学习率策略，不管在量级或者变化规律上都依然与我们平时训练所用的相距甚远，因此不难猜测里边必然加了不少很强的假设。事不宜迟，我们马上来展开证明过程，逐一展开其中的假设。</p>
+<h2 id="_4">证明过程</h2>
+<p>证明的开始，我们假设对于任意$\boldsymbol{x}$，$L(\boldsymbol{x},\boldsymbol{\theta})$都是关于$\boldsymbol{\theta}$的凸函数。这是一个非常强且通常非常不符合训练事实的假设，但没办法，理论分析通常都只能做一些很强的假设，然后将这些假设之下的结论启发性地用到实际场景。</p>
+<p>凸函数有很多不同的定义方式，这里直接采用如下定义：<br />
+\begin{equation}L(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t,\boldsymbol{\theta}_2) - L(\boldsymbol{x}_t,\boldsymbol{\theta}_1) \geq (\boldsymbol{\theta}_2-\boldsymbol{\theta}_1)\cdot\boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_1),\quad \forall \boldsymbol{\theta}_1,\boldsymbol{\theta}_2\label{eq:convex}\end{equation}<br />
+其中$\boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_1)\triangleq \nabla</em>$的梯度，$\cdot$是向量内积，上述定义的几何意义就是凸函数的图像总在其切线（面）的上方。}}L(\boldsymbol{x}_t,\boldsymbol{\theta})$是$L(\boldsymbol{x}_t,\boldsymbol{\theta})$关于$\boldsymbol{\theta</p>
+<p>证明的要点，是考虑$\boldsymbol{\theta}<em t_1="t+1">{t+1}$与$\boldsymbol{\theta}^<em>$的距离：<br />
+\begin{equation}\begin{aligned}<br />
+\Vert\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}^</em>\Vert^2=&amp;\, \Vert\boldsymbol{\theta}_t - \eta_t \boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t)- \boldsymbol{\theta}^<em>\Vert^2 \\<br />
+=&amp;\, \Vert\boldsymbol{\theta}_t - \boldsymbol{\theta}^</em>\Vert^2 - 2\eta_t (\boldsymbol{\theta}_t- \boldsymbol{\theta}^<em>)\cdot\boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t) + \eta_t^2\Vert\boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t)\Vert^2<br />
+\end{aligned}\end{equation}<br />
+将它改写成<br />
+\begin{equation}(\boldsymbol{\theta}_t- \boldsymbol{\theta}^</em>)\cdot\boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t) = \frac{\Vert\boldsymbol{\theta}_t - \boldsymbol{\theta}^<em>\Vert^2}{2\eta_t} - \frac{\Vert\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}^</em>\Vert^2}{2\eta_t} + \frac{1}{2}\eta_t\Vert\boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t)\Vert^2\end{equation}<br />
+根据式$\eqref{eq:convex}$，我们有$L(\boldsymbol{x}_t,\boldsymbol{\theta}_t) - L(\boldsymbol{x}_t,\boldsymbol{\theta}^<em>)\leq (\boldsymbol{\theta}_t- \boldsymbol{\theta}^</em>)\cdot\boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t)$，代入上式有<br />
+\begin{equation}L(\boldsymbol{x}_t,\boldsymbol{\theta}_t) - L(\boldsymbol{x}_t,\boldsymbol{\theta}^<em>)\leq \frac{\Vert\boldsymbol{\theta}_t - \boldsymbol{\theta}^</em>\Vert^2}{2\eta_t} - \frac{\Vert\boldsymbol{\theta}</em>^} - \boldsymbol{\theta<em>\Vert^2}{2\eta_t} + \frac{1}{2}\eta_t\Vert\boldsymbol{g}(\boldsymbol{x}<em t="1">t,\boldsymbol{\theta}_t)\Vert^2\end{equation}<br />
+两端对$t=1,2,\cdots,T$求和：<br />
+\begin{equation}\sum</em>}^T L(\boldsymbol{x<em t="1">t,\boldsymbol{\theta}_t) - \sum</em>^}^TL(\boldsymbol{x}_t,\boldsymbol{\theta</em>)\leq \sum_{t=1}^T\left(\frac{\Vert\boldsymbol{\theta}<em t="1">t - \boldsymbol{\theta}^<em>\Vert^2}{2\eta_t} - \frac{\Vert\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}^</em>\Vert^2}{2\eta_t}\right) + \sum</em>}^T\frac{1}{2}\eta_t\Vert\boldsymbol{g}(\boldsymbol{x<em t_1="t+1">t,\boldsymbol{\theta}_t)\Vert^2\label{neq:base}\end{equation}<br />
+再次引入一个新的假设——$\eta_t$是关于$t$的单调递减函数（即$\eta_t\geq \eta</em>}$），并且记$D = \max_t \Vert\boldsymbol{\theta<em t_1="t+1">t - \boldsymbol{\theta}^<em>\Vert$，那么就有<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\,\sum_{t=1}^T\left(\frac{\Vert\boldsymbol{\theta}_t - \boldsymbol{\theta}^</em>\Vert^2}{2\eta_t} - \frac{\Vert\boldsymbol{\theta}</em>^} - \boldsymbol{\theta<em>\Vert^2}{2\eta_t}\right)\\<br />
+=&amp;\,\frac{\Vert\boldsymbol{\theta}_1 - \boldsymbol{\theta}^</em>\Vert^2}{2\eta_1} - \frac{\Vert\boldsymbol{\theta}<em t="2">{T+1} - \boldsymbol{\theta}^<em>\Vert^2}{2\eta_T} + \sum_{t=2}^T\left(\frac{1}{2\eta_t} - \frac{1}{2\eta_{t-1}}\right)\Vert\boldsymbol{\theta}_t - \boldsymbol{\theta}^</em>\Vert^2\\<br />
+\leq&amp;\,\frac{D^2}{2\eta_1} + \sum</em>\right)D^2\\}^T\left(\frac{1}{2\eta_t} - \frac{1}{2\eta_{t-1}<br />
+=&amp;\, \frac{D^2}{2\eta_T}<br />
+\end{aligned}\end{equation}<br />
+最后我们记$G = \max_t \Vert\boldsymbol{g}(\boldsymbol{x}<em t="1">t,\boldsymbol{\theta}_t)\Vert$，然后将上式代入式$\eqref{neq:base}$得到<br />
+\begin{equation}\sum</em>}^T L(\boldsymbol{x<em t="1">t,\boldsymbol{\theta}_t) - \sum</em>}^T L(\boldsymbol{x<em t="1">t,\boldsymbol{\theta}^*)\leq \frac{D^2}{2\eta_T} + \sum</em>}^T\frac{1}{2}\eta_t\Vert\boldsymbol{g}(\boldsymbol{x<em t="1">t,\boldsymbol{\theta}_t)\Vert^2\leq \frac{D^2}{2\eta_T} + \frac{G^2}{2}\sum</em>}^T\eta_t\end{equation<br />
+最后两端除以$T$即得不等式$\eqref{neq:core}$。</p>
+<p>注意现在的常数$D,G$是优化相关的，即先要确定学习率策略$\{\eta_t\}$，然后完成优化过程才能得到$D,G$。要想$D,G$成为优化无关的常数，我们需要假设对于任意的$\{\eta_t\}$，$\Vert\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\Vert$和$\Vert\boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t)\Vert$都分别不超过某个常数$D,G$，这样才能使得不等式$\eqref{neq:core}$右端只与学习率策略有关。</p>
+<h2 id="_5">域内投影</h2>
+<p>然而，最后的假设“对于任意的$\{\eta_t\}$，$\Vert\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\Vert$和$\Vert\boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t)\Vert$都分别不超过某个常数$D,G$”总有种“本末倒置”的感觉：看上去需要先完成优化才能确定$D,G$，而我们的目的却是要通过所证明的结果来改进优化。为了去掉这种奇怪的感觉，我们干脆将这两个假设改为：</p>
+<blockquote>
+<p>1、式$\eqref{eq:argmin}$中的$\boldsymbol{\theta}\in\mathbb{R}^d$改为$\boldsymbol{\theta}\in\boldsymbol{\Theta}$，其中$\boldsymbol{\Theta}\subseteq \mathbb{R}^d$是一个有界凸集；</p>
+<p>1.1）<strong>有界</strong> ：$D=\max\limits_{\boldsymbol{\theta}_1,\boldsymbol{\theta}_2\in \boldsymbol{\Theta}}\Vert\boldsymbol{\theta}_1-\boldsymbol{\theta}_2\Vert &lt; \infty$；</p>
+<p>1.2）<strong>凸集</strong> ：$\forall \boldsymbol{\theta}_1,\boldsymbol{\theta}_2\in \boldsymbol{\Theta}$以及$\forall\lambda\in[0,1]$，都有$\lambda \boldsymbol{\theta}_1 + (1-\lambda)\boldsymbol{\theta}_2 \in \boldsymbol{\Theta}$。</p>
+<p>2、对于任意$\boldsymbol{\theta}\in \boldsymbol{\Theta}$以及任意$\boldsymbol{x}$，都有$\Vert\boldsymbol{g}(\boldsymbol{x},\boldsymbol{\theta})\Vert\leq G$</p>
+</blockquote>
+<p>第2点可能更容易接受，无非是给损失函数$L(\boldsymbol{x},\boldsymbol{\theta})$再加了个假设而已，就好比“债多不愁”，凸函数这么强的假设都加了，再多加点也无妨。但第1点假设似乎不那么容易理解：凸集是因为凸函数本身只能定义在凸集上，这个也能接受，但有界如何保证呢？即如何保证迭代$\eqref{eq:sgd}$的输出一定有界？</p>
+<p>答案是“多加一步投影”。我们定义投影运算：<br />
+\begin{equation}\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi}) = \mathop{\text{argmin}}<em t_1="t+1">{\boldsymbol{\theta}\in\boldsymbol{\Theta}}\Vert\boldsymbol{\varphi}-\boldsymbol{\theta}\Vert\end{equation}<br />
+即在$\boldsymbol{\Theta}$中找到与$\boldsymbol{\varphi}$最相近的向量，于是我们可以将式$\eqref{eq:sgd}$改为<br />
+\begin{equation}\boldsymbol{\theta}</em>} = \Pi_{\boldsymbol{\Theta}}\big(\boldsymbol{\theta}_t - \eta_t \boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t)\big)\in \boldsymbol{\Theta}\label{eq:sgd-p}\end{equation<br />
+这就能保证迭代结果一定在集合$\boldsymbol{\Theta}$中。</p>
+<p>然而，这样修改之后，上一节的证明和前面的结论（主要是不等式$\eqref{neq:core}$）还成立吗？很幸运，还成立，我们只需要证明对于式$\eqref{eq:sgd-p}$所定义的投影SGD有<br />
+\begin{equation}\Vert\boldsymbol{\theta}<em _boldsymbol_Theta="\boldsymbol{\Theta">{t+1} - \boldsymbol{\theta}^<em>\Vert \leq \Vert\boldsymbol{\theta}_t - \eta_t \boldsymbol{g}(\boldsymbol{x}_t,\boldsymbol{\theta}_t) - \boldsymbol{\theta}^</em>\Vert\end{equation}<br />
+那么“证明过程”一节的推导依然可以进行下去，只不过部分等号变成$\leq$而已。为此，我们只需要证明$\forall \boldsymbol{\varphi}\in\mathbb{R}^d, \boldsymbol{\theta}\in \boldsymbol{\Theta}$，都有<br />
+\begin{equation}\Vert\Pi</em>}} (\boldsymbol{\varphi}) - \boldsymbol{\theta}\Vert \leq \Vert \boldsymbol{\varphi} - \boldsymbol{\theta}\Vert\end{equation</p>
+<blockquote>
+<p><strong>证明</strong> ：证明的关键是将凸集和$\Pi_{\boldsymbol{\Theta}}$的定义结合起来。首先，根据凸集的定义，我们知道$\forall \lambda\in(0,1)$都有$\lambda\boldsymbol{\theta} + (1-\lambda)\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})\in \boldsymbol{\Theta}$，于是根据$\Pi_{\boldsymbol{\Theta}}$的定义，恒成立<br />
+ \begin{equation}\Vert\boldsymbol{\varphi} - \Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})\Vert\leq \Vert\boldsymbol{\varphi} - \lambda\boldsymbol{\theta} - (1-\lambda)\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})\Vert = \Vert(\boldsymbol{\varphi} - \Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})) + \lambda(\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})-\boldsymbol{\theta})\Vert\end{equation}<br />
+ 两端平方然后相减，得到<br />
+ \begin{equation}\lambda^2\Vert\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})-\boldsymbol{\theta}\Vert^2 + 2\lambda(\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})-\boldsymbol{\theta})\cdot(\boldsymbol{\varphi} - \Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi}))\geq 0\end{equation}<br />
+ 注意我们刚限制了$\lambda\in(0,1)$，所以两端可以除以$\lambda$：<br />
+ \begin{equation}\lambda\Vert\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})-\boldsymbol{\theta}\Vert^2 + 2(\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})-\boldsymbol{\theta})\cdot(\boldsymbol{\varphi} - \Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi}))\geq 0\end{equation}<br />
+ 这是个恒成立的式子，那么对于$\lambda\to 0^+$依然是恒成立的，于是<br />
+ \begin{equation}(\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})-\boldsymbol{\theta})\cdot(\boldsymbol{\varphi} - \Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi}))\geq 0\end{equation}<br />
+ 两端加上$\Vert\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})-\boldsymbol{\theta}\Vert^2 + \Vert\boldsymbol{\varphi} - \Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})\Vert^2$，左端正好是$\Vert\boldsymbol{\varphi}-\boldsymbol{\theta}\Vert^2$，所以有<br />
+ \begin{equation}\Vert\boldsymbol{\varphi}-\boldsymbol{\theta}\Vert^2\geq \Vert\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})-\boldsymbol{\theta}\Vert^2 + \Vert\boldsymbol{\varphi} - \Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})\Vert^2 \geq \Vert\Pi_{\boldsymbol{\Theta}} (\boldsymbol{\varphi})-\boldsymbol{\theta}\Vert^2\end{equation}</p>
+</blockquote>
+<h2 id="_6">假设分析</h2>
+<p>至此，我们已经完整了证明过程。以上结果出自<a href="https://www.cs.cmu.edu/~maz/publications/techconvex.pdf">《Online Convex Programming and Generalized Infinitesimal Gradient Ascent》</a>，是2003年的论文。特别地，优化相关的文献非常多，笔者作为一个初学者，在后面的文献溯源方面大概率会有错漏，请了解的读者不吝指正。</p>
+<p>现在我们可以来“盘点”一下完整的证明过程用到的所有假设：</p>
+<blockquote>
+<p>1、$\boldsymbol{\Theta}$是一个有界凸集，$D=\max\limits_{\boldsymbol{\theta}_1,\boldsymbol{\theta}_2\in \boldsymbol{\Theta}}\Vert\boldsymbol{\theta}_1-\boldsymbol{\theta}_2\Vert &lt; \infty$；</p>
+<p>2、对于任意$\boldsymbol{\theta}\in \boldsymbol{\Theta}$以及任意$\boldsymbol{x}$，$L(\boldsymbol{x},\boldsymbol{\theta})$都是关于$\boldsymbol{\theta}$的凸函数；</p>
+<p>3、对于任意$\boldsymbol{\theta}\in \boldsymbol{\Theta}$以及任意$\boldsymbol{x}$，都有$\Vert\nabla_{\boldsymbol{\theta}}L(\boldsymbol{x},\boldsymbol{\theta})\Vert\leq G &lt; \infty$；</p>
+<p>4、学习率$\eta_t$是关于$t$的单调递减函数（即$\eta_t\geq \eta_{t+1}$）；</p>
+</blockquote>
+<p>在这些假设之下，投影SGD即式$\eqref{eq:sgd-p}$成立不等式$\eqref{neq:core}$。</p>
+<p>其中，第1、4点假设都无可厚非，甚至可以说非常合理，比如第1点，对于实际计算来说，一个充分大的球体跟$\mathbb{R}^d$并没有实质区别了，而第4点递减的学习率更是符合已有认知；最强且最不符合事实的是第2点凸函数假设，但没办法，多看几篇优化相关的文献就释然了，因为几乎所有优化理论都是基于凸函数假设进行的，我们只能寄望于优化进入一定区域后损失函数能部分符合凸函数的性质；第3点本质上也是很强的假设，但实际运算中如果初始化做得好，并且学习率也设置得适当，基本上能将梯度模长控制在一定范围内，因此也通常能接受。</p>
+<h2 id="_7">文章小结</h2>
+<p>在这篇文章中，我们重温了一篇凸优化的旧论文，介绍了SGD的一个非常基础的收敛性证明：在适当（实际上非常强）的假设下，SGD的收敛性可以得到保证。尽管这些假设在实际应用中可能并不总是成立，例如凸函数假设和梯度模长的限制，但这些理论结果仍能为我们提供了关于SGD收敛性的重要见解。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9902">https://spaces.ac.cn/archives/9902</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Dec. 19, 2023). 《让炼丹更科学一些（一）：SGD的平均损失收敛 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9902">https://spaces.ac.cn/archives/9902</a></p>
+<p>@online{kexuefm-9902,<br />
+title={让炼丹更科学一些（一）：SGD的平均损失收敛},<br />
+author={苏剑林},<br />
+year={2023},<br />
+month={Dec},<br />
+url={\url{https://spaces.ac.cn/archives/9902}},<br />
+} </p>
+<hr />
+<h2 id="_8">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>

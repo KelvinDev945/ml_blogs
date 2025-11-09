@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer升级之路：20、MLA好在哪里?（上） | ML & Math Blog Posts</title>
+    <meta name="description" content="Transformer升级之路：20、MLA好在哪里?（上）
+原文链接: https://spaces.ac.cn/archives/10907
+发布日期: 
+
+自从DeepSeek爆火后，它所提的Attention变体MLA（M ulti-head L atent A ttention）也愈发受到关注。MLA通过巧妙的设计实现了MHA与MQA的自由切换，使得模型可以根据训练和推理的不同特性（Co...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">Transformer升级之路：20、MLA好在哪里?（上）</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/10907" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                <span class="tag"><i class="fas fa-tag"></i> 语言模型</span>
+                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="transformer20mla">Transformer升级之路：20、MLA好在哪里?（上）</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10907">https://spaces.ac.cn/archives/10907</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>自从DeepSeek爆火后，它所提的Attention变体MLA（<strong>M</strong> ulti-head <strong>L</strong> atent <strong>A</strong> ttention）也愈发受到关注。MLA通过巧妙的设计实现了MHA与MQA的自由切换，使得模型可以根据训练和推理的不同特性（Compute-Bound or Memory-Bound）选择最佳的形式，尽可能地达到效率最大化。</p>
+<p>诚然，MLA很有效，但也有观点认为它不够优雅，所以寻找MLA替代品的努力一直存在，包括我们也有在尝试。然而，经过一段时间的实验，我们发现很多KV Cache相同甚至更大的Attention变体，最终效果都不如MLA。这不得不让我们开始反思：MLA的出色表现背后的关键原因究竟是什么？</p>
+<p>接下来，本文将详细介绍笔者围绕这一问题的思考过程以及相关实验结果。</p>
+<h2 id="_1">观察</h2>
+<p>MLA提出自<a href="https://papers.cool/arxiv/2405.04434">DeepSeek-V2</a>，本文假设读者已经熟悉MLA，至少了解之前的博客<a href="/archives/10091">《缓存与效果的极限拉扯：从MHA、MQA、GQA到MLA》</a>所介绍的内容，因此MLA自身的细节将不会过多展开。</p>
+<p>MLA的主要特点如下：</p>
+<blockquote>
+<p>1、MLA在训练阶段是一个qk_head_dims=(128+64)、v_head_dims=128的MHA；</p>
+<p>2、MLA在解码阶段是一个qk_head_dims=(512+64)、v_head_dims=512、KV-Shared的MQA；</p>
+<p>3、MLA的[qc, qr]、[kc, kr]拼接，可以理解为一种<a href="/archives/10122#%E9%83%A8%E5%88%86%E6%97%8B%E8%BD%AC">Partial RoPE</a>。</p>
+</blockquote>
+<h2 id="_2">猜测</h2>
+<p>MHA、GQA常用的head_dims是128，而对于MLA来说，不管是从训练看的128+64，还是从推理看的512+64，都要大于128，再结合<a href="/archives/7325">《突破瓶颈，打造更强大的Transformer》</a>的经验，我们有：</p>
+<blockquote>
+<p><strong>猜测1</strong> ： 增大head_dims是MLA好的关键之一。</p>
+</blockquote>
+<p>另外，KV-Shared这个特性，可以在同等KV Cache大小下，增大GQA的head_dims或者num_groups，所以有：</p>
+<blockquote>
+<p><strong>猜测2</strong> ： KV-Shared是MLA好的关键之一。</p>
+</blockquote>
+<p>最后，此前有一些理论和实验显示Partial RoPE可能会对效果有正面帮助（参考<a href="/archives/10122#%E9%83%A8%E5%88%86%E6%97%8B%E8%BD%AC">《Transformer升级之路：18、RoPE的底数选择原则》</a>），所以有</p>
+<blockquote>
+<p><strong>猜测3</strong> ： Partial RoPE是MLA好的关键之一。</p>
+</blockquote>
+<h2 id="_3">实验</h2>
+<p>现在我们通过实验逐一检验以上猜测。</p>
+<h3 id="_4">设置</h3>
+<p>所有实验公共部分的超参数如下：</p>
+<blockquote>
+<p>1、类似LLAMA3的Dense模型；</p>
+<p>2、hidden_size=2048，num_layers=12，num_heads=16；</p>
+<p>3、优化器是<a href="/archives/10592">Muon</a>，Attention部分per head更新；</p>
+<p>4、训练长度为4096，总tokens数为16B，总训练步数为16k；</p>
+<p>5、所有实验都是只改变Attention，所以参数量不会严格对齐。</p>
+</blockquote>
+<h3 id="part-i">Part I</h3>
+<p>MLA的KV Cache大小是512+64，约等于GQA2-128（第一个数字是num_groups，第二个数字是head_dims），所以对比的baseline为GQA2-128和GQA1-256。为了验证Partial RoPE，我们增加了GQA1-256-PR，具体做法是将Q、K的256 dims分成192+64两部分，在64上加RoPE，192不加。</p>
+<p>结果如下：<br />
+$$\begin{array}{c|ccc}<br />
+\hline<br />
+&amp; \text{Params} &amp; \text{Loss} &amp; \text{Cache} \\<br />
+\hline<br />
+\text{MLA} &amp; 894M &amp; 2.721 &amp; 576 \\<br />
+\text{GQA2-128} &amp; 842M &amp; 2.75 &amp; 512 \\<br />
+\text{GQA1-256} &amp; 943M &amp; 2.72 &amp; 512 \\<br />
+\text{GQA1-256-PR} &amp; 943M &amp; 2.711 &amp; 512 \\<br />
+\hline<br />
+\end{array}$$</p>
+<p>即<br />
+$$\text{GQA2-128} &lt; \text{MLA} \lesssim \text{GQA1-256} &lt; \text{GQA1-256-PR}$$<br />
+初步验证了增大head_dims和Partial RoPE的作用。这样看来，MLA的设计中，RoPE和NoPE拼接这部分看似无奈的设计，极有可能是它效果优异的关键原因！原论文声称MLA甚至优于MHA，大概率也是因为所对比的MHA的head_dims只有128。</p>
+<h3 id="part-ii">Part II</h3>
+<p>为了进一步验证增大head_dims的作用，我们另外跑了MHA、GQA2-192、MLA-256三个实验，MHA是head_dims=128的常规MHA，GQA2-192是直接增大GQA2的head_dims到192，MLA-256是将MLA的128+64提升到192+64，对照如下</p>
+<p>$$\begin{array}{c|ccc}<br />
+\hline<br />
+&amp; \text{Params} &amp; \text{Loss} &amp; \text{Cache} \\<br />
+\hline<br />
+\text{MHA} &amp; 931M &amp; 2.721 &amp; 4096 \\<br />
+\text{MLA} &amp; 894M &amp; 2.721 &amp; 576 \\<br />
+\text{MLA-256} &amp; 989M &amp; 2.705 &amp; 576 \\<br />
+\text{GQA2-128} &amp; 842M &amp; 2.75 &amp; 512 \\<br />
+\text{GQA2-192} &amp; 899M &amp; 2.729 &amp; 768 \\<br />
+\text{GQA1-256} &amp; 943M &amp; 2.72 &amp; 512 \\<br />
+\text{GQA1-256-PR} &amp; 943M &amp; 2.711 &amp; 512 \\<br />
+\hline<br />
+\end{array}$$</p>
+<p>可以看到，MHA总参数量更多，KV Cache更是7倍于MLA，但Loss才堪堪追平MLA，这跟DeepSeek-V2里边的结论接近。此外，GQA2-192优于GQA2-128，但不如GQA1-256；MLA的head_dims升到(192+64)后，相比(128+64)也还能进一步提升效果。这些现象都表明，增加head_dims远比增加num_groups更有效。</p>
+<h3 id="part-iii">Part III</h3>
+<p>接下来我们验证KV-Shared，即K、V共享全部或大部分dims。这里我们主要考虑的替代品是head_dims不超过256的GQA，并且控制KV Cache的总大小跟MLA接近，所以当KV-Shared时，我们可以至多可以考虑GQA2-256。</p>
+<p>由于KV-Shared跟RoPE不完全兼容，参考MLA的做法，我们将256分成192+64两部分，其中</p>
+<blockquote>
+<p>1、192部分不加RoPE，在K、V间共享；</p>
+<p>2、64部分加RoPE，只用于K；</p>
+<p>3、V另外再投影64 dims，concat到共享的192 dims上去。</p>
+</blockquote>
+<p>这样一来，K、V的head_dims都是256，KV Cache总大小是(192+64+64)*2=640，略大于MLA的512+64=576，这个版本我们简记为“GQA2-(192+64)-S1”，其实“S1”是“Shared-1”的缩写。</p>
+<h3 id="part-iv">Part IV</h3>
+<p>另外一种KV-Shared的方案是：</p>
+<blockquote>
+<p>1、192部分不加RoPE，在K、V间共享；</p>
+<p>2、64部分加RoPE，同样在K、V间共享；</p>
+<p>3、做Attention，由于V带RoPE，此时是绝对位置编码效果；</p>
+<p>4、为了保证相对位置编码，将输出分成192+64两部分，64部分再加一次逆向RoPE。</p>
+</blockquote>
+<p>这种做法是K、V完全共享，KV Cache大小是(192+64)*2=512，略小于MLA。这个版本我们称为“GQA2-(192+64)-S2”，“S2”是“Shared-2”的缩写，背后的原理是笔者新提出的VO-RoPE，参考<a href="/archives/10862">《Transformer升级之路：19、第二类旋转位置编码》</a>。</p>
+<h3 id="part-v">Part V</h3>
+<p>另外，根据同样思路补了几个GQA4和GQA1的实验。所有实验结果汇总如下：<br />
+$$\begin{array}{c|ccc|c}<br />
+\hline<br />
+&amp; \text{Params} &amp; \text{Loss} &amp; \text{Cache} &amp; \text{备注} \\<br />
+\hline<br />
+\text{MLA} &amp; 894M &amp; 2.721 &amp; 576 &amp; \\<br />
+\text{MLA-256} &amp; 989M &amp; 2.705 &amp; 576 &amp; \\<br />
+\text{GQA2-(192+64)-S1} &amp; 946M &amp; 2.714 &amp; 640 &amp; \\<br />
+\text{GQA2-(192+64)-S2} &amp; 943M &amp; 2.708 &amp; 512 &amp; \text{引入VO-RoPE} \\<br />
+\text{GQA4-(64+64)-S2} &amp; 842M &amp; 2.738 &amp; 512 &amp; \\<br />
+\text{GQA4-(128+64)-S2} &amp; 899M &amp; 2.713 &amp; 768 &amp; \text{KV Cache最大} \\<br />
+\text{GQA1-(512+64)-S3} &amp; 1171M &amp; 2.677 &amp; 576 &amp; \text{head_dims最大} \\<br />
+\hline<br />
+\end{array}$$</p>
+<p>这里“GQA1-(512+64)-S3”是按照MLA的推理形式实现的MQA，形式介乎S1与S2之间，它的主要特点是head_dims大。</p>
+<p>结果解读：</p>
+<blockquote>
+<p>1、KV-Shared的GQA自带Partial RoPE；</p>
+<p>2、KV-Shared的GQA2-256，也能超过MLA；</p>
+<p>3、VO-RoPE的引入，似乎有利于效果（S1 ≲ S2）；</p>
+<p>4、同等KV Cache下，head_dims越大越好；</p>
+<p>5、GQA2-(192+64)-S2 略微超过 GQA1-256-PR；</p>
+<p>6、GQA4-(128+64)-S2 的KV Cache最大，但效果不是最优，再次表明head_dims更关键。</p>
+</blockquote>
+<p>关于KV-Shared，还有两点观察：</p>
+<blockquote>
+<p>1、训练过程中，GQA1-256-PR前期是明显领先GQA2-(192+64)-S2，但后期被追平甚至略微反先，猜测GQA1-256-PR可能有后劲不足的嫌疑；</p>
+<p>2、如果没有KV-Shared，GQA顶多是GQA1-256，也就是说head_dims顶天了256，但有KV-Shared的话，GQA可以做到GQA1-512-S，单纯从head_dims看，KV-Shared天花板更高。</p>
+</blockquote>
+<h3 id="part-vi">Part VI</h3>
+<p>由于没有严格对齐参数量，可能读者会有“到底是增加参数量还是增加head_dims更本质”的疑虑，所以这里补充几个对齐参数量的实验。</p>
+<p>这里考虑的对齐参数量的方式有三种：</p>
+<blockquote>
+<p>1、<strong>double-heads</strong> ：以“GQA2-128 vs GQA1-256”为例，将GQA2-128的num_heads翻倍，可以让GQA2-128的参数量跟GQA1-256相同；</p>
+<p>2、<strong>缩减MLP</strong> ：缩小MLP（SwiGLU）的intermediate_size，也可以使得GQA1-256的参数量跟GQA2-128大致相同；</p>
+<p>3、<strong>Q &amp;O LoRA</strong>：GQA的主要参数量来自Query和Output的投影矩阵，对这两个矩阵改用LoRA，也可以降低GQA1-256的参数量。</p>
+</blockquote>
+<p>实验结果如下：<br />
+$$\begin{array}{c|ccc|ccc}<br />
+\hline<br />
+&amp; \text{Params} &amp; \text{Loss} &amp; \text{Cache} &amp; \text{num_heads} &amp; \text{intermediate_size} &amp; \text{qo_lora} \\<br />
+\hline<br />
+\text{MLA} &amp; 894M &amp; 2.721 &amp; 576 &amp; 16 &amp; 5456 &amp; \text{No}\\<br />
+\hline<br />
+\text{GQA2-128} &amp; 842M &amp; 2.75 &amp; 512 &amp; 16 &amp; 5456 &amp; \text{No}\\<br />
+\text{GQA1-256} &amp; 943M &amp; 2.72 &amp; 512 &amp; 16 &amp; 5456 &amp; \text{No}\\<br />
+\hline<br />
+\text{GQA2-128} &amp; 943M &amp; 2.723 &amp; 512 &amp; \color{red}{32} &amp; 5456 &amp; \text{No} \\<br />
+\text{GQA1-256} &amp; 843M &amp; 2.747 &amp; 512 &amp; 16 &amp; \color{red}{4096} &amp; \text{No} \\<br />
+\text{GQA1-256} &amp; 842M &amp; 2.726 &amp; 512 &amp; 16 &amp; 5456 &amp; \color{red}{\text{Yes}} \\<br />
+\hline<br />
+\text{GQA4-(64+64)-S2} &amp; 842M &amp; 2.738 &amp; 512 &amp; 16 &amp; 5456 &amp; \text{No} \\<br />
+\text{GQA2-(192+64)-S2} &amp; 943M &amp; 2.708 &amp; 512 &amp; 16 &amp; 5456 &amp; \text{No} \\<br />
+\hline<br />
+\text{GQA4-(64+64)-S2} &amp; 943M &amp; 2.711 &amp; 512 &amp; \color{red}{32} &amp; 5456 &amp; \text{No} \\<br />
+\text{GQA2-(192+64)-S2} &amp; 843M &amp; 2.733 &amp; 512 &amp; 16 &amp; \color{red}{4096} &amp; \text{No} \\<br />
+\text{GQA2-(192+64)-S2} &amp; 842M &amp; 2.708 &amp; 512 &amp; 16 &amp; 5456 &amp; \color{red}{\text{Yes}} \\<br />
+\hline<br />
+\end{array}$$</p>
+<p>结果主要分三块：</p>
+<blockquote>
+<p>1、heads翻倍相比head_dims翻倍，loss稳定差0.003左右；</p>
+<p>2、缩小MLP比head_dims减半，loss稳定优0.004左右；</p>
+<p>3、Q&amp;O LoRA性能损失最小，可以实现head_dims翻倍但参数量不增，且loss明显降。</p>
+</blockquote>
+<p>结论：如果从增加参数量角度看，增大head_dims可能是效果增益较大的方向，配合Q&amp;O LoRA可以实现参数量几乎不增，但收益仍相当。</p>
+<h2 id="_5">小结</h2>
+<p>初步结论是：</p>
+<blockquote>
+<p>1、增大head_dims收益最大；</p>
+<p>2、Partial RoPE对Loss也有一定帮助；</p>
+<p>3、KV-Shared应该也有一定作用。</p>
+</blockquote>
+<p>这样看来，此前我们一直在head_dims=128下找MLA的替代品，感觉是起点就先天不足了，难怪一直比不上MLA。要想追平MLA，head_dims应该要192起步了，并辅以Partial RoPE。至于KV-Shared，也可能有用，但应该还需要更大规模的验证。</p>
+<h2 id="_6">意义</h2>
+<p>其实这里边的意义，就看我们换掉MLA的决心有多强。</p>
+<p>假设 GQA2-(192+64)-S2 可以替代MLA，但MLA也可以升到256，目前看来 GQA2-(192+64)-S2 比不上 MLA-256 。那么换掉MLA的唯二好处是：</p>
+<blockquote>
+<p>1、结构更简单，可以方便加QK-Norm；</p>
+<p>2、解码阶段的head_dims由512+64变成了256，同时num_groups变为2，可以TP。</p>
+</blockquote>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10907">https://spaces.ac.cn/archives/10907</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 04, 2025). 《Transformer升级之路：20、MLA好在哪里?（上） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10907">https://spaces.ac.cn/archives/10907</a></p>
+<p>@online{kexuefm-10907,<br />
+title={Transformer升级之路：20、MLA好在哪里?（上）},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/10907}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>

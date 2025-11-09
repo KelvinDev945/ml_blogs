@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>从局部到全局：语义相似度的测地线距离 | ML & Math Blog Posts</title>
+    <meta name="description" content="从局部到全局：语义相似度的测地线距离
+原文链接: https://spaces.ac.cn/archives/9368
+发布日期: 
+
+前段时间在最近的一篇论文《Unsupervised Opinion Summarization Using Approximate Geodesics》中学到了一个新的概念，叫做“测地线距离（Geodesic Distance）”，感觉有点意思，特来跟大家分享一下...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">从局部到全局：语义相似度的测地线距离</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/9368" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> 黎曼几何</span>
+                <span class="tag"><i class="fas fa-tag"></i> 语义</span>
+                <span class="tag"><i class="fas fa-tag"></i> 语义相似度</span>
+                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="_1">从局部到全局：语义相似度的测地线距离</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9368">https://spaces.ac.cn/archives/9368</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>前段时间在最近的一篇论文<a href="https://papers.cool/arxiv/2209.07496">《Unsupervised Opinion Summarization Using Approximate Geodesics》</a>中学到了一个新的概念，叫做“测地线距离（Geodesic Distance）”，感觉有点意思，特来跟大家分享一下。</p>
+<p>对笔者来说，“新”的不是测地线距离概念本身（以前学黎曼几何的时候就已经接触过了），而是语义相似度领域原来也可以巧妙地构造出测地线距离出来，并在某些场景下发挥作用。如果乐意，我们还可以说这是“流形上的语义相似度”，是不是瞬间就高级了不少？</p>
+<h2 id="_2">论文梗概</h2>
+<p>首先，我们简单总结一下原论文的主要内容。顾名思义，论文的主题是摘要，通常我们的无监督摘要是这样做的：假设文章由$n$个句子$t_1,t_2,\cdots,t_n$组成，给每个句子设计打分函数$s(t_i)$（经典的是tf-idf及其变体），然后挑出打分最大的若干个句子作为摘要。当然，论文做的不是简单的摘要，而是“Opinion Summarization”，这个“Opinion”，我们可以理解为实现给定的主题或者中心$c$，摘要应该倾向于抽取出与$c$相关的句子，所以打分函数应该还应该跟$c$有关，即$s(t_i, c)$。</p>
+<p>自从“万物皆Embedding”后，$s(t_i,c)$的一种主流设计方式就是将句子$t_i$和主题$c$都编码为相应的句向量$\boldsymbol{v}(t_i),\boldsymbol{v}(c)$，然后用某种距离的倒数作为打分函数：<br />
+\begin{equation}s(t_i, c) = \frac{1}{d(\boldsymbol{v}(t_i), \boldsymbol{v}(c))}\end{equation}<br />
+在这种设计中，句向量的编码模型$\boldsymbol{v}(\cdot)$和距离函数$d(\cdot,\cdot)$都是可设计的空间。原论文在$\boldsymbol{v}(\cdot)$和$d(\cdot,\cdot)$上都做了一些工作，其中$\boldsymbol{v}(\cdot)$不是本文关心的内容，暂且略过，有兴趣的读者自行看原论文。至于论文在$d(\cdot,\cdot)$上的贡献，就是将常见的简单距离，换成了本文的主题“测地线距离”。</p>
+<h2 id="_3">原理分析</h2>
+<p>为什么要用到测地线距离？这要从我们训练句向量的方案说起。</p>
+<p>学习句向量的方式既可以是有监督的，也可以是无监督的。以有监督为例，一般就是正样本对和负样本对做对比学习（参考<a href="/archives/8847">《CoSENT（一）：比Sentence-BERT更有效的句向量方案》</a>），正样本对就是标记出两个语义基本相同的句子，我们可以认为它们相似度很高，或者距离很小。问题出在负样本对，作为两个语义不相同的句子，它们可能是特意标记出来的困难样本，也可能是随机挑出来的两个不相关样本，原则上这两种情况应当赋予不同的距离，但实际都只是标记了同一个标签，即“负”。</p>
+<p>这就导致了一个结果，我们用句向量算出来的距离数值，理论上是对语义比较相近的句子才比较准确，对于语义差距比较大的句子，距离数值只能够用来区分出正负样本，但不能在邻近范围内做比较。举个例子，我们可以说距离为$1$的比距离为$2$的更相似，也可以说距离为$1$的比距离为$10$的更相似，但没法说距离为$10$的比距离为$11$的更相似，因为距离大了，其绝对数值就不准了。</p>
+<p>检索场景下，通常要召回相似度很高（也就是距离很小）的样本，因此直接用简单的距离函数$d(\cdot,\cdot)$去检索就行。但是，对于原论文的“Opinion Summarization”场景，要计算的是句子$t_i$与主题$c$的距离$d(\boldsymbol{v}(t_i), \boldsymbol{v}(c))$，“句子”与“主题”的相似度就未必很大了（距离偏大），也就是说，它是要在距离相似度偏大的区间做相对比较，这就适合用到测地线距离了。</p>
+<h2 id="_4">测地距离</h2>
+<p>测地线距离，简单来说就是两点之间的最短距离，由于流形未必是平直的，因此该距离未必是两点之间的直线距离（欧式距离），经典例子就是从地球的南极走到北极，我们没法穿过地心走直线，只能沿着地球表面先走到赤道然后再走到南极，走了一条曲线（半圆）距离。</p>
+<p>在局部范围内（此时距离比较小），地球还是平的，所以欧式距离还是可用的，但是放到“南极-北极”、“南极-赤道”这样的大距离就不够准确了，这就跟刚才的语义相似度场景很相似了——已知的距离（比如欧式距离）在近距离内比较准确，在远距离不准确，本质上就是因为流形不是平直的。</p>
+<p>幸运的是，有局部距离就够了，我们将其转化为一个图的问题，可以利用“最短路径”的算法估算出近似的测地线距离。具体来说，我们可以用现有的距离函数算出每个点与剩余点的距离，然后只保留距离最近的$k$个点（也可以按阈值截断，看具体情况），在它们之间连一条边并标记上距离，这样一来所有点和边构成了一个加权图（我们称之为“$k$邻近图”），我们就可以用Dijkstra算法来搜索出图上任意两点的最短路径，并计算出它的长度，这就是测地线距离的近似结果。</p>
+<p>总的来说，在“相近点的距离比较准、较远点的距离比较不准”的假设下，我们可以$k$邻近图加最短路径的方法，估算较远点的测地线距离来作为替代品。由于测地线距离考虑了向量空间的流形状况，所以 <em><strong>有可能</strong></em> 取得比较好的效果。（参考原论文的Table 8）</p>
+<h2 id="_5">文章小结</h2>
+<p>本文分享了一个“测地线距离”的概念，指出我们平时训练出来的相似度可能只适合于局部，在较远距离下换为测地线距离可能会在某些语义相似度问题上有帮助。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9368">https://spaces.ac.cn/archives/9368</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Dec. 07, 2022). 《从局部到全局：语义相似度的测地线距离 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9368">https://spaces.ac.cn/archives/9368</a></p>
+<p>@online{kexuefm-9368,<br />
+title={从局部到全局：语义相似度的测地线距离},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Dec},<br />
+url={\url{https://spaces.ac.cn/archives/9368}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>

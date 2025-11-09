@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>矩阵r次方根和逆r次方根的高效计算 | ML & Math Blog Posts</title>
+    <meta name="description" content="矩阵r次方根和逆r次方根的高效计算
+原文链接: https://spaces.ac.cn/archives/11175
+发布日期: 
+
+上一篇文章《矩阵平方根和逆平方根的高效计算》中，笔者从$\newcommand{mcsgn}{\mathop{\text{mcsgn}}}\mcsgn$算子出发，提出了一种很漂亮的矩阵平方根和逆平方根的计算方法。比较神奇的是，该方案经过化简之后，最终公式已经看不到...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">矩阵r次方根和逆r次方根的高效计算</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/11175" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> 代数</span>
+                <span class="tag"><i class="fas fa-tag"></i> 迭代</span>
+                <span class="tag"><i class="fas fa-tag"></i> 矩阵</span>
+                <span class="tag"><i class="fas fa-tag"></i> 线性</span>
+                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="rr">矩阵r次方根和逆r次方根的高效计算</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/11175">https://spaces.ac.cn/archives/11175</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>上一篇文章<a href="/archives/11158">《矩阵平方根和逆平方根的高效计算》</a>中，笔者从$\newcommand{mcsgn}{\mathop{\text{mcsgn}}}\mcsgn$算子出发，提出了一种很漂亮的矩阵平方根和逆平方根的计算方法。比较神奇的是，该方案经过化简之后，最终公式已经看不到最初$\mcsgn$形式的样子。这不禁引发了更深层的思考：该方案更本质的工作原理是什么？是否有推广到任意$r$次方根的可能性？</p>
+<p>沿着这个角度进行分析后，笔者惊喜地发现，我们可以从一个更简单的角度去理解之前的迭代算法，并且在新角度下可以很轻松推广到任意$r$次方根和逆$r$次方根的计算。接下来我们将分享这一过程。</p>
+<h2 id="_1">前情回顾</h2>
+<p>设$\boldsymbol{G}\in\mathbb{R}^{m\times n}$是任意矩阵，$\boldsymbol{P}\in\mathbb{R}^{n\times n}$是任意特征值都在$[0,1]$内的矩阵，上一篇文章给出：<br />
+\begin{gather}<br />
+\boldsymbol{G}<em t_1="t+1">0 = \boldsymbol{G}, \quad \boldsymbol{P}_0 = \boldsymbol{P} \notag\\[6pt]<br />
+\boldsymbol{G}</em>} = \boldsymbol{G<em t_1="t+1">t(a</em>}\boldsymbol{I} + b_{t+1}\boldsymbol{P<em t_1="t+1">t + c</em>}\boldsymbol{P<em t_1="t+1">t^2) \label{eq:r2-rsqrt}\\[6pt]<br />
+\boldsymbol{P}</em>} = (a_{t+1}\boldsymbol{I} + b_{t+1}\boldsymbol{P<em t_1="t+1">t + c</em>}\boldsymbol{P<em t_to_infty="t\to\infty">t^2)^2\boldsymbol{P}_t \label{eq:r3-rsqrt}\\[6pt]<br />
+\lim</em>} \boldsymbol{G<em t="0">t = \boldsymbol{G}\boldsymbol{P}^{-1/2}\notag<br />
+\end{gather}<br />
+代入$\boldsymbol{G}=\boldsymbol{P}$就可以求得$\boldsymbol{P}^{1/2}$，代入$\boldsymbol{G}=\boldsymbol{I}$就可以求得$\boldsymbol{P}^{-1/2}$。仔细观察我们就会发现，上述迭代实际上是如下极限的体现：<br />
+\begin{equation} \prod</em>}^{\infty}(a_{t+1}\boldsymbol{I} + b_{t+1}\boldsymbol{P<em t_1="t+1">t + c</em>}\boldsymbol{P<em t="0">t^2) = \boldsymbol{P}^{-1/2}\label{eq:prod-rsqrt}\end{equation}<br />
+有趣的是，直接证明这个极限并不复杂，直接对式$\eqref{eq:r3-rsqrt}$两边开方，然后代入上式可得<br />
+\begin{equation} \prod</em>}^{\infty}(a_{t+1}\boldsymbol{I} + b_{t+1}\boldsymbol{P<em t_1="t+1">t + c</em>}\boldsymbol{P<em t="0">t^2) = \prod</em>}^{\infty} \boldsymbol{P<em t_to_infty="t\to\infty">{t+1}^{1/2}\boldsymbol{P}_t^{-1/2} = \lim</em>} \boldsymbol{P<em t_to_infty="t\to\infty">t^{1/2}\boldsymbol{P}_0^{-1/2} = \lim</em>} \boldsymbol{P}_t^{1/2}\boldsymbol{P}^{-1/2}\end{equation<br />
+由此可见，只要序列$\{\boldsymbol{P}_t\}$始终保持可逆，并且最终极限为$\boldsymbol{I}$，那么极限$\eqref{eq:prod-rsqrt}$自动成立。至于迭代$\eqref{eq:r3-rsqrt}$如何让$\{\boldsymbol{P}_t\}$保持这两个条件，我们等会再一起讨论。</p>
+<h2 id="_2">一般形式</h2>
+<p>我们不妨一般地考虑迭代<br />
+\begin{gather}<br />
+\boldsymbol{G}<em t_1="t+1">0 = \boldsymbol{G}, \quad \boldsymbol{P}_0 = \boldsymbol{P} \notag\\[6pt]<br />
+\boldsymbol{G}</em>} = \boldsymbol{G<em t_1="t+1">t(a</em>}\boldsymbol{I} + b_{t+1}\boldsymbol{P<em t_1="t+1">t + c</em>}\boldsymbol{P<em t_1="t+1">t^2)^s\\[6pt]<br />
+\boldsymbol{P}</em>} = (a_{t+1}\boldsymbol{I} + b_{t+1}\boldsymbol{P<em t_1="t+1">t + c</em>}\boldsymbol{P<em t_to_infty="t\to\infty">t^2)^r\boldsymbol{P}_t<br />
+\end{gather}<br />
+类似地，如果序列$\{\boldsymbol{P}_t\}$始终保持可逆，并且最终极限为$\boldsymbol{I}$，那么可以证明成立<br />
+\begin{equation}\lim</em>} \boldsymbol{G}_t = \boldsymbol{G}\boldsymbol{P}^{-s/r}\end{equation<br />
+于是我们就得到了一种求矩阵的任意$-s/r$次幂的通用迭代形式。在这个结果之上，我们只需选择$\boldsymbol{G}=\boldsymbol{P}, s=r-1$，就可以得到$\boldsymbol{P}^{1/r}$了，所以只需要集中精力解决$0\sim 1$次幂的逆就可以了。</p>
+<p>这样一来，问题变成了如何选择适当$\{a_t,b_t,c_t\}$，让序列$\{\boldsymbol{P}_t\}$能够尽可能快地收敛到$\boldsymbol{I}$，收敛速度越快，意味着我们可以用越少的迭代步数达到指定精度。</p>
+<h2 id="_3">迭代系数</h2>
+<p>根据假设，$\boldsymbol{P}_0 = \boldsymbol{P}$是一个特征值都在$[0,1]$内的矩阵，而目标矩阵$\boldsymbol{I}$则是特征值全为1的矩阵，所以序列$\{\boldsymbol{P}_t\}$实际上就是特征值从任意$[0,1]$内的数变成$1$的过程，这实际上就是$\mcsgn$所做的事情！</p>
+<p>我们设$\boldsymbol{X}<em t_1="t+1">t = \boldsymbol{P}_t^{1/r}$，那么$\boldsymbol{X}_0 = \boldsymbol{P}^{1/r}$同样是一个特征值都在$[0,1]$内的矩阵，且迭代方程变为<br />
+\begin{equation}\boldsymbol{X}</em>} = a_{t+1}\boldsymbol{X<em t_1="t+1">t + b</em>}\boldsymbol{X<em t_1="t+1">t^{r+1} + c</em>}\boldsymbol{X}_t^{2r+1}\end{equation<br />
+现在问题则变成了如何让$\boldsymbol{X}_0$尽可能快地变成$\boldsymbol{I}$，这跟我们在<a href="/archives/10922">《msign算子的Newton-Schulz迭代（上）》</a>和<a href="/archives/10996">《msign算子的Newton-Schulz迭代（下）》</a>所讨论的问题实质是一样的。其中，“<a href="/archives/10996">下篇</a>”给出了$r=2$的理论最优解，但它的求解过程和结论都可以推广到任意$r$的。</p>
+<p>具体来说，我们先将问题转化为标量的迭代：<br />
+\begin{equation}x_{t+1} = f_t(x_t) = a_{t+1}x_t + b_{t+1}x_t^{r+1} + c_{t+1}x_t^{2r+1}\end{equation}<br />
+然后证明贪心解就是最优解，而求贪心解则变成了解方程<br />
+\begin{equation}\begin{gathered}<br />
+f_t(l_t) = 1 - \mathcal{E}, \quad f_t(u_t) = 1 + \mathcal{E} \\<br />
+f_t(x_1) = 1 + \mathcal{E}, \quad f_t(x_2) = 1 - \mathcal{E} \\<br />
+f_t'(x_1) = 0, \quad f_t'(x_2) = 0<br />
+\end{gathered}\end{equation}<br />
+简单起见，将$f_t$参数化为<br />
+\begin{equation}f_t'(x) = k(x^r-x_1^r)(x^r-x_2^r)\end{equation}<br />
+那么就可以像“<a href="/archives/10996">下篇</a>一样，用Mathematica求解了。</p>
+<h2 id="_4">初始分析</h2>
+<p>不过正式求解之前，我们还要分析一下初始化。在上一篇文章<a href="/archives/11158">《矩阵平方根和逆平方根的高效计算》</a>中我们提到，在$\boldsymbol{P}$的特征值均非负的假设下，我们可以通过除以$\newcommand{tr}{\mathop{\text{tr}}}\tr(\boldsymbol{P})$将特征值都压缩到$[0,1]$内。不过这个压缩比例往往过大了，本文我们改为<br />
+\begin{equation}\boldsymbol{P}_0 = \frac{\boldsymbol{P}}{\sqrt{\tr(\boldsymbol{P}^2)}}\end{equation}<br />
+我们知道，$\tr(\boldsymbol{P}^2)$等于全体特征值的平方和，$\tr(\boldsymbol{P})^2$则等于全体特征值的和平方，在特征值非负时恒成立$\tr(\boldsymbol{P}^2)\leq\tr(\boldsymbol{P})^2$，所以上式提供了一个更紧凑的初始值。特别地，算$\tr(\boldsymbol{P}^2)$并不需要把$\boldsymbol{P}^2$显式计算出来，因为我们有恒等式<br />
+\begin{equation}\tr(\boldsymbol{P}^2) = \langle \boldsymbol{P}, \boldsymbol{P}^{\top}\rangle_F\end{equation}</p>
+<p>接着，我们还要分析需要处理多小的特征值，这跟<a href="/archives/10922">《msign算子的Newton-Schulz迭代（上）》</a>的初始奇异值分析是一样的。除以$\sqrt{\tr(\boldsymbol{P}^2)}$后，$\boldsymbol{P}_0$的特征值组成一个单位向量，如果特征值全部相等，那么每个特征值是$1/\sqrt{n}$。由鸽笼原理可知一般情况下必然存在小于$1/\sqrt{n}$的特征值，保守起见我们兼容到$0.01/\sqrt{n}$。</p>
+<p>考虑到足够大的LLM，$n$已经到了$100^2$这个级别，所以我们需要兼容到$0.0001$。注意这只是$\boldsymbol{P}_0$的特征值，而$\boldsymbol{X}_0 = \boldsymbol{P}_0^{1/r}$，所以$\boldsymbol{X}_0$我们只需要兼容到$0.0001^{1/r}$，这比$\mcsgn$、$\newcommand{msign}{\mathop{\text{msign}}}\msign$的情况要理想一些，因为$\mcsgn$、$\msign$的输入是$\boldsymbol{X}_0$，我们需要兼容$\boldsymbol{X}_0$的小特征值，但这里的输入是$\boldsymbol{P}_0$，我们只需要从$\boldsymbol{P}_0$出发考虑。</p>
+<h2 id="_5">计算结果</h2>
+<p>综合上述考虑，我们最终的求解代码如下</p>
+<div class="codehilite"><pre><span></span><code><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span><span class="p">;</span>
+<span class="n">df</span><span class="o">[</span><span class="n">x_</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k</span><span class="o">*</span><span class="p">(</span><span class="n">x</span><span class="o">^</span><span class="n">r</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">x1</span><span class="o">^</span><span class="n">r</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="n">x</span><span class="o">^</span><span class="n">r</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">x2</span><span class="o">^</span><span class="n">r</span><span class="p">);</span>
+<span class="n">f</span><span class="o">[</span><span class="n">x_</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Integrate</span><span class="o">[</span><span class="n">df[x</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="err">{</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="err">}]</span><span class="p">;</span>
+<span class="n">sol</span><span class="o">[</span><span class="n">l_, u_</span><span class="o">]</span><span class="w"> </span><span class="err">:</span><span class="o">=</span><span class="w"> </span>
+<span class="w"> </span><span class="n">NSolve</span><span class="o">[</span><span class="n">{f[l</span><span class="o">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">e</span><span class="p">,</span><span class="w"> </span><span class="n">f</span><span class="o">[</span><span class="n">x1</span><span class="o">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">e</span><span class="p">,</span><span class="w"> </span><span class="n">f</span><span class="o">[</span><span class="n">x2</span><span class="o">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">e</span><span class="p">,</span><span class="w"> </span><span class="n">f</span><span class="o">[</span><span class="n">u</span><span class="o">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">e</span><span class="p">,</span>
+<span class="w">    </span><span class="n">l</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">x1</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">x2</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">u</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">0</span><span class="err">}</span><span class="p">,</span><span class="w"> </span><span class="err">{</span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="n">x1</span><span class="p">,</span><span class="w"> </span><span class="n">x2</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="err">}]</span>
+<span class="n">ff</span><span class="o">[</span><span class="n">x_, l_, u_</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">f</span><span class="o">[</span><span class="n">x</span><span class="o">]*</span><span class="mi">2</span><span class="o">/</span><span class="p">(</span><span class="n">f</span><span class="o">[</span><span class="n">l</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">f</span><span class="o">[</span><span class="n">u</span><span class="o">]</span><span class="p">)</span><span class="w"> </span><span class="o">//</span><span class="w"> </span><span class="n">Expand</span><span class="p">;</span>
+<span class="n">lt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0001</span><span class="o">^</span><span class="p">(</span><span class="mi">1</span><span class="o">/</span><span class="n">r</span><span class="p">);</span><span class="w"> </span><span class="n">ut</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w"> </span><span class="n">lambda</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.1</span><span class="p">;</span>
+<span class="k">While</span><span class="o">[</span><span class="n">1 - lt &gt; 0.0001,</span>
+<span class="n"> fff[x_</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ff</span><span class="o">[</span><span class="n">x, lt, ut</span><span class="o">]</span><span class="w"> </span><span class="o">/</span><span class="p">.</span><span class="w"> </span><span class="n">sol</span><span class="o">[</span><span class="n">Max[lt, lambda*ut</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">ut</span><span class="err">]</span><span class="o">[</span><span class="n">[1</span><span class="o">]</span><span class="err">]</span><span class="p">;</span>
+<span class="w"> </span><span class="k">Print</span><span class="o">[</span><span class="n">fff[x</span><span class="o">]</span><span class="err">]</span><span class="p">;</span>
+<span class="w"> </span><span class="n">lt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fff</span><span class="o">[</span><span class="n">lt</span><span class="o">]</span><span class="p">;</span><span class="w"> </span><span class="n">ut</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">lt</span><span class="err">]</span>
+<span class="n">f</span><span class="o">[</span><span class="n">x</span><span class="o">]</span><span class="w"> </span><span class="o">/</span><span class="p">.</span><span class="w"> </span><span class="n">Solve</span><span class="o">[</span><span class="n">f[1</span><span class="o">]</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">k</span><span class="err">]</span><span class="o">[</span><span class="n">[1</span><span class="o">]</span><span class="err">]</span><span class="w"> </span><span class="o">/</span><span class="p">.</span><span class="w"> </span><span class="err">{</span><span class="n">x1</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">x2</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="mi">1</span><span class="err">}</span>
+</code></pre></div>
+
+<p>$r=1\sim 5$的计算结果如下：<br />
+\begin{array}{c|ccc}<br />
+\hline<br />
+r &amp; t &amp; a &amp; b &amp; c \\<br />
+\hline<br />
+&amp; \quad 1\quad &amp; 14.2975 &amp; -31.2203 &amp; 18.9214 \\<br />
+&amp; 2 &amp; 7.12258 &amp; -7.78207 &amp; 2.35989 \\<br />
+\quad 1\quad &amp; 3 &amp; 6.9396 &amp; -7.61544 &amp; 2.3195 \\<br />
+&amp; 4 &amp; 5.98456 &amp; -6.77016 &amp; 2.12571 \\<br />
+&amp; 5 &amp; 3.79109 &amp; -4.18664 &amp; 1.39555 \\<br />
+&amp; \geq 6 &amp; 3 &amp; -3 &amp; 1 \\<br />
+\hline<br />
+&amp; 1 &amp; 7.42487 &amp; -18.3958 &amp; 12.8967 \\<br />
+&amp; 2 &amp; 3.48773 &amp; -2.33004 &amp; 0.440469 \\<br />
+2 &amp; 3 &amp; 2.77661 &amp; -2.07064 &amp; 0.463023 \\<br />
+&amp; 4 &amp; 1.99131 &amp; -1.37394 &amp; 0.387593 \\<br />
+&amp; \geq 5 &amp; 15/8 &amp; -5/4 &amp; 3/8 \\<br />
+\hline<br />
+&amp; 1 &amp; 5.05052 &amp; -13.5427 &amp; 10.2579 \\<br />
+&amp; 2 &amp; 2.31728 &amp; -1.06581 &amp; 0.144441 \\<br />
+3 &amp; 3 &amp; 1.79293 &amp; -0.913562 &amp; 0.186699 \\<br />
+&amp; 4 &amp; 1.56683 &amp; -0.786609 &amp; 0.220008 \\<br />
+&amp; \geq 5 &amp; 14/9 &amp; -7/9 &amp; 2/9 \\<br />
+\hline<br />
+&amp; 1 &amp; 3.85003 &amp; -10.8539 &amp; 8.61893 \\<br />
+4 &amp; 2 &amp; 1.80992 &amp; -0.587778 &amp; 0.0647852 \\<br />
+&amp; 3 &amp; 1.50394 &amp; -0.594516 &amp; 0.121161 \\<br />
+&amp; \geq 4 &amp; 45/32 &amp; -9/16 &amp; 5/32 \\<br />
+\hline<br />
+&amp; 1 &amp; 3.11194 &amp; -8.28217 &amp; 6.67716 \\<br />
+5 &amp; 2 &amp; 1.5752 &amp; -0.393327 &amp; 0.0380364 \\<br />
+&amp; 3 &amp; 1.3736 &amp; -0.44661 &amp; 0.0911259 \\<br />
+&amp; \geq 4 &amp; 33/25 &amp; -11/25 &amp; 3/25 \\<br />
+\hline<br />
+\end{array}</p>
+<p>其中最后一步的收敛值，由$x_1=x_2=1$和$f(1)=1$得出。</p>
+<h2 id="_6">测试一下</h2>
+<p>一个简单的测试代码如下：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+
+<span class="n">coefs</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="kc">None</span><span class="p">,</span>
+    <span class="p">[</span>
+        <span class="p">(</span><span class="mf">14.2975</span><span class="p">,</span> <span class="o">-</span><span class="mf">31.2203</span><span class="p">,</span> <span class="mf">18.9214</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">7.12258</span><span class="p">,</span> <span class="o">-</span><span class="mf">7.78207</span><span class="p">,</span> <span class="mf">2.35989</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">6.9396</span><span class="p">,</span> <span class="o">-</span><span class="mf">7.61544</span><span class="p">,</span> <span class="mf">2.3195</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">5.98456</span><span class="p">,</span> <span class="o">-</span><span class="mf">6.77016</span><span class="p">,</span> <span class="mf">2.12571</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">3.79109</span><span class="p">,</span> <span class="o">-</span><span class="mf">4.18664</span><span class="p">,</span> <span class="mf">1.39555</span><span class="p">),</span>
+        <span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="o">-</span><span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+    <span class="p">],</span>
+    <span class="p">[</span>
+        <span class="p">(</span><span class="mf">7.42487</span><span class="p">,</span> <span class="o">-</span><span class="mf">18.3958</span><span class="p">,</span> <span class="mf">12.8967</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">3.48773</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.33004</span><span class="p">,</span> <span class="mf">0.440469</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">2.77661</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.07064</span><span class="p">,</span> <span class="mf">0.463023</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1.99131</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.37394</span><span class="p">,</span> <span class="mf">0.387593</span><span class="p">),</span>
+        <span class="p">(</span><span class="mi">15</span> <span class="o">/</span> <span class="mi">8</span><span class="p">,</span> <span class="o">-</span><span class="mi">5</span> <span class="o">/</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">3</span> <span class="o">/</span> <span class="mi">8</span><span class="p">),</span>
+    <span class="p">],</span>
+    <span class="p">[</span>
+        <span class="p">(</span><span class="mf">5.05052</span><span class="p">,</span> <span class="o">-</span><span class="mf">13.5427</span><span class="p">,</span> <span class="mf">10.2579</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">2.31728</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.06581</span><span class="p">,</span> <span class="mf">0.144441</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1.79293</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.913562</span><span class="p">,</span> <span class="mf">0.186699</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1.56683</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.786609</span><span class="p">,</span> <span class="mf">0.220008</span><span class="p">),</span>
+        <span class="p">(</span><span class="mi">14</span> <span class="o">/</span> <span class="mi">9</span><span class="p">,</span> <span class="o">-</span><span class="mi">7</span> <span class="o">/</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">2</span> <span class="o">/</span> <span class="mi">9</span><span class="p">),</span>
+    <span class="p">],</span>
+    <span class="p">[</span>
+        <span class="p">(</span><span class="mf">3.85003</span><span class="p">,</span> <span class="o">-</span><span class="mf">10.8539</span><span class="p">,</span> <span class="mf">8.61893</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1.80992</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.587778</span><span class="p">,</span> <span class="mf">0.0647852</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1.50394</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.594516</span><span class="p">,</span> <span class="mf">0.121161</span><span class="p">),</span>
+        <span class="p">(</span><span class="mi">45</span> <span class="o">/</span> <span class="mi">32</span><span class="p">,</span> <span class="o">-</span><span class="mi">9</span> <span class="o">/</span> <span class="mi">16</span><span class="p">,</span> <span class="mi">5</span> <span class="o">/</span> <span class="mi">32</span><span class="p">),</span>
+    <span class="p">],</span>
+    <span class="p">[</span>
+        <span class="p">(</span><span class="mf">3.11194</span><span class="p">,</span> <span class="o">-</span><span class="mf">8.28217</span><span class="p">,</span> <span class="mf">6.67716</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1.5752</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.393327</span><span class="p">,</span> <span class="mf">0.0380364</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1.3736</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.44661</span><span class="p">,</span> <span class="mf">0.0911259</span><span class="p">),</span>
+        <span class="p">(</span><span class="mi">33</span> <span class="o">/</span> <span class="mi">25</span><span class="p">,</span> <span class="o">-</span><span class="mi">11</span> <span class="o">/</span> <span class="mi">25</span><span class="p">,</span> <span class="mi">3</span> <span class="o">/</span> <span class="mi">25</span><span class="p">),</span>
+    <span class="p">],</span>
+<span class="p">]</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">abc</span><span class="p">(</span><span class="n">r</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">steps</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scale</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+    <span class="n">w</span><span class="p">,</span> <span class="n">steps</span> <span class="o">=</span> <span class="n">coefs</span><span class="p">[</span><span class="n">r</span><span class="p">],</span> <span class="n">steps</span> <span class="ow">or</span> <span class="nb">len</span><span class="p">(</span><span class="n">coefs</span><span class="p">[</span><span class="n">r</span><span class="p">])</span>
+    <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">w</span><span class="p">[:</span><span class="n">steps</span><span class="p">]</span> <span class="o">+</span> <span class="n">w</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">:]</span> <span class="o">*</span> <span class="nb">max</span><span class="p">(</span><span class="n">steps</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">w</span><span class="p">),</span> <span class="mi">0</span><span class="p">):</span>
+        <span class="k">yield</span> <span class="n">a</span> <span class="o">/</span> <span class="n">scale</span><span class="p">,</span> <span class="n">b</span> <span class="o">/</span> <span class="n">scale</span><span class="o">**</span><span class="p">(</span><span class="n">r</span> <span class="o">+</span> <span class="mi">1</span><span class="p">),</span> <span class="n">c</span> <span class="o">/</span> <span class="n">scale</span><span class="o">**</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">r</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">matmul_invroot</span><span class="p">(</span><span class="n">G</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">r</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">steps</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">eps</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;return G @ P^(-s/r)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">I</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">P</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="kp">dtype</span><span class="o">=</span><span class="n">P</span><span class="o">.</span><span class="kp">dtype</span><span class="p">)</span>
+    <span class="n">P</span> <span class="o">=</span> <span class="n">P</span> <span class="o">/</span> <span class="p">(</span><span class="n">t</span> <span class="o">:=</span> <span class="p">(</span><span class="n">P</span> <span class="o">*</span> <span class="n">P</span><span class="o">.</span><span class="n">mT</span><span class="p">)</span><span class="o">.</span><span class="kp">sum</span><span class="p">()</span><span class="o">**</span><span class="mf">0.5</span><span class="p">)</span> <span class="o">+</span> <span class="n">eps</span> <span class="o">*</span> <span class="n">I</span>
+    <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">abc</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">steps</span><span class="p">,</span> <span class="mf">1.001</span><span class="p">):</span>
+        <span class="n">W</span> <span class="o">=</span> <span class="n">a</span> <span class="o">*</span> <span class="n">I</span> <span class="o">+</span> <span class="n">b</span> <span class="o">*</span> <span class="n">P</span> <span class="o">+</span> <span class="n">c</span> <span class="o">*</span> <span class="n">P</span> <span class="o">@</span> <span class="n">P</span>
+        <span class="n">W1</span><span class="p">,</span> <span class="n">W2</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">matrix_power</span><span class="p">(</span><span class="n">W</span><span class="p">,</span> <span class="n">s</span><span class="p">),</span> <span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">matrix_power</span><span class="p">(</span><span class="n">W</span><span class="p">,</span> <span class="n">r</span><span class="p">)</span>
+        <span class="n">G</span><span class="p">,</span> <span class="n">P</span> <span class="o">=</span> <span class="n">G</span> <span class="o">@</span> <span class="n">W1</span><span class="p">,</span> <span class="n">P</span> <span class="o">@</span> <span class="n">W2</span>
+    <span class="k">return</span> <span class="n">G</span> <span class="o">*</span> <span class="n">t</span><span class="o">**</span><span class="p">(</span><span class="o">-</span><span class="n">s</span> <span class="o">/</span> <span class="n">r</span><span class="p">)</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">matmul_invroot_by_eigh</span><span class="p">(</span><span class="n">G</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">r</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;return G @ P^(-s/r)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">S</span><span class="p">,</span> <span class="n">Q</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">eigh</span><span class="p">(</span><span class="n">P</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">G</span> <span class="o">@</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">diag</span><span class="p">(</span><span class="n">S</span><span class="o">**</span><span class="p">(</span><span class="o">-</span><span class="n">s</span> <span class="o">/</span> <span class="n">r</span><span class="p">))</span> <span class="o">@</span> <span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">inv</span><span class="p">(</span><span class="n">Q</span><span class="p">)</span>
+
+<span class="n">d</span> <span class="o">=</span> <span class="mi">1000</span>
+<span class="n">s</span><span class="p">,</span> <span class="n">r</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">4</span>
+<span class="n">G</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">d</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">d</span><span class="o">**</span><span class="mf">0.5</span>
+<span class="n">P</span> <span class="o">=</span> <span class="p">(</span><span class="n">x</span> <span class="o">:=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">d</span><span class="o">**</span><span class="mf">0.5</span><span class="p">)</span> <span class="o">@</span> <span class="n">x</span><span class="o">.</span><span class="n">T</span> <span class="o">+</span> <span class="mf">0.001</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+
+<span class="n">X1</span> <span class="o">=</span> <span class="n">matmul_invroot_by_eigh</span><span class="p">(</span><span class="n">G</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">r</span><span class="p">,</span> <span class="n">s</span><span class="p">)</span>
+<span class="n">X2</span> <span class="o">=</span> <span class="n">matmul_invroot</span><span class="p">(</span><span class="n">G</span><span class="p">,</span> <span class="n">P</span><span class="p">,</span> <span class="n">r</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">eps</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">X1</span> <span class="o">-</span> <span class="n">X2</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ~= 1e-3</span>
+
+<span class="n">X2</span> <span class="o">=</span> <span class="n">matmul_invroot</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="kp">array</span><span class="p">(</span><span class="n">G</span><span class="p">,</span> <span class="kp">dtype</span><span class="o">=</span><span class="s1">&#39;bfloat16&#39;</span><span class="p">),</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">array</span><span class="p">(</span><span class="n">P</span><span class="p">,</span> <span class="kp">dtype</span><span class="o">=</span><span class="s1">&#39;bfloat16&#39;</span><span class="p">),</span> <span class="n">r</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">eps</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">X1</span> <span class="o">-</span> <span class="n">X2</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ~= 2e-3</span>
+</code></pre></div>
+
+<p>这里有几点注意事项。首先输入$\boldsymbol{P}$的最小特征值不能太小，否则迭代过程极其容易爆炸，哪怕我们只想要求正数次幂如$\boldsymbol{P}^{1/2}$也是如此。这个其实不难理解，因为$\sqrt{x}$在$x=0$处也是比较病态的，一旦由于误差问题“不小心”到了负半轴，那直接就不存在（实数解）了，这时候迭代的表现就无法预估。</p>
+<p>多小才不算“太小”呢？大概是$\boldsymbol{P}/\sqrt{\tr(\boldsymbol{P}^2)}$的最小特征值明显不能小于我们考虑的最小特征值，即$0.0001$。如果没法保证这一点，那么建议直接设置<br />
+\begin{equation}\boldsymbol{P}_0 = \frac{\boldsymbol{P}}{\sqrt{\tr(\boldsymbol{P}^2)}} + \epsilon \cdot\boldsymbol{I} \end{equation}<br />
+其中$\epsilon\sim 0.0001$。这样会损失一点精度，但能够明显增加数值稳定性。</p>
+<p>此外，迭代步数在大多数情况下不需要超过推荐值<code>len(coefs[r])</code>，尤其是低精度计算场景，因为迭代步数越多，越容易由于累积误差而爆炸。实际上只要特征值在考虑范围内，推荐步数已经足够达到理想精度了，除非我们用fp32甚至更高精度迭代，那么可以考虑设置$\epsilon=0$、<code>scale=1</code>以及使用更多的迭代步数。</p>
+<h2 id="_7">文章小结</h2>
+<p>本文将上一篇文章的结果，推广到任意的$r$次方根和逆$r$次方根的计算，得到了一种矩阵的任意$-1/r$次方的通用迭代格式。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/11175">https://spaces.ac.cn/archives/11175</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jul. 21, 2025). 《矩阵r次方根和逆r次方根的高效计算 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/11175">https://spaces.ac.cn/archives/11175</a></p>
+<p>@online{kexuefm-11175,<br />
+title={矩阵r次方根和逆r次方根的高效计算},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={Jul},<br />
+url={\url{https://spaces.ac.cn/archives/11175}},<br />
+} </p>
+<hr />
+<h2 id="_8">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>

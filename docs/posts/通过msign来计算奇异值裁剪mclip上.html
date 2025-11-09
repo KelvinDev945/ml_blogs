@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通过msign来计算奇异值裁剪mclip（上） | ML & Math Blog Posts</title>
+    <meta name="description" content="通过msign来计算奇异值裁剪mclip（上）
+原文链接: https://spaces.ac.cn/archives/11006
+发布日期: 
+
+前面我们用了两篇文章《msign算子的Newton-Schulz迭代（上）》和《msign算子的Newton-Schulz迭代（下）》讨论了矩阵的$\newcommand{msign}{\mathop{\text{msign}}}\newcommand...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">通过msign来计算奇异值裁剪mclip（上）</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/11006" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> 迭代</span>
+                <span class="tag"><i class="fas fa-tag"></i> 近似</span>
+                <span class="tag"><i class="fas fa-tag"></i> 矩阵</span>
+                <span class="tag"><i class="fas fa-tag"></i> SVD</span>
+                <span class="tag"><i class="fas fa-tag"></i> muon</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="msignmclip">通过msign来计算奇异值裁剪mclip（上）</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/11006">https://spaces.ac.cn/archives/11006</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>前面我们用了两篇文章<a href="/archives/10922">《msign算子的Newton-Schulz迭代（上）》</a>和<a href="/archives/10996">《msign算子的Newton-Schulz迭代（下）》</a>讨论了矩阵的$\newcommand{msign}{\mathop{\text{msign}}}\newcommand{sign}{\mathop{\text{sign}}}\newcommand{clip}{\mathop{\text{clip}}}\newcommand{mclip}{\mathop{\text{mclip}}}\msign$算子的数值计算，这篇文章我们来关注“奇异值裁剪（Singular Value Clipping）”运算，它最近在 <a href="https://x.com/_arohan_/status/1929945590366122037">@<em>arohan</em></a> 的推特上引起了热议，我们此前在<a href="/archives/10795">《高阶MuP：更简明但更高明的谱条件缩放》</a>也提到过，接下来我们简称为$\mclip$。</p>
+<h2 id="_1">基本概念</h2>
+<p>对于标量$x$，$\clip$运算定义为<br />
+\begin{equation}\clip(x) = \max(\min(x, 1), -1) = \left\{\begin{aligned}1, &amp;\quad x\geq 1 \\<br />
+x, &amp;\quad x\in(-1, 1)\\<br />
+-1, &amp;\quad x\leq -1<br />
+\end{aligned}\right.\end{equation}<br />
+即大于$1$或者小于$-1$就被截断，否则不变。我们将矩阵$\boldsymbol{M}\in\mathbb{R}^{n\times m}$的$\mclip$定义为<br />
+\begin{equation}\mclip(\boldsymbol{M}) = \boldsymbol{U}\clip(\boldsymbol{\Sigma})\boldsymbol{V}^{\top} \end{equation}<br />
+其中$\boldsymbol{M}=\boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}$是矩阵$\boldsymbol{M}$的SVD，$\boldsymbol{U}\in\mathbb{R}^{n\times n},\boldsymbol{V}\in\mathbb{R}^{m\times m}$是正交矩阵，$\boldsymbol{\Sigma}\in\mathbb{R}^{n\times m}$是奇异值对角阵，对角矩阵加$\clip$表示对它的对角线元素分别进行$\clip$。留意到矩阵$\boldsymbol{\Sigma}$是对角阵并且总是非负的，所以我们也有<br />
+\begin{equation}\mclip(\boldsymbol{M}) = \boldsymbol{U}\min(\boldsymbol{\Sigma}, 1)\boldsymbol{V}^{\top} \end{equation}</p>
+<p>SVD自然是计算$\mclip$的标准方式，但SVD的效率并不高。而有$\msign$的经验在前，我们不难想到可以像$\msign$一样给$\mclip$找一个Newton-Schulz迭代来计算它。这个思路自然没有什么问题，但在$\msign$的基础上，我们还可以有更聪明的办法。</p>
+<h2 id="_2">巨人肩膀</h2>
+<p>这个聪明的想法来自<a href="https://x.com/leloykun">@leloykun</a>，他在博客<a href="https://leloykun.github.io/ponder/spectral-clipping/">《Numerically Stable Spectral Clipping Via Newton-Schulz Iteration》</a>提出可以站在$\msign$的肩膀上，用$\msign$来表示$\mclip$，这样就不用另外寻找Newton-Schulz迭代了。他在博客中也提了一个巧妙的解法，但个人感觉不够直观并且效率也不算高，下面给出笔者的思路。</p>
+<p>笔者的出发点是标量恒等式（Kimi帮忙找的）<br />
+$$\min(x, 1) = \frac{1}{2} [x + 1 - (x-1)\sign(x-1)] $$<br />
+简单起见，先假设$\boldsymbol{M}$是满秩方阵，那么<br />
+\begin{equation}\begin{aligned}<br />
+2\mclip(\boldsymbol{M}) =&amp;\, \boldsymbol{U} [2\min(\boldsymbol{\Sigma},1)] \boldsymbol{V}^{\top} \\[6pt]<br />
+=&amp;\, \boldsymbol{U} [\boldsymbol{\Sigma} + \boldsymbol{I} - (\boldsymbol{\Sigma} - \boldsymbol{I})\sign(\boldsymbol{\Sigma} - \boldsymbol{I})] \boldsymbol{V}^{\top} \\[6pt]<br />
+=&amp;\, \boldsymbol{U} [\boldsymbol{\Sigma} + \boldsymbol{I} - (\boldsymbol{\Sigma} - \boldsymbol{I})\msign(\boldsymbol{\Sigma} - \boldsymbol{I})] \boldsymbol{V}^{\top} \\[6pt]<br />
+=&amp;\, \boldsymbol{M} + \boldsymbol{U}\boldsymbol{V}^{\top} - \boldsymbol{U}(\boldsymbol{\Sigma} - \boldsymbol{I})\msign(\boldsymbol{\Sigma} - \boldsymbol{I}) \boldsymbol{V}^{\top}<br />
+\end{aligned}\label{eq:2-mclip-M}\end{equation}<br />
+注意<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\,\boldsymbol{U}(\boldsymbol{\Sigma} - \boldsymbol{I})\msign(\boldsymbol{\Sigma} - \boldsymbol{I}) \boldsymbol{V}^{\top} \\[6pt]<br />
+=&amp;\, \boldsymbol{U}(\boldsymbol{\Sigma} - \boldsymbol{I}) \boldsymbol{U}^{\top} \boldsymbol{U}\msign(\boldsymbol{\Sigma} - \boldsymbol{I}) \boldsymbol{V}^{\top} \\[6pt]<br />
+=&amp;\, (\boldsymbol{U}\boldsymbol{\Sigma} \boldsymbol{U}^{\top} - \boldsymbol{I}) \msign(\boldsymbol{M} - \boldsymbol{U}\boldsymbol{V}^{\top}) \\[6pt]<br />
+=&amp;\, (\boldsymbol{U}\boldsymbol{\Sigma} \boldsymbol{V}^{\top} (\boldsymbol{U}\boldsymbol{V}^{\top})^{\top} - \boldsymbol{I}) \msign(\boldsymbol{M} - \boldsymbol{U}\boldsymbol{V}^{\top}) \\[6pt]<br />
+=&amp;\, (\boldsymbol{M} (\boldsymbol{U}\boldsymbol{V}^{\top})^{\top} - \boldsymbol{I}) \msign(\boldsymbol{M} - \boldsymbol{U}\boldsymbol{V}^{\top}) \\[6pt]<br />
+\end{aligned}\end{equation}<br />
+其中第二个等号用到了对于任意正交矩阵$\boldsymbol{P},\boldsymbol{Q}$成立$\boldsymbol{P}\msign(\boldsymbol{R})\boldsymbol{Q} = \msign(\boldsymbol{P}\boldsymbol{R}\boldsymbol{Q})$。将上式代回式$\eqref{eq:2-mclip-M}$得到<br />
+\begin{equation}2\mclip(\boldsymbol{M}) = \boldsymbol{M} + \boldsymbol{U}\boldsymbol{V}^{\top} + (\boldsymbol{I} - \boldsymbol{M}(\boldsymbol{U}\boldsymbol{V}^{\top})^{\top}) \msign(\boldsymbol{M} - \boldsymbol{U}\boldsymbol{V}^{\top})\label{eq:mclip-M-core}\end{equation}<br />
+若$\boldsymbol{M}$是一般的$r$秩矩阵，则$\boldsymbol{U}\boldsymbol{V}^{\top}$改为$\boldsymbol{U}<em _:_:r_="[:,:r]">{[:,:r]}\boldsymbol{V}</em>}^{\top}$，我们可以直接将$\boldsymbol{M} = \boldsymbol{U<em _:r_:r_="[:r,:r]">{[:,:r]}\boldsymbol{\Sigma}</em>$代入上式验证等号成立。}\boldsymbol{V}_{[:,:r]}^{\top</p>
+<p>（注：这一节感谢 <a href="https://x.com/YouJiacheng">@YouJiacheng</a> 的交流讨论。）</p>
+<h2 id="_3">参考实现</h2>
+<p>我们知道$\boldsymbol{U}\boldsymbol{V}^{\top}=\msign(\boldsymbol{M})$，所以用式$\eqref{eq:mclip-M-core}$计算$\mclip$只需要算两次$\msign$：<br />
+\begin{equation}2\mclip(\boldsymbol{M}) = \boldsymbol{M} + \msign(\boldsymbol{M}) + (\boldsymbol{I} - \boldsymbol{M}\msign(\boldsymbol{M})^{\top}) \msign(\boldsymbol{M} - \msign(\boldsymbol{M}))\end{equation}</p>
+<p>计算量大致是$\msign$的2倍；相比之下<a href="https://leloykun.github.io/ponder/spectral-clipping/">《Numerically Stable Spectral Clipping Via Newton-Schulz Iteration》</a>需要对一个约4倍大小的矩阵算一次$\msign$，计算量大致是$\msign$的8倍。</p>
+<p>在$\msign$的基础上，实现式$\eqref{eq:mclip-M-core}$最短只需要两行代码，参考如下：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">msign</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
+    <span class="n">u</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">vh</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">full_matrices</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">u</span> <span class="o">@</span> <span class="n">vh</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">mclip</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
+    <span class="n">ms2</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span> <span class="o">-</span> <span class="p">(</span><span class="n">ms</span> <span class="o">:=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="n">ms</span> <span class="o">+</span> <span class="n">ms2</span> <span class="o">-</span> <span class="n">m</span> <span class="o">@</span> <span class="n">ms</span><span class="o">.</span><span class="n">mT</span> <span class="o">@</span> <span class="n">ms2</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+
+<span class="n">m</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">20</span><span class="p">)</span>
+<span class="n">u</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">vh</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">full_matrices</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<span class="n">result1</span> <span class="o">=</span> <span class="n">u</span> <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="kp">diag</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span> <span class="o">@</span> <span class="n">vh</span>
+<span class="n">result2</span> <span class="o">=</span> <span class="n">mclip</span><span class="p">(</span><span class="n">m</span><span class="p">)</span>
+<span class="n">np</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">result1</span> <span class="o">-</span> <span class="n">result2</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>
+</code></pre></div>
+
+<p>这里直接用SVD来计算$\msign$，以便快速验证式$\eqref{eq:mclip-M-core}$的正确性，实际计算中，读者可以自行将$\msign$函数换成相应的Newton-Schulz迭代。</p>
+<h2 id="_4">其他函数</h2>
+<p>我们还可以用同样思路去计算其他函数的矩阵版，比如阶跃函数。我们定义标量的阶跃函数$\newcommand{mstep}{\mathop{\text{mstep}}}\newcommand{step}{\mathop{\text{step}}}$<br />
+\begin{equation}\step(x) = \frac{1}{2}[\sign(x - 1) + 1]\end{equation}<br />
+这表示大于1就变成1，小于1就变成0。于是我们可以定义<br />
+\begin{equation}\mstep(\boldsymbol{M}) = \boldsymbol{U}\step(\boldsymbol{\Sigma})\boldsymbol{V}^{\top}\end{equation}<br />
+也就是只保留大于1的奇异值并截断为1，小于1的奇异值则直接置零。基于同样的步骤，我们可以得到<br />
+\begin{equation}\mstep(\boldsymbol{M}) = \frac{1}{2}[\msign(\boldsymbol{M}) + \msign(\boldsymbol{M} - \msign(\boldsymbol{M}))]\end{equation}<br />
+我们甚至可以表示偶函数，比如定义<br />
+\begin{equation}\mathop{\text{msquare}}(\boldsymbol{M}) = \boldsymbol{U} \boldsymbol{\Sigma}^2\boldsymbol{V}^{\top} = \boldsymbol{U}\boldsymbol{V}^{\top}(\boldsymbol{V}\boldsymbol{\Sigma}\boldsymbol{U}^{\top})(\boldsymbol{U} \boldsymbol{\Sigma}\boldsymbol{V}^{\top}) = \msign(\boldsymbol{M})\boldsymbol{M}^{\top}\boldsymbol{M}\end{equation}<br />
+这跟直接由$\boldsymbol{M}^2$定义的矩阵平方不同，后者只对方阵有效，是在特征值分解下对特征值平方，而上式则是在奇异值分解下对奇异值平方。一般地，我们有<br />
+\begin{equation}\boldsymbol{U} \boldsymbol{\Sigma}^{2n}\boldsymbol{V}^{\top} = \msign(\boldsymbol{M})(\boldsymbol{M}^{\top}\boldsymbol{M})^n,\quad \boldsymbol{U} \boldsymbol{\Sigma}^{2n+1}\boldsymbol{V}^{\top} = \boldsymbol{M}(\boldsymbol{M}^{\top}\boldsymbol{M})^n\end{equation}<br />
+这表明对于任意多项式$f(x)$（而不单单是奇多项式），$\boldsymbol{U}f(\boldsymbol{\Sigma})\boldsymbol{V}^{\top}$都可以由$\boldsymbol{M}$和$\msign(\boldsymbol{M})$以及矩阵的有限步加乘得到。</p>
+<h2 id="_5">文章小结</h2>
+<p>本文介绍了利用矩阵及其$\msign$，来对矩阵的奇异值进行一般运算的思路，包括奇异值裁剪、阶跃函数、任意次多项式（而不单单是奇多项式）等。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/11006">https://spaces.ac.cn/archives/11006</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jun. 07, 2025). 《通过msign来计算奇异值裁剪mclip（上） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/11006">https://spaces.ac.cn/archives/11006</a></p>
+<p>@online{kexuefm-11006,<br />
+title={通过msign来计算奇异值裁剪mclip（上）},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={Jun},<br />
+url={\url{https://spaces.ac.cn/archives/11006}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>

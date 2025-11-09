@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer升级之路：6、旋转位置编码的完备性分析 | ML & Math Blog Posts</title>
+    <meta name="description" content="Transformer升级之路：6、旋转位置编码的完备性分析
+原文链接: https://spaces.ac.cn/archives/9403
+发布日期: 
+
+在去年的文章《Transformer升级之路：2、博采众长的旋转式位置编码》中，笔者提出了旋转位置编码（RoPE），当时的出发点只是觉得用绝对位置来实现相对位置是一件“很好玩的事情”，并没料到其实际效果还相当不错，并为大家所接受，不得不说这...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">Transformer升级之路：6、旋转位置编码的完备性分析</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/9403" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> 矩阵</span>
+                <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                <span class="tag"><i class="fas fa-tag"></i> 位置编码</span>
+                <span class="tag"><i class="fas fa-tag"></i> rope</span>
+                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="transformer6">Transformer升级之路：6、旋转位置编码的完备性分析</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9403">https://spaces.ac.cn/archives/9403</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在去年的文章<a href="/archives/8265">《Transformer升级之路：2、博采众长的旋转式位置编码》</a>中，笔者提出了旋转位置编码（RoPE），当时的出发点只是觉得用绝对位置来实现相对位置是一件“很好玩的事情”，并没料到其实际效果还相当不错，并为大家所接受，不得不说这真是一个意外之喜。后来，在<a href="/archives/8397">《Transformer升级之路：4、二维位置的旋转式位置编码》</a>中，笔者讨论了二维形式的RoPE，并研究了用矩阵指数表示的RoPE的一般解。</p>
+<p>既然有了一般解，那么自然就会引出一个问题：我们常用的RoPE，只是一个以二维旋转矩阵为基本单元的分块对角矩阵，如果换成一般解，理论上效果会不会更好呢？本文就来回答这个问题。</p>
+<h2 id="_1">指数通解</h2>
+<p>在<a href="/archives/8397">《Transformer升级之路：4、二维位置的旋转式位置编码》</a>中，我们将RoPE抽象地定义为任意满足下式的方阵<br />
+\begin{equation}\boldsymbol{\mathcal{R}}<em n-m="n-m">m^{\top}\boldsymbol{\mathcal{R}}_n=\boldsymbol{\mathcal{R}}</em>}\label{eq:re}\end{equation<br />
+然后，我们探讨了如下矩阵指数形式的解<br />
+\begin{equation}\boldsymbol{\mathcal{R}}_n=\exp n\boldsymbol{B}\end{equation}<br />
+这里的矩阵指数，不是像Softmax那样的激活函数式的element-wise运算，而是按照泰勒级数定义的“<a href="https://en.wikipedia.org/wiki/Matrix_exponential">Matrix Exponential</a>”。根据“<a href="https://en.wikipedia.org/wiki/Baker%E2%80%93Campbell%E2%80%93Hausdorff_formula">Baker–Campbell–Hausdorff公式</a>”，我们有<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{\mathcal{R}}_m^{\top}\boldsymbol{\mathcal{R}}_n=&amp;\,\big(\exp m\boldsymbol{B}\big)^{\top}\big(\exp n\boldsymbol{B}\big) = \big(\exp m\boldsymbol{B}^{\top}\big)\big(\exp n\boldsymbol{B}\big) \\<br />
+=&amp;\,\exp\left(m\boldsymbol{B}^{\top} + n\boldsymbol{B} + \frac{1}{2}mn\left[\boldsymbol{B}^{\top}, \boldsymbol{B}\right]+\cdots\right)<br />
+\end{aligned}\end{equation}<br />
+这里$\left[\boldsymbol{A}, \boldsymbol{B}\right]=\boldsymbol{A}\boldsymbol{B}-\boldsymbol{B}\boldsymbol{A}$，$\cdots$省略的都是$m,n$的三次或三次以上的项。按照式$\eqref{eq:re}$，那么上式指数部分应该等于$(n-m)\boldsymbol{B}$，这就推出<br />
+\begin{equation}\boldsymbol{B}^{\top} = - \boldsymbol{B}\end{equation}<br />
+即要求$\boldsymbol{B}$是反对称矩阵。</p>
+<h2 id="_2">正交通解</h2>
+<p>进一步地，我们有$(\exp \boldsymbol{B})^{\top}(\exp \boldsymbol{B})=\exp(\boldsymbol{B}-\boldsymbol{B}) = \boldsymbol{I}$和$\exp n\boldsymbol{B} = \left(\exp\boldsymbol{B}\right)^n$，前者说明$\exp\boldsymbol{B}$是正交矩阵，后者则启示我们这是不是可以推广到任意正交矩阵？不难验证，答案是肯定的，我们有结论：</p>
+<blockquote>
+<p>对于任意正交矩阵$\boldsymbol{O}$，$\boldsymbol{\mathcal{R}}_n=\boldsymbol{O}^n$是满足式$\eqref{eq:re}$的解。</p>
+</blockquote>
+<p>值得指出的是，在实数域内，并非所有正交矩阵能写成$\exp\boldsymbol{B}$的形式，所以$\boldsymbol{O}^n$实际上比矩阵指数形式更宽泛。从<a href="/archives/6377">《恒等式 det(exp(A)) = exp(Tr(A)) 赏析》</a>可知$\det(\exp(\boldsymbol{A})) = \exp(\text{Tr}(\boldsymbol{A})) &gt; 0$，所以能写成矩阵指数形式的正交矩阵行列式必然大于0（即等于1），事实上这个结果反过来也成立，即行列式等于1的正交矩阵，必然可以写成$\exp\boldsymbol{B}$的形式，其中$\boldsymbol{B}$是反对称矩阵。（参考<a href="https://math.stackexchange.com/questions/2467531/why-can-any-orthogonal-matrix-be-written-as-o-ea">《Why can any orthogonal matrix be written as O=e^A》</a>）。</p>
+<p>对于$\det(\boldsymbol{O}) = -1$的正交矩阵，我们有$\boldsymbol{O}=\boldsymbol{O}<em>+ \boldsymbol{I}</em>-$，其中$\boldsymbol{I}<em>-$是对角线有一个-1、剩下都是1的对角阵，$\boldsymbol{O}</em>+$是$\det(\boldsymbol{O}<em>+) = 1$的正交矩阵，它可以写成$\exp\boldsymbol{B}$的形式，此时$\boldsymbol{O}^n = (\boldsymbol{O}</em>+ \boldsymbol{I}<em>-)^n = \boldsymbol{I}</em>-^n\exp n\boldsymbol{B}$。这也就是说，即便对于$\det(\boldsymbol{O}) = -1$的$\boldsymbol{O}^n$，也只是$\exp n\boldsymbol{B}$的简单变换，所以接下来我们主要研究$\exp n\boldsymbol{B}$形式的解。</p>
+<h2 id="_3">完备分析</h2>
+<p>众所周知，我们平时所用的RoPE位置编码，是如下形式的分块对角矩阵：<br />
+\begin{equation}\scriptsize{\left(\begin{array}{cc:cc:cc:cc}<br />
+\cos n\theta_0 &amp; -\sin n\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; \cdots &amp; 0 &amp; 0 \\<br />
+\sin n\theta_0 &amp; \cos n\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; \cdots &amp; 0 &amp; 0 \\<br />
+\hdashline<br />
+0 &amp; 0 &amp; \cos n\theta_1 &amp; -\sin n\theta_1 &amp; \cdots &amp; \cdots &amp; 0 &amp; 0 \\<br />
+0 &amp; 0 &amp; \sin n\theta_1 &amp; \cos n\theta_1 &amp; \cdots &amp; \cdots &amp; 0 &amp; 0 \\<br />
+\hdashline<br />
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \ddots &amp; \ddots &amp; \vdots &amp; \vdots \\<br />
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \ddots &amp; \ddots &amp; \vdots &amp; \vdots \\<br />
+\hdashline<br />
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \cdots &amp; \cos n\theta_{d/2-1} &amp; -\sin n\theta_{d/2-1} \\<br />
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \cdots &amp; \sin n\theta_{d/2-1} &amp; \cos n\theta_{d/2-1} \\<br />
+\end{array}\right)}\end{equation}<br />
+它可以简写成<br />
+\begin{equation}\begin{pmatrix}<br />
+\boldsymbol{R}<em n_theta_1="n\theta_1">{n\theta_0} &amp; \boldsymbol{0} &amp; \cdots &amp; \boldsymbol{0} \\<br />
+\boldsymbol{0} &amp; \boldsymbol{R}</em> \\} &amp; \cdots &amp; \boldsymbol{0<br />
+\vdots &amp; \vdots &amp; \ddots &amp; \vdots \\<br />
+\boldsymbol{0} &amp; \boldsymbol{0} &amp; \cdots &amp; \boldsymbol{R}<em d_2-1="d/2-1">{n\theta</em> \\}<br />
+\end{pmatrix} = \exp n\begin{pmatrix}<br />
+\boldsymbol{J}<em _theta_1="\theta_1">{\theta_0} &amp; \boldsymbol{0} &amp; \cdots &amp; \boldsymbol{0} \\<br />
+\boldsymbol{0} &amp; \boldsymbol{J}</em> \\} &amp; \cdots &amp; \boldsymbol{0<br />
+\vdots &amp; \vdots &amp; \ddots &amp; \vdots \\<br />
+\boldsymbol{0} &amp; \boldsymbol{0} &amp; \cdots &amp; \boldsymbol{J}<em d_2-1="d/2-1">{\theta</em> \\}<br />
+\end{pmatrix}\end{equation}<br />
+其中<br />
+\begin{equation}\boldsymbol{R}<em _theta="\theta">{\theta} = \begin{pmatrix} \cos\theta &amp; -\sin\theta \\ \sin\theta &amp; \cos\theta \end{pmatrix},\quad \boldsymbol{J}</em>} = \begin{pmatrix} 0 &amp; -\theta \\ \theta &amp; 0\end{pmatrix}\end{equation<br />
+这种选择可以说是最简单的一种，其本质原因可以说是为了降低计算量。那么，所谓完备性问题，就是要回答：如上的分块对角矩阵的特例，相比全参数$\exp n\boldsymbol{B}$，是否有能力上的缺失？换句话说，如果不考虑计算量，将$\boldsymbol{B}$替换为一般的反对称矩阵，效果是否可能会有提升？</p>
+<p>回答这个问题不困难，事实上，对于任意偶数阶反对称矩阵，它都可以对角化为分块对角矩阵<br />
+\begin{equation}\boldsymbol{\Lambda} = \begin{pmatrix}<br />
+\boldsymbol{J}<em _theta_1="\theta_1">{\theta_0} &amp; \boldsymbol{0} &amp; \cdots &amp; \boldsymbol{0} \\<br />
+\boldsymbol{0} &amp; \boldsymbol{J}</em> \\} &amp; \cdots &amp; \boldsymbol{0<br />
+\vdots &amp; \vdots &amp; \ddots &amp; \vdots \\<br />
+\boldsymbol{0} &amp; \boldsymbol{0} &amp; \cdots &amp; \boldsymbol{J}<em d_2-1="d/2-1">{\theta</em> \\}<br />
+\end{pmatrix}\end{equation}<br />
+该结论可以参考<a href="https://en.wikipedia.org/wiki/Skew-symmetric_matrix#Spectral_theory">Skew-symmetric matrix</a>。也就是说，存在可逆矩阵$\boldsymbol{P}$，使得$\boldsymbol{B}=\boldsymbol{P}\boldsymbol{\Lambda}\boldsymbol{P}^{-1}$，于是<br />
+\begin{equation}\exp n\boldsymbol{B} = \exp \left(n\boldsymbol{P}\boldsymbol{\Lambda}\boldsymbol{P}^{-1}\right) = \boldsymbol{P}(\exp n\boldsymbol{\Lambda})\boldsymbol{P}^{-1}\end{equation}<br />
+也就是说，任意的$\exp n\boldsymbol{B}$与分块对角的$\exp n\boldsymbol{\Lambda}$，仅仅相差一个相似变换，而我们在Self Attention中应用RoPE时，是<br />
+\begin{equation}\boldsymbol{q}^{\top}\big(\exp (n-m)\boldsymbol{B}\big)\boldsymbol{k} = \big(\boldsymbol{P}^{\top}\boldsymbol{q}\big)^{\top}\big(\exp (n-m)\boldsymbol{\Lambda}\big)\big(\boldsymbol{P}^{-1}\boldsymbol{k}\big)\end{equation}<br />
+由于$\boldsymbol{q},\boldsymbol{k}$一般都是输入$\boldsymbol{x}$经过某个可学习的线性变换而来，$\boldsymbol{P}^{\top},\boldsymbol{P}^{-1}$原则上都可以吸收到线性变换的训练参数中，因此直接设为$\boldsymbol{q}^{\top}\big(\exp (n-m)\boldsymbol{\Lambda}\big)\boldsymbol{k}$理论上不会损失一般性。</p>
+<p>所以，对于Self Attention来说，问题的答案是否定的。不过，如果是<a href="线性Attention的探索：Attention必须有个Softmax吗？">线性Attention</a>，答案会有少许区别，因为线性Attention的$\boldsymbol{q},\boldsymbol{k}$加了个激活函数：<br />
+\begin{equation}\phi(\boldsymbol{q})^{\top}\big(\exp (n-m)\boldsymbol{B}\big)\varphi(\boldsymbol{k}) = \big(\boldsymbol{P}^{\top}\phi(\boldsymbol{q})\big)^{\top}\big(\exp (n-m)\boldsymbol{\Lambda}\big)\big(\boldsymbol{P}^{-1}\varphi(\boldsymbol{k})\big)\end{equation}<br />
+这就导致了$\boldsymbol{P}^{\top},\boldsymbol{P}^{-1}$不一定能吸收到线性变换的训练参数中，因此对线性Attention补上两个参数矩阵，是有可能带来提升的。</p>
+<h2 id="_4">文章小结</h2>
+<p>本文简单分析了RoPE的完备性问题，表明对于Self Attention来说，目前的分块对角型RoPE不会损失一般性。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9403">https://spaces.ac.cn/archives/9403</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Dec. 28, 2022). 《Transformer升级之路：6、旋转位置编码的完备性分析 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9403">https://spaces.ac.cn/archives/9403</a></p>
+<p>@online{kexuefm-9403,<br />
+title={Transformer升级之路：6、旋转位置编码的完备性分析},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Dec},<br />
+url={\url{https://spaces.ac.cn/archives/9403}},<br />
+} </p>
+<hr />
+<h2 id="_5">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>

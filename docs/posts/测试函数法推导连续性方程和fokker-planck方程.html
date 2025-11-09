@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试函数法推导连续性方程和Fokker-Planck方程 | ML & Math Blog Posts</title>
+    <meta name="description" content="测试函数法推导连续性方程和Fokker-Planck方程
+原文链接: https://spaces.ac.cn/archives/9461
+发布日期: 
+
+在文章《生成扩散模型漫谈（六）：一般框架之ODE篇》中，我们推导了SDE的Fokker-Planck方程；而在《生成扩散模型漫谈（十二）：“硬刚”扩散ODE》中，我们单独推导了ODE的连续性方程。它们都是描述随机变量沿着SDE/ODE演化的分布...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">测试函数法推导连续性方程和Fokker-Planck方程</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/9461" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> 概率</span>
+                <span class="tag"><i class="fas fa-tag"></i> 微分方程</span>
+                <span class="tag"><i class="fas fa-tag"></i> 随机</span>
+                <span class="tag"><i class="fas fa-tag"></i> 扩散</span>
+                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="fokker-planck">测试函数法推导连续性方程和Fokker-Planck方程</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9461">https://spaces.ac.cn/archives/9461</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在文章<a href="/archives/9228">《生成扩散模型漫谈（六）：一般框架之ODE篇》</a>中，我们推导了SDE的Fokker-Planck方程；而在<a href="/archives/9280">《生成扩散模型漫谈（十二）：“硬刚”扩散ODE》</a>中，我们单独推导了ODE的连续性方程。它们都是描述随机变量沿着SDE/ODE演化的分布变化方程，连续性方程是Fokker-Planck方程的特例。在推导Fokker-Planck方程时，我们将泰勒展开硬套到了狄拉克函数上，虽然结果是对的，但未免有点不伦不类；在推导连续性方程时，我们结合了雅可比行列式和泰勒展开，方法本身比较常规，但没法用来推广到Fokker-Planck方程。</p>
+<p>这篇文章我们介绍“测试函数法”，它是推导连续性方程和Fokker-Planck方程的标准方法之一，其分析过程比较正规，并且适用场景也比较广。</p>
+<h2 id="_1">分部积分</h2>
+<p>正式推导之前，这里先介绍后面推导会用到的关键结果——分部积分法的高维推广。</p>
+<p>一般教程对分部积分的介绍仅限于一维情形，即<br />
+\begin{equation}\int_a^b uv'dx = uv|<em _Omega="\Omega">a^b - \int_a^b vu'dx\end{equation}<br />
+这里$u,v$是$x$的函数，$'$表示求函数关于$x$的导数。下面我们需要它的一个高维版本，为此，我们先回顾一维分部积分的推导过程，它依赖于求导的乘法法则：<br />
+\begin{equation}(uv)' = uv' + vu'\end{equation}<br />
+然后两边对$x$积分并移项，就得到分部积分公式。对于高维情形，我们考虑类似的公式：<br />
+\begin{equation}\nabla\cdot(u\boldsymbol{v}) = \boldsymbol{v}\cdot\nabla u + u\nabla \cdot\boldsymbol{v}\end{equation}<br />
+其中$u$是$\boldsymbol{x}$的标量函数，$\boldsymbol{v}$是$\boldsymbol{x}$的向量函数（维度跟$\boldsymbol{v}$一致），$\nabla$表示求函数关于$\boldsymbol{x}$的梯度。现在我们对两端在区域$\Omega$积分：<br />
+\begin{equation}\int</em>}\nabla\cdot(u\boldsymbol{v})d\boldsymbol{x} = \int_{\Omega}\boldsymbol{v}\cdot\nabla u d\boldsymbol{x} + \int_{\Omega}u\nabla \cdot\boldsymbol{v} d\boldsymbol{x}\end{equation<br />
+根据<a href="https://en.wikipedia.org/wiki/Divergence_theorem">高斯散度定理</a>，左侧等于$\int_{\partial\Omega}u\boldsymbol{v}\cdot\hat{\boldsymbol{n}}dS$，$\partial\Omega$是$\Omega$的边界，$\hat{\boldsymbol{n}}$是边界的外向单位法向量，$dS$是面积微元。所以，移项后有<br />
+\begin{equation}\int_{\Omega}\boldsymbol{v}\cdot\nabla u d\boldsymbol{x} = \int_{\partial\Omega}u\boldsymbol{v}\cdot\hat{\boldsymbol{n}}dS - \int_{\Omega}u\nabla \cdot\boldsymbol{v} d\boldsymbol{x}\label{eq:int-by-parts}\end{equation}<br />
+这就是我们要推导的高维空间分部积分公式。特别地，对于概率密度函数$p$，那么由于非负性和积分为1的限制，无穷远处必然有$p\to 0$和$\nabla p\to \boldsymbol{0}$，所以如果$\Omega$选为全空间（没有特别注明积分区域的，默认为全空间），那么分别将$u=p$和$\boldsymbol{v}=\nabla p$代入上式，得到<br />
+\begin{align}\int\boldsymbol{v}\cdot\nabla p d\boldsymbol{x} =&amp;\, - \int p\nabla \cdot\boldsymbol{v} d\boldsymbol{x}\label{eq:int-by-parts-p} \\<br />
+\int u\nabla \cdot\nabla p d\boldsymbol{x} = &amp;\,-\int\nabla p\cdot\nabla u d\boldsymbol{x}\label{eq:int-by-parts-gp}\end{align}<br />
+如果要进一步严格化上述结论，可以假设$p$具有紧的支撑集。不过这纯粹是数学上的严格化，事实上对于一般理解来说，直接默认在无穷远处成立$p\to 0$和$\nabla p\to \boldsymbol{0}$就够了。</p>
+<h2 id="ode">ODE演化</h2>
+<p>测试函数法的原理，是如果对于任意函数$\phi(\boldsymbol{x})$，都成立<br />
+\begin{equation}\int f(\boldsymbol{x})\phi(\boldsymbol{x})d\boldsymbol{x} = \int g(\boldsymbol{x})\phi(\boldsymbol{x})d\boldsymbol{x}\end{equation}<br />
+那么就成立$f(\boldsymbol{x})=g(\boldsymbol{x})$，其中$\phi(\boldsymbol{x})$就叫做测试函数。更严谨的定义需要声明$\phi(\boldsymbol{x})$的选取空间，以及等号的具体含义（如严格相等/几乎处处相等/依概率相等之类），这里我们就不引入这些细节了。</p>
+<p>对于ODE<br />
+\begin{equation}\frac{d\boldsymbol{x}<em t="t" t_Delta="t+\Delta">t}{dt}=\boldsymbol{f}_t(\boldsymbol{x}_t)\label{eq:ode}\end{equation}<br />
+我们将它离散化为<br />
+\begin{equation}\boldsymbol{x}</em>} = \boldsymbol{x<em t="t" t_Delta="t+\Delta">t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t\label{eq:ode-diff}\end{equation}<br />
+那么就有<br />
+\begin{equation}\phi(\boldsymbol{x}</em>}) = \phi(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t)\approx \phi(\boldsymbol{x}_t) + \Delta t\,\,\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla</em><em t="t" t_Delta="t+\Delta">t}\phi(\boldsymbol{x}_t)\end{equation}<br />
+两边求期望，得到：<br />
+\begin{equation}\int p</em>}(\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t})\phi(\boldsymbol{x}</em>}) d\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">{t+\Delta t}\approx \int p_t(\boldsymbol{x}_t)\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t + \Delta t\int p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla</em><em t="t" t_Delta="t+\Delta">t}\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t\end{equation}<br />
+由于积分的结果不依赖于被积自变量的记号，所以左边将$\boldsymbol{x}</em>}$换成$\boldsymbol{x<em t="t" t_Delta="t+\Delta">t$也是等价的：<br />
+\begin{equation}\int p</em>}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t\approx \int p_t(\boldsymbol{x}_t)\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t + \Delta t\int p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t\label{eq:change-var}\end{equation}<br />
+将右边第一项移到左边，然后取$\Delta t\to 0$的极限，得到：<br />
+\begin{equation}\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t\label{eq:dt-0}\end{equation}<br />
+右端利用分部积分公式$\eqref{eq:int-by-parts-p}$得到<br />
+\begin{equation}\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = -\int \Big[\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\cdot\big(p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\big)\Big]\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t\end{equation}<br />
+根据测试函数法的相等原理，就有<br />
+\begin{equation}\frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} = -\nabla</em>}_t}\cdot\big(p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\big)\end{equation<br />
+这称为“<a href="https://en.wikipedia.org/wiki/Continuity_equation">连续性方程</a>”。</p>
+<h2 id="sde">SDE演化</h2>
+<p>对于SDE<br />
+\begin{equation}d\boldsymbol{x}<em t="t" t_Delta="t+\Delta">t = \boldsymbol{f}_t(\boldsymbol{x}_t) dt + g_t d\boldsymbol{w}\label{eq:sde}\end{equation}<br />
+我们离散化为<br />
+\begin{equation}\boldsymbol{x}</em>} = \boldsymbol{x<em t="t" t_Delta="t+\Delta">t + \boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t + g_t \sqrt{\Delta t}\boldsymbol{\varepsilon},\quad \boldsymbol{\varepsilon}\sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})\label{eq:sde-diff}\end{equation}<br />
+那么<br />
+\begin{equation}\begin{aligned}<br />
+\phi(\boldsymbol{x}</em>}) =&amp;\, \phi(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t + \boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t + g_t \sqrt{\Delta t}\boldsymbol{\varepsilon}) \\<br />
+\approx&amp;\, \phi(\boldsymbol{x}_t) + \left(\boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t + g_t \sqrt{\Delta t}\boldsymbol{\varepsilon}\right)\cdot \nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t) + \frac{1}{2} \left(g_t\sqrt{\Delta t}\boldsymbol{\varepsilon}\cdot \nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\right)^2\phi(\boldsymbol{x}_t)<br />
+\end{aligned}\end{equation}<br />
+两边求期望，注意右边要同时对$\boldsymbol{x}_t$和$\boldsymbol{\varepsilon}$求期望，其中$\boldsymbol{\varepsilon}$的期望可以事先求出，结果是<br />
+\begin{equation}\phi(\boldsymbol{x}_t) + \Delta t\,\,\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot \nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t) + \frac{1}{2} \Delta t\,g_t^2\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\cdot\nabla</em><em t="t" t_Delta="t+\Delta">t}\phi(\boldsymbol{x}_t)<br />
+\end{equation}<br />
+于是<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\,\int p</em>}(\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t})\phi(\boldsymbol{x}</em>}) d\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">{t+\Delta t}\\<br />
+\approx&amp;\, \int p_t(\boldsymbol{x}_t)\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t + \Delta t\int p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t + \int\frac{1}{2} \Delta t\,g_t^2 p_t(\boldsymbol{x}_t)\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t<br />
+\end{aligned}\end{equation}<br />
+跟式$\eqref{eq:change-var}$、式$\eqref{eq:dt-0}$类似，取$\Delta\to 0$的极限，得到<br />
+\begin{equation}\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t + \int\frac{1}{2} \,g_t^2 p_t(\boldsymbol{x}_t)\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t\end{equation}<br />
+对右边第一项应用式$\eqref{eq:int-by-parts-p}$、对右边第二项先应用式$\eqref{eq:int-by-parts-gp}$再应用式$\eqref{eq:int-by-parts-p}$，得到<br />
+\begin{equation}\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int \left[-\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\cdot\big(p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\big)+\frac{1}{2}g_t^2 \nabla</em>}}\cdot\nabla_{\boldsymbol{x}}p_t(\boldsymbol{x})\right]\phi(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)d\boldsymbol{x}_t\end{equation}<br />
+根据测试函数法的相等原理得<br />
+\begin{equation}\frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} = -\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\cdot\big(p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\big)+\frac{1}{2}g_t^2 \nabla</em>}}\cdot\nabla_{\boldsymbol{x}}p_t(\boldsymbol{x})\end{equation<br />
+这就是“<a href="https://en.wikipedia.org/wiki/Fokker%E2%80%93Planck_equation">Fokker-Planck方程</a>”。</p>
+<h2 id="_2">文章小结</h2>
+<p>本文介绍了用于推导某些概率方程的测试函数法，主要内容包括分部积分法的高维推广，以及ODE的连续性方程和SDE的Fokker-Planck方程的推导过程。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9461">https://spaces.ac.cn/archives/9461</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Feb. 11, 2023). 《测试函数法推导连续性方程和Fokker-Planck方程 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9461">https://spaces.ac.cn/archives/9461</a></p>
+<p>@online{kexuefm-9461,<br />
+title={测试函数法推导连续性方程和Fokker-Planck方程},<br />
+author={苏剑林},<br />
+year={2023},<br />
+month={Feb},<br />
+url={\url{https://spaces.ac.cn/archives/9461}},<br />
+} </p>
+<hr />
+<h2 id="_3">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>

@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通过msign来计算奇异值裁剪mclip（下） | ML & Math Blog Posts</title>
+    <meta name="description" content="通过msign来计算奇异值裁剪mclip（下）
+原文链接: https://spaces.ac.cn/archives/11059
+发布日期: 
+
+前面我们在《通过msign来计算奇异值裁剪mclip（上）》讨论了奇异值裁剪$\newcommand{mclip}{\mathop{\text{mclip}}}\mclip$的数值计算，核心思路来自 @leloykun 的文章《Numerically ...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">通过msign来计算奇异值裁剪mclip（下）</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/11059" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> 迭代</span>
+                <span class="tag"><i class="fas fa-tag"></i> 近似</span>
+                <span class="tag"><i class="fas fa-tag"></i> 矩阵</span>
+                <span class="tag"><i class="fas fa-tag"></i> SVD</span>
+                <span class="tag"><i class="fas fa-tag"></i> muon</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="msignmclip">通过msign来计算奇异值裁剪mclip（下）</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/11059">https://spaces.ac.cn/archives/11059</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>前面我们在<a href="/archives/11006">《通过msign来计算奇异值裁剪mclip（上）》</a>讨论了奇异值裁剪$\newcommand{mclip}{\mathop{\text{mclip}}}\mclip$的数值计算，核心思路来自 <a href="https://x.com/leloykun">@leloykun</a> 的文章<a href="https://leloykun.github.io/ponder/spectral-clipping/">《Numerically Stable Spectral Clipping Via Newton-Schulz Iteration》</a>（现已重新修订和改名），通过寻找基于$\newcommand{msign}{\mathop{\text{msign}}}\msign$的表达式来避免另外寻找Newton-Schulz迭代，在文章中笔者提出了一个计算量更低的嵌套$\msign$方案。</p>
+<p>不过前两天，@leloykun 在<a href="https://x.com/leloykun/status/1936199820479205420">推特</a>上指出笔者的方案实际计算中存在误差偏大的问题。本文来具体分析一下这个问题，并给出一个更高效、误差更低的新方案。</p>
+<h2 id="_1">基本概念</h2>
+<p>按照惯例，先整理一下基本概念。首先是标量$x$的$\newcommand{clip}{\mathop{\text{clip}}}\clip$算子，这次我们一般地定义<br />
+\begin{equation}\clip\nolimits_{[\alpha,\beta]}(x) = \max(\min(x, \beta), \alpha) = \left\{\begin{aligned}\beta, &amp;\quad \geq \beta \\<br />
+x, &amp;\quad x\in(\alpha, \beta)\\<br />
+\alpha, &amp;\quad x\leq \alpha<br />
+\end{aligned}\right.\end{equation}<br />
+当没有特别注明区间时，区间默认是$[-1,1]$，即$\clip(x) = \clip_{[-1,1]}(x)$。设矩阵$\boldsymbol{M}\in\mathbb{R}^{n\times m}$的SVD为$\boldsymbol{M}=\boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}$，$\boldsymbol{U}\in\mathbb{R}^{n\times n},\boldsymbol{V}\in\mathbb{R}^{m\times m}$是正交矩阵，$\boldsymbol{\Sigma}\in\mathbb{R}^{n\times m}$是奇异值对角阵，那么定义<br />
+\begin{equation}\mclip\nolimits_{[\alpha,\beta]}(\boldsymbol{M}) = \boldsymbol{U}\clip\nolimits_{[\alpha,\beta]}(\boldsymbol{\Sigma})\boldsymbol{V}^{\top}\end{equation}<br />
+对角矩阵加$\clip$表示对它的对角线元素分别进行$\clip$，说白了，$\mclip_{[\alpha,\beta]}$就是把$\boldsymbol{M}$的奇异值裁剪到$[\alpha,\beta]$内。</p>
+<p>由于奇异值是非负的，所以当$\alpha &lt; 0$时有$\mclip_{[\alpha,\beta]}(\boldsymbol{M})=\mclip_{[0,\beta]}(\boldsymbol{M})$，但后面我们将会看到，由于实际计算的误差，考虑负数的$\alpha$会有一些神奇的抵消误差效果。</p>
+<h2 id="_2">理论通解</h2>
+<p>这一节的目标是用$\msign$表示出$\mclip$，出发点是恒等式<br />
+\begin{equation}\newcommand{sign}{\mathop{\text{sign}}}\mclip\nolimits_{[\alpha,\beta]} (x) = \frac{\alpha + \beta + (\alpha - x)\sign(\alpha - x) - (\beta - x)\sign(\beta - x)}{2}\end{equation}<br />
+找到恒等式的关键是将$\clip$表示为绝对值与自身的线性运算，然后通过$|x|=x\sign(x)$过渡到$\sign$运算，这里就不展开了。</p>
+<p>简单起见，先设$\boldsymbol{M}$是满秩方阵，基于该恒等式，我们有<br />
+\begin{equation}2\mclip\nolimits_{[\alpha,\beta]}(\boldsymbol{M}) = \boldsymbol{U}\Big((\alpha + \beta)\boldsymbol{I} + (\alpha \boldsymbol{I} - \boldsymbol{\Sigma})\sign(\alpha \boldsymbol{I} - \boldsymbol{\Sigma}) - (\beta \boldsymbol{I} - \boldsymbol{\Sigma})\sign(\beta \boldsymbol{I} - \boldsymbol{\Sigma})\Big)\boldsymbol{V}^{\top}\end{equation}<br />
+展开右式，分别包含几种项（$\gamma\in\{\alpha,\beta\}$）：<br />
+\begin{array}{c|c}<br />
+\hline<br />
+\text{原始} &amp; \text{化简} \\<br />
+\hline<br />
+\boldsymbol{U}\boldsymbol{V}^{\top} &amp; \msign(\boldsymbol{M}) \\<br />
+\hline<br />
+\boldsymbol{U}\sign(\gamma \boldsymbol{I} - \boldsymbol{\Sigma})\boldsymbol{V}^{\top} &amp;<br />
+\begin{aligned}&amp;\, \msign(\gamma \boldsymbol{U}\boldsymbol{V}^{\top} - \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}) \\<br />
+=&amp;\, \msign(\gamma \msign(\boldsymbol{M}) - \boldsymbol{M})<br />
+\end{aligned} \\<br />
+\hline<br />
+\boldsymbol{U}\boldsymbol{\Sigma}\sign(\gamma \boldsymbol{I} - \boldsymbol{\Sigma})\boldsymbol{V}^{\top} &amp; \begin{aligned}&amp;\, \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}\boldsymbol{V}\boldsymbol{U}^{\top}\boldsymbol{U}\sign(\gamma \boldsymbol{I} - \boldsymbol{\Sigma})\boldsymbol{V}^{\top} \\<br />
+=&amp;\, \boldsymbol{M}\msign(\boldsymbol{M})^{\top}\msign(\gamma \msign(\boldsymbol{M}) - \boldsymbol{M})<br />
+\end{aligned} \\<br />
+\hline<br />
+\end{array}<br />
+代入整理可得<br />
+\begin{equation}\mclip\nolimits_{[\alpha,\beta]}(\boldsymbol{M}) = \frac{1}{2}\left\{\begin{aligned}&amp;\,(\alpha + \beta)\msign(\boldsymbol{M}) \\<br />
++ &amp;\, (\alpha \boldsymbol{I} - \boldsymbol{M}\msign(\boldsymbol{M})^{\top})\msign(\alpha \msign(\boldsymbol{M}) - \boldsymbol{M})\\<br />
+- &amp;\, (\beta \boldsymbol{I} - \boldsymbol{M}\msign(\boldsymbol{M})^{\top})\msign(\beta \msign(\boldsymbol{M}) - \boldsymbol{M})<br />
+\end{aligned}\right\}\label{eq:general}\end{equation}<br />
+对于非方形、非满秩矩阵，可以代入$\msign(\boldsymbol{M})=\boldsymbol{U}<em _:_:r_="[:,:r]">{[:,:r]}\boldsymbol{V}</em>$到上式检验成立，所以上式是$\mclip$的理论通解。}^{\top</p>
+<h2 id="_3">初始形式</h2>
+<p>式$\eqref{eq:general}$看起来至少需要计算三次$\msign$，并且后面两次$\msign$的输入带有第一次$\msign$的结果，所以形式上是$\msign$的嵌套。当我们取$\alpha=0,\beta=1$时，$\msign$的次数可以降低到两次：<br />
+\begin{equation}\mclip(\boldsymbol{M}) = \frac{1}{2}\Big[\boldsymbol{M} + \msign(\boldsymbol{M}) + (\boldsymbol{I} - \boldsymbol{M}\msign(\boldsymbol{M})^{\top}) \msign(\boldsymbol{M} - \msign(\boldsymbol{M}))\Big]\label{eq:mclip-1}\end{equation}<br />
+这就是笔者在上一篇文章<a href="/archives/11006">《通过msign来计算奇异值裁剪mclip（上）》</a>给出的结果，只需要两次$\msign$。</p>
+<p>然而，实测显示该式在$\boldsymbol{M}$的奇异值较大且$\msign$的计算精度较低时，会产生较大的误差，远大于 @leloykun 所给出的方案。但 @leloykun 的方案需要对一个大约4倍大小的矩阵$\begin{bmatrix}\boldsymbol{I} &amp; \boldsymbol{M} \\ \boldsymbol{M}^{\top} &amp; \boldsymbol{I}\end{bmatrix}$算$\msign$，代价不菲，所以还是想看看这里的方案还有什么提升空间。</p>
+<h2 id="_4">去掉嵌套</h2>
+<p>直觉上，误差的来源是嵌套$\msign$导致的累积误差，所以尝试想办法去掉嵌套，幸运的是，利用一个简单的技巧还真的能去掉嵌套！</p>
+<p>首先可以证明<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\,(\boldsymbol{I} - \boldsymbol{M}\msign(\boldsymbol{M})^{\top}) \msign(\boldsymbol{M} - \msign(\boldsymbol{M})) \\[6pt]<br />
+=&amp;\, (\msign(\boldsymbol{M}) - \boldsymbol{M}) \msign(\msign(\boldsymbol{M})^{\top}\boldsymbol{M} - \boldsymbol{I})<br />
+\end{aligned}\end{equation}<br />
+然后我们有<br />
+\begin{equation}\msign(\boldsymbol{M})^{\top}\boldsymbol{M} - \boldsymbol{I} = \boldsymbol{V}\boldsymbol{\Sigma}\boldsymbol{V}^{\top} - \boldsymbol{I} = \boldsymbol{V}(\boldsymbol{\Sigma}-\boldsymbol{I})\boldsymbol{V}^{\top}\end{equation}<br />
+根据上式，我们断言<br />
+\begin{equation}\msign(\msign(\boldsymbol{M})^{\top}\boldsymbol{M} - \boldsymbol{I}) = \msign(\boldsymbol{M}^{\top}\boldsymbol{M} - \boldsymbol{I}) = \msign(\boldsymbol{V}(\boldsymbol{\Sigma}^2-\boldsymbol{I})\boldsymbol{V}^{\top})\end{equation}<br />
+这利用了一个很简单的性质：$\forall x \geq 0, \sign(x-1) = \sign(x^2-1)$。利用该结果，可以得到<br />
+\begin{equation}\mclip(\boldsymbol{M}) = \frac{1}{2}\Big[\boldsymbol{M} + \msign(\boldsymbol{M}) + (\msign(\boldsymbol{M}) - \boldsymbol{M}) \msign(\boldsymbol{M}^{\top}\boldsymbol{M} - \boldsymbol{I})\Big]\label{eq:mclip-2}\end{equation}<br />
+还是两次$\msign$，但它们之间已经不再有嵌套关系，意味着理论上已经没有嵌套$\msign$带来的累积误差，实测显示式$\eqref{eq:mclip-2}$的误差确实能比式$\eqref{eq:mclip-1}$小一半左右，但极端情况下还是不如 @leloykun 的方案，这说明嵌套并不是主要误差来源。</p>
+<h2 id="_5">相互抵消</h2>
+<p>还有什么改进空间呢？@leloykun 的方案要求是奇函数，所以它实际上考虑的是$\mclip_{[-1,1]}$而不是$\mclip_{[0,1]}$。有没有可能是这个选择导致了它某两部分误差相互抵销，从而得到更好的计算精度呢？</p>
+<p>为了验证这一点，我们在式$\eqref{eq:general}$代入$\alpha=-1,\beta=1$，得到<br />
+\begin{equation}\mclip(\boldsymbol{M}) = \frac{1}{2}\left\{\begin{aligned}<br />
+&amp;\,(\boldsymbol{I} + \boldsymbol{M}\msign(\boldsymbol{M})^{\top})\msign(\msign(\boldsymbol{M}) + \boldsymbol{M}) \\<br />
+- &amp;\,(\boldsymbol{I} - \boldsymbol{M}\msign(\boldsymbol{M})^{\top})\msign(\msign(\boldsymbol{M}) - \boldsymbol{M})<br />
+\end{aligned}\right\}\end{equation}<br />
+基于上一节一样的去嵌套技巧，我们得到<br />
+\begin{equation}\mclip(\boldsymbol{M}) = \frac{1}{2}\left\{\begin{aligned}<br />
+&amp;\,(\msign(\boldsymbol{M}) + \boldsymbol{M})\msign(\boldsymbol{M}^{\top}\boldsymbol{M} + \boldsymbol{I}) \\<br />
++ &amp;\,(\msign(\boldsymbol{M}) - \boldsymbol{M})\msign(\boldsymbol{M}^{\top}\boldsymbol{M} - \boldsymbol{I})<br />
+\end{aligned}\right\}\label{eq:mclip-3}\end{equation}<br />
+注意，$\boldsymbol{M}^{\top}\boldsymbol{M} + \boldsymbol{I}$一定是正定对称矩阵，所以理论上$\msign(\boldsymbol{M}^{\top}\boldsymbol{M} + \boldsymbol{I})=\boldsymbol{I}$，这样我们就恢复了式$\eqref{eq:mclip-2}$。但实际计算中，$\msign(\boldsymbol{M}^{\top}\boldsymbol{M} + \boldsymbol{I})$与$\boldsymbol{I}$之间的误差可能会抵消$\msign(\boldsymbol{M}^{\top}\boldsymbol{M} - \boldsymbol{I})$带来的误差，所以我们通过实验决定是否保留它。</p>
+<p>不出所料，式$\eqref{eq:mclip-3}$的数值误差比 @leloykun 的方案还要小！这就肯定了我们的猜测，设置$\alpha=-1$和$\beta=1$让$\mclip$变成奇函数，有助于抵消误差。</p>
+<h2 id="_6">原因浅思</h2>
+<p>为什么这么巧能抵消误差呢？我们可以简单做个定量分析。大误差的出现前提有两个，一是$\boldsymbol{M}$有非常大的奇异值，二是$\msign$的迭代步数并不多，导致$\msign$本身的精度不高。</p>
+<p>我们观察式$\eqref{eq:mclip-3}$，它可以拆分为4项求和，其实$\msign(\boldsymbol{M})\msign(\boldsymbol{M}^{\top}\boldsymbol{M} \pm \boldsymbol{I})$这两项有界的，即便$\msign$精度不高也基本无法发散，所以主要误差来自<br />
+\begin{equation}\boldsymbol{M}\msign(\boldsymbol{M}^{\top}\boldsymbol{M} + \boldsymbol{I}) - \boldsymbol{M}\msign(\boldsymbol{M}^{\top}\boldsymbol{M} - \boldsymbol{I})\label{eq:error-1}\end{equation}<br />
+它正比于$\boldsymbol{M}$，最有可能把误差放大。相应地，式$\eqref{eq:mclip-2}$的主要误差项则是<br />
+\begin{equation}\boldsymbol{M} - \boldsymbol{M}\msign(\boldsymbol{M}^{\top}\boldsymbol{M} - \boldsymbol{I})\label{eq:error-2}\end{equation}<br />
+我们考虑远大于1的奇异值，如果$\msign$是精确的，那么$\msign$的结果就是1，上面两个式子的结果中对应大奇异值部分将会都是我们期望的0。</p>
+<p>然而，如果是迭代步数不多的$\msign$，它可能变成$0.6$或者$1.4$这样的值，式$\eqref{eq:error-2}$相应的部分就会出现$\sim\pm 0.4 \boldsymbol{M}$这样的巨大误差；但如果是式$\eqref{eq:error-1}$，当奇异值很大时，$\boldsymbol{M}^{\top}\boldsymbol{M} - \boldsymbol{I}$和$\boldsymbol{M}^{\top}\boldsymbol{M} + \boldsymbol{I}$的相对差异并不大，因此$\msign(\boldsymbol{M}^{\top}\boldsymbol{M} \pm \boldsymbol{I})$的差异很小，所以式$\eqref{eq:error-1}$依然能抵消大部份误差。</p>
+<p>但要记住，这始终有个前提，就是$\boldsymbol{M}$有明显大于1的奇异值，以及迭代步数不多。如果不满足这两个条件，那么式$\eqref{eq:mclip-2}$本来的误差就不大，式$\eqref{eq:mclip-3}$反而会因为多算了一次$\msign$而增加误差。因此，哪个公式的实际表现最优，还需要具体情况具体分析。</p>
+<h2 id="_7">对比代码</h2>
+<p>构造一个奇异值有大于1也有小于1，且最大奇异值接近1000的奇异值，然后在bfloat16精度下测试各个算法，参考代码如下（大致运行结果已在注释写出）：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">jax.lax</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lax</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">msign</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">steps</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">eps</span><span class="o">=</span><span class="mf">1e-20</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;The coefficients come from https://kexue.fm/archives/10996</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">abc</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">(</span><span class="mf">8.287212018145622</span><span class="p">,</span> <span class="o">-</span><span class="mf">23.59588651909882</span><span class="p">,</span> <span class="mf">17.300387312530923</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">4.107059111542197</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.9478499167379084</span><span class="p">,</span> <span class="mf">0.54484310829266</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">3.9486908534822938</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.908902115962947</span><span class="p">,</span> <span class="mf">0.5518191394370131</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">3.3184196573706055</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.488488024314878</span><span class="p">,</span> <span class="mf">0.5100489401237208</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">2.3006520199548186</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.6689039845747518</span><span class="p">,</span> <span class="mf">0.4188073119525678</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1.8913014077874002</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.2679958271945908</span><span class="p">,</span> <span class="mf">0.37680408948524996</span><span class="p">),</span>
+        <span class="p">(</span><span class="mf">1.875</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.25</span><span class="p">,</span> <span class="mf">0.375</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">mT</span> <span class="k">if</span> <span class="n">x</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">x</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">else</span> <span class="n">x</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="n">y</span> <span class="o">*</span> <span class="n">lax</span><span class="o">.</span><span class="n">rsqrt</span><span class="p">((</span><span class="n">y</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="kp">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">abc</span><span class="p">[:</span><span class="n">steps</span><span class="p">]</span> <span class="o">+</span> <span class="nb">max</span><span class="p">(</span><span class="n">steps</span> <span class="o">-</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">abc</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">:]:</span>
+        <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span> <span class="o">=</span> <span class="n">a</span> <span class="o">/</span> <span class="mf">1.01</span><span class="p">,</span> <span class="n">b</span> <span class="o">/</span> <span class="mf">1.01</span><span class="o">**</span><span class="mi">3</span><span class="p">,</span> <span class="n">c</span> <span class="o">/</span> <span class="mf">1.01</span><span class="o">**</span><span class="mi">5</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="n">a</span> <span class="o">*</span> <span class="n">y</span> <span class="o">+</span> <span class="p">(</span><span class="n">b</span> <span class="o">*</span> <span class="p">(</span><span class="n">u</span> <span class="o">:=</span> <span class="n">y</span> <span class="o">@</span> <span class="n">y</span><span class="o">.</span><span class="n">mT</span><span class="p">)</span> <span class="o">+</span> <span class="n">c</span> <span class="o">*</span> <span class="n">u</span> <span class="o">@</span> <span class="n">u</span><span class="p">)</span> <span class="o">@</span> <span class="n">y</span>
+    <span class="k">return</span> <span class="n">y</span><span class="o">.</span><span class="n">mT</span> <span class="k">if</span> <span class="n">x</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">x</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">else</span> <span class="n">y</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">mclip1</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;1st version (2 nested msign)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">ms2</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span> <span class="o">-</span> <span class="p">(</span><span class="n">ms1</span> <span class="o">:=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="n">ms1</span> <span class="o">+</span> <span class="n">ms2</span> <span class="o">-</span> <span class="n">m</span> <span class="o">@</span> <span class="n">ms1</span><span class="o">.</span><span class="n">mT</span> <span class="o">@</span> <span class="n">ms2</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">mclip2</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;2nd version (2 non-nested msign)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">ms1</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="p">)</span>
+    <span class="n">ms2</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">mT</span> <span class="o">@</span> <span class="n">m</span> <span class="o">-</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="n">ms1</span> <span class="o">+</span> <span class="p">(</span><span class="n">ms1</span> <span class="o">-</span> <span class="n">m</span><span class="p">)</span> <span class="o">@</span> <span class="n">ms2</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">mclip3</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;3rd version (3 non-nested msign)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">ms1</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="p">)</span>
+    <span class="n">ms2</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">mT</span> <span class="o">@</span> <span class="n">m</span> <span class="o">+</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
+    <span class="n">ms3</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">mT</span> <span class="o">@</span> <span class="n">m</span> <span class="o">-</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
+    <span class="k">return</span> <span class="p">((</span><span class="n">ms1</span> <span class="o">+</span> <span class="n">m</span><span class="p">)</span> <span class="o">@</span> <span class="n">ms2</span>  <span class="o">+</span> <span class="p">(</span><span class="n">ms1</span> <span class="o">-</span> <span class="n">m</span><span class="p">)</span> <span class="o">@</span> <span class="n">ms3</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">spectral_clip</span><span class="p">(</span><span class="n">W</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;@leloykun verision: https://leloykun.github.io/ponder/spectral-clipping/</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">m</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="n">W</span><span class="o">.</span><span class="kp">shape</span>
+    <span class="n">H</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">block</span><span class="p">([[</span><span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">m</span><span class="p">),</span> <span class="n">W</span><span class="p">],</span> <span class="p">[</span><span class="n">W</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">n</span><span class="p">)]])</span>
+    <span class="n">OH</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">H</span><span class="p">)</span>
+    <span class="n">P</span><span class="p">,</span> <span class="n">Q</span> <span class="o">=</span> <span class="n">OH</span><span class="p">[:</span><span class="n">m</span><span class="p">,</span> <span class="p">:</span><span class="n">m</span><span class="p">],</span> <span class="n">OH</span><span class="p">[:</span><span class="n">m</span><span class="p">,</span> <span class="n">m</span><span class="p">:]</span>
+    <span class="k">return</span> <span class="n">Q</span> <span class="o">+</span> <span class="n">P</span> <span class="o">@</span> <span class="n">W</span>
+
+<span class="n">m</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">4096</span><span class="p">,</span> <span class="mi">1024</span><span class="p">)</span>
+<span class="n">u</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">vh</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">full_matrices</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">concatenate</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="kp">linspace</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">128</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="kp">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">896</span><span class="p">)])</span>
+<span class="n">s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">sort</span><span class="p">(</span><span class="n">s</span><span class="p">)[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">m</span> <span class="o">=</span> <span class="n">u</span> <span class="o">@</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">diag</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">@</span> <span class="n">vh</span>  <span class="c1"># matrix with large singular values</span>
+
+<span class="n">result0</span> <span class="o">=</span> <span class="n">u</span> <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="kp">diag</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span> <span class="o">@</span> <span class="n">vh</span>  <span class="c1"># exact result via SVD</span>
+<span class="n">result1</span> <span class="o">=</span> <span class="n">mclip1</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;bfloat16&#39;</span><span class="p">))</span>
+<span class="n">result2</span> <span class="o">=</span> <span class="n">mclip2</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;bfloat16&#39;</span><span class="p">))</span>
+<span class="n">result3</span> <span class="o">=</span> <span class="n">mclip3</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;bfloat16&#39;</span><span class="p">))</span>
+<span class="n">result4</span> <span class="o">=</span> <span class="n">spectral_clip</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;bfloat16&#39;</span><span class="p">))</span>
+
+<span class="c1"># spectral norm of the resulting matrix, closer to 1 is better.</span>
+<span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result0</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># = 1</span>
+<span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result1</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># ≈ 700</span>
+<span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result2</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># ≈ 250</span>
+<span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result3</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># ≈ 1.5</span>
+<span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result4</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># ≈ 13</span>
+
+<span class="c1"># mean absolute error of singular values, closer to 0 is better.</span>
+<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result1</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 20</span>
+<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result2</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 10</span>
+<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result3</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 0.5</span>
+<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result4</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 0.7</span>
+
+<span class="c1"># mean absolute error of total matrix, closer to 0 is better.</span>
+<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">result0</span> <span class="o">-</span> <span class="n">result1</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 1</span>
+<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">result0</span> <span class="o">-</span> <span class="n">result2</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 0.5</span>
+<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">result0</span> <span class="o">-</span> <span class="n">result3</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 0.01</span>
+<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">result0</span> <span class="o">-</span> <span class="n">result4</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 0.02</span>
+</code></pre></div>
+
+<h2 id="_8">文章小结</h2>
+<p>本文继续完善了上一篇文章用$\msign$来计算$\mclip$的方案，通过去掉$\msign$的嵌套以及引入额外的修正项，成功降低了计算误差。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/11059">https://spaces.ac.cn/archives/11059</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jun. 23, 2025). 《通过msign来计算奇异值裁剪mclip（下） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/11059">https://spaces.ac.cn/archives/11059</a></p>
+<p>@online{kexuefm-11059,<br />
+title={通过msign来计算奇异值裁剪mclip（下）},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={Jun},<br />
+url={\url{https://spaces.ac.cn/archives/11059}},<br />
+} </p>
+<hr />
+<h2 id="_9">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>

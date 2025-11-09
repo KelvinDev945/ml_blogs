@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>为什么Pre Norm的效果不如Post Norm？ | ML & Math Blog Posts</title>
+    <meta name="description" content="为什么Pre Norm的效果不如Post Norm？
+原文链接: https://spaces.ac.cn/archives/9009
+发布日期: 
+
+Pre Norm与Post Norm之间的对比是一个“老生常谈”的话题了，本博客就多次讨论过这个问题，比如文章《浅谈Transformer的初始化、参数化与标准化》、《模型优化漫谈：BERT的初始标准差为什么是0.02？》等。目前比较明确的结论是：...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">为什么Pre Norm的效果不如Post Norm？</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/9009" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
+                <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="pre-normpost-norm">为什么Pre Norm的效果不如Post Norm？</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9009">https://spaces.ac.cn/archives/9009</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>Pre Norm与Post Norm之间的对比是一个“老生常谈”的话题了，本博客就多次讨论过这个问题，比如文章<a href="/archives/8620">《浅谈Transformer的初始化、参数化与标准化》</a>、<a href="/archives/8747">《模型优化漫谈：BERT的初始标准差为什么是0.02？》</a>等。目前比较明确的结论是：同一设置之下，Pre Norm结构往往更容易训练，但最终效果通常不如Post Norm。Pre Norm更容易训练好理解，因为它的恒等路径更突出，但为什么它效果反而没那么好呢？</p>
+<p>笔者之前也一直没有好的答案，直到前些时间在知乎上看到 <a href="https://www.zhihu.com/question/519668254/answer/2371885202">@唐翔昊</a> 的一个回复后才“恍然大悟”，原来这个问题竟然有一个非常直观的理解！本文让我们一起来学习一下。</p>
+<h2 id="_1">基本结论</h2>
+<p>Pre Norm和Post Norm的式子分别如下：<br />
+\begin{align}<br />
+\text{Pre Norm: } \quad \boldsymbol{x}<em t_1="t+1">{t+1} = \boldsymbol{x}_t + F_t(\text{Norm}(\boldsymbol{x}_t))\\<br />
+\text{Post Norm: }\quad \boldsymbol{x}</em>_t))} = \text{Norm}(\boldsymbol{x}_t + F_t(\boldsymbol{x<br />
+\end{align}<br />
+在Transformer中，这里的$\text{Norm}$主要指Layer Normalization，但在一般的模型中，它也可以是Batch Normalization、Instance Normalization等，相关结论本质上是通用的。</p>
+<p>在笔者找到的资料中，显示Post Norm优于Pre Norm的工作有两篇，一篇是<a href="https://papers.cool/arxiv/2004.08249">《Understanding the Difficulty of Training Transformers》</a>，一篇是<a href="https://papers.cool/arxiv/2012.11747">《RealFormer: Transformer Likes Residual Attention》</a>。另外，笔者自己也做过对比实验，显示Post Norm的结构迁移性能更加好，也就是说在Pretraining中，Pre Norm和Post Norm都能做到大致相同的结果，但是Post Norm的Finetune效果明显更好。</p>
+<p>可能读者会反问<a href="https://papers.cool/arxiv/2002.04745">《On Layer Normalization in the Transformer Architecture》</a>不是显示Pre Norm要好于Post Norm吗？这是不是矛盾了？其实这篇文章比较的是在完全相同的训练设置下Pre Norm的效果要优于Post Norm，这只能显示出Pre Norm更容易训练，因为Post Norm要达到自己的最优效果，不能用跟Pre Norm一样的训练配置（比如Pre Norm可以不加Warmup但Post Norm通常要加），所以结论并不矛盾。</p>
+<h2 id="_2">直观理解</h2>
+<p>为什么Pre Norm的效果不如Post Norm？知乎上 <a href="https://www.zhihu.com/question/519668254/answer/2371885202">@唐翔昊</a> 给出的答案是：Pre Norm的深度有“水分”！也就是说，一个$L$层的Pre Norm模型，其实际等效层数不如$L$层的Post Norm模型，而层数少了导致效果变差了。</p>
+<p>具体怎么理解呢？很简单，对于Pre Norm模型我们迭代得到：<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{x}<em t-1="t-1">{t+1} =&amp;\,\boldsymbol{x}_t + F_t(\text{Norm}(\boldsymbol{x}_t)) \\<br />
+=&amp;\, \boldsymbol{x}</em>} + F_{t-1}(\text{Norm}(\boldsymbol{x<em t-1="t-1">{t-1})) + F_t(\text{Norm}(\boldsymbol{x}_t)) \\<br />
+=&amp;\, \cdots \\<br />
+=&amp;\, \boldsymbol{x}_0 + F_0 (\text{Norm}(\boldsymbol{x}_0)) + \cdots + F</em>}(\text{Norm}(\boldsymbol{x<em t_1="t+1">{t-1})) + F_t(\text{Norm}(\boldsymbol{x}_t))<br />
+\end{aligned}\end{equation}<br />
+其中每一项都是同一量级的，那么有$\boldsymbol{x}</em>(t+1)$，也就是说第$t+1$层跟第$t$层的差别就相当于$t+1$与$t$的差别，当$t$较大时，两者的相对差别是很小的，因此}=\mathcal{O<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\,F_t(\text{Norm}(\boldsymbol{x}<em t_1="t+1">t)) + F</em>}(\text{Norm}(\boldsymbol{x<em t_1="t+1">{t+1})) \\<br />
+\approx&amp;\,F_t(\text{Norm}(\boldsymbol{x}_t)) + F</em>}(\text{Norm}(\boldsymbol{x<em t_1="t+1">t)) \\<br />
+=&amp;\, \begin{pmatrix} 1 &amp; 1\end{pmatrix}\begin{pmatrix} F_t \\ F</em>}\end{pmatrix}(\text{Norm}(\boldsymbol{x<em t_1="t+1">t))<br />
+\end{aligned}\end{equation}<br />
+这个意思是说，当$t$比较大时，$\boldsymbol{x}_t,\boldsymbol{x}</em>}$相差较小，所以$F_{t+1}(\text{Norm}(\boldsymbol{x<em t_1="t+1">{t+1}))$与$F</em>_t))$很接近，因此原本一个$t$层的模型与$t+1$层和，近似等效于一个更宽的$t$层模型，所以在Pre Norm中多层叠加的结果更多是增加宽度而不是深度，层数越多，这个层就越“虚”。}(\text{Norm}(\boldsymbol{x</p>
+<p>说白了，Pre Norm结构无形地增加了模型的宽度而降低了模型的深度，而我们知道深度通常比宽度更重要，所以是无形之中的降低深度导致最终效果变差了。而Post Norm刚刚相反，在<a href="/archives/8620">《浅谈Transformer的初始化、参数化与标准化》</a>中我们就分析过，它每Norm一次就削弱一次恒等分支的权重，所以Post Norm反而是更突出残差分支的，因此Post Norm中的层数更加“足秤”，一旦训练好之后效果更优。</p>
+<h2 id="_3">相关工作</h2>
+<p>前段时间号称能训练1000层Transformer的<a href="/archives/8978">DeepNet</a>想必不少读者都听说过，在其论文<a href="https://papers.cool/arxiv/2203.00555">《DeepNet: Scaling Transformers to 1,000 Layers》</a>中对Pre Norm的描述是：</p>
+<blockquote>
+<p>However, the gradients of Pre-LN at bottom layers tend to be larger than at top layers, leading to a degradation in performance compared with Post-LN.</p>
+</blockquote>
+<p>不少读者当时可能并不理解这段话的逻辑关系，但看了前一节内容的解释后，想必会有新的理解。</p>
+<p>简单来说，所谓“the gradients of Pre-LN at bottom layers tend to be larger than at top layers”，就是指Pre Norm结构会过度倾向于恒等分支（bottom layers），从而使得Pre Norm倾向于退化（degradation）为一个“浅而宽”的模型，最终不如同一深度的Post Norm。这跟前面的直观理解本质上是一致的。</p>
+<h2 id="_4">文章小结</h2>
+<p>本文主要分享了“为什么Pre Norm的效果不如Post Norm”的一个直观理解。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9009">https://spaces.ac.cn/archives/9009</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Mar. 29, 2022). 《为什么Pre Norm的效果不如Post Norm？ 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9009">https://spaces.ac.cn/archives/9009</a></p>
+<p>@online{kexuefm-9009,<br />
+title={为什么Pre Norm的效果不如Post Norm？},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Mar},<br />
+url={\url{https://spaces.ac.cn/archives/9009}},<br />
+} </p>
+<hr />
+<h2 id="_5">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>

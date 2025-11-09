@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>从Hessian近似看自适应学习率优化器 | ML & Math Blog Posts</title>
+    <meta name="description" content="从Hessian近似看自适应学习率优化器
+原文链接: https://spaces.ac.cn/archives/10588
+发布日期: 
+
+这几天在重温去年的Meta的一篇论文《A Theory on Adam Instability in Large-Scale Machine Learning》，里边给出了看待Adam等自适应学习率优化器的新视角：它指出梯度平方的滑动平均某种程度上近似于在估...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- MathJax for math rendering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">从Hessian近似看自适应学习率优化器</h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/10588" target="_blank">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
+                <span class="tag"><i class="fas fa-tag"></i> 学习率</span>
+                <span class="tag"><i class="fas fa-tag"></i> 优化器</span>
+                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                
+            </div>
+            
+        </header>
+
+        <!-- Post Body -->
+        <div class="post-content">
+            <h1 id="hessian">从Hessian近似看自适应学习率优化器</h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10588">https://spaces.ac.cn/archives/10588</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>这几天在重温去年的Meta的一篇论文<a href="https://papers.cool/arxiv/2304.09871">《A Theory on Adam Instability in Large-Scale Machine Learning》</a>，里边给出了看待Adam等自适应学习率优化器的新视角：它指出梯度平方的滑动平均某种程度上近似于在估计Hessian矩阵的平方，从而Adam、RMSprop等优化器实际上近似于二阶的Newton法。</p>
+<p>这个角度颇为新颖，而且表面上跟以往的一些Hessian近似有明显的差异，因此值得我们去学习和思考一番。</p>
+<h2 id="_1">牛顿下降</h2>
+<p>设损失函数为$\mathcal{L}(\boldsymbol{\theta})$，其中待优化参数为$\boldsymbol{\theta}$，我们的优化目标是<br />
+\begin{equation}\boldsymbol{\theta}^* = \mathop{\text{argmin}}<em t_1="t+1">{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta})\label{eq:loss}\end{equation}<br />
+假设$\boldsymbol{\theta}$的当前值是$\boldsymbol{\theta}_t$，Newton法通过将损失函数展开到二阶来寻求$\boldsymbol{\theta}</em>$：<br />
+\begin{equation}\mathcal{L}(\boldsymbol{\theta})\approx \mathcal{L}(\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">t) + \boldsymbol{g}_t^{\top}(\boldsymbol{\theta} - \boldsymbol{\theta}_t) + \frac{1}{2}(\boldsymbol{\theta} - \boldsymbol{\theta}_t)^{\top}\boldsymbol{\mathcal{H}}_t(\boldsymbol{\theta} - \boldsymbol{\theta}_t)\end{equation}<br />
+其中$\boldsymbol{g}_t = \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t}\mathcal{L}(\boldsymbol{\theta}_t)$是梯度、 $\boldsymbol{\mathcal{H}}_t=\nabla</em><em t_1="t+1">t}^2\mathcal{L}(\boldsymbol{\theta}_t)$是Hessian矩阵。假定Hessian矩阵的正定性，那么上式右端就存在唯一的最小值$\boldsymbol{\theta}_t - \boldsymbol{\mathcal{H}}_t^{-1}\boldsymbol{g}_t$，Newton法将它作为下一步的$\boldsymbol{\theta}</em>$：<br />
+\begin{equation}\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">{t+1} = \boldsymbol{\theta}_t-\boldsymbol{\mathcal{H}}_t^{-1}\boldsymbol{g}_t = \boldsymbol{\theta}_t - (\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t}^2\mathcal{L})^{-1} \nabla</em>}_t}\mathcal{L}\end{equation<br />
+注意上式没有额外的学习率参数，因此Newton法天生就是自适应学习率算法。当然，由于Hessian矩阵的复杂度正比于参数量的平方，所以在深度学习中完整的Newton法基本上只有理论价值了，真要想应用Newton法，要对Hessian矩阵做比较大的简化假设，比如对角矩阵或者低秩矩阵。</p>
+<p>在Newton法视角下，SGD就是假设了$\boldsymbol{\mathcal{H}}<em t-1="t-1">t=\eta_t^{-1}\boldsymbol{I}$，而Adam则是假设$\boldsymbol{\mathcal{H}}_t=\eta_t^{-1}\text{diag}(\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon)$，其中<br />
+\begin{equation}\text{Adam}:=\left\{\begin{aligned}<br />
+&amp;\boldsymbol{m}_t = \beta_1 \boldsymbol{m}</em>} + \left(1 - \beta_1\right) \boldsymbol{g<em t-1="t-1">t\\<br />
+&amp;\boldsymbol{v}_t = \beta_2 \boldsymbol{v}</em>} + \left(1 - \beta_2\right) \boldsymbol{g<em t-1="t-1">t\odot\boldsymbol{g}_t\\<br />
+&amp;\hat{\boldsymbol{m}}_t = \boldsymbol{m}_t\left/\left(1 - \beta_1^t\right)\right.\\<br />
+&amp;\hat{\boldsymbol{v}}_t = \boldsymbol{v}_t\left/\left(1 - \beta_2^t\right)\right.\\<br />
+&amp;\boldsymbol{\theta}_t = \boldsymbol{\theta}</em> + \epsilon\right)\right.} - \eta_t \hat{\boldsymbol{m}}_t\left/\left(\sqrt{\hat{\boldsymbol{v}}_t<br />
+\end{aligned}\right.\end{equation}<br />
+接下来我们想要证明的是，$\eta_t^{-1}\text{diag}(\sqrt{\hat{\boldsymbol{v}}_t})$是$\boldsymbol{\mathcal{H}}_t$的一个更好的近似。</p>
+<h2 id="_2">梯度近似</h2>
+<p>证明的要点是利用梯度的一阶近似：<br />
+\begin{equation}\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}} \approx \boldsymbol{g}</em>^<em>} + \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^</em>}(\boldsymbol{\theta} - \boldsymbol{\theta}^<em>)\end{equation}<br />
+其中$\boldsymbol{g}_{\boldsymbol{\theta}^</em>}$和$\boldsymbol{\mathcal{H}}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}^<em>}$表明我们在$\boldsymbol{\theta}=\boldsymbol{\theta}^</em>$处展开，这里的$\boldsymbol{\theta}^<em>$就是我们要寻找的目标$\eqref{eq:loss}$，在此处模型的梯度为零，从而上式可以简化成<br />
+\begin{equation}\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}} \approx \boldsymbol{\mathcal{H}}</em>^</em>}(\boldsymbol{\theta} - \boldsymbol{\theta}^<em>)\end{equation}<br />
+于是<br />
+\begin{equation}\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}\boldsymbol{g}</em>^}}^{\top} \approx \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta</em>}(\boldsymbol{\theta} - \boldsymbol{\theta}^<em>)(\boldsymbol{\theta} - \boldsymbol{\theta}^</em>)^{\top}\boldsymbol{\mathcal{H}}</em>^<em>}^{\top}\end{equation}<br />
+假设训练进入“正轨”后，模型将会长期处于围绕着$\boldsymbol{\theta}^</em>$“打转”、缓慢且螺旋地收敛的状态，那么一定程度上我们可以将$\boldsymbol{\theta} - \boldsymbol{\theta}^<em>$视为正态分布$\mathcal{N}(\boldsymbol{0},\sigma^2\boldsymbol{I})$的随机变量，那么<br />
+\begin{equation}\mathbb{E}[\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}\boldsymbol{g}</em>^}}^{\top}] \approx \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta</em>}\mathbb{E}[(\boldsymbol{\theta} - \boldsymbol{\theta}^<em>)(\boldsymbol{\theta} - \boldsymbol{\theta}^</em>)^{\top}]\boldsymbol{\mathcal{H}}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}^<em>}^{\top} = \sigma^2\boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^</em>}\boldsymbol{\mathcal{H}}</em>^<em>}^{\top}\label{eq:hessian-2}\end{equation}<br />
+假设Hessian矩阵是对角阵，那么上式我们可以只保留对角线元素<br />
+\begin{equation}\text{diag}(\mathbb{E}[\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}\odot\boldsymbol{g}</em>^}}]) \approx \sigma^2\boldsymbol{\mathcal{H}}_{\boldsymbol{\theta</em>}^2\quad\Rightarrow\quad \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^<em>} = \frac{1}{\sigma}\text{diag}(\sqrt{\mathbb{E}[\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}\odot\boldsymbol{g}</em>}}]})\end{equation<br />
+是不是有点相似了？Adam的$\hat{\boldsymbol{v}}<em _boldsymbol_theta="\boldsymbol{\theta">t$是对梯度平方的滑动平均，它可以看作在近似$\mathbb{E}[\boldsymbol{g}</em>}}\odot\boldsymbol{g<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}]$。最后我们再假设$\boldsymbol{\mathcal{H}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}$相比$\boldsymbol{\mathcal{H}}</em>^</em>}$变化不大，就可以得到$\eta_t^{-1}\text{diag}(\sqrt{\hat{\boldsymbol{v}}_t})$是$\boldsymbol{\mathcal{H}}_t$近似的结论。</p>
+<p>这也可以解释为什么Adam的$\beta_2$通常都大于$\beta_1$。为了更准确地估计Hessian，$\hat{\boldsymbol{v}}<em _boldsymbol_theta="\boldsymbol{\theta">t$的滑动平均应该尽可能“长期”（接近均匀平均），所以$\beta_2$应该要很接近于1；而动量$\hat{\boldsymbol{m}}_t$是梯度的滑动平均，如果梯度的平均过于长期的话，那么结果将会接近$\boldsymbol{g}</em>$，这反而不好，因此动量的滑动平均要更局部些。}^*}=\boldsymbol{0</p>
+<h2 id="_3">相关工作</h2>
+<p>对于比较了解Hessian矩阵理论的读者，看到上述结论后的第一反应也许不是熟悉而是疑惑，这是因为Hessian矩阵的一个经典近似是Jacobi矩阵（类似梯度）的外积，而这里的Hessian近似则是梯度外积的平方根，两者差了个根号。</p>
+<p>具体来说，我们以平方误差损失为例<br />
+\begin{equation}\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{2}\mathbb{E}<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}[\Vert \boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x})\Vert^2]\label{eq:loss-2}\end{equation<br />
+我们在$\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">t$处展开，有$\boldsymbol{f}</em>}}(\boldsymbol{x})\approx \boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}_t}(\boldsymbol{x}) + \boldsymbol{\mathcal{J}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}^{\top} (\boldsymbol{\theta} - \boldsymbol{\theta}_t)$，其中$\boldsymbol{\mathcal{J}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}=\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t} \boldsymbol{f}</em><em _boldsymbol_x="(\boldsymbol{x">t}(\boldsymbol{x})$是Jacobi矩阵，代入上式得到<br />
+\begin{equation}\mathcal{L}(\boldsymbol{\theta}) \approx \frac{1}{2}\mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}[\Vert \boldsymbol{y} - \boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}_t}(\boldsymbol{x}) - \boldsymbol{\mathcal{J}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}^{\top} (\boldsymbol{\theta} - \boldsymbol{\theta}_t)\Vert^2]\end{equation}<br />
+经过简化后的上式只是关于$\boldsymbol{\theta}$的二次型，因此可以直接写出它的Hessian矩阵，结果是<br />
+\begin{equation}\boldsymbol{\mathcal{H}}</em><em _boldsymbol_x="(\boldsymbol{x">t} \approx \mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}[\boldsymbol{\mathcal{J}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}_t}\boldsymbol{\mathcal{J}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}^{\top}]\end{equation}<br />
+这就是基于Jacobi矩阵外积的Hessian近似，它是“<a href="https://en.wikipedia.org/wiki/Gauss%E2%80%93Newton_algorithm">Gauss–Newton法</a>”的理论基础。当然，$\boldsymbol{\mathcal{J}}$还不是$\boldsymbol{g}$，我们要试图将结果跟$\mathcal{g}$联系起来。对式$\eqref{eq:loss-2}$直接求导得<br />
+\begin{equation}\boldsymbol{g}</em>}} = \mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}[\boldsymbol{\mathcal{J}}</em>}}(\boldsymbol{y} - \boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}))]\end{equation}<br />
+于是<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{g}</em>}} \boldsymbol{g<em _boldsymbol_x="(\boldsymbol{x">{\boldsymbol{\theta}}^{\top} =&amp;\, \big(\mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}[\boldsymbol{\mathcal{J}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x}))]\big)\big(\mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}[\boldsymbol{\mathcal{J}}</em>}}(\boldsymbol{y} - \boldsymbol{f<em _boldsymbol_x="(\boldsymbol{x">{\boldsymbol{\theta}}(\boldsymbol{x}))]\big)^{\top} \\[5pt]<br />
+=&amp;\, \big(\mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}[\boldsymbol{\mathcal{J}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x}))]\big)\big(\mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}[(\boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x}))^{\top}\boldsymbol{\mathcal{J}<em _boldsymbol_x="(\boldsymbol{x">{\boldsymbol{\theta}}^{\top}]\big) \\[5pt]<br />
+\approx&amp;\, \mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}\big[\boldsymbol{\mathcal{J}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x}))(\boldsymbol{y} - \boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}))^{\top}\boldsymbol{\mathcal{J}}</em>\big] \\[5pt]}}^{\top<br />
+\approx&amp;\, \mathbb{E}<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}\Big[\boldsymbol{\mathcal{J}}</em>}}\mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}\big[(\boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x}))(\boldsymbol{y} - \boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}))^{\top}\big]\boldsymbol{\mathcal{J}}</em>\Big] \\[5pt]}}^{\top<br />
+\end{aligned}\end{equation}<br />
+这里两个约等号其实没有太多道理，可以勉强看成是平均场近似，而$\boldsymbol{y} - \boldsymbol{f}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x})$是回归预测的残差，我们通常假设它服从$\mathcal{N}(\boldsymbol{0},\sigma^2\boldsymbol{I})$，因此有<br />
+\begin{equation}\boldsymbol{g}</em>}} \boldsymbol{g<em _boldsymbol_x="(\boldsymbol{x">{\boldsymbol{\theta}}^{\top} \approx \sigma^2\mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}\big[\boldsymbol{\mathcal{J}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}\boldsymbol{\mathcal{J}}</em>}}^{\top}\big] \approx \sigma^2 \boldsymbol{\mathcal{H}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}_t}\label{eq:hessian-t}\end{equation}<br />
+这就揭示了$\boldsymbol{\mathcal{H}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}$与$\boldsymbol{g}</em>$，可以发现表面上刚好差了个平方。}} \boldsymbol{g}_{\boldsymbol{\theta}}^{\top}$的联系。对比上一节的式$\eqref{eq:hessian-2</p>
+<p>看推导过程，两个结果似乎都没明显错误，那怎么理解这种不一致性呢？我们可以这样理解：式$\eqref{eq:hessian-t}$给出的是$t$时刻的Hessian近似，属于“瞬时近似”，而式$\eqref{eq:hessian-2}$则是时间步的“长期平均”结果，长期的平均作用抵销了一部分强度（但理论上也会使得估计更准确），从而需要多开一个平方根。</p>
+<p>类似的效应也出现在<a href="/archives/9209">《生成扩散模型漫谈（五）：一般框架之SDE篇》</a>介绍的SDE中，SDE的噪声项强度需要比非噪声项高半阶，同样是因为噪声项在长期平均之下会抵消，所以噪声需要更高阶才能在最终的结果中体现出噪声的作用。</p>
+<h2 id="_4">更多联系</h2>
+<p>在前面的推导中，我们假设了$\boldsymbol{\theta}^<em>$是理论最优点，从而有$\boldsymbol{g} _{\boldsymbol{\theta}^</em>} = \boldsymbol{0}$。如果$\boldsymbol{\theta}^<em>$是任意一点呢？那么式$\eqref{eq:hessian-2}$将变成<br />
+\begin{equation}\mathbb{E}[(\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}-\boldsymbol{g} </em>^</em>})(\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}-\boldsymbol{g} </em>^<em>})^{\top}] \approx \sigma^2\boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^</em>}\boldsymbol{\mathcal{H}}<em t-1="t-1">{\boldsymbol{\theta}^*}^{\top}\end{equation}<br />
+也就是说我们只要滑动平均的是协方差而不是二阶矩，就可以得到局部范围内的Hessian近似。这正好跟<a href="https://papers.cool/arxiv/2010.07468">AdaBelief优化器</a>的做法对应上了，它的$\boldsymbol{v}$滑动平均的是$\boldsymbol{g}$与$\boldsymbol{m}$的差的平方：<br />
+\begin{equation}\text{AdaBelief}:=\left\{\begin{aligned}<br />
+&amp;\boldsymbol{m}_t = \beta_1 \boldsymbol{m}</em>} + \left(1 - \beta_1\right) \boldsymbol{g<em t-1="t-1">t\\<br />
+&amp;\boldsymbol{v}_t = \beta_2 \boldsymbol{v}</em>} + \left(1 - \beta_2\right) (\boldsymbol{g<em t-1="t-1">t - \boldsymbol{m}_t)\odot(\boldsymbol{g}_t - \boldsymbol{m}_t)\\<br />
+&amp;\hat{\boldsymbol{m}}_t = \boldsymbol{m}_t\left/\left(1 - \beta_1^t\right)\right.\\<br />
+&amp;\hat{\boldsymbol{v}}_t = \boldsymbol{v}_t\left/\left(1 - \beta_2^t\right)\right.\\<br />
+&amp;\boldsymbol{\theta}_t = \boldsymbol{\theta}</em> + \epsilon\right)\right.} - \eta_t \hat{\boldsymbol{m}}_t\left/\left(\sqrt{\hat{\boldsymbol{v}}_t<br />
+\end{aligned}\right.\end{equation}</p>
+<h2 id="_5">文章小结</h2>
+<p>本文介绍了从Newton法和Hessian近似看待Adam等自适应学习率优化器的一个视角，并讨论了Hessian近似的相关结果。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10588">https://spaces.ac.cn/archives/10588</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Nov. 29, 2024). 《从Hessian近似看自适应学习率优化器 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10588">https://spaces.ac.cn/archives/10588</a></p>
+<p>@online{kexuefm-10588,<br />
+title={从Hessian近似看自适应学习率优化器},<br />
+author={苏剑林},<br />
+year={2024},<br />
+month={Nov},<br />
+url={\url{https://spaces.ac.cn/archives/10588}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+
+        <!-- Back to Home -->
+        <div class="text-center mt-5 mb-4">
+            <a href="../index.html" class="btn btn-outline-primary">
+                <i class="fas fa-arrow-left"></i> 返回首页
+            </a>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+</body>
+</html>
