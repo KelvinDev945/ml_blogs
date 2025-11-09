@@ -21,4 +21,9 @@
 - [ ] 持续迭代优化
 
 ## 下一步：抓取所有页面并更新到blog_list.txt
+- [ ] 编写代码抓取https://spaces.ac.cn/feed中的所有页面并更新到blog_list.txt
+- [ ] 将每个blog内容转化为网页
+- [ ] 补充github action的workflow，确保每个页面生成正常
+- [ ] 继续制定后续迭代目标并更新TODO.md
+
 
