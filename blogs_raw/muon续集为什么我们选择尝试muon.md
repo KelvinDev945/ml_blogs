@@ -2,10 +2,9 @@
 title: Muon续集：为什么我们选择尝试Muon？
 slug: muon续集为什么我们选择尝试muon
 date: 2025-02-27
-tags: 矩阵, 梯度, 优化器, 谱范数, muon
+tags: 详细推导, 矩阵, 梯度, 优化器, 谱范数, muon
 status: pending
 ---
-
 # Muon续集：为什么我们选择尝试Muon？
 
 **原文链接**: [https://spaces.ac.cn/archives/10739](https://spaces.ac.cn/archives/10739)

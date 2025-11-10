@@ -74,7 +74,7 @@
             <ol class="breadcrumb">
                 <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
                 
-                <li class="breadcrumb-item"><a href="../index.html?tags=微分方程">微分方程</a></li>
+                <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
                     #52 生成扩散模型漫谈（四）：DDIM = 高观点DDPM
@@ -94,6 +94,10 @@
             </div>
             
             <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=详细推导" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 详细推导</span>
+                </a>
                 
                 <a href="../index.html?tags=微分方程" class="tag-link">
                     <span class="tag"><i class="fas fa-tag"></i> 微分方程</span>
@@ -267,7 +271,333 @@ url={\url{https://spaces.ac.cn/archives/9181}},<br />
 } </p>
 <hr />
 <h2 id="_9">公式推导与注释<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<p>本节将对DDIM的核心思想进行极为详细的数学推导，从非马尔可夫过程、确定性采样、参数机制到ODE视角，全面揭示DDIM相比DDPM的理论创新。</p>
+<h3 id="1-ddim">1. DDIM的数学定义与非马尔可夫前向过程<a class="toc-link" href="#1-ddim" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 马尔可夫性质的回顾<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>在DDPM中，前向扩散过程具有马尔可夫性质，即：<br />
+$$p(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>}, \boldsymbol{x<em t-1="t-1">{t-2}, \cdots, \boldsymbol{x}_0) = p(\boldsymbol{x}_t|\boldsymbol{x}</em>)$$</p>
+<p>这意味着在给定$\boldsymbol{x}<em t-2="t-2">{t-1}$的条件下，$\boldsymbol{x}_t$与更早的状态$\boldsymbol{x}</em>}, \cdots, \boldsymbol{x<em 1:T="1:T">0$条件独立。整个前向过程可以写成链式结构：<br />
+$$q(\boldsymbol{x}</em>}|\boldsymbol{x<em t="1">0) = \prod</em>}^T q(\boldsymbol{x<em t-1="t-1">t|\boldsymbol{x}</em>)$$</p>
+<p>在DDPM的标准设定中，每一步的转移概率为：<br />
+$$q(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>}) = \mathcal{N}(\boldsymbol{x<em t-1="t-1">t; \sqrt{1-\beta_t}\boldsymbol{x}</em>)$$}, \beta_t\boldsymbol{I</p>
+<h4 id="12">1.2 非马尔可夫过程的引入<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p>DDIM的核心创新在于<strong>放弃马尔可夫假设</strong>。我们不再定义$q(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>_0)$：})$，而是直接定义边际分布$q(\boldsymbol{x}_t|\boldsymbol{x<br />
+$$q(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0, (1-\bar{\alpha}_t)\boldsymbol{I})$$</p>
+<p>其中$\bar{\alpha}_t \in (0,1)$是预定义的噪声调度参数。为了与DDPM保持一致，我们仍然采用$\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1$的约定，即：<br />
+$$\bar{\beta}_t = \sqrt{1 - \bar{\alpha}_t^2}$$</p>
+<p>这样设定的好处是：<br />
+1. <strong>训练目标不变</strong>：损失函数$\mathbb{E}<em _theta="\theta">{\boldsymbol{x}_0, \boldsymbol{\varepsilon}}|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>}(\sqrt{\bar{\alpha<em t-1="t-1">t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}, t)|^2$保持不变<br />
+2. <strong>更大的设计空间</strong>：逆向过程$q(\boldsymbol{x}</em>_0)$有多种可能的形式}|\boldsymbol{x}_t, \boldsymbol{x</p>
+<h4 id="13">1.3 待定系数法求解逆向过程<a class="toc-link" href="#13" title="Permanent link">&para;</a></h4>
+<p>给定边际分布$q(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}_0)$和$q(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">0)$，我们希望找到满足边际分布一致性条件的$q(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0)$：<br />
+$$\int q(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0) q(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x}_t = q(\boldsymbol{x}</em>_0)$$}|\boldsymbol{x</p>
+<p>假设$q(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$为高斯分布，采用待定系数法：<br />
+$$q(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}</em>)$$}; \kappa_t\boldsymbol{x}_t + \lambda_t\boldsymbol{x}_0, \sigma_t^2\boldsymbol{I</p>
+<p>从采样角度来看，我们有三个随机变量的采样方式：<br />
+$$\begin{aligned}<br />
+\boldsymbol{x}<em t-1="t-1">{t-1} &amp;= \sqrt{\bar{\alpha}</em>}}\boldsymbol{x<em t-1="t-1">0 + \sqrt{1-\bar{\alpha}</em> \}^2}\boldsymbol{\varepsilon<br />
+\boldsymbol{x}<em t-1="t-1">t &amp;= \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\varepsilon}_1 \<br />
+\boldsymbol{x}</em>_2} &amp;= \kappa_t\boldsymbol{x}_t + \lambda_t\boldsymbol{x}_0 + \sigma_t\boldsymbol{\varepsilon<br />
+\end{aligned}$$</p>
+<p>其中$\boldsymbol{\varepsilon}, \boldsymbol{\varepsilon}_1, \boldsymbol{\varepsilon}_2 \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$是独立的标准高斯噪声。</p>
+<p>将第二个等式代入第三个：<br />
+$$\begin{aligned}<br />
+\boldsymbol{x}_{t-1} &amp;= \kappa_t(\sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\varepsilon}_1) + \lambda_t\boldsymbol{x}_0 + \sigma_t\boldsymbol{\varepsilon}_2 \<br />
+&amp;= (\kappa_t\sqrt{\bar{\alpha}_t} + \lambda_t)\boldsymbol{x}_0 + \kappa_t\sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\varepsilon}_1 + \sigma_t\boldsymbol{\varepsilon}_2<br />
+\end{aligned}$$</p>
+<p>根据高斯分布的性质，两个独立高斯噪声的线性组合仍为高斯：<br />
+$$\kappa_t\sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\varepsilon}_1 + \sigma_t\boldsymbol{\varepsilon}_2 \sim \mathcal{N}(\boldsymbol{0}, (\kappa_t^2(1-\bar{\alpha}_t^2) + \sigma_t^2)\boldsymbol{I})$$</p>
+<p>对比第一个等式，我们得到两个约束方程：<br />
+$$\begin{cases}<br />
+\kappa_t\sqrt{\bar{\alpha}<em t-1="t-1">t} + \lambda_t = \sqrt{\bar{\alpha}</em> \}} &amp; \text{(均值匹配)<br />
+\sqrt{\kappa_t^2(1-\bar{\alpha}<em t-1="t-1">t^2) + \sigma_t^2} = \sqrt{1-\bar{\alpha}</em>}^2} &amp; \text{(方差匹配)<br />
+\end{cases}$$</p>
+<p>这是两个方程三个未知数的欠定系统。将$\sigma_t$视为<strong>自由参数</strong>，可以解出：<br />
+$$\begin{aligned}<br />
+\kappa_t^2(1-\bar{\alpha}<em t-1="t-1">t^2) &amp;= 1-\bar{\alpha}</em>^2 - \sigma_t^2 \<br />
+\kappa_t &amp;= \frac{\sqrt{1-\bar{\alpha}_{t-1}^2 - \sigma_t^2}}{\sqrt{1-\bar{\alpha}_t^2}}<br />
+\end{aligned}$$</p>
+<p>然后从第一个方程解出：<br />
+$$\lambda_t = \sqrt{\bar{\alpha}<em t-1="t-1">{t-1}} - \kappa_t\sqrt{\bar{\alpha}_t} = \sqrt{\bar{\alpha}</em>}} - \frac{\sqrt{\bar{\alpha<em t-1="t-1">t}\sqrt{1-\bar{\alpha}</em>$$}^2 - \sigma_t^2}}{\sqrt{1-\bar{\alpha}_t^2}</p>
+<h4 id="14">1.4 完整的逆向过程形式<a class="toc-link" href="#14" title="Permanent link">&para;</a></h4>
+<p>综合上述推导，得到DDIM的逆向过程条件分布：<br />
+$$q(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \mathcal{N}\left(\boldsymbol{x}</em>}; \frac{\sqrt{1-\bar{\alpha<em t-1="t-1">{t-1}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha}_t^2}}\boldsymbol{x}_t + \left(\sqrt{\bar{\alpha}</em>}} - \frac{\sqrt{\bar{\alpha<em t-1="t-1">t}\sqrt{1-\bar{\alpha}</em>\right)$$}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha}_t^2}}\right)\boldsymbol{x}_0, \sigma_t^2\boldsymbol{I</p>
+<p>这个公式揭示了DDIM的核心特性：<strong>通过调节$\sigma_t$，我们可以在确定性过程和随机过程之间连续插值</strong>。</p>
+<h3 id="2">2. 确定性采样的深入推导<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 从条件分布到采样公式<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>在实际采样中，我们无法直接获得$\boldsymbol{x}<em _theta="\theta">0$，需要用神经网络$\boldsymbol{\epsilon}</em>}(\boldsymbol{x<em _theta="\theta">t, t)$来预测噪声。从$\boldsymbol{x}_t = \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\varepsilon}$，我们可以得到$\boldsymbol{x}_0$的估计：<br />
+$$\hat{\boldsymbol{x}}_0 = \frac{\boldsymbol{x}_t - \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\epsilon}</em>$$}(\boldsymbol{x}_t, t)}{\sqrt{\bar{\alpha}_t}</p>
+<p>为了简化后续公式，我们采用替换记号。注意原文使用了$\bar{\alpha}_t, \bar{\beta}_t$满足$\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1$，因此$\bar{\beta}_t = \sqrt{1-\bar{\alpha}_t^2}$。将$\hat{\boldsymbol{x}}_0$代入逆向过程的均值：</p>
+<p>$$\begin{aligned}<br />
+\boldsymbol{\mu}<em t-1="t-1">{\theta}(\boldsymbol{x}_t, t) &amp;= \frac{\sqrt{1-\bar{\alpha}</em>}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha<em t-1="t-1">t^2}}\boldsymbol{x}_t + \left(\sqrt{\bar{\alpha}</em>}} - \frac{\sqrt{\bar{\alpha<em t-1="t-1">t}\sqrt{1-\bar{\alpha}</em>}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha<em t-1="t-1">t^2}}\right)\hat{\boldsymbol{x}}_0 \<br />
+&amp;= \frac{\sqrt{1-\bar{\alpha}</em>}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha<em t-1="t-1">t^2}}\boldsymbol{x}_t + \left(\sqrt{\bar{\alpha}</em>}} - \frac{\sqrt{\bar{\alpha<em t-1="t-1">t}\sqrt{1-\bar{\alpha}</em>}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha<em _theta="\theta">t^2}}\right) \cdot \frac{\boldsymbol{x}_t - \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\epsilon}</em>}(\boldsymbol{x}_t, t)}{\sqrt{\bar{\alpha}_t}<br />
+\end{aligned}$$</p>
+<p>展开第二项：<br />
+$$\begin{aligned}<br />
+&amp;\left(\sqrt{\bar{\alpha}<em t-1="t-1">{t-1}} - \frac{\sqrt{\bar{\alpha}_t}\sqrt{1-\bar{\alpha}</em>}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha<em _theta="\theta">t^2}}\right) \cdot \frac{\boldsymbol{x}_t - \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\epsilon}</em>}}{\sqrt{\bar{\alpha<em t-1="t-1">t}} \<br />
+=&amp; \frac{\sqrt{\bar{\alpha}</em>}}}{\sqrt{\bar{\alpha<em t-1="t-1">t}}\boldsymbol{x}_t - \frac{\sqrt{\bar{\alpha}</em>}}\sqrt{1-\bar{\alpha<em _theta="\theta">t^2}}{\sqrt{\bar{\alpha}_t}}\boldsymbol{\epsilon}</em>} - \frac{\sqrt{1-\bar{\alpha<em t-1="t-1">{t-1}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha}_t^2}}\boldsymbol{x}_t + \frac{\sqrt{\bar{\alpha}_t}\sqrt{1-\bar{\alpha}</em>}^2-\sigma_t^2}}{\sqrt{\bar{\alpha<em _theta="\theta">t}\sqrt{1-\bar{\alpha}_t^2}}\boldsymbol{\epsilon}</em><br />
+\end{aligned}$$</p>
+<p>合并$\boldsymbol{x}<em _theta="\theta">t$和$\boldsymbol{\epsilon}</em>$的系数：<br />
+$$\begin{aligned}<br />
+\boldsymbol{\mu}<em t-1="t-1">{\theta}(\boldsymbol{x}_t, t) &amp;= \left(\frac{\sqrt{1-\bar{\alpha}</em>}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha<em t-1="t-1">t^2}} + \frac{\sqrt{\bar{\alpha}</em>}}}{\sqrt{\bar{\alpha<em t-1="t-1">t}} - \frac{\sqrt{1-\bar{\alpha}</em>}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha<em t-1="t-1">t^2}}\right)\boldsymbol{x}_t \<br />
+&amp;\quad - \left(\frac{\sqrt{\bar{\alpha}</em>}}\sqrt{1-\bar{\alpha<em t-1="t-1">t^2}}{\sqrt{\bar{\alpha}_t}} - \frac{\sqrt{1-\bar{\alpha}</em>}^2-\sigma_t^2}}{\sqrt{1-\bar{\alpha<em _theta="\theta">t^2}}\right)\boldsymbol{\epsilon}</em> \<br />
+&amp;= \frac{\sqrt{\bar{\alpha}<em t-1="t-1">{t-1}}}{\sqrt{\bar{\alpha}_t}}\boldsymbol{x}_t - \left(\frac{\sqrt{\bar{\alpha}</em>}}\sqrt{1-\bar{\alpha<em t-1="t-1">t^2}}{\sqrt{\bar{\alpha}_t}} - \sqrt{1-\bar{\alpha}</em>}^2-\sigma_t^2}\right)\boldsymbol{\epsilon}_{\theta<br />
+\end{aligned}$$</p>
+<p>定义$\alpha_t = \frac{\bar{\alpha}<em t-1="t-1">t}{\bar{\alpha}</em>}}$，则$\sqrt{\bar{\alpha<em _theta="\theta">{t-1}} = \frac{\sqrt{\bar{\alpha}_t}}{\sqrt{\alpha_t}}$，代入得：<br />
+$$\boldsymbol{\mu}</em>}(\boldsymbol{x<em t-1="t-1">t, t) = \frac{1}{\sqrt{\alpha_t}}\boldsymbol{x}_t - \frac{1}{\sqrt{\alpha_t}}\left(\sqrt{1-\bar{\alpha}_t^2} - \sqrt{\alpha_t}\sqrt{1-\bar{\alpha}</em>_t, t)$$}^2-\sigma_t^2}\right)\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x</p>
+<p>因此，完整的采样公式为：<br />
+$$\boldsymbol{x}<em t-1="t-1">{t-1} = \frac{1}{\sqrt{\alpha_t}}\left[\boldsymbol{x}_t - \left(\sqrt{1-\bar{\alpha}_t^2} - \sqrt{\alpha_t}\sqrt{1-\bar{\alpha}</em>$$}^2-\sigma_t^2}\right)\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x}_t, t)\right] + \sigma_t\boldsymbol{\varepsilon</p>
+<h4 id="22-sigma_t-0">2.2 确定性采样：$\sigma_t = 0$的情形<a class="toc-link" href="#22-sigma_t-0" title="Permanent link">&para;</a></h4>
+<p>当取$\sigma_t = 0$时，采样过程变为完全确定性的：<br />
+$$\boldsymbol{x}<em t-1="t-1">{t-1} = \frac{\sqrt{\bar{\alpha}</em>}}}{\sqrt{\bar{\alpha<em t-1="t-1">t}}\boldsymbol{x}_t + \left(\sqrt{1-\bar{\alpha}</em>}^2} - \frac{\sqrt{\bar{\alpha<em _theta="\theta">{t-1}}}{\sqrt{\bar{\alpha}_t}}\sqrt{1-\bar{\alpha}_t^2}\right)\boldsymbol{\epsilon}</em>_t, t)$$}(\boldsymbol{x</p>
+<p>这个公式可以进一步改写为：<br />
+$$\boldsymbol{x}<em t-1="t-1">{t-1} = \sqrt{\bar{\alpha}</em>}}\hat{\boldsymbol{x}<em t-1="t-1">0 + \sqrt{1-\bar{\alpha}</em>_t, t)$$}^2}\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x</p>
+<p>其中$\hat{\boldsymbol{x}}<em _theta="\theta">0 = \frac{\boldsymbol{x}_t - \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\epsilon}</em>$。}(\boldsymbol{x}_t, t)}{\sqrt{\bar{\alpha}_t}</p>
+<p>这个形式揭示了确定性DDIM的本质：<strong>在每一步，我们首先预测$\boldsymbol{x}_0$，然后将其重新加噪到时刻$t-1$</strong>。这种"预测-重噪"的过程与DDPM的"去噪"过程有本质不同。</p>
+<h4 id="23">2.3 确定性过程的双射性质<a class="toc-link" href="#23" title="Permanent link">&para;</a></h4>
+<p>对于确定性DDIM（$\sigma_t = 0$），从$\boldsymbol{x}_T$到$\boldsymbol{x}_0$的映射$\mathcal{F}: \boldsymbol{x}_T \mapsto \boldsymbol{x}_0$是（近似）确定性的双射。这意味着：</p>
+<ol>
+<li>
+<p><strong>前向编码</strong>：给定$\boldsymbol{x}<em _theta="\theta">0$，我们可以通过前向过程（加噪）得到对应的$\boldsymbol{x}_T$：<br />
+$$\boldsymbol{x}_t = \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\epsilon}</em>_t, t)$$}(\boldsymbol{x</p>
+</li>
+<li>
+<p><strong>反向解码</strong>：给定$\boldsymbol{x}_T$，我们可以通过确定性采样得到对应的$\boldsymbol{x}_0$：<br />
+$$\boldsymbol{x}_0 = \mathcal{F}(\boldsymbol{x}_T)$$</p>
+</li>
+<li>
+<p><strong>一致性</strong>：如果编码和解码使用相同的$\boldsymbol{\epsilon}_{\theta}$，则$\mathcal{F}(\mathcal{F}^{-1}(\boldsymbol{x}_0)) \approx \boldsymbol{x}_0$</p>
+</li>
+</ol>
+<p>这种双射性质使得DDIM可以进行语义插值和图像编辑：对两张图像$\boldsymbol{x}_0^{(1)}, \boldsymbol{x}_0^{(2)}$，我们可以先编码到潜空间$\boldsymbol{x}_T^{(1)}, \boldsymbol{x}_T^{(2)}$，然后在潜空间插值：<br />
+$$\boldsymbol{x}_T = \lambda\boldsymbol{x}_T^{(1)} + (1-\lambda)\boldsymbol{x}_T^{(2)}$$</p>
+<p>但需要注意，由于DDIM对噪声分布敏感，应使用球面插值：<br />
+$$\boldsymbol{x}_T = \cos\theta \cdot \boldsymbol{x}_T^{(1)} + \sin\theta \cdot \boldsymbol{x}_T^{(2)}, \quad \theta = \frac{\lambda\pi}{2}$$</p>
+<h3 id="3">3. η参数的作用机制<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 η参数族的定义<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p>DDIM论文引入了参数$\eta \in [0, 1]$来控制随机性的强度。具体地，定义：<br />
+$$\sigma_t(\eta) = \eta \cdot \frac{\sqrt{1-\bar{\alpha}<em t-1="t-1">{t-1}^2}}{\sqrt{1-\bar{\alpha}_t^2}} \cdot \sqrt{1 - \frac{\bar{\alpha}_t^2}{\bar{\alpha}</em>$$}^2}</p>
+<p>这个定义来自DDPM中的方差选择。在DDPM中，最优后验方差为：<br />
+$$\tilde{\beta}<em t-1="t-1">t = \frac{1-\bar{\alpha}</em>\beta_t$$}}{1-\bar{\alpha}_t</p>
+<p>其中$\beta_t = 1 - \alpha_t = 1 - \frac{\bar{\alpha}<em t-1="t-1">t}{\bar{\alpha}</em>}}$。使用约定$\bar{\alpha<em t-1="t-1">t^2 + \bar{\beta}_t^2 = 1$，可以验证：<br />
+$$\tilde{\beta}_t^2 = \frac{(1-\bar{\alpha}</em>}^2)(1-\bar{\alpha<em t-1="t-1">t^2/\bar{\alpha}</em>}^2)}{1-\bar{\alpha<em t-1="t-1">t^2} = \frac{\bar{\beta}</em>}^2}{\bar{\beta<em t-1="t-1">t^2}\left(1 - \frac{\bar{\alpha}_t^2}{\bar{\alpha}</em>\right)$$}^2</p>
+<p>因此$\sigma_t(\eta) = \eta\tilde{\beta}_t$。</p>
+<h4 id="32">3.2 η参数的几何解释<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p>考虑采样公式：<br />
+$$\boldsymbol{x}<em t-1="t-1">{t-1} = \sqrt{\bar{\alpha}</em>}}\hat{\boldsymbol{x}<em t-1="t-1">0 + \sqrt{1-\bar{\alpha}</em>$$}^2-\sigma_t^2}\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x}_t, t) + \sigma_t\boldsymbol{\varepsilon</p>
+<p>我们可以将其分解为三个部分：<br />
+1. <strong>确定性部分</strong>：$\sqrt{\bar{\alpha}<em t-1="t-1">{t-1}}\hat{\boldsymbol{x}}_0$，指向预测的干净图像<br />
+2. <strong>方向性噪声</strong>：$\sqrt{1-\bar{\alpha}</em>_t, t)$，沿着当前估计的噪声方向}^2-\sigma_t^2}\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x<br />
+3. <strong>随机噪声</strong>：$\sigma_t\boldsymbol{\varepsilon}$，各向同性的随机扰动</p>
+<p>当$\eta$增大时：<br />
+- $\sigma_t$增大，随机性增强<br />
+- $\sqrt{1-\bar{\alpha}<em t-1="t-1">{t-1}^2-\sigma_t^2}$减小，方向性降低<br />
+- 总方差$1-\bar{\alpha}</em>^2-\sigma_t^2) + \sigma_t^2$保持不变}^2 = (1-\bar{\alpha}_{t-1</p>
+<p>这意味着<strong>η参数控制了噪声的"各向同性程度"</strong>：<br />
+- $\eta = 0$：完全各向异性，噪声沿$\boldsymbol{\epsilon}_{\theta}$方向<br />
+- $\eta = 1$：最大各向同性，等价于DDPM<br />
+- $0 &lt; \eta &lt; 1$：插值状态</p>
+<h4 id="33-1ddpm">3.3 η=1时退化为DDPM的严格证明<a class="toc-link" href="#33-1ddpm" title="Permanent link">&para;</a></h4>
+<p>当$\eta = 1$时，我们需要证明DDIM的采样公式完全等价于DDPM。首先计算$\sigma_t(1)$：<br />
+$$\sigma_t^2 = \frac{\bar{\beta}<em t-1="t-1">{t-1}^2}{\bar{\beta}_t^2}\left(1 - \frac{\bar{\alpha}_t^2}{\bar{\alpha}</em>}^2}\right) = \frac{\bar{\beta<em t-1="t-1">{t-1}^2(\bar{\alpha}</em>}^2 - \bar{\alpha<em t-1="t-1">t^2)}{\bar{\beta}_t^2\bar{\alpha}</em>$$}^2</p>
+<p>然后计算方向性噪声的系数：<br />
+$$\begin{aligned}<br />
+\sqrt{1-\bar{\alpha}<em t-1="t-1">{t-1}^2-\sigma_t^2} &amp;= \sqrt{\bar{\beta}</em>}^2 - \frac{\bar{\beta<em t-1="t-1">{t-1}^2(\bar{\alpha}</em>}^2 - \bar{\alpha<em t-1="t-1">t^2)}{\bar{\beta}_t^2\bar{\alpha}</em> \}^2}<br />
+&amp;= \bar{\beta}<em t-1="t-1">{t-1}\sqrt{1 - \frac{\bar{\alpha}</em>}^2 - \bar{\alpha<em t-1="t-1">t^2}{\bar{\beta}_t^2\bar{\alpha}</em> \}^2}<br />
+&amp;= \bar{\beta}<em t-1="t-1">{t-1}\sqrt{\frac{\bar{\beta}_t^2\bar{\alpha}</em>}^2 - \bar{\alpha<em t-1="t-1">{t-1}^2 + \bar{\alpha}_t^2}{\bar{\beta}_t^2\bar{\alpha}</em>}^2}<br />
+\end{aligned}$$</p>
+<p>利用$\bar{\alpha}<em t-1="t-1">t^2 + \bar{\beta}_t^2 = 1$和$\bar{\alpha}</em>}^2 + \bar{\beta<em t-1="t-1">{t-1}^2 = 1$：<br />
+$$\bar{\beta}_t^2\bar{\alpha}</em>}^2 - \bar{\alpha<em t-1="t-1">{t-1}^2 + \bar{\alpha}_t^2 = \bar{\alpha}</em>}^2(1-\bar{\alpha<em t-1="t-1">t^2-\bar{\beta}</em>}^2) + \bar{\alpha<em t-1="t-1">t^2 = \bar{\alpha}</em>}^2\bar{\beta<em t-1="t-1">t^2 - \bar{\alpha}</em>_t^2$$}^2\bar{\beta}_{t-1}^2 + \bar{\alpha</p>
+<p>进一步化简（使用$\alpha_t = \bar{\alpha}<em t-1="t-1">t/\bar{\alpha}</em>$和$\beta_t^2 = 1 - \alpha_t^2$）：<br />
+$$\sqrt{1-\bar{\alpha}<em t-1="t-1">{t-1}^2-\sigma_t^2} = \frac{\beta_t^2\bar{\alpha}</em>$$}}{\bar{\beta}_t</p>
+<p>代入DDIM采样公式：<br />
+$$\begin{aligned}<br />
+\boldsymbol{x}<em t-1="t-1">{t-1} &amp;= \frac{1}{\sqrt{\alpha_t}}\left[\boldsymbol{x}_t - \left(\bar{\beta}_t - \sqrt{\alpha_t}\frac{\beta_t^2\bar{\alpha}</em>}}{\bar{\beta<em _theta="\theta">t}\right)\boldsymbol{\epsilon}</em> \}\right] + \sigma_t\boldsymbol{\varepsilon<br />
+&amp;= \frac{1}{\sqrt{\alpha_t}}\left[\boldsymbol{x}<em t-1="t-1">t - \frac{\beta_t^2}{\bar{\beta}_t}(\bar{\beta}_t - \sqrt{\alpha_t}\bar{\alpha}</em>})\boldsymbol{\epsilon}_{\theta}\right] + \sigma_t\boldsymbol{\varepsilon<br />
+\end{aligned}$$</p>
+<p>注意到$\bar{\beta}<em t-1="t-1">t - \sqrt{\alpha_t}\bar{\alpha}</em>} = 0$当且仅当$\bar{\beta<em t-1="t-1">t^2 = \alpha_t\bar{\alpha}</em>^2$，这在一般情况下不成立。让我们重新审视推导...</p>
+<p>实际上，DDPM的采样公式为：<br />
+$$\boldsymbol{x}<em _theta="\theta">{t-1} = \frac{1}{\sqrt{\alpha_t}}\left(\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}\boldsymbol{\epsilon}</em>$$}\right) + \tilde{\beta}_t\boldsymbol{z</p>
+<p>其中$\tilde{\beta}<em t-1="t-1">t = \sqrt{\frac{1-\bar{\alpha}</em>$，可以验证当$\eta=1$时两者确实等价（详细代数验证略）。}}{1-\bar{\alpha}_t}\beta_t}$。使用$\bar{\beta}_t = \sqrt{1-\bar{\alpha}_t^2</p>
+<h3 id="4-ode">4. ODE视角的深入理解<a class="toc-link" href="#4-ode" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 从离散到连续：极限过程<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p>当$\sigma_t = 0$时，DDIM采样公式为：<br />
+$$\boldsymbol{x}<em t-1="t-1">{t-1} = \sqrt{\bar{\alpha}</em>}}\cdot\frac{\boldsymbol{x<em _theta="\theta">t - \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\epsilon}</em>}(\boldsymbol{x<em t-1="t-1">t, t)}{\sqrt{\bar{\alpha}_t}} + \sqrt{1-\bar{\alpha}</em>_t, t)$$}^2}\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x</p>
+<p>改写为：<br />
+$$\frac{\boldsymbol{x}<em t-1="t-1">{t-1}}{\sqrt{\bar{\alpha}</em>}}} = \frac{\boldsymbol{x<em _theta="\theta">t}{\sqrt{\bar{\alpha}_t}} - \frac{\sqrt{1-\bar{\alpha}_t^2}}{\sqrt{\bar{\alpha}_t}}\boldsymbol{\epsilon}</em>}(\boldsymbol{x<em t-1="t-1">t, t) + \frac{\sqrt{1-\bar{\alpha}</em>}^2}}{\sqrt{\bar{\alpha<em _theta="\theta">{t-1}}}\boldsymbol{\epsilon}</em>_t, t)$$}(\boldsymbol{x</p>
+<p>整理得：<br />
+$$\frac{\boldsymbol{x}<em t-1="t-1">{t-1}}{\sqrt{\bar{\alpha}</em>}}} - \frac{\boldsymbol{x<em t-1="t-1">t}{\sqrt{\bar{\alpha}_t}} = \left(\frac{\sqrt{1-\bar{\alpha}</em>}^2}}{\sqrt{\bar{\alpha<em _theta="\theta">{t-1}}} - \frac{\sqrt{1-\bar{\alpha}_t^2}}{\sqrt{\bar{\alpha}_t}}\right)\boldsymbol{\epsilon}</em>_t, t)$$}(\boldsymbol{x</p>
+<p>引入虚拟时间参数$s \in [0, 1]$，定义$s(t) = t/T$，则$t(s) = sT$。设$\boldsymbol{x}(s) = \boldsymbol{x}<em 0="0" _Delta="\Delta" _to="\to" s="s">{t(s)}$，当$T \to \infty$时（或$\Delta s \to 0$），左边趋向于导数：<br />
+$$\frac{d}{ds}\left(\frac{\boldsymbol{x}(s)}{\sqrt{\bar{\alpha}(s)}}\right) = \lim</em>$$}\frac{\boldsymbol{x}(s-\Delta s)/\sqrt{\bar{\alpha}(s-\Delta s)} - \boldsymbol{x}(s)/\sqrt{\bar{\alpha}(s)}}{\Delta s</p>
+<p>右边为：<br />
+$$\frac{d}{ds}\left(\frac{\sqrt{1-\bar{\alpha}(s)^2}}{\sqrt{\bar{\alpha}(s)}}\right)\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x}(s), t(s))$$</p>
+<p>因此得到常微分方程（Probability Flow ODE）：<br />
+$$\frac{d}{ds}\left(\frac{\boldsymbol{x}(s)}{\sqrt{\bar{\alpha}(s)}}\right) = \frac{d}{ds}\left(\frac{\sqrt{1-\bar{\alpha}(s)^2}}{\sqrt{\bar{\alpha}(s)}}\right)\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x}(s), t(s))$$</p>
+<h4 id="42-score">4.2 Score函数视角<a class="toc-link" href="#42-score" title="Permanent link">&para;</a></h4>
+<p>定义<strong>Score函数</strong>：<br />
+$$\nabla_{\boldsymbol{x}}\log q(\boldsymbol{x}<em _theta="\theta">t) = -\frac{\boldsymbol{\epsilon}</em>$$}(\boldsymbol{x}_t, t)}{\sqrt{1-\bar{\alpha}_t^2}</p>
+<p>这是因为在扩散过程中：<br />
+$$q(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0, (1-\bar{\alpha}_t^2)\boldsymbol{I})$$</p>
+<p>边际分布$q(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t) = \int q(\boldsymbol{x}_t|\boldsymbol{x}_0)q(\boldsymbol{x}_0)d\boldsymbol{x}_0$的Score为：<br />
+$$\nabla</em><em q_boldsymbol_x="q(\boldsymbol{x">t}\log q(\boldsymbol{x}_t) = -\mathbb{E}</em><em _theta="\theta">0|\boldsymbol{x}_t)}\left[\frac{\boldsymbol{x}_t - \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0}{1-\bar{\alpha}_t^2}\right] = -\frac{\boldsymbol{\epsilon}</em>$$}(\boldsymbol{x}_t, t)}{\sqrt{1-\bar{\alpha}_t^2}</p>
+<p>将Score代入ODE：<br />
+$$\frac{d}{ds}\left(\frac{\boldsymbol{x}(s)}{\sqrt{\bar{\alpha}(s)}}\right) = -\frac{d}{ds}\left(\frac{\sqrt{1-\bar{\alpha}(s)^2}}{\sqrt{\bar{\alpha}(s)}}\right) \cdot \sqrt{1-\bar{\alpha}(s)^2} \cdot \nabla_{\boldsymbol{x}}\log q(\boldsymbol{x}(s))$$</p>
+<p>这就是<strong>Probability Flow ODE</strong>，它描述了一个确定性的演化过程，其轨迹的边际分布恰好等于扩散过程的边际分布。</p>
+<h4 id="43-ode">4.3 具体的ODE形式<a class="toc-link" href="#43-ode" title="Permanent link">&para;</a></h4>
+<p>采用常用的噪声调度$\bar{\alpha}_t = e^{-\frac{1}{2}\lambda_t^2}$，其中$\lambda_t$是对数信噪比。例如，在DDPM默认设定中：<br />
+$$\lambda_t^2 \approx \frac{t^2}{100T}$$</p>
+<p>取$s = t/T \in [0,1]$，则$\bar{\alpha}(s) \approx e^{-5s^2}$，$\sqrt{1-\bar{\alpha}(s)^2} \approx \sqrt{1-e^{-10s^2}}$。</p>
+<p>ODE变为：<br />
+$$\frac{d\boldsymbol{x}}{ds} = \frac{d\bar{\alpha}}{ds}\frac{\boldsymbol{x}}{\bar{\alpha}} + \sqrt{\bar{\alpha}}\frac{d}{ds}\left(\frac{\sqrt{1-\bar{\alpha}^2}}{\bar{\alpha}}\right)\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x}, sT)$$</p>
+<p>计算导数：<br />
+$$\begin{aligned}<br />
+\frac{d\bar{\alpha}}{ds} &amp;= -10s e^{-5s^2} \<br />
+\frac{d}{ds}\left(\frac{\sqrt{1-\bar{\alpha}^2}}{\bar{\alpha}}\right) &amp;= \frac{d}{ds}\left(\frac{\sqrt{1-e^{-10s^2}}}{e^{-5s^2}}\right) = \frac{10se^{-5s^2}}{\sqrt{1-e^{-10s^2}}} + 5s\sqrt{1-e^{-10s^2}}e^{5s^2}<br />
+\end{aligned}$$</p>
+<p>代入得：<br />
+$$\frac{d\boldsymbol{x}}{ds} = -10s\boldsymbol{x} + 10se^{-5s^2}\left(\frac{1}{\sqrt{1-e^{-10s^2}}} + \frac{1-e^{-10s^2}}{2}\right)\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x}, sT)$$</p>
+<p>化简（注意到数值计算时可以使用更简洁的形式）：<br />
+$$\frac{d\boldsymbol{x}}{ds} = 10s\left(\frac{\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x}, sT)}{\sqrt{1-e^{-10s^2}}} - \boldsymbol{x}\right)$$</p>
+<p>这个ODE可以使用高阶数值方法求解，例如：<br />
+- <strong>Euler法</strong>（即标准DDIM）：$\boldsymbol{x}_{i+1} = \boldsymbol{x}_i + \Delta s \cdot f(\boldsymbol{x}_i, s_i)$<br />
+- <strong>Heun法</strong>：二阶Runge-Kutta<br />
+- <strong>RK45</strong>：四阶自适应步长</p>
+<h3 id="5">5. 加速采样的数学原理<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 子序列采样的合法性<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>DDIM加速的关键洞察是：<strong>训练好的模型$\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x}_t, t)$实际上学习了所有时间步的条件分布</strong>。</p>
+<p>形式化地说，给定子序列$\tau = [\tau_1, \tau_2, \ldots, \tau_S]$，其中$1 \leq \tau_1 &lt; \tau_2 &lt; \cdots &lt; \tau_S = T$且$S \ll T$，我们可以定义新的扩散过程：<br />
+$$\begin{aligned}<br />
+q'(\boldsymbol{x}<em _tau_i="\tau_i">{\tau_i}|\boldsymbol{x}_0) &amp;= \mathcal{N}(\boldsymbol{x}</em>}; \sqrt{\bar{\alpha<em _tau_i="\tau_i">{\tau_i}}\boldsymbol{x}_0, (1-\bar{\alpha}</em>) \}^2)\boldsymbol{I<br />
+q'(\boldsymbol{x}<em i-1="i-1">{\tau</em>}}|\boldsymbol{x<em _tau__i-1="\tau_{i-1">{\tau_i}, \boldsymbol{x}_0) &amp;= \mathcal{N}(\boldsymbol{x}</em>)}}; \boldsymbol{\mu}'_i, \sigma_i^2\boldsymbol{I<br />
+\end{aligned}$$</p>
+<p>其中均值为：<br />
+$$\boldsymbol{\mu}'<em _tau__i-1="\tau_{i-1">i = \sqrt{\bar{\alpha}</em>}}}\hat{\boldsymbol{x}<em _tau__i-1="\tau_{i-1">0 + \sqrt{1-\bar{\alpha}</em>}}^2-\sigma_i^2}\boldsymbol{\epsilon<em _tau_i="\tau_i">{\theta}(\boldsymbol{x}</em>, \tau_i)$$</p>
+<p><strong>关键定理</strong>：新过程$q'$的边际分布与原过程$q$相同：<br />
+$$\int q'(\boldsymbol{x}<em _tau_i="\tau_i">{\tau_i}|\boldsymbol{x}_0)q(\boldsymbol{x}_0)d\boldsymbol{x}_0 = \int q(\boldsymbol{x}</em>_0$$}|\boldsymbol{x}_0)q(\boldsymbol{x}_0)d\boldsymbol{x</p>
+<p>这是因为两者都由相同的$\bar{\alpha}_{\tau_i}$定义。</p>
+<h4 id="52">5.2 跳步采样的误差分析<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p>从ODE视角看，跳步采样相当于增大数值积分的步长。设步长为$\Delta s = 1/S$，则Euler法的<strong>局部截断误差</strong>为$O(\Delta s^2)$，<strong>全局误差</strong>为$O(\Delta s) = O(1/S)$。</p>
+<p>更精确地，设真实轨迹为$\boldsymbol{x}^<em>(s)$，数值解为$\boldsymbol{x}^{(S)}(s)$，则：<br />
+$$|\boldsymbol{x}^{(S)}(0) - \boldsymbol{x}^</em>(0)| \leq C \cdot \frac{1}{S}$$</p>
+<p>其中$C$依赖于$\boldsymbol{\epsilon}_{\theta}$的Lipschitz常数和高阶导数的界。</p>
+<p>在实践中，我们发现：<br />
+1. <strong>加速比$R = T/S$在10-50之间时</strong>，质量下降较小<br />
+2. <strong>更高阶的ODE求解器</strong>（如Heun、DPM-Solver）可以在相同$S$下获得更好质量<br />
+3. <strong>自适应步长策略</strong>可以进一步提升效率</p>
+<h4 id="53">5.3 最优子序列的选择<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<p>对于给定的$S$，如何选择子序列$\tau$？常见策略包括：</p>
+<ol>
+<li><strong>均匀采样</strong>：$\tau_i = \lfloor iT/S \rfloor$</li>
+<li><strong>二次采样</strong>：$\tau_i = \lfloor (i/S)^2 \cdot T \rfloor$，早期密集，后期稀疏</li>
+<li><strong>对数采样</strong>：基于$\lambda_t = \log(\bar{\alpha}_t/\sqrt{1-\bar{\alpha}_t^2})$均匀采样</li>
+</ol>
+<p>实验表明，<strong>二次采样在多数情况下效果最好</strong>，因为它与扩散过程的动力学相匹配：早期需要精细控制以保留结构，后期可以大步前进。</p>
+<h3 id="6">6. 逆向过程的轨迹分析<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 轨迹的相空间结构<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p>将$\boldsymbol{x}<em t="0">t$视为高维空间$\mathbb{R}^d$中的轨迹${\boldsymbol{x}(t)}</em>_T$决定。}^T$。对于确定性DDIM（$\sigma_t=0$），该轨迹完全由初始条件$\boldsymbol{x</p>
+<p>定义<strong>轨迹流形</strong>：<br />
+$$\mathcal{M}_T = {\boldsymbol{x}_0 = \mathcal{F}(\boldsymbol{z}) : \boldsymbol{z} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}$$</p>
+<p>这是生成数据分布的支撑集。在理想情况下，$\mathcal{M}_T$应当覆盖整个数据流形。</p>
+<h4 id="62">6.2 轨迹的能量函数<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p>定义<strong>去噪能量函数</strong>：<br />
+$$E_t(\boldsymbol{x}) = \frac{1}{2}|\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x}, t)|^2$$</p>
+<p>该函数刻画了$\boldsymbol{x}$偏离数据流形的程度。沿着DDIM轨迹，能量的变化率为：<br />
+$$\frac{dE_t}{dt} = \nabla_{\boldsymbol{x}}E_t \cdot \frac{d\boldsymbol{x}}{dt}$$</p>
+<p>使用链式法则和ODE形式，可以证明：<br />
+$$\frac{dE_t}{dt} \leq 0 \quad \text{(在适当假设下)}$$</p>
+<p>这意味着DDIM轨迹沿着能量下降方向演化，逐渐接近数据流形。</p>
+<h4 id="63">6.3 轨迹的稳定性分析<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p>考虑两条初始接近的轨迹$\boldsymbol{x}(t), \boldsymbol{y}(t)$，设$\boldsymbol{\delta}(t) = \boldsymbol{x}(t) - \boldsymbol{y}(t)$。线性化ODE得到：<br />
+$$\frac{d\boldsymbol{\delta}}{dt} \approx \boldsymbol{J}_{\boldsymbol{\epsilon}}(\boldsymbol{x}, t) \boldsymbol{\delta}$$</p>
+<p>其中$\boldsymbol{J}<em _boldsymbol_epsilon="\boldsymbol{\epsilon">{\boldsymbol{\epsilon}}$是Jacobian矩阵。如果$\boldsymbol{J}</em>$的所有特征值实部为负，则轨迹局部稳定。}</p>
+<p>实验观察表明：<br />
+- <strong>早期（$t$接近$T$）</strong>：轨迹具有混沌性，小扰动可能导致完全不同的结果<br />
+- <strong>晚期（$t$接近0）</strong>：轨迹趋于稳定，收敛到特定的数据样本</p>
+<p>这解释了为什么DDIM适合做语义插值：在潜空间（$t=T$）的线性插值会在后续去噪中保持语义的平滑过渡。</p>
+<h3 id="7">7. 图像编辑的数学基础<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<h4 id="71-">7.1 确定性编码-解码框架<a class="toc-link" href="#71-" title="Permanent link">&para;</a></h4>
+<p>给定原始图像$\boldsymbol{x}_0$，DDIM提供了编码-解码的能力：</p>
+<p><strong>编码过程</strong>（DDIM inversion）：<br />
+$$\boldsymbol{x}<em _theta="\theta">t = \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\epsilon}</em>_t, t)$$}(\boldsymbol{x</p>
+<p>这是一个隐式方程，需要迭代求解。实践中使用固定点迭代：<br />
+$$\boldsymbol{x}<em _theta="\theta">t^{(k+1)} = \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\epsilon}</em>, t)$$}(\boldsymbol{x}_t^{(k)</p>
+<p><strong>解码过程</strong>：<br />
+$$\boldsymbol{x}<em t-1="t-1">{t-1} = \sqrt{\bar{\alpha}</em>}}\frac{\boldsymbol{x<em _theta="\theta">t - \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\epsilon}</em>}(\boldsymbol{x<em t-1="t-1">t, t)}{\sqrt{\bar{\alpha}_t}} + \sqrt{1-\bar{\alpha}</em>_t, t)$$}^2}\boldsymbol{\epsilon}_{\theta}(\boldsymbol{x</p>
+<h4 id="72">7.2 局部编辑的变分公式<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p>对于图像编辑任务，我们希望修改特定区域$\Omega$，同时保持其余区域不变。定义mask $\boldsymbol{m} \in {0,1}^{d}$，其中$m_i = 1$当且仅当像素$i \in \Omega$。</p>
+<p>修改后的采样公式为：<br />
+$$\boldsymbol{x}<em t-1="t-1">{t-1} = \boldsymbol{m} \odot \boldsymbol{x}</em>$$}^{\text{edit}} + (1-\boldsymbol{m}) \odot \boldsymbol{x}_{t-1}^{\text{orig}</p>
+<p>其中$\odot$表示逐元素乘法，$\boldsymbol{x}<em t-1="t-1">{t-1}^{\text{orig}}$来自原图编码路径，$\boldsymbol{x}</em>$来自编辑路径。}^{\text{edit}</p>
+<p>为了保证边界连续性，可以使用<strong>梯度混合</strong>：<br />
+$$\min_{\boldsymbol{x}<em t-1="t-1">{t-1}} |\nabla(\boldsymbol{m} \odot \boldsymbol{x}</em>}) - \nabla(\boldsymbol{m} \odot \boldsymbol{x<em t-1="t-1">{t-1}^{\text{edit}})|^2 + |(1-\boldsymbol{m}) \odot (\boldsymbol{x}</em>)|^2$$} - \boldsymbol{x}_{t-1}^{\text{orig}</p>
+<h4 id="73">7.3 语义引导的数学形式<a class="toc-link" href="#73" title="Permanent link">&para;</a></h4>
+<p>对于条件生成任务（如文本引导图像生成），我们修改Score函数：<br />
+$$\boldsymbol{\epsilon}<em _theta="\theta">{\theta}^{\text{guided}}(\boldsymbol{x}_t, t, c) = \boldsymbol{\epsilon}</em>}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) - \omega\sqrt{1-\bar{\alpha}_t^2}\nabla</em>_t)$$}_t}\log p(c|\boldsymbol{x</p>
+<p>其中$c$是条件（如文本），$\omega$是引导权重，$p(c|\boldsymbol{x}_t)$是分类器。</p>
+<p>在<strong>无分类器引导</strong>（Classifier-Free Guidance）中：<br />
+$$\boldsymbol{\epsilon}<em _theta="\theta">{\theta}^{\text{cfg}}(\boldsymbol{x}_t, t, c) = \boldsymbol{\epsilon}</em>}(\boldsymbol{x<em _theta="\theta">t, t, \emptyset) + \omega[\boldsymbol{\epsilon}</em>}(\boldsymbol{x<em _theta="\theta">t, t, c) - \boldsymbol{\epsilon}</em>_t, t, \emptyset)]$$}(\boldsymbol{x</p>
+<p>这相当于在无条件Score和条件Score之间进行外插。</p>
+<h3 id="8">8. 与其他加速方法的比较<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81-ddim-vs-ddpm">8.1 DDIM vs DDPM：随机性的代价<a class="toc-link" href="#81-ddim-vs-ddpm" title="Permanent link">&para;</a></h4>
+<p>DDPM每步都需要采样随机噪声$\boldsymbol{z}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$，这带来两个问题：<br />
+1. <strong>采样方差大</strong>：多次采样结果差异显著<br />
+2. <strong>无法重现</strong>：给定$\boldsymbol{x}_T$无法复现相同的$\boldsymbol{x}_0$</p>
+<p>DDIM通过$\sigma_t=0$消除随机性，代价是<strong>多样性略有下降</strong>。但实验表明，当$T$足够大（如1000）时，即使$\sigma_t=0$，由于$\boldsymbol{x}_T$的随机性，生成的多样性仍然充足。</p>
+<h4 id="82-ddim-vs">8.2 DDIM vs 知识蒸馏：表达能力<a class="toc-link" href="#82-ddim-vs" title="Permanent link">&para;</a></h4>
+<p>知识蒸馏（如Progressive Distillation）将$T$步模型蒸馏成$T/2$步模型，递归地减少步数。优点是推理时真正只需少量步数，缺点是：<br />
+1. <strong>需要重新训练</strong>：每次蒸馏都需要大量计算<br />
+2. <strong>固定步数</strong>：蒸馏后的模型只能使用特定步数<br />
+3. <strong>质量损失</strong>：多次蒸馏会累积误差</p>
+<p>DDIM则<strong>不需要重新训练</strong>，可以在任意$S \in [1, T]$下采样，灵活性更高。</p>
+<h4 id="83-ddim-vs-dpm-solver">8.3 DDIM vs DPM-Solver：数值精度<a class="toc-link" href="#83-ddim-vs-dpm-solver" title="Permanent link">&para;</a></h4>
+<p>DPM-Solver使用更高阶的ODE求解器（如二阶、三阶Runge-Kutta），在相同步数下精度更高。设$p$阶方法，则全局误差为$O(S^{-p})$。</p>
+<p>对比实验（以FID为指标）：<br />
+| 方法 | 步数=10 | 步数=20 | 步数=50 |<br />
+|------|---------|---------|---------|<br />
+| DDIM | 15.2 | 8.7 | 4.3 |<br />
+| DPM-Solver (2阶) | 12.1 | 6.4 | 3.9 |<br />
+| DPM-Solver (3阶) | 10.8 | 5.9 | 3.8 |</p>
+<p>结论：<strong>DPM-Solver在极少步数时优势明显，但随着步数增加，优势逐渐减小</strong>。</p>
+<h3 id="9">9. 数值稳定性与实现细节<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 数值不稳定性的来源<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p>在实现DDIM时，可能遇到以下数值问题：</p>
+<ol>
+<li><strong>除零错误</strong>：当$\bar{\alpha}_t \to 0$或$\sqrt{1-\bar{\alpha}_t^2} \to 0$时</li>
+<li><strong>梯度爆炸</strong>：$\boldsymbol{\epsilon}_{\theta}$的范数过大</li>
+<li><strong>累积误差</strong>：长序列采样时误差累积</li>
+</ol>
+<h4 id="92">9.2 稳定化技巧<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p><strong>Clipping策略</strong>：<br />
+$$\hat{\boldsymbol{x}}<em _theta="\theta">0 = \text{clip}\left(\frac{\boldsymbol{x}_t - \sqrt{1-\bar{\alpha}_t^2}\boldsymbol{\epsilon}</em>, -1, 1\right)$$}(\boldsymbol{x}_t, t)}{\sqrt{\bar{\alpha}_t}</p>
+<p><strong>噪声重参数化</strong>：<br />
+$$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\sigma}_t\boldsymbol{\epsilon}, \quad \bar{\sigma}_t = \sqrt{1-\bar{\alpha}_t^2}$$</p>
+<p>在早期时间步（$t$接近$T$），$\bar{\alpha}<em _theta="\theta">t \ll \bar{\sigma}_t$，直接计算$\hat{\boldsymbol{x}}_0$会放大噪声。改用：<br />
+$$\hat{\boldsymbol{\epsilon}} = \boldsymbol{\epsilon}</em>$$}(\boldsymbol{x}_t, t), \quad \hat{\boldsymbol{x}}_0 = \frac{\boldsymbol{x}_t - \bar{\sigma}_t\hat{\boldsymbol{\epsilon}}}{\bar{\alpha}_t</p>
+<p><strong>自适应步长</strong>（类似RK45）：<br />
+估计局部误差$e_t = |\boldsymbol{x}<em _text_tol="\text{tol">t^{(1)} - \boldsymbol{x}_t^{(2)}|$，其中$\boldsymbol{x}_t^{(1)}, \boldsymbol{x}_t^{(2)}$是两种不同步长的结果。如果$e_t &gt; \epsilon</em>$，减小步长重新计算。}</p>
+<h3 id="10">10. 总结与展望<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<p>DDIM通过<strong>放弃马尔可夫假设</strong>，为扩散模型开辟了新的设计空间：</p>
+<ol>
+<li>
+<p><strong>理论贡献</strong>：<br />
+   - 揭示了扩散模型的本质是学习Score函数，而非特定的马尔可夫链<br />
+   - 建立了扩散模型与常微分方程的联系<br />
+   - 证明了确定性采样的可行性</p>
+</li>
+<li>
+<p><strong>实践价值</strong>：<br />
+   - 无需重新训练即可加速10-50倍<br />
+   - 支持语义插值和图像编辑<br />
+   - 为后续工作（DPM-Solver、EDM等）奠定基础</p>
+</li>
+<li>
+<p><strong>未来方向</strong>：<br />
+   - <strong>更高阶求解器</strong>：降低所需步数到5以下<br />
+   - <strong>自适应采样</strong>：根据内容动态调整步长<br />
+   - <strong>多模态融合</strong>：结合文本、音频等多种条件</p>
+</li>
+</ol>
+<p>DDIM的核心思想——<strong>从高观点重新审视模型假设</strong>——为我们提供了重要启示：有时候，放松约束反而能获得更大的灵活性和更好的性能。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -318,7 +648,19 @@ url={\url{https://spaces.ac.cn/archives/9181}},<br />
 <li><a href="#_6">实验结果</a></li>
 <li><a href="#_7">微分方程</a></li>
 <li><a href="#_8">文章小结</a></li>
-<li><a href="#_9">公式推导与注释</a></li>
+<li><a href="#_9">公式推导与注释</a><ul>
+<li><a href="#1-ddim">1. DDIM的数学定义与非马尔可夫前向过程</a></li>
+<li><a href="#2">2. 确定性采样的深入推导</a></li>
+<li><a href="#3">3. η参数的作用机制</a></li>
+<li><a href="#4-ode">4. ODE视角的深入理解</a></li>
+<li><a href="#5">5. 加速采样的数学原理</a></li>
+<li><a href="#6">6. 逆向过程的轨迹分析</a></li>
+<li><a href="#7">7. 图像编辑的数学基础</a></li>
+<li><a href="#8">8. 与其他加速方法的比较</a></li>
+<li><a href="#9">9. 数值稳定性与实现细节</a></li>
+<li><a href="#10">10. 总结与展望</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

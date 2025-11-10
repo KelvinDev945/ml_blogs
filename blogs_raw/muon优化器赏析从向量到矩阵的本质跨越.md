@@ -2,10 +2,9 @@
 title: Muon优化器赏析：从向量到矩阵的本质跨越
 slug: muon优化器赏析从向量到矩阵的本质跨越
 date: 2024-12-10
-tags: 矩阵, 梯度, 优化器, 谱范数, muon
+tags: 详细推导, 矩阵, 梯度, 优化器, 谱范数, muon
 status: pending
 ---
-
 # Muon优化器赏析：从向量到矩阵的本质跨越
 
 **原文链接**: [https://spaces.ac.cn/archives/10592](https://spaces.ac.cn/archives/10592)

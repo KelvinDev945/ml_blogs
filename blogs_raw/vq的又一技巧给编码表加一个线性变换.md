@@ -2,10 +2,9 @@
 title: VQ的又一技巧：给编码表加一个线性变换
 slug: vq的又一技巧给编码表加一个线性变换
 date: 2024-11-06
-tags: 生成模型, 编码, 梯度, 离散化, 生成模型
+tags: 详细推导, 生成模型, 编码, 梯度, 离散化, 生成模型
 status: pending
 ---
-
 # VQ的又一技巧：给编码表加一个线性变换
 
 **原文链接**: [https://spaces.ac.cn/archives/10519](https://spaces.ac.cn/archives/10519)

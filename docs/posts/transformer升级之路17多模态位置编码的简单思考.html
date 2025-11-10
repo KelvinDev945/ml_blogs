@@ -74,7 +74,7 @@
             <ol class="breadcrumb">
                 <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
                 
-                <li class="breadcrumb-item"><a href="../index.html?tags=attention">attention</a></li>
+                <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
                     #136 Transformer升级之路：17、多模态位置编码的简单思考
@@ -94,6 +94,10 @@
             </div>
             
             <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=详细推导" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 详细推导</span>
+                </a>
                 
                 <a href="../index.html?tags=attention" class="tag-link">
                     <span class="tag"><i class="fas fa-tag"></i> attention</span>
@@ -239,7 +243,817 @@ url={\url{https://spaces.ac.cn/archives/10040}},<br />
 } </p>
 <hr />
 <h2 id="_8">公式推导与注释<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1-rope">1. 一维RoPE的数学基础<a class="toc-link" href="#1-rope" title="Permanent link">&para;</a></h3>
+<p><strong>定义1.1：一维旋转位置编码（RoPE-1D）</strong></p>
+<p>对于文本序列，位置$m$的旋转矩阵定义为：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_m^{(2)} = \begin{pmatrix} \cos(m\theta) &amp; -\sin(m\theta) \ \sin(m\theta) &amp; \cos(m\theta) \end{pmatrix}<br />
+$$</p>
+<p>对于$d$维向量，分为$d/2$对，每对使用不同频率$\theta_i$：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em d_2-1="d/2-1">m^{(d)} = \text{diag}(\boldsymbol{\mathcal{R}}_m^{(\theta_0)}, \boldsymbol{\mathcal{R}}_m^{(\theta_1)}, \ldots, \boldsymbol{\mathcal{R}}_m^{(\theta</em>)})<br />
+$$</p>
+<p><strong>定理1.1：相对位置性质</strong></p>
+<p>RoPE满足核心的相对位置性质：<br />
+$$<br />
+(\boldsymbol{\mathcal{R}}<em n-m="n-m">m \boldsymbol{q})^T (\boldsymbol{\mathcal{R}}_n \boldsymbol{k}) = \boldsymbol{q}^T \boldsymbol{\mathcal{R}}_m^T \boldsymbol{\mathcal{R}}_n \boldsymbol{k} = \boldsymbol{q}^T \boldsymbol{\mathcal{R}}</em>} \boldsymbol{k<br />
+$$</p>
+<p>即内积只依赖于相对位置$\Delta = n - m$，而不依赖于绝对位置。</p>
+<p><strong>推导1.1：旋转矩阵的性质</strong></p>
+<p>旋转矩阵是正交矩阵：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_m^T \boldsymbol{\mathcal{R}}_m = \boldsymbol{I}<br />
+$$</p>
+<p>保持向量模长不变：<br />
+$$<br />
+|\boldsymbol{\mathcal{R}}_m \boldsymbol{v}| = |\boldsymbol{v}|<br />
+$$</p>
+<p>满足群性质：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em m_n="m+n">m \boldsymbol{\mathcal{R}}_n = \boldsymbol{\mathcal{R}}</em><br />
+$$</p>
+<p><strong>推导1.2：频率的作用</strong></p>
+<p>不同频率$\theta_i$对应不同的周期：<br />
+$$<br />
+T_i = \frac{2\pi}{\theta_i}<br />
+$$</p>
+<p>标准设置中：<br />
+$$<br />
+\theta_i = 10000^{-2i/d}<br />
+$$</p>
+<p>因此：<br />
+$$<br />
+T_i = 2\pi \cdot 10000^{2i/d}<br />
+$$</p>
+<p>高频（$i$小）：短周期，适合编码局部位置<br />
+低频（$i$大）：长周期，适合编码远程位置</p>
+<h3 id="2-rope">2. 二维RoPE的数学推广<a class="toc-link" href="#2-rope" title="Permanent link">&para;</a></h3>
+<p><strong>定义2.1：二维旋转位置编码（RoPE-2D）</strong></p>
+<p>对于图像patch的二维位置$(x, y)$，旋转矩阵定义为分块对角形式：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{x,y}^{(4)} = \begin{pmatrix} \boldsymbol{\mathcal{R}}_x &amp; \boldsymbol{0} \ \boldsymbol{0} &amp; \boldsymbol{\mathcal{R}}_y \end{pmatrix} = \begin{pmatrix}<br />
+\cos(x\theta) &amp; -\sin(x\theta) &amp; 0 &amp; 0 \<br />
+\sin(x\theta) &amp; \cos(x\theta) &amp; 0 &amp; 0 \<br />
+0 &amp; 0 &amp; \cos(y\theta) &amp; -\sin(y\theta) \<br />
+0 &amp; 0 &amp; \sin(y\theta) &amp; \cos(y\theta)<br />
+\end{pmatrix}<br />
+$$</p>
+<p><strong>推导2.1：二维相对位置性质</strong></p>
+<p>对于两个位置$(x_1, y_1)$和$(x_2, y_2)$：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em x_2_y_2="x_2,y_2">{x_1,y_1}^T \boldsymbol{\mathcal{R}}</em>} = \begin{pmatrix} \boldsymbol{\mathcal{R}<em y_2-y_1="y_2-y_1">{x_2-x_1} &amp; \boldsymbol{0} \ \boldsymbol{0} &amp; \boldsymbol{\mathcal{R}}</em>} \end{pmatrix<br />
+$$</p>
+<p>因此：<br />
+$$<br />
+(\boldsymbol{\mathcal{R}}<em x_2_y_2="x_2,y_2">{x_1,y_1} \boldsymbol{q})^T (\boldsymbol{\mathcal{R}}</em>} \boldsymbol{k}) = \boldsymbol{q}^T \boldsymbol{\mathcal{R}}_{x_2-x_1, y_2-y_1} \boldsymbol{k<br />
+$$</p>
+<p>内积只依赖于相对位置$(\Delta_x, \Delta_y) = (x_2 - x_1, y_2 - y_1)$。</p>
+<p><strong>定理2.1：二维位置编码的轴向分解</strong></p>
+<p>二维RoPE可以分解为两个独立的一维RoPE：<br />
+$$<br />
+\text{RoPE-2D}(x, y) = \text{RoPE-1D}_x(x) \oplus \text{RoPE-1D}_y(y)<br />
+$$</p>
+<p>其中$\oplus$表示分块对角组合。</p>
+<p><strong>推导2.2：高维推广</strong></p>
+<p>对于$d$维向量和$(k_1, k_2)$维的空间位置：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em k_1_0="k_1,0">{k_1,k_2}^{(d)} = \text{diag}(\boldsymbol{\mathcal{R}}</em>)}^{(d_1)}, \boldsymbol{\mathcal{R}}_{0,k_2}^{(d_2)<br />
+$$</p>
+<p>其中$d_1 + d_2 = d$，通常取$d_1 = d_2 = d/2$。</p>
+<p>对于三维（视频）或更高维的情况，类似地分块对角组合。</p>
+<h3 id="3">3. 展平策略的数学分析<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<p><strong>定义3.1：图像展平映射</strong></p>
+<p>将$H \times W$的图像展平为一维序列，常见的映射方式：</p>
+<p><strong>行优先（Row-major）</strong>：<br />
+$$<br />
+\phi_{row}(x, y) = x \cdot W + y, \quad x \in [0, H), \, y \in [0, W)<br />
+$$</p>
+<p><strong>列优先（Column-major）</strong>：<br />
+$$<br />
+\phi_{col}(x, y) = y \cdot H + x<br />
+$$</p>
+<p><strong>Z-order（Morton order）</strong>：<br />
+$$<br />
+\phi_{Z}(x, y) = \text{interleave}(\text{bits}(x), \text{bits}(y))<br />
+$$</p>
+<p><strong>推导3.1：相邻性的损失</strong></p>
+<p>在二维空间中，位置$(x, y)$有4个相邻位置：<br />
+$$<br />
+\mathcal{N}_{2D}(x, y) = {(x \pm 1, y), (x, y \pm 1)}<br />
+$$</p>
+<p>其欧氏距离为：<br />
+$$<br />
+d_{2D}((x, y), (x', y')) = \sqrt{(x - x')^2 + (y - y')^2} = 1<br />
+$$</p>
+<p>展平后，使用行优先映射：<br />
+$$<br />
+\begin{align}<br />
+d_{1D}(\phi(x, y), \phi(x+1, y)) &amp;= |\phi(x+1, y) - \phi(x, y)| = W \<br />
+d_{1D}(\phi(x, y), \phi(x, y+1)) &amp;= |\phi(x, y+1) - \phi(x, y)| = 1<br />
+\end{align}<br />
+$$</p>
+<p>垂直相邻的patch在一维序列中距离为$W$，远大于1，严重破坏了相邻性。</p>
+<p><strong>定理3.1：展平无法保持全局相邻性</strong></p>
+<p><strong>证明</strong>：考虑$H \times W$的图像，任意位置$(x, y)$与$(x+1, y)$在二维空间中相邻，距离为1。</p>
+<p>展平后：<br />
+$$<br />
+|\phi(x+1, y) - \phi(x, y)| = W<br />
+$$</p>
+<p>要保持所有相邻关系，需要：<br />
+$$<br />
+W = 1<br />
+$$</p>
+<p>但这要求图像宽度为1，即退化为一维。因此，展平策略必然损失部分相邻性信息。$\square$</p>
+<p><strong>推导3.2：Z-order的改进</strong></p>
+<p>Z-order（空间填充曲线）试图更好地保持局部性：<br />
+$$<br />
+\phi_Z(x, y) = \sum_{i=0}^{\log_2 \max(H,W)} (x_i \cdot 2^{2i+1} + y_i \cdot 2^{2i})<br />
+$$</p>
+<p>其中$x_i, y_i$是$x, y$的第$i$位二进制数字。</p>
+<p>Z-order的优势：相邻patch在一维序列中的距离更均衡，但仍无法完全保持二维相邻性。</p>
+<h3 id="4-">4. 文本-图像混合输入的统一编码<a class="toc-link" href="#4-" title="Permanent link">&para;</a></h3>
+<p><strong>定义4.1：混合模态的位置表示</strong></p>
+<p>文本token：位置为标量$n \in \mathbb{N}$<br />
+图像patch：位置为向量$(x, y) \in \mathbb{N}^2$</p>
+<p><strong>策略1：展平为一维（强行降维）</strong></p>
+<p>所有输入统一为一维位置$p \in \mathbb{N}$：<br />
+$$<br />
+p = \begin{cases}<br />
+n, &amp; \text{文本token } n \<br />
+\phi(x, y), &amp; \text{图像patch } (x, y)<br />
+\end{cases}<br />
+$$</p>
+<p>应用标准RoPE-1D：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_p^{(d)}<br />
+$$</p>
+<p><strong>策略2：升维为二维（统一升维）</strong></p>
+<p>所有输入统一为二维位置$(p_1, p_2) \in \mathbb{N}^2$：<br />
+$$<br />
+(p_1, p_2) = \begin{cases}<br />
+(n, n), &amp; \text{文本token } n \<br />
+(x, y), &amp; \text{图像patch } (x, y)<br />
+\end{cases}<br />
+$$</p>
+<p>应用RoPE-2D：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{p_1, p_2}^{(d)}<br />
+$$</p>
+<p><strong>推导4.1：策略1的问题</strong></p>
+<p>使用行优先展平，两个水平相邻的patch：<br />
+$$<br />
+(x, y) \to p_1 = xW + y<br />
+$$<br />
+$$<br />
+(x, y+1) \to p_2 = xW + y + 1<br />
+$$</p>
+<p>相对位置：$\Delta_1 = 1$</p>
+<p>两个垂直相邻的patch：<br />
+$$<br />
+(x, y) \to p_1 = xW + y<br />
+$$<br />
+$$<br />
+(x+1, y) \to p_3 = (x+1)W + y<br />
+$$</p>
+<p>相对位置：$\Delta_2 = W$</p>
+<p>在二维空间中，两对patch的距离都是1，但展平后的相对位置差异为$W$倍，无法体现这种对称性。</p>
+<p><strong>推导4.2：策略2对文本的退化</strong></p>
+<p>对于文本token，位置表示为$(n, n)$：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{n,n}^{(d)} = \text{diag}(\boldsymbol{\mathcal{R}}_n^{(d/2)}, \boldsymbol{\mathcal{R}}_n^{(d/2)})<br />
+$$</p>
+<p>两个文本token的相对位置编码：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em n_n="n,n">{m,m}^T \boldsymbol{\mathcal{R}}</em>} = \text{diag}(\boldsymbol{\mathcal{R}<em n-m="n-m">{n-m}^{(d/2)}, \boldsymbol{\mathcal{R}}</em>)}^{(d/2)<br />
+$$</p>
+<p>这等价于两个相同的$d/2$维RoPE-1D的组合，而不是标准的$d$维RoPE-1D。</p>
+<p>标准RoPE-1D使用$d/2$个不同频率${\theta_i}<em i="0">{i=0}^{d/2-1}$，而策略2只使用了其中一半${\theta_i}</em>$（每个重复两次）。}^{d/4-1</p>
+<p><strong>定理4.1：策略2无法退化为RoPE-1D</strong></p>
+<p>对于纯文本输入，策略2的位置编码：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{n,n}^{(d)} \neq \boldsymbol{\mathcal{R}}_n^{(d)}<br />
+$$</p>
+<p>因为前者只使用了后者一半的频率，信息容量降低。$\square$</p>
+<h3 id="5-rope-tie">5. RoPE-Tie：统一一维和二维的方案<a class="toc-link" href="#5-rope-tie" title="Permanent link">&para;</a></h3>
+<p><strong>定义5.1：RoPE-Tie的核心思想</strong></p>
+<p><strong>关键观察</strong>：RoPE-2D的分块对角结构<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{x,y}^{(d)} = \text{diag}(\boldsymbol{\mathcal{R}}_x^{(d/2)}, \boldsymbol{\mathcal{R}}_y^{(d/2)})<br />
+$$</p>
+<p>可以看作两个独立的$d/2$维RoPE-1D的组合。</p>
+<p>如果文本使用$(n, n)$作为位置，则：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{n,n}^{(d)} = \text{diag}(\boldsymbol{\mathcal{R}}_n^{(d/2)}, \boldsymbol{\mathcal{R}}_n^{(d/2)})<br />
+$$</p>
+<p>要使其等价于标准RoPE-1D，需要$x$和$y$使用不同的频率集合。</p>
+<p><strong>推导5.1：频率分配</strong></p>
+<p>标准RoPE-1D的频率：<br />
+$$<br />
+{\theta_i}<em i="0">{i=0}^{d/2-1} = {10000^{-2i/d}}</em>}^{d/2-1<br />
+$$</p>
+<p>RoPE-Tie的频率分配：<br />
+- $x$方向：使用${\theta_{2i}}<em 2i_1="2i+1">{i=0}^{d/4-1}$（偶数索引）<br />
+- $y$方向：使用${\theta</em>$（奇数索引）}}_{i=0}^{d/4-1</p>
+<p>这样对于文本token$(n, n)$：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em 2i="2i">{n,n}^{RoPE-Tie} = \text{diag}(\boldsymbol{\mathcal{R}}_n^{({\theta</em>}})}, \boldsymbol{\mathcal{R}<em 2i_1="2i+1">n^{({\theta</em>)}})<br />
+$$</p>
+<p>组合起来恰好覆盖了所有$d/2$个频率，等价于标准RoPE-1D。</p>
+<p><strong>定理5.1：RoPE-Tie的退化性质</strong></p>
+<p>使用适当的频率分配，RoPE-Tie满足：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{n,n}^{RoPE-Tie} = \boldsymbol{\mathcal{R}}_n^{RoPE-1D}<br />
+$$</p>
+<p>对于纯文本输入，RoPE-Tie完全退化为标准RoPE-1D。$\square$</p>
+<h3 id="6">6. 图像位置的缩放因子<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<p><strong>定义6.1：带缩放的二维位置</strong></p>
+<p>对于$w \times h$的图像，位置$(x, y)$缩放为：<br />
+$$<br />
+(sx, ty)<br />
+$$</p>
+<p>其中$s, t &gt; 0$是缩放因子。</p>
+<p><strong>定理6.1：缩放不改变位置信息</strong></p>
+<p>由于旋转编码的性质，缩放只是重新参数化：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em sx="sx">{sx, ty} = \begin{pmatrix} \boldsymbol{\mathcal{R}}</em>} &amp; \boldsymbol{0} \ \boldsymbol{0} &amp; \boldsymbol{\mathcal{R}}_{ty} \end{pmatrix<br />
+$$</p>
+<p>相对位置：<br />
+$$<br />
+\Delta_{scaled} = ((x_2 - x_1)s, (y_2 - y_1)t)<br />
+$$</p>
+<p>只要$(x_2 - x_1, y_2 - y_1)$不同，$\Delta_{scaled}$也不同，因此位置信息无损。</p>
+<p><strong>推导6.1：左右对称性的数学表达</strong></p>
+<p>设句子最后一个token位置为$L$，图像位置$(x, y)$缩放为$(sx + L, ty + L)$。</p>
+<p>图像第一个patch（左上角）：<br />
+$$<br />
+(s + L, t + L)<br />
+$$</p>
+<p>与句子最后token的距离：<br />
+$$<br />
+\Delta_{left} = (s + L, t + L) - (L, L) = (s, t)<br />
+$$</p>
+<p>图像最后一个patch（右下角）：<br />
+$$<br />
+(hs + L, wt + L)<br />
+$$</p>
+<p>后续句子第一个token位置为$K$，要求：<br />
+$$<br />
+(K, K) - (hs + L, wt + L) = (s, t)<br />
+$$</p>
+<p>解得：<br />
+$$<br />
+K = L + hs + s = L + (h+1)s<br />
+$$<br />
+$$<br />
+K = L + wt + t = L + (w+1)t<br />
+$$</p>
+<p>因此：<br />
+$$<br />
+(h+1)s = (w+1)t<br />
+$$</p>
+<p><strong>推导6.2：缩放因子的选择</strong></p>
+<p><strong>方案1：整数位置ID</strong></p>
+<p>要求所有位置都是整数，最简单的解是：<br />
+$$<br />
+s = w + 1, \quad t = h + 1<br />
+$$</p>
+<p>此时：<br />
+$$<br />
+K = L + (w+1)(h+1)<br />
+$$</p>
+<p>图像"等价于"$(w+1)(h+1)$个文本token。</p>
+<p><strong>方案2：图像等价于$wh$个token</strong></p>
+<p>如果希望图像等价于$wh$个token：<br />
+$$<br />
+K = L + wh + 1<br />
+$$</p>
+<p>则：<br />
+$$<br />
+(h+1)s = (w+1)t = wh + 1<br />
+$$</p>
+<p>解得：<br />
+$$<br />
+s = \frac{wh + 1}{h + 1}, \quad t = \frac{wh + 1}{w + 1}<br />
+$$</p>
+<p>此时位置ID不一定是整数。</p>
+<p><strong>推导6.3：两种方案的比较</strong></p>
+<p>方案1：<br />
+- 优点：所有位置都是整数，实现简单<br />
+- 缺点：图像"虚增"了一些等价token数</p>
+<p>方案2：<br />
+- 优点：图像等价token数精确为$wh$，更符合直觉<br />
+- 缺点：位置ID可能非整数，需要处理浮点数</p>
+<p>实践中，方案1更常用，因为"虚增"的影响很小（相对于整个序列）。</p>
+<h3 id="7-token">7. 特殊token的位置处理<a class="toc-link" href="#7-token" title="Permanent link">&para;</a></h3>
+<p><strong>定义7.1：图像边界token</strong></p>
+<p>引入特殊token标记图像边界：<br />
+- [IMG]：图像开始<br />
+- [/IMG]：图像结束</p>
+<p>这些token作为普通文本token处理，位置为一维标量。</p>
+<p><strong>推导7.1：完整的位置序列</strong></p>
+<p>设句子有$L$个token，图像有$w \times h$个patch。</p>
+<p>完整序列的位置：<br />
+$$<br />
+\begin{align}<br />
+&amp;\text{Text}<em 1_1="1,1">1, \ldots, \text{Text}_L &amp;&amp;: (1,1), \ldots, (L,L) \<br />
+&amp;\text{[IMG]} &amp;&amp;: (L+1, L+1) \<br />
+&amp;\text{Patch}</em>}, \ldots, \text{Patch<em L_1="L+1">{h,w} &amp;&amp;: (s+L+1, t+L+1), \ldots, (hs+L+1, wt+L+1) \<br />
+&amp;\text{[/IMG]} &amp;&amp;: (K, K) \<br />
+&amp;\text{Text}</em>, \ldots &amp;&amp;: (K+1, K+1), \ldots<br />
+\end{align}<br />
+$$</p>
+<p>其中$K = L + 1 + (w+1)(h+1)$（使用方案1的缩放）。</p>
+<p><strong>定理7.1：特殊token避免了模态直接相邻</strong></p>
+<p>有了[IMG]和[/IMG]，任意两个图像patch之间都至少隔着这两个特殊token，因此：<br />
+- 不需要考虑两张不同图像直接相邻的情况<br />
+- 每张图像都"夹在"两个文本token之间（[IMG]和[/IMG]）<br />
+- 统一的位置编码方案适用于所有情况</p>
+<h3 id="8">8. 轴向位置编码的数学理论<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<p><strong>定义8.1：轴向分解（Axial Decomposition）</strong></p>
+<p>二维位置编码$(x, y)$的轴向分解：<br />
+$$<br />
+\text{Pos}(x, y) = \text{Pos}_x(x) + \text{Pos}_y(y)<br />
+$$</p>
+<p>或乘法形式：<br />
+$$<br />
+\text{Pos}(x, y) = \text{Pos}_x(x) \odot \text{Pos}_y(y)<br />
+$$</p>
+<p>RoPE-2D使用的是分块对角（直和）形式：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{x,y} = \boldsymbol{\mathcal{R}}_x \oplus \boldsymbol{\mathcal{R}}_y<br />
+$$</p>
+<p><strong>定理8.1：轴向分解保持维度加性</strong></p>
+<p>加法分解：<br />
+$$<br />
+\dim(\text{Pos}(x, y)) = \dim(\text{Pos}_x(x)) = \dim(\text{Pos}_y(y))<br />
+$$</p>
+<p>直和分解（RoPE-2D）：<br />
+$$<br />
+\dim(\boldsymbol{\mathcal{R}}_{x,y}) = \dim(\boldsymbol{\mathcal{R}}_x) + \dim(\boldsymbol{\mathcal{R}}_y)<br />
+$$</p>
+<p><strong>推导8.1：加法vs直和的比较</strong></p>
+<p><strong>加法分解</strong>：<br />
+$$<br />
+\boldsymbol{p}_{x,y} = \boldsymbol{p}_x + \boldsymbol{p}_y, \quad \boldsymbol{p}_x, \boldsymbol{p}_y \in \mathbb{R}^d<br />
+$$</p>
+<p>优点：维度不增加<br />
+缺点：$x$和$y$的信息混合，可能相互干扰</p>
+<p><strong>直和分解</strong>：<br />
+$$<br />
+\boldsymbol{p}_{x,y} = \begin{pmatrix} \boldsymbol{p}_x \ \boldsymbol{p}_y \end{pmatrix}, \quad \boldsymbol{p}_x \in \mathbb{R}^{d_1}, \boldsymbol{p}_y \in \mathbb{R}^{d_2}<br />
+$$</p>
+<p>优点：$x$和$y$完全独立，信息不干扰<br />
+缺点：维度翻倍（$d_1 + d_2$）</p>
+<p><strong>推导8.2：RoPE的选择</strong></p>
+<p>RoPE选择直和形式的原因：<br />
+1. <strong>独立性</strong>：$x$和$y$方向完全独立，便于分析和优化<br />
+2. <strong>相对位置</strong>：旋转矩阵的群性质只在直和形式下保持<br />
+3. <strong>可扩展性</strong>：容易推广到3D（视频）或更高维</p>
+<p>虽然维度增加，但通过合理分配（如$d_1 = d_2 = d/2$），总维度仍为$d$。</p>
+<h3 id="9">9. 多模态位置编码的信息论分析<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<p><strong>定义9.1：位置编码的熵</strong></p>
+<p>位置编码$\boldsymbol{p}$的信息熵：<br />
+$$<br />
+H(\boldsymbol{p}) = -\int p(\boldsymbol{p}) \log p(\boldsymbol{p}) d\boldsymbol{p}<br />
+$$</p>
+<p>对于离散位置集合$\mathcal{P}$：<br />
+$$<br />
+H(\mathcal{P}) = \log |\mathcal{P}|<br />
+$$</p>
+<p><strong>定理9.1：二维位置的信息容量</strong></p>
+<p>一维位置：$\mathcal{P}<em 1D="1D">{1D} = {1, 2, \ldots, L}$<br />
+$$<br />
+H</em> = \log L<br />
+$$</p>
+<p>二维位置：$\mathcal{P}<em 2D="2D">{2D} = {(x, y) : 1 \leq x \leq H, 1 \leq y \leq W}$<br />
+$$<br />
+H</em> = \log(H \cdot W)<br />
+$$</p>
+<p>展平后：$\mathcal{P}<em flat="flat">{flat} = {1, 2, \ldots, HW}$<br />
+$$<br />
+H</em>} = \log(HW) = H_{2D<br />
+$$</p>
+<p><strong>推导9.1：展平保持信息但损失结构</strong></p>
+<p>虽然：<br />
+$$<br />
+H_{flat} = H_{2D}<br />
+$$</p>
+<p>但二维结构信息丢失。定义结构熵：<br />
+$$<br />
+H_{struct} = H(\text{相邻关系})<br />
+$$</p>
+<p>对于二维网格，每个内部位置有4个相邻位置，边界位置2-3个。平均相邻度：<br />
+$$<br />
+\bar{d}_{2D} \approx 4<br />
+$$</p>
+<p>展平后，相邻关系变为不规则：<br />
+$$<br />
+\bar{d}_{flat} \approx 2 \quad \text{(一维序列)}<br />
+$$</p>
+<p>结构熵损失：<br />
+$$<br />
+\Delta H_{struct} = H_{struct}^{2D} - H_{struct}^{flat} &gt; 0<br />
+$$</p>
+<p><strong>推导9.2：RoPE-2D保留结构信息</strong></p>
+<p>使用RoPE-2D，相对位置$(\Delta_x, \Delta_y)$直接编码：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{\Delta_x, \Delta_y}<br />
+$$</p>
+<p>相邻位置的编码：<br />
+$$<br />
+\begin{align}<br />
+\text{水平：} \quad &amp;\boldsymbol{\mathcal{R}}<em 1_0="1,0">{0,1} \<br />
+\text{垂直：} \quad &amp;\boldsymbol{\mathcal{R}}</em> \<br />
+\text{对角：} \quad &amp;\boldsymbol{\mathcal{R}}_{1,1}<br />
+\end{align}<br />
+$$</p>
+<p>这三种相邻关系有不同的编码，结构信息得以保留：<br />
+$$<br />
+\Delta H_{struct}^{RoPE-2D} = 0<br />
+$$</p>
+<h3 id="10-">10. 视觉-语言位置对齐的理论<a class="toc-link" href="#10-" title="Permanent link">&para;</a></h3>
+<p><strong>定义10.1：跨模态位置对齐</strong></p>
+<p>视觉patch $(x, y)$与文本token $n$的对齐度：<br />
+$$<br />
+A(n, (x, y)) = \text{Sim}(\boldsymbol{p}<em x_y="x,y">n^{text}, \boldsymbol{p}</em>)}^{vision<br />
+$$</p>
+<p>其中$\text{Sim}$是相似度函数，如余弦相似度。</p>
+<p><strong>推导10.1：展平策略的对齐</strong></p>
+<p>使用展平策略，图像patch位置为：<br />
+$$<br />
+p_{x,y}^{flat} = L + \phi(x, y)<br />
+$$</p>
+<p>文本token位置为：<br />
+$$<br />
+p_n^{text} = n<br />
+$$</p>
+<p>位置编码：<br />
+$$<br />
+\boldsymbol{p}_{p}^{RoPE-1D} = \boldsymbol{\mathcal{R}}_p \boldsymbol{e}<br />
+$$</p>
+<p>相似度：<br />
+$$<br />
+\text{Sim}(n, (x, y)) = \boldsymbol{e}^T \boldsymbol{\mathcal{R}}<em L_phi_x_y_="L+\phi(x,y)">n^T \boldsymbol{\mathcal{R}}</em>} \boldsymbol{e} = \boldsymbol{e}^T \boldsymbol{\mathcal{R}}_{\phi(x,y)+L-n} \boldsymbol{e<br />
+$$</p>
+<p>取决于一维相对位置$\Delta = \phi(x,y) + L - n$。</p>
+<p><strong>推导10.2：RoPE-Tie的对齐</strong></p>
+<p>使用RoPE-Tie，文本位置$(n, n)$，图像位置$(sx+L, ty+L)$。</p>
+<p>位置编码的内积：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em sx_L_="sx+L," ty_L="ty+L">{n,n}^T \boldsymbol{\mathcal{R}}</em>} = \begin{pmatrix} \boldsymbol{\mathcal{R}<em ty_L-n="ty+L-n">{sx+L-n} &amp; \boldsymbol{0} \ \boldsymbol{0} &amp; \boldsymbol{\mathcal{R}}</em>} \end{pmatrix<br />
+$$</p>
+<p>相似度取决于二维相对位置$(sx+L-n, ty+L-n)$，保留了$x$和$y$的独立信息。</p>
+<p><strong>定理10.1：RoPE-Tie提供更精细的对齐</strong></p>
+<p>对于相同的一维相对距离$\Delta = sx + L - n = ty + L - n$（当$s=t$时），RoPE-Tie能区分不同的$(x, y)$组合，而展平策略不能。</p>
+<p>例如：$(x_1, y_1)$和$(x_2, y_2)$满足$x_1 + y_1 = x_2 + y_2$，则在展平后（行优先，$s=t=1$）有相同的一维位置，但RoPE-Tie能区分它们（除非$x_1=x_2$且$y_1=y_2$）。$\square$</p>
+<h3 id="11">11. 多图像场景的位置编码<a class="toc-link" href="#11" title="Permanent link">&para;</a></h3>
+<p><strong>定义11.1：多图像输入</strong></p>
+<p>输入包含$M$张图像，第$k$张图像大小为$w_k \times h_k$。</p>
+<p><strong>推导11.1：逐图像的位置分配</strong></p>
+<p>使用[IMG]和[/IMG]分隔各图像：<br />
+$$<br />
+\begin{align}<br />
+&amp;\text{Text}<em L_0="L_0">1, \ldots, \text{Text}</em> &amp;&amp;: (1, 1), \ldots, (L_0, L_0) \<br />
+&amp;\text{[IMG]}_1 &amp;&amp;: (L_0 + 1, L_0 + 1) \<br />
+&amp;\text{Image}_1 &amp;&amp;: (s_1 x + L_0 + 1, t_1 y + L_0 + 1), \quad x \in [1, h_1], y \in [1, w_1] \<br />
+&amp;\text{[/IMG]}_1 &amp;&amp;: (L_1, L_1) \<br />
+&amp;\text{Text between} &amp;&amp;: (L_1 + 1, L_1 + 1), \ldots \<br />
+&amp;\text{[IMG]}_2 &amp;&amp;: \ldots \<br />
+&amp;\vdots<br />
+\end{align}<br />
+$$</p>
+<p>其中：<br />
+$$<br />
+L_k = L_{k-1} + 1 + (w_k + 1)(h_k + 1)<br />
+$$</p>
+<p><strong>定理11.1：多图像的位置一致性</strong></p>
+<p>每张图像独立应用相同的位置编码规则，保证：<br />
+1. 所有patch位置唯一<br />
+2. 每张图像的局部结构保持<br />
+3. 图像间不会位置冲突</p>
+<p><strong>推导11.2：不同大小图像的处理</strong></p>
+<p>图像$k$的缩放因子：<br />
+$$<br />
+s_k = w_k + 1, \quad t_k = h_k + 1<br />
+$$</p>
+<p>不同图像有不同的缩放因子，但这不影响位置编码的有效性，因为：<br />
+1. 每张图像的patch之间使用相同的$s_k, t_k$<br />
+2. 跨图像的相对位置不需要特殊处理（由绝对位置差自然确定）</p>
+<h3 id="12">12. 位置编码的频谱特性<a class="toc-link" href="#12" title="Permanent link">&para;</a></h3>
+<p><strong>定义12.1：位置编码的傅里叶表示</strong></p>
+<p>RoPE可以看作傅里叶级数：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em i="0">m = \sum</em>}^{d/2-1} \alpha_i e^{im\theta_i<br />
+$$</p>
+<p>其中$\alpha_i$是系数，$e^{im\theta_i} = \cos(m\theta_i) + i\sin(m\theta_i)$。</p>
+<p><strong>推导12.1：一维位置的频谱</strong></p>
+<p>对于RoPE-1D，频率集合：<br />
+$$<br />
+\Theta_{1D} = {\theta_i}_{i=0}^{d/2-1}<br />
+$$</p>
+<p>功率谱：<br />
+$$<br />
+P_{1D}(\theta) = \sum_{i=0}^{d/2-1} \delta(\theta - \theta_i)<br />
+$$</p>
+<p>其中$\delta$是Dirac delta函数。</p>
+<p><strong>推导12.2：二维位置的频谱</strong></p>
+<p>对于RoPE-2D，频率集合分为两组：<br />
+$$<br />
+\Theta_x = {\theta_i^x}<em j="0">{i=0}^{d/4-1}, \quad \Theta_y = {\theta_j^y}</em>}^{d/4-1<br />
+$$</p>
+<p>二维功率谱：<br />
+$$<br />
+P_{2D}(\theta_x, \theta_y) = \sum_{i,j} \delta(\theta_x - \theta_i^x) \delta(\theta_y - \theta_j^y)<br />
+$$</p>
+<p><strong>定理12.1：RoPE-Tie的频谱完整性</strong></p>
+<p>当$\Theta_x \cup \Theta_y = \Theta_{1D}$且$\Theta_x \cap \Theta_y = \emptyset$时，RoPE-Tie在$(n, n)$处的频谱等价于RoPE-1D在$n$处的频谱。</p>
+<p><strong>证明</strong>：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{n,n}^{RoPE-Tie} = \text{diag}(\boldsymbol{\mathcal{R}}_n^{\Theta_x}, \boldsymbol{\mathcal{R}}_n^{\Theta_y})<br />
+$$</p>
+<p>其包含的频率为$\Theta_x \cup \Theta_y = \Theta_{1D}$，与RoPE-1D相同。$\square$</p>
+<h3 id="13">13. 注意力机制下的位置交互<a class="toc-link" href="#13" title="Permanent link">&para;</a></h3>
+<p><strong>定义13.1：位置相关的注意力分数</strong></p>
+<p>Attention分数：<br />
+$$<br />
+s(i, j) = (\boldsymbol{\mathcal{R}}<em j-i="j-i">i \boldsymbol{q})^T (\boldsymbol{\mathcal{R}}_j \boldsymbol{k}) = \boldsymbol{q}^T \boldsymbol{\mathcal{R}}</em>} \boldsymbol{k<br />
+$$</p>
+<p>对于RoPE-2D：<br />
+$$<br />
+s((x_1, y_1), (x_2, y_2)) = \boldsymbol{q}^T \boldsymbol{\mathcal{R}}_{x_2-x_1, y_2-y_1} \boldsymbol{k}<br />
+$$</p>
+<p><strong>推导13.1：文本-图像注意力</strong></p>
+<p>文本token $n$（位置$(n, n)$）对图像patch $(x, y)$（位置$(sx+L, ty+L)$）的注意力：<br />
+$$<br />
+s(n, (x,y)) = \boldsymbol{q}<em sx_L-n_="sx+L-n," ty_L-n="ty+L-n">n^T \boldsymbol{\mathcal{R}}</em>} \boldsymbol{k}_{x,y<br />
+$$</p>
+<p>分解为：<br />
+$$<br />
+s(n, (x,y)) = \boldsymbol{q}<em sx_L-n="sx+L-n">n^T \begin{pmatrix} \boldsymbol{\mathcal{R}}</em>}^{(d/2)} &amp; \boldsymbol{0} \ \boldsymbol{0} &amp; \boldsymbol{\mathcal{R}<em x_y="x,y">{ty+L-n}^{(d/2)} \end{pmatrix} \boldsymbol{k}</em><br />
+$$</p>
+<p><strong>推导13.2：图像内部注意力</strong></p>
+<p>同一图像内，patch $(x_1, y_1)$对patch $(x_2, y_2)$的注意力：<br />
+$$<br />
+s((x_1,y_1), (x_2,y_2)) = \boldsymbol{q}<em s_x_2-x_1_="s(x_2-x_1)," t_y_2-y_1_="t(y_2-y_1)">{x_1,y_1}^T \boldsymbol{\mathcal{R}}</em>} \boldsymbol{k}_{x_2,y_2<br />
+$$</p>
+<p>由于$s = w+1, t = h+1$，相对位置被缩放，但对于同一图像内的所有patch对，缩放是一致的，因此相对关系保持。</p>
+<p><strong>定理13.1：局部注意力模式的保持</strong></p>
+<p>对于图像内部的相邻patch（二维相邻），其注意力分数由相对位置$(\pm s, 0)$或$(0, \pm t)$决定。</p>
+<p>由于$s, t$对于同一图像是常数，相邻patch的注意力模式一致，不受图像在序列中位置的影响。$\square$</p>
+<h3 id="14">14. 位置插值与多模态<a class="toc-link" href="#14" title="Permanent link">&para;</a></h3>
+<p><strong>定义14.1：多模态中的位置插值</strong></p>
+<p>当测试时图像大小变化，从训练的$w \times h$变为$w' \times h'$：<br />
+$$<br />
+w' &gt; w, \quad h' &gt; h<br />
+$$</p>
+<p>位置插值策略：<br />
+$$<br />
+(x', y') \to \left(\frac{w}{w'} x', \frac{h}{h'} y'\right)<br />
+$$</p>
+<p><strong>推导14.1：插值对RoPE-Tie的影响</strong></p>
+<p>原始位置：$(sx + L, ty + L)$<br />
+插值后：$\left(\frac{w}{w'} s x + L, \frac{h}{h'} t y + L\right)$</p>
+<p>如果$s = w+1, t = h+1$，则：<br />
+$$<br />
+s' = \frac{w}{w'}(w+1), \quad t' = \frac{h}{h'}(h+1)<br />
+$$</p>
+<p><strong>定理14.1：插值保持相对关系</strong></p>
+<p>对于同一图像内的任意两个patch $(x_1, y_1)$和$(x_2, y_2)$，插值后的相对位置：<br />
+$$<br />
+\Delta' = \left(\frac{w}{w'}s(x_2-x_1), \frac{h}{h'}t(y_2-y_1)\right)<br />
+$$</p>
+<p>虽然绝对位置被缩放，但相对位置的比例关系保持：<br />
+$$<br />
+\frac{\Delta_x'}{\Delta_y'} = \frac{s(x_2-x_1)}{t(y_2-y_1)} \cdot \frac{h'}{w'} = \frac{(w+1)(x_2-x_1)}{(h+1)(y_2-y_1)} \cdot \frac{h'}{w'}<br />
+$$</p>
+<p>如果$w' / h' \approx w / h$（保持宽高比），则比例关系近似保持。$\square$</p>
+<h3 id="15-transformer">15. 多模态Transformer的位置编码实现<a class="toc-link" href="#15-transformer" title="Permanent link">&para;</a></h3>
+<p><strong>算法15.1：RoPE-Tie的前向计算</strong></p>
+<p>输入：混合序列${x_i}_{i=1}^N$，每个$x_i$带有位置标签$(p_1^{(i)}, p_2^{(i)})$</p>
+<p>对于每个位置$i$：<br />
+1. 计算旋转矩阵：<br />
+   $$<br />
+   \boldsymbol{\mathcal{R}}<em p_1_i_="p_1^{(i)">i = \text{diag}(\boldsymbol{\mathcal{R}}</em>)}}^{(\Theta_x)}, \boldsymbol{\mathcal{R}}_{p_2^{(i)}}^{(\Theta_y)<br />
+   $$</p>
+<ol start="2">
+<li>
+<p>应用旋转：<br />
+   $$<br />
+   \tilde{\boldsymbol{q}}_i = \boldsymbol{\mathcal{R}}_i \boldsymbol{q}_i, \quad \tilde{\boldsymbol{k}}_i = \boldsymbol{\mathcal{R}}_i \boldsymbol{k}_i<br />
+   $$</p>
+</li>
+<li>
+<p>计算Attention：<br />
+   $$<br />
+   \alpha_{ij} = \frac{\exp(\tilde{\boldsymbol{q}}_i^T \tilde{\boldsymbol{k}}_j / \sqrt{d})}{\sum_k \exp(\tilde{\boldsymbol{q}}_i^T \tilde{\boldsymbol{k}}_k / \sqrt{d})}<br />
+   $$</p>
+</li>
+</ol>
+<p><strong>推导15.1：计算复杂度</strong></p>
+<p>对于序列长度$N$：<br />
+- RoPE应用：$O(Nd)$（线性于序列长度和维度）<br />
+- Attention计算：$O(N^2 d)$（标准Attention复杂度）</p>
+<p>RoPE-Tie相比RoPE-1D没有额外的复杂度增加（只是频率分配不同）。</p>
+<p><strong>推导15.2：内存占用</strong></p>
+<p>位置信息存储：<br />
+- RoPE-1D：每个位置一个标量，$O(N)$<br />
+- RoPE-Tie：每个位置两个标量，$O(2N) = O(N)$</p>
+<p>预计算的旋转矩阵（如果使用Cache）：<br />
+- RoPE-1D：$O(L_{max} \cdot d)$<br />
+- RoPE-Tie：$O(L_{max}^2 \cdot d)$（因为二维位置$(x, y)$的组合数）</p>
+<p>但实际上不需要缓存所有可能的二维位置，只需动态计算，因此内存占用仍为$O(Nd)$。</p>
+<h3 id="16">16. 跨模态位置编码的泛化能力<a class="toc-link" href="#16" title="Permanent link">&para;</a></h3>
+<p><strong>定义16.1：位置编码的泛化</strong></p>
+<p>训练时图像大小分布：$\mathcal{D}<em test="test">{train} = {(w, h)}$<br />
+测试时图像大小：$(w</em>$}, h_{test}) \notin \mathcal{D}_{train</p>
+<p>泛化能力：模型在新大小图像上的性能不显著下降。</p>
+<p><strong>定理16.1：RoPE-Tie的尺度不变性</strong></p>
+<p>由于RoPE的旋转性质，位置编码满足：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em _lambda="\lambda" x="x">{\lambda x, \lambda y} = \text{diag}(\boldsymbol{\mathcal{R}}</em>)}, \boldsymbol{\mathcal{R}}_{\lambda y<br />
+$$</p>
+<p>对于不同的缩放因子$\lambda$（即不同图像大小），只要相对位置$(\Delta_x, \Delta_y)$的模式相似，注意力模式也相似。</p>
+<p><strong>推导16.1：训练多尺度图像的好处</strong></p>
+<p>如果训练时包含多种尺寸$(w_1, h_1), (w_2, h_2), \ldots$，则模型学到的是：<br />
+$$<br />
+\text{Attention}(\Delta_x, \Delta_y) \text{ for various } (\Delta_x, \Delta_y)<br />
+$$</p>
+<p>测试时遇到新尺寸，只要$(\Delta_x, \Delta_y)$在训练过的范围内（通过插值等手段），就能泛化。</p>
+<p><strong>推导16.2：展平策略的泛化问题</strong></p>
+<p>使用展平策略，图像大小变化会改变展平的映射：<br />
+$$<br />
+\phi_{w \times h}(x, y) = xw + y<br />
+$$</p>
+<p>不同的$w$导致完全不同的一维位置序列，模型很难泛化。</p>
+<p>而RoPE-Tie通过缩放保持了相对位置的结构，更易泛化。</p>
+<h3 id="17-mask">17. 位置编码与注意力Mask的交互<a class="toc-link" href="#17-mask" title="Permanent link">&para;</a></h3>
+<p><strong>定义17.1：Causal Mask</strong></p>
+<p>Decoder中使用下三角Mask：<br />
+$$<br />
+M_{ij} = \begin{cases}<br />
+0, &amp; j \leq i \<br />
+-\infty, &amp; j &gt; i<br />
+\end{cases}<br />
+$$</p>
+<p>Attention分数：<br />
+$$<br />
+s'<em ij="ij">{ij} = s</em>} + M_{ij<br />
+$$</p>
+<p><strong>推导17.1：多模态中的Causal Mask</strong></p>
+<p>对于文本token $i$（位置$p_i$）和图像patch $j$（位置$(x_j, y_j)$转为$p_j$）：</p>
+<p>如果图像出现在文本之前（$p_j &lt; p_i$），则：<br />
+$$<br />
+M_{ij} = 0 \quad \text{（可见）}<br />
+$$</p>
+<p>如果图像出现在文本之后（$p_j &gt; p_i$），则：<br />
+$$<br />
+M_{ij} = -\infty \quad \text{（不可见）}<br />
+$$</p>
+<p><strong>推导17.2：图像内部的Mask</strong></p>
+<p>图像是同时输入的（非自回归），因此图像内部所有patch相互可见：<br />
+$$<br />
+M_{(x_1,y_1), (x_2,y_2)} = 0, \quad \forall (x_1,y_1), (x_2,y_2) \in \text{same image}<br />
+$$</p>
+<p>这与文本的逐token生成不同。</p>
+<p><strong>定理17.1：位置编码与Mask的独立性</strong></p>
+<p>位置编码和Attention Mask是独立的机制：<br />
+- 位置编码决定相对位置的表示<br />
+- Mask决定哪些位置对可以相互作用</p>
+<p>两者可以独立设计和优化，不冲突。$\square$</p>
+<h3 id="18">18. 三维位置编码（视频）<a class="toc-link" href="#18" title="Permanent link">&para;</a></h3>
+<p><strong>定义18.1：三维RoPE（RoPE-3D）</strong></p>
+<p>对于视频，位置为$(t, x, y)$，其中$t$是时间维度。</p>
+<p>三维旋转矩阵：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}_{t,x,y}^{(d)} = \text{diag}(\boldsymbol{\mathcal{R}}_t^{(d/3)}, \boldsymbol{\mathcal{R}}_x^{(d/3)}, \boldsymbol{\mathcal{R}}_y^{(d/3)})<br />
+$$</p>
+<p>将$d$维向量分为三等份，分别编码三个维度。</p>
+<p><strong>推导18.1：视频-文本混合输入</strong></p>
+<p>文本token：$(n, n, n)$<br />
+视频patch：$(t, x, y)$</p>
+<p>统一为三维位置表示。</p>
+<p><strong>定理18.1：RoPE的任意维度推广</strong></p>
+<p>对于$K$维位置$(p_1, p_2, \ldots, p_K)$：<br />
+$$<br />
+\boldsymbol{\mathcal{R}}<em p_1="p_1">{p_1, \ldots, p_K}^{(d)} = \text{diag}(\boldsymbol{\mathcal{R}}</em>)}^{(d_1)}, \ldots, \boldsymbol{\mathcal{R}}_{p_K}^{(d_K)<br />
+$$</p>
+<p>其中$\sum_{i=1}^K d_i = d$。</p>
+<p>退化性质：当所有$p_i$相等，即$(n, n, \ldots, n)$，且频率适当分配时，等价于$d$维RoPE-1D。$\square$</p>
+<h3 id="19">19. 位置编码的学习与固定<a class="toc-link" href="#19" title="Permanent link">&para;</a></h3>
+<p><strong>定义19.1：可学习vs固定位置编码</strong></p>
+<p><strong>固定位置编码</strong>（如RoPE）：<br />
+$$<br />
+\boldsymbol{p}_i = f(i; \boldsymbol{\theta}), \quad \boldsymbol{\theta} \text{ 固定}<br />
+$$</p>
+<p><strong>可学习位置编码</strong>：<br />
+$$<br />
+\boldsymbol{p}<em max="max">i = \boldsymbol{E}_i, \quad \boldsymbol{E} \in \mathbb{R}^{L</em>} \times d} \text{ 可学习<br />
+$$</p>
+<p><strong>推导19.1：两者的对比</strong></p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>固定（RoPE）</th>
+<th>可学习</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>长度泛化</td>
+<td>好（可外推）</td>
+<td>差（固定$L_{max}$）</td>
+</tr>
+<tr>
+<td>参数量</td>
+<td>0</td>
+<td>$O(L_{max} d)$</td>
+</tr>
+<tr>
+<td>表达能力</td>
+<td>有限（函数形式固定）</td>
+<td>强（任意模式）</td>
+</tr>
+<tr>
+<td>训练速度</td>
+<td>快（无需更新）</td>
+<td>慢（额外参数）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>推导19.2：混合策略</strong></p>
+<p>结合两者优点：<br />
+$$<br />
+\boldsymbol{p}_i = f(i; \boldsymbol{\theta}) + \boldsymbol{E}_i<br />
+$$</p>
+<p>其中$f$是固定的RoPE，$\boldsymbol{E}$是可学习的偏置。</p>
+<p><strong>定理19.1：混合策略的优势</strong></p>
+<p>混合策略结合了：<br />
+1. RoPE的长度泛化能力<br />
+2. 可学习编码的灵活性</p>
+<p>在有限的训练长度内，可学习部分补偿RoPE的不足；超出训练长度时，RoPE提供基础的位置信息。$\square$</p>
+<h3 id="20">20. 实践中的超参数设置<a class="toc-link" href="#20" title="Permanent link">&para;</a></h3>
+<p><strong>建议20.1：频率分配</strong></p>
+<p>对于RoPE-Tie，$d = 128$的情况：<br />
+- $x$方向：使用$\theta_{0}, \theta_{2}, \ldots, \theta_{62}$（32个频率）<br />
+- $y$方向：使用$\theta_{1}, \theta_{3}, \ldots, \theta_{63}$（32个频率）</p>
+<p>或者根据任务特点调整：<br />
+- 如果$x$方向（如高度）变化更重要：分配更多频率<br />
+- 如果$x, y$同等重要：均分</p>
+<p><strong>建议20.2：缩放因子选择</strong></p>
+<p>对于常见的图像尺寸（如224×224，分patch后14×14）：<br />
+$$<br />
+s = t = 15 \quad \text{（方案1：} w+1=h+1=15\text{）}<br />
+$$</p>
+<p>或：<br />
+$$<br />
+s = t = \frac{197}{15} \approx 13.13 \quad \text{（方案2：} wh+1=197\text{）}<br />
+$$</p>
+<p>方案1更简单，推荐使用。</p>
+<p><strong>建议20.3：特殊token的使用</strong></p>
+<p>是否使用[IMG]和[/IMG]取决于任务：<br />
+- <strong>图像理解</strong>（输入）：可选，主要为了标记图像边界<br />
+- <strong>图像生成</strong>（输出）：必须，用于指示生成开始和结束<br />
+- <strong>图文交错</strong>：推荐，便于区分不同模态</p>
+<p><strong>建议20.4：实现细节</strong></p>
+<pre class="highlight"><code class="language-python"># 伪代码示例
+def apply_rope_tie(q, k, positions, d):
+    # positions: (batch, seq_len, 2) 表示 (p1, p2)
+    d_half = d // 2
+
+    # 分别处理 x 和 y 方向
+    q_x, q_y = q[..., :d_half], q[..., d_half:]
+    k_x, k_y = k[..., :d_half], k[..., d_half:]
+
+    # 应用旋转
+    p1, p2 = positions[..., 0], positions[..., 1]
+    q_x_rot = apply_rope_1d(q_x, p1, freqs_x)
+    q_y_rot = apply_rope_1d(q_y, p2, freqs_y)
+    k_x_rot = apply_rope_1d(k_x, p1, freqs_x)
+    k_y_rot = apply_rope_1d(k_y, p2, freqs_y)
+
+    # 拼接
+    q_rot = concat([q_x_rot, q_y_rot], dim=-1)
+    k_rot = concat([k_x_rot, k_y_rot], dim=-1)
+
+    return q_rot, k_rot
+</code></pre>
+
+<h3 id="_9">总结：多模态位置编码的核心原则<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h3>
+<p><strong>原则1：保持模态内的结构</strong><br />
+- 文本：一维序列结构<br />
+- 图像：二维网格结构<br />
+- 视频：三维时空结构</p>
+<p><strong>原则2：统一的数学框架</strong><br />
+- 使用轴向分解（直和）统一不同维度<br />
+- 通过频率分配实现维度退化</p>
+<p><strong>原则3：可扩展性</strong><br />
+- 易于推广到3D、4D或更高维<br />
+- 支持变长、变尺寸输入</p>
+<p><strong>原则4：计算效率</strong><br />
+- 复杂度不超过标准Attention<br />
+- 与Flash Attention等优化技术兼容</p>
+<p>RoPE-Tie作为一个统一多模态位置编码的方案，在理论和实践中都展现了良好的特性，值得在多模态大模型中进一步探索和应用。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -289,7 +1103,30 @@ url={\url{https://spaces.ac.cn/archives/10040}},<br />
 <li><a href="#_5">合二为一</a></li>
 <li><a href="#_6">延伸思考</a></li>
 <li><a href="#_7">文章小结</a></li>
-<li><a href="#_8">公式推导与注释</a></li>
+<li><a href="#_8">公式推导与注释</a><ul>
+<li><a href="#1-rope">1. 一维RoPE的数学基础</a></li>
+<li><a href="#2-rope">2. 二维RoPE的数学推广</a></li>
+<li><a href="#3">3. 展平策略的数学分析</a></li>
+<li><a href="#4-">4. 文本-图像混合输入的统一编码</a></li>
+<li><a href="#5-rope-tie">5. RoPE-Tie：统一一维和二维的方案</a></li>
+<li><a href="#6">6. 图像位置的缩放因子</a></li>
+<li><a href="#7-token">7. 特殊token的位置处理</a></li>
+<li><a href="#8">8. 轴向位置编码的数学理论</a></li>
+<li><a href="#9">9. 多模态位置编码的信息论分析</a></li>
+<li><a href="#10-">10. 视觉-语言位置对齐的理论</a></li>
+<li><a href="#11">11. 多图像场景的位置编码</a></li>
+<li><a href="#12">12. 位置编码的频谱特性</a></li>
+<li><a href="#13">13. 注意力机制下的位置交互</a></li>
+<li><a href="#14">14. 位置插值与多模态</a></li>
+<li><a href="#15-transformer">15. 多模态Transformer的位置编码实现</a></li>
+<li><a href="#16">16. 跨模态位置编码的泛化能力</a></li>
+<li><a href="#17-mask">17. 位置编码与注意力Mask的交互</a></li>
+<li><a href="#18">18. 三维位置编码（视频）</a></li>
+<li><a href="#19">19. 位置编码的学习与固定</a></li>
+<li><a href="#20">20. 实践中的超参数设置</a></li>
+<li><a href="#_9">总结：多模态位置编码的核心原则</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

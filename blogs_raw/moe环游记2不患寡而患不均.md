@@ -2,10 +2,9 @@
 title: MoE环游记：2、不患寡而患不均
 slug: moe环游记2不患寡而患不均
 date: 2025-02-21
-tags: 损失函数, 梯度, 稀疏, moe, 生成模型
+tags: 详细推导, 损失函数, 梯度, 稀疏, moe, 生成模型
 status: pending
 ---
-
 # MoE环游记：2、不患寡而患不均
 
 **原文链接**: [https://spaces.ac.cn/archives/10735](https://spaces.ac.cn/archives/10735)

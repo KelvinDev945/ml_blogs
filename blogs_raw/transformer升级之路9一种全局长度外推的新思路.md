@@ -2,10 +2,9 @@
 title: Transformer升级之路：9、一种全局长度外推的新思路
 slug: transformer升级之路9一种全局长度外推的新思路
 date: 2023-05-12
-tags: attention, 泛化, 外推, 生成模型, attention
+tags: 详细推导, attention, 泛化, 外推, 生成模型, attention
 status: pending
 ---
-
 # Transformer升级之路：9、一种全局长度外推的新思路
 
 **原文链接**: [https://spaces.ac.cn/archives/9603](https://spaces.ac.cn/archives/9603)

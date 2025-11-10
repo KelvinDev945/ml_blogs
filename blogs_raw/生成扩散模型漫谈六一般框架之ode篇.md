@@ -2,10 +2,9 @@
 title: 生成扩散模型漫谈（六）：一般框架之ODE篇
 slug: 生成扩散模型漫谈六一般框架之ode篇
 date: 2022-08-08
-tags: flow模型, 微分方程, 生成模型, DDPM, 扩散
+tags: 详细推导, flow模型, 微分方程, 生成模型, DDPM, 扩散
 status: pending
 ---
-
 # 生成扩散模型漫谈（六）：一般框架之ODE篇
 
 **原文链接**: [https://spaces.ac.cn/archives/9228](https://spaces.ac.cn/archives/9228)

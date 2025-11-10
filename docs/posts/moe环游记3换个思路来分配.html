@@ -74,7 +74,7 @@
             <ol class="breadcrumb">
                 <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
                 
-                <li class="breadcrumb-item"><a href="../index.html?tags=最优">最优</a></li>
+                <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
                     #185 MoE环游记：3、换个思路来分配
@@ -94,6 +94,10 @@
             </div>
             
             <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=详细推导" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 详细推导</span>
+                </a>
                 
                 <a href="../index.html?tags=最优" class="tag-link">
                     <span class="tag"><i class="fas fa-tag"></i> 最优</span>
@@ -203,7 +207,653 @@ url={\url{https://spaces.ac.cn/archives/10757}},<br />
 } </p>
 <hr />
 <h2 id="_8">公式推导与注释<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<p>本节提供MoE负载均衡问题的深入数学分析，从最优化理论、深度学习和实际应用等多个角度解释Loss-Free方法的理论基础。</p>
+<h3 id="1-moe">1. MoE的数学模型<a class="toc-link" href="#1-moe" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 基本形式<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>标准的MoE（Mixture of Experts）模型可以形式化表示为：</p>
+<p>$$<br />
+\boldsymbol{y} = \sum_{i=1}^{n} g_i(\boldsymbol{x}) \boldsymbol{e}_i(\boldsymbol{x})<br />
+$$</p>
+<p>其中：<br />
+- $\boldsymbol{x} \in \mathbb{R}^d$ 是输入token的表示<br />
+- $n$ 是专家（Expert）的总数<br />
+- $\boldsymbol{e}<em i="1">i: \mathbb{R}^d \to \mathbb{R}^{d'}$ 是第 $i$ 个专家网络<br />
+- $g_i: \mathbb{R}^d \to \mathbb{R}$ 是门控（Gating）函数，满足 $\sum</em>) = 1$}^n g_i(\boldsymbol{x</p>
+<h4 id="12-top-kmoe">1.2 Top-K稀疏化MoE<a class="toc-link" href="#12-top-kmoe" title="Permanent link">&para;</a></h4>
+<p>为了计算效率，实际应用中通常采用Top-K稀疏化的MoE：</p>
+<p>$$<br />
+\boldsymbol{y} = \sum_{i \in \mathcal{T}_k(\boldsymbol{x})} \tilde{g}_i(\boldsymbol{x}) \boldsymbol{e}_i(\boldsymbol{x})<br />
+$$</p>
+<p>其中 $\mathcal{T}_k(\boldsymbol{x}) = \mathop{\text{argtop}}_k {\rho_1(\boldsymbol{x}), \ldots, \rho_n(\boldsymbol{x})}$ 是选择得分最高的 $k$ 个专家的索引集合，而</p>
+<p>$$<br />
+\tilde{g}<em _in="\in" _mathcal_T="\mathcal{T" j="j">i(\boldsymbol{x}) = \frac{\rho_i(\boldsymbol{x})}{\sum</em>}_k(\boldsymbol{x})} \rho_j(\boldsymbol{x})<br />
+$$</p>
+<p>是重归一化的门控权重。这里 $\boldsymbol{\rho}(\boldsymbol{x}) = [\rho_1(\boldsymbol{x}), \ldots, \rho_n(\boldsymbol{x})]^T$ 是路由器（Router）的输出得分。</p>
+<p><strong>路由器的参数化</strong>：</p>
+<p>$$<br />
+\boldsymbol{\rho}(\boldsymbol{x}) = h(\boldsymbol{x} \boldsymbol{W}^{(R)})<br />
+$$</p>
+<p>其中 $\boldsymbol{W}^{(R)} \in \mathbb{R}^{d \times n}$ 是路由器的权重矩阵，$h(\cdot)$ 是激活函数（如Softmax、Sigmoid、ReLU等）。</p>
+<h3 id="2">2. 专家分配问题的最优化表述<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 负载均衡作为约束优化问题<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>考虑一个批次（batch）中有 $m$ 个token，记为 ${\boldsymbol{x}_1, \ldots, \boldsymbol{x}_m}$。专家分配问题可以表述为以下优化问题：</p>
+<p>$$<br />
+\begin{align}<br />
+\max_{{S_i}<em t="1">{i=1}^{m}} \quad &amp; \sum</em>}^{m} \sum_{i \in S_t} \rho_i(\boldsymbol{x<em S_t="S_t" _in="\in" i="i" t:="t:">t) \<br />
+\text{s.t.} \quad &amp; |S_t| = k, \quad \forall t = 1, \ldots, m \<br />
+&amp; \left|\bigcup</em> {t}\right| \leq C, \quad \forall i = 1, \ldots, n<br />
+\end{align}<br />
+$$</p>
+<p>其中：<br />
+- $S_t \subseteq {1, \ldots, n}$ 是分配给第 $t$ 个token的专家集合<br />
+- 第一个约束保证每个token恰好选择 $k$ 个专家<br />
+- 第二个约束是容量约束（Capacity Constraint），限制每个专家最多处理 $C$ 个token<br />
+- $C = \lceil \frac{mk}{n} \cdot \gamma \rceil$ 是容量上限，$\gamma \geq 1$ 是容量因子（Capacity Factor）</p>
+<p><strong>当 $\gamma = 1$ 时的完美均衡</strong>：容量恰好等于 $C = \frac{mk}{n}$，这意味着所有专家的负载完全均衡。</p>
+<h4 id="22-linear-assignment-problem">2.2 线性指派问题（Linear Assignment Problem）<a class="toc-link" href="#22-linear-assignment-problem" title="Permanent link">&para;</a></h4>
+<p>当 $k=1$ 时，上述问题退化为经典的线性指派问题：</p>
+<p>$$<br />
+\begin{align}<br />
+\min_{A \in \mathcal{P}} \quad &amp; \sum_{t=1}^{m} \sum_{i=1}^{n} c_{ti} a_{ti} \<br />
+\text{s.t.} \quad &amp; \sum_{i=1}^{n} a_{ti} = 1, \quad \forall t \<br />
+&amp; \sum_{t=1}^{m} a_{ti} \leq C, \quad \forall i \<br />
+&amp; a_{ti} \in {0, 1}<br />
+\end{align}<br />
+$$</p>
+<p>其中 $c_{ti} = -\rho_i(\boldsymbol{x}<em ti="ti">t)$ 是成本矩阵，$a</em>$ 是指示变量（token $t$ 是否分配给专家 $i$）。</p>
+<p>这个问题可以用<strong>匈牙利算法</strong>（Hungarian Algorithm）或<strong>Kuhn-Munkres算法</strong>在 $O(m^3)$ 时间内求解，但存在以下限制：<br />
+1. 仅适用于 $k=1$ 的情况<br />
+2. 需要全局信息（整个batch的所有token），不适合自回归推理<br />
+3. 计算复杂度较高</p>
+<h3 id="3">3. 负载均衡约束的数学表征<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 负载分布的定义<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p>对于单个token $\boldsymbol{x}$，定义其专家选择的one-hot向量：</p>
+<p>$$<br />
+f_i = \begin{cases}<br />
+\frac{1}{k}, &amp; i \in \mathop{\text{argtop}}_k \boldsymbol{\rho}(\boldsymbol{x}) \<br />
+0, &amp; \text{otherwise}<br />
+\end{cases}<br />
+$$</p>
+<p>这里除以 $k$ 是为了归一化，使得 $\sum_{i=1}^{n} f_i = 1$。</p>
+<p><strong>批次级别的负载分布</strong>：对于包含 $m$ 个token的批次，专家 $i$ 的平均负载为：</p>
+<p>$$<br />
+F_i = \frac{1}{m} \sum_{t=1}^{m} f_i^{(t)} = \mathbb{E}_{\boldsymbol{x} \sim \mathcal{D}}[f_i(\boldsymbol{x})]<br />
+$$</p>
+<p>其中 $\mathcal{D}$ 是训练数据分布。</p>
+<p><strong>理想均匀分布</strong>：</p>
+<p>$$<br />
+Q_i = \frac{1}{n}, \quad \forall i = 1, \ldots, n<br />
+$$</p>
+<p>满足 $\sum_{i=1}^{n} Q_i = 1$。</p>
+<h4 id="32">3.2 负载不均衡的度量<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p>常用的度量包括：</p>
+<p><strong>（1）L2距离（欧氏距离）</strong>：</p>
+<p>$$<br />
+\mathcal{D}<em i="1">2(\boldsymbol{F}, \boldsymbol{Q}) = |\boldsymbol{F} - \boldsymbol{Q}|_2 = \sqrt{\sum</em>}^{n} (F_i - Q_i)^2<br />
+$$</p>
+<p><strong>（2）KL散度（Kullback-Leibler Divergence）</strong>：</p>
+<p>$$<br />
+\mathcal{D}<em i="1">{\text{KL}}(\boldsymbol{F} | \boldsymbol{Q}) = \sum</em>}^{n} F_i \log \frac{F_i}{Q_i<br />
+$$</p>
+<p><strong>（3）变异系数（Coefficient of Variation）</strong>：</p>
+<p>$$<br />
+\text{CV}(\boldsymbol{F}) = \frac{\sqrt{\text{Var}(\boldsymbol{F})}}{\mathbb{E}[\boldsymbol{F}]} = \frac{\sqrt{\frac{1}{n}\sum_{i=1}^{n} (F_i - \frac{1}{n})^2}}{\frac{1}{n}} = \sqrt{n \sum_{i=1}^{n} (F_i - \frac{1}{n})^2}<br />
+$$</p>
+<p>本文采用L2距离的平方作为优化目标，这在数学上更加方便处理。</p>
+<h3 id="4">4. 路由策略的数学分析<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 常见激活函数的性质<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p><strong>（1）Softmax激活</strong>：</p>
+<p>$$<br />
+\rho_i^{(\text{softmax})}(\boldsymbol{x}) = \frac{\exp(z_i)}{\sum_{j=1}^{n} \exp(z_j)}<br />
+$$</p>
+<p>其中 $z_i = \boldsymbol{x}^T \boldsymbol{w}_i^{(R)}$ 是第 $i$ 个专家的logit。</p>
+<p><strong>性质</strong>：<br />
+- 概率约束：$\sum_{i=1}^{n} \rho_i = 1$<br />
+- 值域：$\rho_i \in (0, 1)$<br />
+- 梯度：$\frac{\partial \rho_i}{\partial z_j} = \rho_i (\delta_{ij} - \rho_j)$，其中 $\delta_{ij}$ 是Kronecker delta</p>
+<p><strong>（2）Sigmoid激活</strong>：</p>
+<p>$$<br />
+\rho_i^{(\text{sigmoid})}(\boldsymbol{x}) = \sigma(z_i) = \frac{1}{1 + \exp(-z_i)}<br />
+$$</p>
+<p><strong>性质</strong>：<br />
+- 独立性：每个 $\rho_i$ 独立计算<br />
+- 值域：$\rho_i \in (0, 1)$<br />
+- 梯度：$\frac{\partial \rho_i}{\partial z_i} = \rho_i(1 - \rho_i)$<br />
+- <strong>不满足概率约束</strong>：$\sum_{i=1}^{n} \rho_i \neq 1$（一般情况）</p>
+<p><strong>（3）ReLU激活</strong>：</p>
+<p>$$<br />
+\rho_i^{(\text{ReLU})}(\boldsymbol{x}) = \max(0, z_i)<br />
+$$</p>
+<p><strong>性质</strong>：<br />
+- 值域：$\rho_i \in [0, +\infty)$<br />
+- 稀疏性：可能产生很多零值<br />
+- 梯度：$\frac{\partial \rho_i}{\partial z_i} = \mathbb{1}_{z_i &gt; 0}$（几乎处处可导）</p>
+<h4 id="42-top-k">4.2 Top-K选择的非平滑性<a class="toc-link" href="#42-top-k" title="Permanent link">&para;</a></h4>
+<p>Top-K操作定义为：</p>
+<p>$$<br />
+\mathop{\text{argtop}}_k \boldsymbol{\rho} = {i_1, \ldots, i_k}<br />
+$$</p>
+<p>其中 $\rho_{i_1} \geq \rho_{i_2} \geq \cdots \geq \rho_{i_k} \geq \rho_j$ 对所有 $j \notin {i_1, \ldots, i_k}$。</p>
+<p><strong>问题</strong>：这是一个<strong>离散的、不可微的</strong>操作：<br />
+- 当 $\rho_i$ 发生微小变化时，选择集合 $\mathcal{T}_k$ 可能发生突变<br />
+- 标准的反向传播无法直接应用</p>
+<p><strong>梯度近似方法</strong>：</p>
+<p>（1）<strong>直通估计器（Straight-Through Estimator, STE）</strong>：</p>
+<p>$$<br />
+\frac{\partial \mathcal{L}}{\partial \rho_i} \approx \begin{cases}<br />
+\frac{\partial \mathcal{L}}{\partial \tilde{\rho}_i}, &amp; i \in \mathcal{T}_k \<br />
+0, &amp; \text{otherwise}<br />
+\end{cases}<br />
+$$</p>
+<p>其中 $\tilde{\rho}_i$ 是归一化后的门控权重。</p>
+<p>（2）<strong>Gumbel-Softmax松弛</strong>：用连续分布近似离散采样。</p>
+<p>（3）<strong>本文方法（Loss-Free）</strong>：引入偏置项 $\boldsymbol{b}$，将Top-K的输入从 $\boldsymbol{\rho}$ 改为 $\boldsymbol{\rho} + \boldsymbol{b}$。</p>
+<h3 id="5-loss-free">5. Loss-Free方法的最优化理论<a class="toc-link" href="#5-loss-free" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 偏置项的引入<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p><strong>核心观察</strong>：对于任意给定的路由得分 $\boldsymbol{\rho}$，总存在一个偏置向量 $\boldsymbol{b} \in \mathbb{R}^n$，使得基于 $\boldsymbol{\rho} + \boldsymbol{b}$ 的Top-K选择达到负载均衡。</p>
+<p><strong>数学表述</strong>：存在 $\boldsymbol{b}^* \in \mathbb{R}^n$，使得</p>
+<p>$$<br />
+\mathbb{E}_{\boldsymbol{x} \sim \mathcal{D}}\left[\boldsymbol{f}(\boldsymbol{x}; \boldsymbol{b}^*)\right] = \boldsymbol{Q}<br />
+$$</p>
+<p>其中</p>
+<p>$$<br />
+f_i(\boldsymbol{x}; \boldsymbol{b}) = \begin{cases}<br />
+\frac{1}{k}, &amp; i \in \mathop{\text{argtop}}_k (\boldsymbol{\rho}(\boldsymbol{x}) + \boldsymbol{b}) \<br />
+0, &amp; \text{otherwise}<br />
+\end{cases}<br />
+$$</p>
+<p><strong>存在性证明（构造性）</strong>：</p>
+<p>考虑映射 $\Phi: \mathbb{R}^n \to \mathbb{R}^n$：</p>
+<p>$$<br />
+\Phi(\boldsymbol{b}) = \mathbb{E}_{\boldsymbol{x} \sim \mathcal{D}}\left[\boldsymbol{f}(\boldsymbol{x}; \boldsymbol{b})\right] - \boldsymbol{Q}<br />
+$$</p>
+<p>目标是找到 $\boldsymbol{b}^<em>$ 使得 $\Phi(\boldsymbol{b}^</em>) = \boldsymbol{0}$。</p>
+<p>通过以下观察可以证明解的存在性：<br />
+1. 当 $b_i \to +\infty$ 时，专家 $i$ 总是被选中（对所有token），因此 $F_i \to 1 &gt; Q_i$<br />
+2. 当 $b_i \to -\infty$ 时，专家 $i$ 从不被选中，因此 $F_i \to 0 &lt; Q_i$<br />
+3. $\Phi_i(\boldsymbol{b})$ 关于 $b_i$ 单调递增（几乎处处）<br />
+4. 由中间值定理和不动点定理，存在 $\boldsymbol{b}^<em>$ 使得 $\Phi(\boldsymbol{b}^</em>) = \boldsymbol{0}$</p>
+<h4 id="52">5.2 优化目标的构造<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p>定义损失函数：</p>
+<p>$$<br />
+\mathcal{L}<em i="1">{\text{balance}}(\boldsymbol{b}) = \frac{1}{2} |\boldsymbol{F}(\boldsymbol{b}) - \boldsymbol{Q}|_2^2 = \frac{1}{2} \sum</em>) - Q_i)^2}^{n} (F_i(\boldsymbol{b<br />
+$$</p>
+<p>其中 $\boldsymbol{F}(\boldsymbol{b}) = \mathbb{E}_{\boldsymbol{x} \sim \mathcal{D}}[\boldsymbol{f}(\boldsymbol{x}; \boldsymbol{b})]$。</p>
+<p><strong>目标</strong>：最小化 $\mathcal{L}_{\text{balance}}(\boldsymbol{b})$ 以达到 $\boldsymbol{F}(\boldsymbol{b}) \approx \boldsymbol{Q}$。</p>
+<p><strong>困难</strong>：$\boldsymbol{F}(\boldsymbol{b})$ 关于 $\boldsymbol{b}$ 不可微（因为涉及 $\mathop{\text{argtop}}_k$ 操作）。</p>
+<h4 id="53-ste">5.3 直通估计器（STE）的应用<a class="toc-link" href="#53-ste" title="Permanent link">&para;</a></h4>
+<p><strong>观察</strong>：尽管 $F_i(\boldsymbol{b})$ 不可微，但我们可以利用以下性质：<br />
+- 增大 $b_i$ 会增加专家 $i$ 被选中的概率，从而增大 $F_i$<br />
+- 减小 $b_i$ 会减少专家 $i$ 被选中的概率，从而减小 $F_i$</p>
+<p><strong>STE构造</strong>：将损失函数重写为</p>
+<p>$$<br />
+\mathcal{L}_{\text{balance}}(\boldsymbol{b}) = \frac{1}{2} |\boldsymbol{b} + \text{sg}[\boldsymbol{F}(\boldsymbol{b}) - \boldsymbol{b}] - \boldsymbol{Q}|_2^2<br />
+$$</p>
+<p>其中 $\text{sg}[\cdot]$ 表示stop-gradient操作（在反向传播时视为常数）。</p>
+<p><strong>梯度计算</strong>：</p>
+<p>$$<br />
+\begin{align}<br />
+\nabla_{\boldsymbol{b}} \mathcal{L}<em _boldsymbol_b="\boldsymbol{b">{\text{balance}} &amp;= \nabla</em>|}} \frac{1}{2} |\boldsymbol{b} + \text{sg}[\boldsymbol{F} - \boldsymbol{b}] - \boldsymbol{Q<em _boldsymbol_b="\boldsymbol{b">2^2 \<br />
+&amp;= \nabla</em>) \}} \frac{1}{2} |\boldsymbol{F} - \boldsymbol{Q}|_2^2 \quad (\text{视} \boldsymbol{F} \text{为常数<br />
+&amp;= \boldsymbol{F} - \boldsymbol{Q}<br />
+\end{align}<br />
+$$</p>
+<p>这个梯度形式简单且直观：<br />
+- 如果 $F_i &gt; Q_i$（专家 $i$ 过载），则 $\nabla_{b_i} \mathcal{L} &gt; 0$，梯度下降会减小 $b_i$<br />
+- 如果 $F_i &lt; Q_i$（专家 $i$ 欠载），则 $\nabla_{b_i} \mathcal{L} &lt; 0$，梯度下降会增大 $b_i$</p>
+<h4 id="54">5.4 梯度下降更新规则<a class="toc-link" href="#54" title="Permanent link">&para;</a></h4>
+<p><strong>标准SGD</strong>：</p>
+<p>$$<br />
+\boldsymbol{b}^{(t+1)} = \boldsymbol{b}^{(t)} - \alpha (\boldsymbol{F}^{(t)} - \boldsymbol{Q})<br />
+$$</p>
+<p>其中 $\alpha &gt; 0$ 是学习率，$\boldsymbol{F}^{(t)}$ 是第 $t$ 步的负载统计。</p>
+<p><strong>符号梯度下降（SignSGD）</strong>（原论文采用）：</p>
+<p>$$<br />
+\boldsymbol{b}^{(t+1)} = \boldsymbol{b}^{(t)} - \alpha \, \text{sign}(\boldsymbol{F}^{(t)} - \boldsymbol{Q})<br />
+$$</p>
+<p>其中</p>
+<p>$$<br />
+\text{sign}(x) = \begin{cases}<br />
++1, &amp; x &gt; 0 \<br />
+0, &amp; x = 0 \<br />
+-1, &amp; x &lt; 0<br />
+\end{cases}<br />
+$$</p>
+<p><strong>优点</strong>：<br />
+- 更新幅度统一，不受 $|F_i - Q_i|$ 绝对值的影响<br />
+- 类似于Adam等自适应优化器的效果<br />
+- 鲁棒性更强，不容易因为某个专家负载极度不均而产生过大的更新</p>
+<p><strong>缺点</strong>：<br />
+- 忽略了不均衡程度的信息<br />
+- 可能在接近最优点时产生震荡</p>
+<h4 id="55-rms">5.5 RMS归一化梯度下降（改进版）<a class="toc-link" href="#55-rms" title="Permanent link">&para;</a></h4>
+<p>本文作者提出的改进方案：</p>
+<p>$$<br />
+\boldsymbol{b}^{(t+1)} = \boldsymbol{b}^{(t)} - \alpha \frac{\boldsymbol{F}^{(t)} - \boldsymbol{Q}}{\text{RMS}(\boldsymbol{F}^{(t)} - \boldsymbol{Q})}<br />
+$$</p>
+<p>其中RMS（Root Mean Square）定义为：</p>
+<p>$$<br />
+\text{RMS}(\boldsymbol{v}) = \sqrt{\frac{1}{n} \sum_{i=1}^{n} v_i^2}<br />
+$$</p>
+<p><strong>性质分析</strong>：</p>
+<p>（1）<strong>尺度归一化</strong>：归一化后的梯度的RMS值恒为1：</p>
+<p>$$<br />
+\text{RMS}\left(\frac{\boldsymbol{v}}{\text{RMS}(\boldsymbol{v})}\right) = 1<br />
+$$</p>
+<p>这与 $\text{sign}(\boldsymbol{v})$ 的 $\ell_2$ 范数为 $\sqrt{n}$ 不同，但两者都实现了尺度归一化。</p>
+<p>（2）<strong>保留相对信息</strong>：与SignSGD不同，RMS归一化保留了各分量的相对大小关系：</p>
+<p>$$<br />
+\frac{F_i - Q_i}{\text{RMS}(\boldsymbol{F} - \boldsymbol{Q})} \propto (F_i - Q_i)<br />
+$$</p>
+<p>这意味着不均衡更严重的专家会得到更大的调整。</p>
+<p>（3）<strong>减少震荡</strong>：在接近收敛时，$|\boldsymbol{F} - \boldsymbol{Q}|$ 较小，归一化梯度的各分量也相应变小，有助于稳定收敛。</p>
+<p><strong>与标准SGD的关系</strong>：</p>
+<p>RMS归一化梯度下降可以看作是自适应学习率的SGD：</p>
+<p>$$<br />
+\boldsymbol{b}^{(t+1)} = \boldsymbol{b}^{(t)} - \frac{\alpha}{\text{RMS}(\boldsymbol{F}^{(t)} - \boldsymbol{Q})} (\boldsymbol{F}^{(t)} - \boldsymbol{Q})<br />
+$$</p>
+<p>相当于有效学习率为 $\alpha_{\text{eff}} = \frac{\alpha}{\text{RMS}(\boldsymbol{F} - \boldsymbol{Q})}$。</p>
+<h3 id="6">6. 最优传输理论的联系<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61-optimal-transport">6.1 最优传输问题（Optimal Transport）<a class="toc-link" href="#61-optimal-transport" title="Permanent link">&para;</a></h4>
+<p>负载均衡问题可以从最优传输（OT）的角度来理解。给定两个概率分布：<br />
+- 源分布：$\boldsymbol{\mu} = \boldsymbol{F}$（当前负载分布）<br />
+- 目标分布：$\boldsymbol{\nu} = \boldsymbol{Q}$（均匀分布）</p>
+<p>最优传输问题寻找一个传输计划 $\boldsymbol{\pi} \in \mathbb{R}^{n \times n}$，使得</p>
+<p>$$<br />
+\begin{align}<br />
+\min_{\boldsymbol{\pi}} \quad &amp; \sum_{i,j=1}^{n} C_{ij} \pi_{ij} \<br />
+\text{s.t.} \quad &amp; \sum_{j=1}^{n} \pi_{ij} = \mu_i, \quad \forall i \<br />
+&amp; \sum_{i=1}^{n} \pi_{ij} = \nu_j, \quad \forall j \<br />
+&amp; \pi_{ij} \geq 0<br />
+\end{align}<br />
+$$</p>
+<p>其中 $C_{ij}$ 是从位置 $i$ 传输到位置 $j$ 的成本。</p>
+<p><strong>特殊情况</strong>：当 $C_{ij} = |i - j|^2$ 时，这是经典的<strong>Wasserstein-2距离</strong>：</p>
+<p>$$<br />
+W_2(\boldsymbol{\mu}, \boldsymbol{\nu}) = \left(\min_{\boldsymbol{\pi} \in \Pi(\boldsymbol{\mu}, \boldsymbol{\nu})} \sum_{i,j} C_{ij} \pi_{ij}\right)^{1/2}<br />
+$$</p>
+<h4 id="62">6.2 熵正则化最优传输<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p>为了提高计算效率，引入<strong>熵正则化</strong>：</p>
+<p>$$<br />
+\min_{\boldsymbol{\pi}} \quad \sum_{i,j=1}^{n} C_{ij} \pi_{ij} + \epsilon H(\boldsymbol{\pi})<br />
+$$</p>
+<p>其中熵项定义为：</p>
+<p>$$<br />
+H(\boldsymbol{\pi}) = -\sum_{i,j=1}^{n} \pi_{ij} \log \pi_{ij}<br />
+$$</p>
+<p>参数 $\epsilon &gt; 0$ 控制正则化强度。</p>
+<p><strong>优点</strong>：<br />
+- 最优解具有 $\pi_{ij}^<em> = u_i K_{ij} v_j$ 的形式，其中 $K_{ij} = \exp(-C_{ij}/\epsilon)$<br />
+- 可以用</em><em>Sinkhorn算法</em>*高效求解</p>
+<h4 id="63-sinkhorn">6.3 Sinkhorn算法<a class="toc-link" href="#63-sinkhorn" title="Permanent link">&para;</a></h4>
+<p>Sinkhorn算法是求解熵正则化OT问题的经典迭代算法。</p>
+<p><strong>初始化</strong>：</p>
+<p>$$<br />
+\boldsymbol{u}^{(0)} = \mathbf{1}_n, \quad \boldsymbol{v}^{(0)} = \mathbf{1}_n<br />
+$$</p>
+<p><strong>迭代更新</strong>（第 $t$ 次迭代）：</p>
+<p>$$<br />
+\begin{align}<br />
+u_i^{(t+1)} &amp;= \frac{\mu_i}{\sum_{j=1}^{n} K_{ij} v_j^{(t)}} = \frac{\mu_i}{(\boldsymbol{K} \boldsymbol{v}^{(t)})<em i="1">i} \<br />
+v_j^{(t+1)} &amp;= \frac{\nu_j}{\sum</em>}^{n} K_{ij} u_i^{(t+1)}} = \frac{\nu_j}{(\boldsymbol{K}^T \boldsymbol{u}^{(t+1)})_j<br />
+\end{align}<br />
+$$</p>
+<p><strong>收敛性</strong>：Sinkhorn算法线性收敛到最优解，收敛速度与 $\epsilon$ 有关。</p>
+<p><strong>与Loss-Free的联系</strong>：Loss-Free的偏置项 $\boldsymbol{b}$ 可以看作是一种隐式的最优传输调整：<br />
+- $\boldsymbol{b}$ 的作用是调整选择概率，使得负载分布从 $\boldsymbol{F}$ 移动到 $\boldsymbol{Q}$<br />
+- 这类似于OT中的dual variable（对偶变量）</p>
+<p><strong>对偶形式</strong>：最优传输的对偶问题为</p>
+<p>$$<br />
+\max_{\boldsymbol{\phi}, \boldsymbol{\psi}} \quad \sum_{i=1}^{n} \mu_i \phi_i + \sum_{j=1}^{n} \nu_j \psi_j<br />
+$$</p>
+<p>满足 $\phi_i + \psi_j \leq C_{ij}$。偏置项 $\boldsymbol{b}$ 可以理解为对偶变量的离散化近似。</p>
+<h3 id="7">7. 梯度计算与反向传播<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<h4 id="71-moe">7.1 完整的MoE前向传播<a class="toc-link" href="#71-moe" title="Permanent link">&para;</a></h4>
+<p>考虑带偏置的MoE前向过程：</p>
+<p>$$<br />
+\begin{align}<br />
+\boldsymbol{z} &amp;= \boldsymbol{x} \boldsymbol{W}^{(R)} \in \mathbb{R}^n \<br />
+\boldsymbol{\rho} &amp;= h(\boldsymbol{z}) \in \mathbb{R}^n \<br />
+\boldsymbol{\rho}' &amp;= \boldsymbol{\rho} + \boldsymbol{b} \<br />
+\mathcal{T}<em _mathcal_T="\mathcal{T">k &amp;= \mathop{\text{argtop}}_k \boldsymbol{\rho}' \<br />
+\tilde{\boldsymbol{\rho}} &amp;= \text{normalize}(\boldsymbol{\rho}|</em><em _in="\in" _mathcal_T="\mathcal{T" i="i">k}) \<br />
+\boldsymbol{y} &amp;= \sum</em>)}_k} \tilde{\rho}_i \boldsymbol{e}_i(\boldsymbol{x<br />
+\end{align}<br />
+$$</p>
+<h4 id="72">7.2 参数的梯度<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p><strong>（1）专家网络参数的梯度</strong>：</p>
+<p>对于 $i \in \mathcal{T}_k$：</p>
+<p>$$<br />
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{\theta}_i^{(E)}} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{y}} \cdot \frac{\partial \boldsymbol{y}}{\partial \boldsymbol{e}_i} \cdot \frac{\partial \boldsymbol{e}_i}{\partial \boldsymbol{\theta}_i^{(E)}} = \tilde{\rho}_i \frac{\partial \mathcal{L}}{\partial \boldsymbol{y}} \cdot \frac{\partial \boldsymbol{e}_i}{\partial \boldsymbol{\theta}_i^{(E)}}<br />
+$$</p>
+<p>对于 $i \notin \mathcal{T}_k$：梯度为零（因为该专家未参与计算）。</p>
+<p><strong>（2）路由器参数的梯度</strong>：</p>
+<p>使用STE近似：</p>
+<p>$$<br />
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{W}^{(R)}} \approx \sum_{i \in \mathcal{T}_k} \frac{\partial \mathcal{L}}{\partial \tilde{\rho}_i} \cdot \frac{\partial \tilde{\rho}_i}{\partial \rho_i} \cdot \frac{\partial \rho_i}{\partial \boldsymbol{z}} \cdot \frac{\partial \boldsymbol{z}}{\partial \boldsymbol{W}^{(R)}}<br />
+$$</p>
+<p>其中归一化的梯度为：</p>
+<p>$$<br />
+\frac{\partial \tilde{\rho}_i}{\partial \rho_j} = \begin{cases}<br />
+\frac{1}{Z} - \frac{\rho_i}{Z^2}, &amp; i = j \in \mathcal{T}_k \<br />
+-\frac{\rho_i}{Z^2}, &amp; i \neq j, \, i,j \in \mathcal{T}_k \<br />
+0, &amp; \text{otherwise}<br />
+\end{cases}<br />
+$$</p>
+<p>其中 $Z = \sum_{j \in \mathcal{T}_k} \rho_j$。</p>
+<p><strong>（3）偏置项的梯度</strong>：</p>
+<p>关键是 $\boldsymbol{b}$ <strong>不参与前向计算的权重</strong>，只参与Top-K选择。因此：</p>
+<p>$$<br />
+\frac{\partial \boldsymbol{y}}{\partial \boldsymbol{b}} = \boldsymbol{0}<br />
+$$</p>
+<p>换言之，$\boldsymbol{b}$ 对主损失函数 $\mathcal{L}_{\text{LM}}$ 的梯度为零！</p>
+<p>这正是Loss-Free的核心优势：$\boldsymbol{b}$ 的优化完全独立于主任务，不会干扰语言模型的训练。</p>
+<h4 id="73">7.3 偏置项的独立更新<a class="toc-link" href="#73" title="Permanent link">&para;</a></h4>
+<p>$\boldsymbol{b}$ 的更新不通过 $\mathcal{L}_{\text{LM}}$ 的梯度，而是通过负载均衡目标：</p>
+<p>$$<br />
+\boldsymbol{b}^{(t+1)} = \boldsymbol{b}^{(t)} - \alpha \nabla_{\boldsymbol{b}} \mathcal{L}_{\text{balance}} = \boldsymbol{b}^{(t)} - \alpha (\boldsymbol{F}^{(t)} - \boldsymbol{Q})<br />
+$$</p>
+<p><strong>更新顺序</strong>：<br />
+1. 前向传播：计算 $\mathcal{L}_{\text{LM}}$ 和统计 $\boldsymbol{F}$<br />
+2. 反向传播：更新 $\boldsymbol{W}^{(R)}$ 和 ${\boldsymbol{\theta}_i^{(E)}}$<br />
+3. 独立更新 $\boldsymbol{b}$</p>
+<p>这个顺序保证了：<br />
+- $\boldsymbol{b}$ 的更新基于当前batch的真实负载统计<br />
+- 避免了"泄漏未来信息"的风险</p>
+<h3 id="8-capacity-factor">8. 容量因子（Capacity Factor）的影响<a class="toc-link" href="#8-capacity-factor" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 容量因子的定义<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p>容量因子 $\gamma \geq 1$ 决定了每个专家的最大容量：</p>
+<p>$$<br />
+C = \left\lceil \frac{mk}{n} \cdot \gamma \right\rceil<br />
+$$</p>
+<p>其中：<br />
+- $m$：batch中的token数<br />
+- $k$：每个token选择的专家数<br />
+- $n$：专家总数<br />
+- $\frac{mk}{n}$：完美均衡时每个专家的平均负载</p>
+<h4 id="82-gamma">8.2 不同 $\gamma$ 值的影响<a class="toc-link" href="#82-gamma" title="Permanent link">&para;</a></h4>
+<p><strong>（1）$\gamma = 1$（理想情况）</strong>：</p>
+<ul>
+<li>容量恰好等于平均负载</li>
+<li><strong>无溢出空间</strong>：要求严格的负载均衡</li>
+<li>优点：计算资源利用最优</li>
+<li>缺点：可能导致token overflow（某些token无法分配到k个专家）</li>
+</ul>
+<p><strong>（2）$\gamma &gt; 1$（实际常用）</strong>：</p>
+<ul>
+<li>提供了 $(\gamma - 1) \times 100\%$ 的冗余容量</li>
+<li>允许一定程度的负载不均衡</li>
+<li>常用值：$\gamma = 1.25$ 或 $\gamma = 1.5$</li>
+</ul>
+<p><strong>token溢出概率分析</strong>：</p>
+<p>假设负载分布的标准差为 $\sigma_F$，则专家 $i$ 的实际负载 $L_i$ 可以近似为：</p>
+<p>$$<br />
+L_i \sim \mathcal{N}\left(\frac{mk}{n}, \sigma_F^2 m\right)<br />
+$$</p>
+<p>溢出概率：</p>
+<p>$$<br />
+P(\text{overflow}) = P\left(L_i &gt; C\right) = P\left(L_i &gt; \frac{mk}{n} \gamma\right)<br />
+$$</p>
+<p>标准化后：</p>
+<p>$$<br />
+P(\text{overflow}) \approx 1 - \Phi\left(\frac{(\gamma - 1) mk/n}{\sigma_F \sqrt{m}}\right)<br />
+$$</p>
+<p>其中 $\Phi(\cdot)$ 是标准正态分布的CDF。</p>
+<p><strong>结论</strong>：<br />
+- $\gamma$ 越大，溢出概率越低<br />
+- $\sigma_F$ 越小（负载越均衡），溢出概率越低<br />
+- Loss-Free通过减小 $\sigma_F$ 来降低所需的 $\gamma$</p>
+<h4 id="83">8.3 容量约束下的修正<a class="toc-link" href="#83" title="Permanent link">&para;</a></h4>
+<p>当存在容量约束时，分配策略需要修改为：</p>
+<p>$$<br />
+\mathcal{T}_k(\boldsymbol{x}_t; {\ell_i}) = \begin{cases}<br />
+\mathop{\text{argtop}}_k (\boldsymbol{\rho}_t + \boldsymbol{b}) &amp; \text{if no overflow} \<br />
+\text{greedy allocation} &amp; \text{otherwise}<br />
+\end{cases}<br />
+$$</p>
+<p>其中 $\ell_i$ 是专家 $i$ 的当前负载计数。</p>
+<p><strong>贪心分配算法</strong>：按 $\rho_{ti} + b_i$ 降序遍历，跳过已满的专家：</p>
+<pre class="highlight"><code>for i in argsort(ρ_t + b, descending=True):
+    if ℓ_i &lt; C and |T_k| &lt; k:
+        T_k.add(i)
+        ℓ_i += 1
+</code></pre>
+
+<h3 id="9">9. 损失函数设计（辅助损失对比）<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91-aux-loss">9.1 传统辅助损失（Aux Loss）<a class="toc-link" href="#91-aux-loss" title="Permanent link">&para;</a></h4>
+<p><strong>形式1：均衡损失</strong>（Switch Transformer）：</p>
+<p>$$<br />
+\mathcal{L}<em i="1">{\text{aux}}^{(1)} = \alpha \sum</em> F_i P_i}^{n<br />
+$$</p>
+<p>其中 $P_i = \frac{1}{m} \sum_{t=1}^{m} \rho_{ti}$ 是专家 $i$ 的平均得分。</p>
+<p><strong>优化目标</strong>：最小化负载 $F_i$ 与得分 $P_i$ 的乘积，促使高得分的专家被更多选择。</p>
+<p><strong>形式2：变异系数损失</strong>：</p>
+<p>$$<br />
+\mathcal{L}<em i="1">{\text{aux}}^{(2)} = \alpha \cdot \text{Var}(\boldsymbol{F}) = \alpha \sum</em>)^2}^{n} (F_i - \frac{1}{n<br />
+$$</p>
+<p><strong>总损失</strong>：</p>
+<p>$$<br />
+\mathcal{L}<em _text_LM="\text{LM">{\text{total}} = \mathcal{L}</em>}} + \mathcal{L}_{\text{aux}<br />
+$$</p>
+<p><strong>问题</strong>：<br />
+- 权重 $\alpha$ 难以调节<br />
+- $\mathcal{L}_{\text{aux}}$ 的梯度会影响所有参数（包括路由器和专家网络）<br />
+- 可能损害主任务性能</p>
+<h4 id="92-loss-free">9.2 Loss-Free的优势<a class="toc-link" href="#92-loss-free" title="Permanent link">&para;</a></h4>
+<p><strong>对比表</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>传统Aux Loss</th>
+<th>Loss-Free</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>优化参数</td>
+<td>全体参数</td>
+<td>仅偏置 $\boldsymbol{b}$</td>
+</tr>
+<tr>
+<td>对主任务影响</td>
+<td>直接影响 $\mathcal{L}_{\text{LM}}$</td>
+<td>不影响前向权重</td>
+</tr>
+<tr>
+<td>超参数</td>
+<td>权重 $\alpha$</td>
+<td>学习率 $\alpha$</td>
+</tr>
+<tr>
+<td>训练/推理一致性</td>
+<td>一致</td>
+<td>一致</td>
+</tr>
+<tr>
+<td>实现复杂度</td>
+<td>中等</td>
+<td>低</td>
+</tr>
+</tbody>
+</table>
+<p><strong>数学分析</strong>：</p>
+<p>（1）<strong>参数空间分离</strong>：</p>
+<p>传统方法：$\theta = {\boldsymbol{W}^{(R)}, {\boldsymbol{\theta}_i^{(E)}}}$ 同时优化两个目标</p>
+<p>$$<br />
+\theta^* = \arg\min_{\theta} \left[\mathcal{L}<em _text_aux="\text{aux">{\text{LM}}(\theta) + \alpha \mathcal{L}</em>(\theta)\right]}<br />
+$$</p>
+<p>Loss-Free：参数分为两组<br />
+- 主参数：$\theta = {\boldsymbol{W}^{(R)}, {\boldsymbol{\theta}<em _text_LM="\text{LM">i^{(E)}}}$ 优化 $\mathcal{L}</em>$}<br />
+- 辅助参数：$\boldsymbol{b}$ 优化 $\mathcal{L}_{\text{balance}}$</p>
+<p>$$<br />
+\begin{align}<br />
+\theta^<em> &amp;= \arg\min_{\theta} \mathcal{L}_{\text{LM}}(\theta; \boldsymbol{b}) \<br />
+\boldsymbol{b}^</em> &amp;= \arg\min_{\boldsymbol{b}} \mathcal{L}_{\text{balance}}(\boldsymbol{b})<br />
+\end{align}<br />
+$$</p>
+<p>（2）<strong>优化景观（Optimization Landscape）</strong>：</p>
+<p>传统方法的梯度：</p>
+<p>$$<br />
+\nabla_{\theta} \mathcal{L}<em _theta="\theta">{\text{total}} = \nabla</em>} \mathcal{L<em _theta="\theta">{\text{LM}} + \alpha \nabla</em>} \mathcal{L}_{\text{aux}<br />
+$$</p>
+<p>两个梯度可能方向冲突，导致优化困难。</p>
+<p>Loss-Free的梯度：</p>
+<p>$$<br />
+\begin{align}<br />
+\nabla_{\theta} \mathcal{L}<em _boldsymbol_b="\boldsymbol{b">{\text{LM}} &amp;\quad \text{(主任务)} \<br />
+\nabla</em>}} \mathcal{L}_{\text{balance}} = \boldsymbol{F} - \boldsymbol{Q} &amp;\quad \text{(负载均衡)<br />
+\end{align}<br />
+$$</p>
+<p>两者正交，互不干扰。</p>
+<h3 id="10">10. 收敛性分析与理论保证<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 偏置更新的收敛性<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p>考虑连续时间的梯度流（Gradient Flow）：</p>
+<p>$$<br />
+\frac{d\boldsymbol{b}(t)}{dt} = -(\boldsymbol{F}(\boldsymbol{b}(t)) - \boldsymbol{Q})<br />
+$$</p>
+<p><strong>Lyapunov函数</strong>：定义</p>
+<p>$$<br />
+V(\boldsymbol{b}) = \frac{1}{2} |\boldsymbol{F}(\boldsymbol{b}) - \boldsymbol{Q}|_2^2<br />
+$$</p>
+<p>其沿梯度流的导数为：</p>
+<p>$$<br />
+\frac{dV}{dt} = (\boldsymbol{F} - \boldsymbol{Q})^T \frac{d\boldsymbol{F}}{dt} = (\boldsymbol{F} - \boldsymbol{Q})^T \frac{\partial \boldsymbol{F}}{\partial \boldsymbol{b}} \frac{d\boldsymbol{b}}{dt}<br />
+$$</p>
+<p>假设 $\frac{\partial F_i}{\partial b_i} &gt; 0$（增大 $b_i$ 增加 $F_i$），并且 $\frac{\partial F_i}{\partial b_j} \approx 0$ 对 $i \neq j$，则</p>
+<p>$$<br />
+\frac{dV}{dt} \approx -\sum_{i=1}^{n} (F_i - Q_i) \frac{\partial F_i}{\partial b_i} (F_i - Q_i) = -\sum_{i=1}^{n} \frac{\partial F_i}{\partial b_i} (F_i - Q_i)^2 &lt; 0<br />
+$$</p>
+<p>因此 $V(\boldsymbol{b}(t))$ 单调递减，系统收敛到 $\boldsymbol{F} = \boldsymbol{Q}$。</p>
+<h4 id="102">10.2 离散化误差<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p>实际的SignSGD或RMS-SGD是离散化的：</p>
+<p>$$<br />
+\boldsymbol{b}^{(t+1)} = \boldsymbol{b}^{(t)} - \alpha \boldsymbol{g}^{(t)}<br />
+$$</p>
+<p>其中 $\boldsymbol{g}^{(t)}$ 是归一化梯度。</p>
+<p><strong>稳定性条件</strong>：要求学习率满足</p>
+<p>$$<br />
+\alpha &lt; \frac{2}{\lambda_{\max}(\boldsymbol{H})}<br />
+$$</p>
+<p>其中 $\boldsymbol{H} = \frac{\partial^2 V}{\partial \boldsymbol{b}^2}$ 是Hessian矩阵。</p>
+<p>对于本问题，由于 $\frac{\partial F_i}{\partial b_i}$ 通常较小（负载变化缓慢），$\alpha = 0.001$ 远小于稳定性上界，因此收敛有保证。</p>
+<h4 id="103">10.3 随机性的影响<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<p>实际训练中，$\boldsymbol{F}$ 是基于mini-batch估计的，存在方差：</p>
+<p>$$<br />
+\boldsymbol{F}<em _text_true="\text{true">{\text{batch}} = \boldsymbol{F}</em>}} + \boldsymbol{\epsilon<br />
+$$</p>
+<p>其中 $\mathbb{E}[\boldsymbol{\epsilon}] = \boldsymbol{0}$，$\text{Var}(\epsilon_i) = \frac{\sigma_i^2}{m}$。</p>
+<p><strong>影响</strong>：<br />
+- 更新存在噪声，导致 $\boldsymbol{b}$ 在最优点附近振荡<br />
+- 振荡幅度与batch size $m$ 成反比<br />
+- 可以通过增大 $m$ 或使用moving average来减小方差</p>
+<h3 id="11_1">11. 实验结果的理论解释<a class="toc-link" href="#11_1" title="Permanent link">&para;</a></h3>
+<h4 id="111">11.1 负载均衡指标<a class="toc-link" href="#111" title="Permanent link">&para;</a></h4>
+<p>常用指标：</p>
+<p><strong>（1）负载变异系数</strong>：</p>
+<p>$$<br />
+\text{CV}(\boldsymbol{F}) = \frac{\sqrt{\text{Var}(\boldsymbol{F})}}{\mathbb{E}[\boldsymbol{F}]} = \sqrt{n \sum_{i=1}^{n} (F_i - \frac{1}{n})^2}<br />
+$$</p>
+<p><strong>（2）最大/最小负载比</strong>：</p>
+<p>$$<br />
+\text{Ratio} = \frac{\max_i F_i}{\min_i F_i}<br />
+$$</p>
+<p>理想情况：$\text{Ratio} = 1$</p>
+<p><strong>（3）熵</strong>：</p>
+<p>$$<br />
+H(\boldsymbol{F}) = -\sum_{i=1}^{n} F_i \log F_i<br />
+$$</p>
+<p>最大值：$H(\boldsymbol{Q}) = \log n$（均匀分布）</p>
+<h4 id="112">11.2 性能改进的理论原因<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
+<p><strong>（1）计算效率</strong>：</p>
+<p>均衡负载下，总计算时间为：</p>
+<p>$$<br />
+T_{\text{total}} = \max_{i} T_i \approx \frac{mk}{n} \cdot T_{\text{expert}}<br />
+$$</p>
+<p>不均衡时：</p>
+<p>$$<br />
+T_{\text{total}} = \max_{i} L_i \cdot T_{\text{expert}} \gg \frac{mk}{n} \cdot T_{\text{expert}}<br />
+$$</p>
+<p><strong>加速比</strong>：</p>
+<p>$$<br />
+\text{Speedup} = \frac{\max_i L_i^{\text{before}}}{\max_i L_i^{\text{after}}} = \frac{\max_i L_i^{\text{before}}}{mk/n}<br />
+$$</p>
+<p><strong>（2）模型质量</strong>：</p>
+<p>传统Aux Loss会损害主任务，因为：</p>
+<p>$$<br />
+\nabla_{\theta} \mathcal{L}<em _theta="\theta">{\text{LM}} \quad \text{与} \quad \nabla</em>} \mathcal{L}_{\text{aux}} \quad \text{可能反向<br />
+$$</p>
+<p>导致妥协解：</p>
+<p>$$<br />
+\theta^* \neq \arg\min_{\theta} \mathcal{L}_{\text{LM}}<br />
+$$</p>
+<p>Loss-Free避免了这个问题：</p>
+<p>$$<br />
+\theta^<em> = \arg\min_{\theta} \mathcal{L}_{\text{LM}}(\theta; \boldsymbol{b}^</em>)<br />
+$$</p>
+<p><strong>（3）专家专业化（Expert Specialization）</strong>：</p>
+<p>负载均衡有助于每个专家学习不同的模式：</p>
+<p>$$<br />
+\min_{{\boldsymbol{\theta}<em _in="\in" _mathcal_T="\mathcal{T" i="i">i^{(E)}}} \mathbb{E}\left[\sum</em>)\right]}_k(\boldsymbol{x})} \tilde{\rho}_i(\boldsymbol{x}) \mathcal{L}(\boldsymbol{e}_i(\boldsymbol{x}), \boldsymbol{y<br />
+$$</p>
+<p>均衡负载确保每个专家都有足够的训练样本，避免某些专家"饿死"。</p>
+<h4 id="113">11.3 消融实验分析<a class="toc-link" href="#113" title="Permanent link">&para;</a></h4>
+<p><strong>（1）不同激活函数的影响</strong>：</p>
+<ul>
+<li>Sigmoid：$\rho_i \in (0,1)$，独立，适合 $\alpha=0.001$</li>
+<li>Softmax：$\sum_i \rho_i = 1$，相互依赖，可能需要调整 $\alpha$</li>
+<li>ReLU：$\rho_i \in [0, \infty)$，尺度不固定，需要仔细调整</li>
+</ul>
+<p><strong>（2）SignSGD vs RMS-SGD</strong>：</p>
+<p>实验表明RMS-SGD通常更好：<br />
+- 更平滑的收敛曲线<br />
+- 更低的最终CV值<br />
+- 对学习率 $\alpha$ 的鲁棒性更强</p>
+<p><strong>理论解释</strong>：RMS归一化保留了梯度的方向信息，而Sign仅保留符号，丢失了幅度信息。</p>
+<p><strong>（3）学习率 $\alpha$ 的影响</strong>：</p>
+<ul>
+<li>$\alpha$ 太小：收敛慢，可能在训练结束前未达到均衡</li>
+<li>$\alpha$ 太大：可能产生振荡或过冲</li>
+<li>最优 $\alpha$ 依赖于batch size、专家数等</li>
+</ul>
+<p><strong>经验法则</strong>：</p>
+<p>$$<br />
+\alpha \approx \frac{C_0}{\sqrt{n}}<br />
+$$</p>
+<p>其中 $C_0 \approx 0.03$ 对Sigmoid激活。</p>
+<h3 id="12-vq-vae">12. 扩展应用：VQ-VAE的编码表坍缩<a class="toc-link" href="#12-vq-vae" title="Permanent link">&para;</a></h3>
+<h4 id="121">12.1 问题描述<a class="toc-link" href="#121" title="Permanent link">&para;</a></h4>
+<p>Vector Quantization VAE（VQ-VAE）中的编码表坍缩（Codebook Collapse）：某些编码向量从不被使用，导致编码表的有效容量减小。</p>
+<p><strong>形式化</strong>：设编码表 ${\boldsymbol{c}_1, \ldots, \boldsymbol{c}_K}$，编码过程为</p>
+<p>$$<br />
+\text{encode}(\boldsymbol{z}) = \arg\min_{i} |\boldsymbol{z} - \boldsymbol{c}_i|_2<br />
+$$</p>
+<p><strong>问题</strong>：某些 $\boldsymbol{c}_i$ 可能永远不被选中。</p>
+<h4 id="122-loss-free">12.2 Loss-Free解决方案<a class="toc-link" href="#122-loss-free" title="Permanent link">&para;</a></h4>
+<p>引入偏置 $\boldsymbol{b} = [b_1, \ldots, b_K]$：</p>
+<p>$$<br />
+\text{encode}(\boldsymbol{z}; \boldsymbol{b}) = \arg\min_{i} |\boldsymbol{z} - \boldsymbol{c}_i|_2 + b_i<br />
+$$</p>
+<p><strong>目标</strong>：均衡使用频率 $\boldsymbol{F} = [F_1, \ldots, F_K]$，其中</p>
+<p>$$<br />
+F_i = \mathbb{E}<em _text_encode="\text{encode">{\boldsymbol{z}}[\mathbb{1}</em>]}(\boldsymbol{z}; \boldsymbol{b}) = i<br />
+$$</p>
+<p><strong>更新规则</strong>：</p>
+<p>$$<br />
+\boldsymbol{b} \leftarrow \boldsymbol{b} - \alpha (\boldsymbol{F} - \boldsymbol{Q})<br />
+$$</p>
+<p>其中 $\boldsymbol{Q} = (\frac{1}{K}, \ldots, \frac{1}{K})$。</p>
+<p><strong>优势</strong>：<br />
+- 不需要修改VQ-VAE的核心损失<br />
+- 训练和推理一致<br />
+- 自动适应数据分布</p>
+<h3 id="_9">总结<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h3>
+<p>Loss-Free方法的数学本质是：<br />
+1. <strong>参数空间分离</strong>：通过引入偏置 $\boldsymbol{b}$，将负载均衡与主任务优化解耦<br />
+2. <strong>直通估计器</strong>：利用STE处理不可微的Top-K操作<br />
+3. <strong>自适应调整</strong>：通过梯度下降自动调整负载分布<br />
+4. <strong>最优传输视角</strong>：隐式求解从当前分布到均匀分布的最优传输</p>
+<p>这种方法在理论上优雅，实践上有效，具有广泛的应用潜力。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -253,7 +903,22 @@ url={\url{https://spaces.ac.cn/archives/10757}},<br />
 <li><a href="#_5">相关细节</a></li>
 <li><a href="#_6">延伸思考</a></li>
 <li><a href="#_7">文章小结</a></li>
-<li><a href="#_8">公式推导与注释</a></li>
+<li><a href="#_8">公式推导与注释</a><ul>
+<li><a href="#1-moe">1. MoE的数学模型</a></li>
+<li><a href="#2">2. 专家分配问题的最优化表述</a></li>
+<li><a href="#3">3. 负载均衡约束的数学表征</a></li>
+<li><a href="#4">4. 路由策略的数学分析</a></li>
+<li><a href="#5-loss-free">5. Loss-Free方法的最优化理论</a></li>
+<li><a href="#6">6. 最优传输理论的联系</a></li>
+<li><a href="#7">7. 梯度计算与反向传播</a></li>
+<li><a href="#8-capacity-factor">8. 容量因子（Capacity Factor）的影响</a></li>
+<li><a href="#9">9. 损失函数设计（辅助损失对比）</a></li>
+<li><a href="#10">10. 收敛性分析与理论保证</a></li>
+<li><a href="#11_1">11. 实验结果的理论解释</a></li>
+<li><a href="#12-vq-vae">12. 扩展应用：VQ-VAE的编码表坍缩</a></li>
+<li><a href="#_9">总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

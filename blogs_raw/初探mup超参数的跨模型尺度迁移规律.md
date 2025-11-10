@@ -2,10 +2,9 @@
 title: 初探MuP：超参数的跨模型尺度迁移规律
 slug: 初探mup超参数的跨模型尺度迁移规律
 date: 2025-03-13
-tags: 梯度, 学习率, 优化器, 尺度定律, 生成模型
+tags: 详细推导, 梯度, 学习率, 优化器, 尺度定律, 生成模型
 status: pending
 ---
-
 # 初探MuP：超参数的跨模型尺度迁移规律
 
 **原文链接**: [https://spaces.ac.cn/archives/10770](https://spaces.ac.cn/archives/10770)

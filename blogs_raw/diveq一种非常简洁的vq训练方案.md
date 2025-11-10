@@ -3,10 +3,9 @@ title: DiVeQ：一种非常简洁的VQ训练方案
 slug: diveq一种非常简洁的vq训练方案
 date: 2025-10-08
 source: https://spaces.ac.cn/archives/11328
-tags: 机器学习
+tags: 详细推导, 机器学习
 status: pending
 ---
-
 # DiVeQ：一种非常简洁的VQ训练方案
 
 **原文链接**: [https://spaces.ac.cn/archives/11328](https://spaces.ac.cn/archives/11328)

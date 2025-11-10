@@ -2,10 +2,9 @@
 title: Transformer升级之路：17、多模态位置编码的简单思考
 slug: transformer升级之路17多模态位置编码的简单思考
 date: 2024-03-29
-tags: attention, 位置编码, rope, 多模态, 生成模型
+tags: 详细推导, attention, 位置编码, rope, 多模态, 生成模型
 status: pending
 ---
-
 # Transformer升级之路：17、多模态位置编码的简单思考
 
 **原文链接**: [https://spaces.ac.cn/archives/10040](https://spaces.ac.cn/archives/10040)

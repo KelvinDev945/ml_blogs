@@ -2,10 +2,9 @@
 title: MoE环游记：3、换个思路来分配
 slug: moe环游记3换个思路来分配
 date: 2025-03-05
-tags: 最优, 损失函数, 梯度, moe, 生成模型
+tags: 详细推导, 最优, 损失函数, 梯度, moe, 生成模型
 status: pending
 ---
-
 # MoE环游记：3、换个思路来分配
 
 **原文链接**: [https://spaces.ac.cn/archives/10757](https://spaces.ac.cn/archives/10757)

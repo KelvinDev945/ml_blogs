@@ -2,10 +2,9 @@
 title: MoE环游记：4、难处应当多投入
 slug: moe环游记4难处应当多投入
 date: 2025-03-28
-tags: 优化, 梯度, moe, 动态, 生成模型
+tags: 详细推导, 优化, 梯度, moe, 动态, 生成模型
 status: pending
 ---
-
 # MoE环游记：4、难处应当多投入
 
 **原文链接**: [https://spaces.ac.cn/archives/10815](https://spaces.ac.cn/archives/10815)

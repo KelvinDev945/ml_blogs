@@ -2,10 +2,9 @@
 title: 测试函数法推导连续性方程和Fokker-Planck方程
 slug: 测试函数法推导连续性方程和fokker-planck方程
 date: 2023-02-11
-tags: 概率, 微分方程, 随机, 扩散, 生成模型
+tags: 详细推导, 概率, 微分方程, 随机, 扩散, 生成模型
 status: pending
 ---
-
 # 测试函数法推导连续性方程和Fokker-Planck方程
 
 **原文链接**: [https://spaces.ac.cn/archives/9461](https://spaces.ac.cn/archives/9461)

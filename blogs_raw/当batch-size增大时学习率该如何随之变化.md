@@ -2,10 +2,9 @@
 title: 当Batch Size增大时，学习率该如何随之变化？
 slug: 当batch-size增大时学习率该如何随之变化
 date: 2024-11-14
-tags: 梯度, 学习率, 优化器, 尺度定律, 生成模型
+tags: 详细推导, 梯度, 学习率, 优化器, 尺度定律, 生成模型
 status: pending
 ---
-
 # 当Batch Size增大时，学习率该如何随之变化？
 
 **原文链接**: [https://spaces.ac.cn/archives/10542](https://spaces.ac.cn/archives/10542)

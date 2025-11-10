@@ -2,10 +2,9 @@
 title: 生成扩散模型漫谈（三）：DDPM = 贝叶斯 + 去噪
 slug: 生成扩散模型漫谈三ddpm-贝叶斯-去噪
 date: 2022-07-19
-tags: 概率, 生成模型, DDPM, 扩散, 生成模型
+tags: 详细推导, 概率, 生成模型, DDPM, 扩散, 生成模型
 status: pending
 ---
-
 # 生成扩散模型漫谈（三）：DDPM = 贝叶斯 + 去噪
 
 **原文链接**: [https://spaces.ac.cn/archives/9164](https://spaces.ac.cn/archives/9164)

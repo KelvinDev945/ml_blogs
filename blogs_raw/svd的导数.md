@@ -2,10 +2,9 @@
 title: SVD的导数
 slug: svd的导数
 date: 2025-04-26
-tags: 微积分, 分析, 矩阵, SVD, 梯度
+tags: 详细推导, 微积分, 分析, 矩阵, SVD, 梯度
 status: pending
 ---
-
 # SVD的导数
 
 **原文链接**: [https://spaces.ac.cn/archives/10878](https://spaces.ac.cn/archives/10878)

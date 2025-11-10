@@ -2,10 +2,9 @@
 title: 重新思考学习率与Batch Size（一）：现状
 slug: 重新思考学习率与batch-size一现状
 date: 2025-09-01
-tags: 梯度, 学习率, 优化器, 尺度定律, 生成模型
+tags: 详细推导, 梯度, 学习率, 优化器, 尺度定律, 生成模型
 status: pending
 ---
-
 # 重新思考学习率与Batch Size（一）：现状
 
 **原文链接**: [https://spaces.ac.cn/archives/11260](https://spaces.ac.cn/archives/11260)

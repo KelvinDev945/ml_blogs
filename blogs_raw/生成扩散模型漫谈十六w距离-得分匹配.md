@@ -2,10 +2,9 @@
 title: 生成扩散模型漫谈（十六）：W距离 ≤ 得分匹配
 slug: 生成扩散模型漫谈十六w距离-得分匹配
 date: 2023-02-14
-tags: 微分方程, GAN, 生成模型, 扩散, 生成模型
+tags: 详细推导, 微分方程, GAN, 生成模型, 扩散, 生成模型
 status: pending
 ---
-
 # 生成扩散模型漫谈（十六）：W距离 ≤ 得分匹配
 
 **原文链接**: [https://spaces.ac.cn/archives/9467](https://spaces.ac.cn/archives/9467)

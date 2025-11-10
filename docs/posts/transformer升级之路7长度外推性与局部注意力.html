@@ -74,7 +74,7 @@
             <ol class="breadcrumb">
                 <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
                 
-                <li class="breadcrumb-item"><a href="../index.html?tags=语言模型">语言模型</a></li>
+                <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
                     #74 Transformer升级之路：7、长度外推性与局部注意力
@@ -94,6 +94,10 @@
             </div>
             
             <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=详细推导" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 详细推导</span>
+                </a>
                 
                 <a href="../index.html?tags=语言模型" class="tag-link">
                     <span class="tag"><i class="fas fa-tag"></i> 语言模型</span>
@@ -212,7 +216,383 @@ url={\url{https://spaces.ac.cn/archives/9431}},<br />
 } </p>
 <hr />
 <h2 id="_5">公式推导与注释<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1">1. 局部注意力的窗口函数表示<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 全局注意力的数学定义<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>标准的全局自注意力机制定义为：</p>
+<p>$$\text{Attention}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}) = \text{softmax}\left(\frac{\boldsymbol{Q}\boldsymbol{K}^{\top}}{\sqrt{d_k}}\right)\boldsymbol{V}$$</p>
+<p>对于序列长度为 $L$ 的输入，注意力矩阵 $\boldsymbol{A} \in \mathbb{R}^{L \times L}$ 的第 $(m, n)$ 个元素为：</p>
+<p>$$A_{m,n} = \frac{\exp\left(\frac{\boldsymbol{q}<em j="1">m^{\top}\boldsymbol{k}_n}{\sqrt{d_k}}\right)}{\sum</em>$$}^{L} \exp\left(\frac{\boldsymbol{q}_m^{\top}\boldsymbol{k}_j}{\sqrt{d_k}}\right)</p>
+<p>这意味着每个位置 $m$ 可以关注到所有 $L$ 个位置。</p>
+<h4 id="12">1.2 窗口函数的定义<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p><strong>定义1（窗口掩码函数）</strong>：对于窗口大小 $w$，定义窗口掩码函数 $\mathcal{M}_w: \mathbb{Z} \times \mathbb{Z} \to {0, 1}$：</p>
+<p>$$\mathcal{M}_w(m, n) = \begin{cases}<br />
+1, &amp; \text{if } |m - n| \leq w \<br />
+0, &amp; \text{otherwise}<br />
+\end{cases}$$</p>
+<p>对于单向注意力（因果掩码），窗口函数修改为：</p>
+<p>$$\mathcal{M}_w^{\text{causal}}(m, n) = \begin{cases}<br />
+1, &amp; \text{if } 0 \leq m - n \leq w \<br />
+0, &amp; \text{otherwise}<br />
+\end{cases}$$</p>
+<p>这确保了位置 $m$ 只能看到其前面的 $w$ 个位置（包括自己）。</p>
+<h4 id="13">1.3 局部注意力的显式表示<a class="toc-link" href="#13" title="Permanent link">&para;</a></h4>
+<p>应用窗口掩码后的局部注意力为：</p>
+<p>$$A_{m,n}^{\text{local}} = \begin{cases}<br />
+\frac{\exp\left(\frac{\boldsymbol{q}<em _mathcal_M="\mathcal{M" j:="j:">m^{\top}\boldsymbol{k}_n}{\sqrt{d_k}}\right)}{\sum</em>_w(m,n) = 1 \}_w(m,j)=1} \exp\left(\frac{\boldsymbol{q}_m^{\top}\boldsymbol{k}_j}{\sqrt{d_k}}\right)}, &amp; \text{if } \mathcal{M<br />
+0, &amp; \text{otherwise}<br />
+\end{cases}$$</p>
+<p>也可以写成掩码加法的形式：</p>
+<p>$$A_{m,n}^{\text{local}} = \text{softmax}\left(\frac{\boldsymbol{Q}\boldsymbol{K}^{\top}}{\sqrt{d_k}} + \boldsymbol{M}_w\right)$$</p>
+<p>其中掩码矩阵 $\boldsymbol{M}_w \in \mathbb{R}^{L \times L}$：</p>
+<p>$$(\boldsymbol{M}<em m_n="m,n">w)</em>} = \begin{cases<br />
+0, &amp; \text{if } \mathcal{M}_w(m,n) = 1 \<br />
+-\infty, &amp; \text{otherwise}<br />
+\end{cases}$$</p>
+<h4 id="14">1.4 滑动窗口的数学性质<a class="toc-link" href="#14" title="Permanent link">&para;</a></h4>
+<p><strong>性质1（局部性）</strong>：对于窗口大小 $w$，每个token最多关注 $2w+1$ 个位置（双向）或 $w+1$ 个位置（单向）。</p>
+<p><strong>性质2（稀疏性）</strong>：注意力矩阵的非零元素比例为：<br />
+$$\rho = \frac{\text{非零元素数}}{\text{总元素数}} = \frac{O(Lw)}{L^2} = O\left(\frac{w}{L}\right)$$</p>
+<p>当 $w \ll L$ 时，$\rho \to 0$，注意力矩阵变得高度稀疏。</p>
+<p><strong>性质3（带状结构）</strong>：局部注意力矩阵具有带状（band）结构，非零元素集中在主对角线附近宽度为 $2w+1$ 的带内。</p>
+<h3 id="2">2. 稀疏注意力模式的数学定义<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 稀疏注意力的一般框架<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p><strong>定义2（稀疏注意力模式）</strong>：稀疏注意力模式由一个索引集合函数 $\mathcal{S}: {1, \ldots, L} \to 2^{{1, \ldots, L}}$ 定义，其中 $\mathcal{S}(m)$ 表示位置 $m$ 可以关注的位置集合。</p>
+<p>稀疏注意力为：<br />
+$$A_{m,n}^{\text{sparse}} = \begin{cases}<br />
+\frac{\exp\left(\frac{\boldsymbol{q}<em _in="\in" _mathcal_S="\mathcal{S" j="j">m^{\top}\boldsymbol{k}_n}{\sqrt{d_k}}\right)}{\sum</em>(m) \}(m)} \exp\left(\frac{\boldsymbol{q}_m^{\top}\boldsymbol{k}_j}{\sqrt{d_k}}\right)}, &amp; \text{if } n \in \mathcal{S<br />
+0, &amp; \text{otherwise}<br />
+\end{cases}$$</p>
+<h4 id="22">2.2 常见的稀疏模式<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p><strong>局部窗口模式</strong>：<br />
+$$\mathcal{S}_{\text{local}}(m) = {n : |m - n| \leq w}$$</p>
+<p><strong>跨步模式（Strided Pattern）</strong>：<br />
+$$\mathcal{S}_{\text{stride}}(m) = {n : n \equiv m \pmod{s}}$$</p>
+<p>其中 $s$ 是步长。</p>
+<p><strong>固定模式（Fixed Pattern）</strong>：<br />
+$$\mathcal{S}_{\text{fixed}}(m) = {n : n \in {0, s, 2s, \ldots}} \cup {n : |m - n| \leq w}$$</p>
+<p>结合了全局稀疏采样和局部窗口。</p>
+<p><strong>随机模式（Random Pattern）</strong>：<br />
+$$\mathcal{S}_{\text{random}}(m) = {n : n \text{ 从 } {1, \ldots, L} \text{ 中随机采样 } k \text{ 个}}$$</p>
+<h4 id="23-alibi">2.3 ALIBI的数学表示<a class="toc-link" href="#23-alibi" title="Permanent link">&para;</a></h4>
+<p>ALIBI通过在注意力得分上添加线性偏置实现软局部化：</p>
+<p>$$\text{score}(m, n) = \frac{\boldsymbol{q}_m^{\top}\boldsymbol{k}_n}{\sqrt{d_k}} - \lambda|m - n|$$</p>
+<p>其中 $\lambda &gt; 0$ 是衰减系数。</p>
+<p>经过softmax后：<br />
+$$A_{m,n}^{\text{ALIBI}} = \frac{\exp\left(\frac{\boldsymbol{q}<em j="1">m^{\top}\boldsymbol{k}_n}{\sqrt{d_k}} - \lambda|m - n|\right)}{\sum</em>$$}^{L} \exp\left(\frac{\boldsymbol{q}_m^{\top}\boldsymbol{k}_j}{\sqrt{d_k}} - \lambda|j - n|\right)</p>
+<p><strong>性质4（指数衰减）</strong>：ALIBI的注意力权重随距离指数衰减：<br />
+$$A_{m,n}^{\text{ALIBI}} \propto \exp(-\lambda|m - n|)$$</p>
+<p>当 $|m - n|$ 很大时，$A_{m,n}^{\text{ALIBI}} \approx 0$，实现了软局部化。</p>
+<h4 id="24">2.4 稀疏度的量化<a class="toc-link" href="#24" title="Permanent link">&para;</a></h4>
+<p><strong>定义3（注意力稀疏度）</strong>：对于稀疏模式 $\mathcal{S}$，其稀疏度定义为：</p>
+<p>$$\text{Sparsity}(\mathcal{S}) = 1 - \frac{1}{L^2}\sum_{m=1}^{L} |\mathcal{S}(m)|$$</p>
+<p>其中 $|\mathcal{S}(m)|$ 是位置 $m$ 关注的位置数量。</p>
+<p>对于局部窗口（窗口大小 $w$）：<br />
+$$\text{Sparsity}(\mathcal{S}_{\text{local}}) = 1 - \frac{2w+1}{L} \approx 1 - \frac{2w}{L}$$</p>
+<p>当 $L \to \infty$ 且 $w$ 固定时，稀疏度趋向于1。</p>
+<h3 id="3">3. 长度外推的理论界限<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 外推问题的形式化<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p><strong>定义4（长度外推）</strong>：设模型在长度 $L_{\text{train}}$ 的序列上训练，要在长度 $L_{\text{test}} &gt; L_{\text{train}}$ 的序列上测试，定义外推比率：</p>
+<p>$$r = \frac{L_{\text{test}}}{L_{\text{train}}}$$</p>
+<p><strong>问题</strong>：当 $r &gt; 1$ 时，模型性能如何变化？</p>
+<h4 id="32">3.2 位置编码的外推界限<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p><strong>定理1（位置编码外推界）</strong>：对于周期性位置编码（如Sinusoidal和RoPE），设最大周期为 $T_{\max}$，则外推到长度 $L$ 时，至少有 $\lfloor L/T_{\max} \rfloor$ 个周期重复。</p>
+<p>对于RoPE，最大周期为：<br />
+$$T_{\max} = 2\pi \cdot \theta_{\text{base}}^{(d-2)/d} = 2\pi \cdot 10000^{(d-2)/d}$$</p>
+<p>当 $d = 128$ 时，$T_{\max} \approx 2\pi \cdot 10000^{126/128} \approx 62700$。</p>
+<p><strong>推论</strong>：当 $L_{\text{test}} &gt; T_{\max}$ 时，位置编码开始重复，模型难以区分相差 $T_{\max}$ 倍数的位置。</p>
+<h4 id="33">3.3 注意力熵的变化<a class="toc-link" href="#33" title="Permanent link">&para;</a></h4>
+<p><strong>定义5（注意力熵）</strong>：对于位置 $m$ 的注意力分布 ${A_{m,n}}_{n=1}^{L}$，定义其熵为：</p>
+<p>$$H_m = -\sum_{n=1}^{L} A_{m,n} \log A_{m,n}$$</p>
+<p><strong>定理2（熵与序列长度的关系）</strong>：在均匀注意力假设下（$A_{m,n} \approx 1/L$），注意力熵随序列长度对数增长：</p>
+<p>$$H_m \approx \log L$$</p>
+<p>证明：当 $A_{m,n} = 1/L$ 时，<br />
+$$H_m = -\sum_{n=1}^{L} \frac{1}{L} \log \frac{1}{L} = -L \cdot \frac{1}{L} \log \frac{1}{L} = \log L$$</p>
+<p><strong>推论</strong>：当 $L_{\text{test}} &gt; L_{\text{train}}$ 时，注意力熵增加：<br />
+$$\Delta H = H_{\text{test}} - H_{\text{train}} \approx \log \frac{L_{\text{test}}}{L_{\text{train}}} = \log r$$</p>
+<p>这导致注意力更加分散，与训练时的集中注意力不一致。</p>
+<h4 id="34">3.4 局部注意力的熵不变性<a class="toc-link" href="#34" title="Permanent link">&para;</a></h4>
+<p>对于窗口大小为 $w$ 的局部注意力，无论序列长度 $L$ 如何增加，注意力熵保持有界：</p>
+<p>$$H_m^{\text{local}} \leq \log(2w+1)$$</p>
+<p><strong>定理3（局部注意力的熵稳定性）</strong>：局部注意力的熵不随序列长度变化，从而保持训练与测试的一致性。</p>
+<p>证明：由于每个位置最多关注 $2w+1$ 个位置，在均匀分布假设下：<br />
+$$H_m^{\text{local}} = -\sum_{n \in \mathcal{S}<em _text_local="\text{local">{\text{local}}(m)} \frac{1}{|\mathcal{S}</em>}}(m)|} \log \frac{1}{|\mathcal{S<em _text_local="\text{local">{\text{local}}(m)|} = \log |\mathcal{S}</em>(m)| \leq \log(2w+1)$$}</p>
+<p>这与序列长度 $L$ 无关。</p>
+<h3 id="4">4. 滑动窗口与全局注意力的权衡<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 感受野分析<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p><strong>定义6（有效感受野）</strong>：在 $\ell$ 层Transformer中，位置 $m$ 的有效感受野是所有能够影响其表示的位置集合。</p>
+<p>对于全局注意力，单层的感受野为整个序列：<br />
+$$\text{RF}_1^{\text{global}}(m) = {1, 2, \ldots, L}$$</p>
+<p>对于局部注意力（窗口大小 $w$），单层的感受野为：<br />
+$$\text{RF}_1^{\text{local}}(m) = {n : |m - n| \leq w}$$</p>
+<p><strong>定理4（多层感受野的增长）</strong>：在 $\ell$ 层局部注意力中，感受野线性增长：</p>
+<p>$$|\text{RF}_\ell^{\text{local}}(m)| = \min(2\ell w + 1, L)$$</p>
+<p>证明（归纳法）：<br />
+- 基础情况（$\ell = 1$）：$|\text{RF}<em _ell-1="\ell-1">1^{\text{local}}(m)| = 2w + 1$<br />
+- 归纳步骤：假设 $|\text{RF}</em>(m)| = 2(\ell-1)w + 1$，则第 $\ell$ 层中，每个位置可以关注到前一层感受野的 $\pm w$ 范围，因此：}^{\text{local}<br />
+  $$|\text{RF}_\ell^{\text{local}}(m)| = 2(\ell-1)w + 1 + 2w = 2\ell w + 1$$</p>
+<p><strong>推论</strong>：要覆盖整个序列 $L$，需要的层数为：<br />
+$$\ell_{\text{min}} = \left\lceil \frac{L - 1}{2w} \right\rceil$$</p>
+<h4 id="42">4.2 信息传播速度<a class="toc-link" href="#42" title="Permanent link">&para;</a></h4>
+<p><strong>定义7（信息传播速度）</strong>：从位置 $i$ 传播信息到位置 $j$ 所需的最小层数。</p>
+<p>对于全局注意力，信息传播是即时的（1层）：<br />
+$$\text{Hops}_{\text{global}}(i, j) = 1, \quad \forall i, j$$</p>
+<p>对于局部注意力：<br />
+$$\text{Hops}_{\text{local}}(i, j) = \left\lceil \frac{|i - j|}{w} \right\rceil$$</p>
+<p><strong>定理5（信息瓶颈）</strong>：局部注意力中，远距离信息传播需要多层，可能导致信息损失。</p>
+<h4 id="43">4.3 表达能力的权衡<a class="toc-link" href="#43" title="Permanent link">&para;</a></h4>
+<p><strong>定理6（全局vs局部的Pareto前沿）</strong>：记 $C$ 为计算成本，$E$ 为表达能力，则：</p>
+<ul>
+<li>全局注意力：$C_{\text{global}} = O(L^2 d)$，$E_{\text{global}} = $ 最大</li>
+<li>局部注意力：$C_{\text{local}} = O(Lwd)$，$E_{\text{local}} = $ 受限于感受野</li>
+</ul>
+<p>不存在同时最小化 $C$ 和最大化 $E$ 的方案，形成Pareto前沿。</p>
+<h4 id="44">4.4 最优窗口大小的选择<a class="toc-link" href="#44" title="Permanent link">&para;</a></h4>
+<p><strong>优化问题</strong>：给定计算预算 $C_{\max}$ 和目标序列长度 $L$，选择最优窗口大小 $w^<em>$ 和层数 $\ell^</em>$：</p>
+<p>$$\begin{aligned}<br />
+\max_{w, \ell} \quad &amp; \text{Performance}(w, \ell) \<br />
+\text{s.t.} \quad &amp; \ell \cdot L \cdot w \cdot d \leq C_{\max} \<br />
+&amp; 2\ell w \geq L \quad \text{（覆盖整个序列）}<br />
+\end{aligned}$$</p>
+<p><strong>启发式解</strong>：在实践中，常选择 $w = O(\sqrt{L})$，使得 $\ell = O(\sqrt{L})$ 也能覆盖整个序列，计算复杂度为 $O(L^{1.5}d)$。</p>
+<h3 id="5">5. 计算复杂度分析<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 时间复杂度<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p><strong>全局注意力</strong>：<br />
+- 计算 $\boldsymbol{Q}\boldsymbol{K}^{\top}$：$O(L^2 d)$<br />
+- Softmax：$O(L^2)$<br />
+- 乘以 $\boldsymbol{V}$：$O(L^2 d)$<br />
+- <strong>总计</strong>：$O(L^2 d)$</p>
+<p><strong>局部注意力（窗口大小 $w$）</strong>：<br />
+- 对每个位置，计算 $w$ 个点积：$O(Lwd)$<br />
+- Softmax（每个位置 $w$ 个元素）：$O(Lw)$<br />
+- 加权求和：$O(Lwd)$<br />
+- <strong>总计</strong>：$O(Lwd)$</p>
+<p><strong>复杂度比</strong>：<br />
+$$\frac{C_{\text{local}}}{C_{\text{global}}} = \frac{Lwd}{L^2d} = \frac{w}{L}$$</p>
+<p>当 $w \ll L$ 时，局部注意力显著更快。</p>
+<h4 id="52">5.2 空间复杂度<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p><strong>全局注意力</strong>：<br />
+- 注意力矩阵：$O(L^2)$<br />
+- QKV矩阵：$O(Ld)$<br />
+- <strong>总计</strong>：$O(L^2 + Ld) = O(L^2)$（当 $L &gt; d$ 时）</p>
+<p><strong>局部注意力</strong>：<br />
+- 稀疏注意力矩阵（只存储非零元素）：$O(Lw)$<br />
+- QKV矩阵：$O(Ld)$<br />
+- <strong>总计</strong>：$O(Lw + Ld) = O(L(w+d))$</p>
+<p><strong>空间节省比</strong>：<br />
+$$\frac{S_{\text{local}}}{S_{\text{global}}} = \frac{Lw}{L^2} = \frac{w}{L}$$</p>
+<h4 id="53">5.3 不同稀疏模式的复杂度<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>模式</th>
+<th>时间复杂度</th>
+<th>空间复杂度</th>
+<th>感受野（$\ell$ 层）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>全局注意力</td>
+<td>$O(L^2d)$</td>
+<td>$O(L^2)$</td>
+<td>$L$</td>
+</tr>
+<tr>
+<td>局部窗口</td>
+<td>$O(Lwd)$</td>
+<td>$O(Lw)$</td>
+<td>$2\ell w$</td>
+</tr>
+<tr>
+<td>跨步</td>
+<td>$O(L^2d/s)$</td>
+<td>$O(L^2/s)$</td>
+<td>$L$（稀疏）</td>
+</tr>
+<tr>
+<td>固定+局部</td>
+<td>$O(L(w+k)d)$</td>
+<td>$O(L(w+k))$</td>
+<td>$L$</td>
+</tr>
+<tr>
+<td>Longformer</td>
+<td>$O(L(w+g)d)$</td>
+<td>$O(L(w+g))$</td>
+<td>$L$</td>
+</tr>
+</tbody>
+</table>
+<p>其中 $k$ 是固定采样数，$g$ 是全局token数。</p>
+<h4 id="54">5.4 实际加速比分析<a class="toc-link" href="#54" title="Permanent link">&para;</a></h4>
+<p>考虑现代GPU的并行特性，实际加速比可能低于理论值：</p>
+<p><strong>定理7（Amdahl定律的应用）</strong>：设并行部分比例为 $p$，串行部分比例为 $1-p$，则实际加速比为：</p>
+<p>$$\text{Speedup} = \frac{1}{(1-p) + \frac{p}{N}}$$</p>
+<p>其中 $N$ 是理论加速倍数。</p>
+<p>对于局部注意力，$N = L/w$，但由于存在串行部分（如Softmax归一化），实际加速比小于 $L/w$。</p>
+<h3 id="6">6. 外推误差的定量估计<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 误差来源分解<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p>外推误差可以分解为两部分：</p>
+<p>$$\mathcal{E}<em _text_position="\text{position">{\text{total}} = \mathcal{E}</em>$$}} + \mathcal{E}_{\text{attention}</p>
+<p>其中：<br />
+- $\mathcal{E}<em _text_attention="\text{attention">{\text{position}}$：未见过位置编码的误差<br />
+- $\mathcal{E}</em>$：注意力分布变化的误差}</p>
+<h4 id="62">6.2 位置编码误差<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p><strong>定义8（位置编码外推误差）</strong>：对于位置 $m &gt; L_{\text{train}}$，位置编码的误差为：</p>
+<p>$$\mathcal{E}<em _text_interp="\text{interp">{\text{position}}(m) = |\text{PE}(m) - \text{PE}</em>(m)|$$}</p>
+<p>其中 $\text{PE}_{\text{interp}}(m)$ 是基于训练集位置编码的插值或外推。</p>
+<p>对于函数式位置编码（如RoPE），假设模型学到的是位置编码之间的关系而非绝对值，则：</p>
+<p><strong>定理8（RoPE的外推误差界）</strong>：对于RoPE，外推误差主要来自高频分量的振荡：</p>
+<p>$$\mathcal{E}<em i="0">{\text{position}}^{\text{RoPE}}(m) \leq C \sum</em>[\sin(m'\theta_i)]|$$}^{d/2-1} |\sin(m\theta_i) - \mathbb{E</p>
+<p>其中期望是对训练集中的 $m' \in [1, L_{\text{train}}]$ 求的。</p>
+<p>对于 $m &gt; L_{\text{train}}$，高频项（$\theta_i$ 大）的振荡更剧烈，误差更大。</p>
+<h4 id="63">6.3 注意力分布误差<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p><strong>定义9（注意力分布的KL散度）</strong>：测量训练与测试时注意力分布的差异：</p>
+<p>$$\mathcal{E}_{\text{attention}}(m) = \text{KL}\left(A_m^{\text{train}} | A_m^{\text{test}}\right)$$</p>
+<p>其中 $A_m^{\text{train}}$ 和 $A_m^{\text{test}}$ 分别是训练和测试时位置 $m$ 的注意力分布。</p>
+<p><strong>定理9（全局注意力的KL散度界）</strong>：在均匀注意力假设下：</p>
+<p>$$\text{KL}\left(\text{Uniform}(L_{\text{train}}) | \text{Uniform}(L_{\text{test}})\right) = \log \frac{L_{\text{test}}}{L_{\text{train}}} = \log r$$</p>
+<p>这与前面的熵增加一致。</p>
+<p><strong>定理10（局部注意力的KL散度界）</strong>：对于窗口大小 $w$ 的局部注意力，当 $w &lt; \min(L_{\text{train}}, L_{\text{test}})$ 时：</p>
+<p>$$\text{KL}\left(A_m^{\text{train}} | A_m^{\text{test}}\right) \approx 0$$</p>
+<p>因为两者的注意力范围相同（都是 $2w+1$ 个位置）。</p>
+<h4 id="64">6.4 误差的上界估计<a class="toc-link" href="#64" title="Permanent link">&para;</a></h4>
+<p><strong>定理11（总外推误差的上界）</strong>：对于局部注意力，总外推误差有界：</p>
+<p>$$\mathcal{E}<em _text_position="\text{position">{\text{total}} \leq \mathcal{E}</em>\right)$$}} + O\left(\frac{w}{L_{\text{train}}</p>
+<p>证明：注意力分布误差主要来自边界效应（序列开头和结尾的窗口不完整），其影响为 $O(w/L)$。</p>
+<p>对于全局注意力：<br />
+$$\mathcal{E}<em _text_position="\text{position">{\text{total}} \leq \mathcal{E}</em> + C \log r$$}</p>
+<p>其中 $r = L_{\text{test}}/L_{\text{train}}$ 是外推比率。</p>
+<h4 id="65">6.5 实验验证的理论预测<a class="toc-link" href="#65" title="Permanent link">&para;</a></h4>
+<p>基于上述分析，我们可以预测：</p>
+<p><strong>预测1</strong>：局部注意力的外推性能随外推比率 $r$ 缓慢下降：<br />
+$$\text{Performance}<em _text_local="\text{local">{\text{local}}(r) \approx \text{Performance}</em>)$$}}(1) - O(\epsilon_{\text{pos}</p>
+<p>其中 $\epsilon_{\text{pos}}$ 是位置编码误差，与 $r$ 的关系较弱。</p>
+<p><strong>预测2</strong>：全局注意力的外推性能随 $r$ 快速下降：<br />
+$$\text{Performance}<em _text_global="\text{global">{\text{global}}(r) \approx \text{Performance}</em>(1) - C \log r$$}</p>
+<p><strong>预测3</strong>：最优窗口大小应接近训练长度：<br />
+$$w^* \approx \alpha L_{\text{train}}, \quad \alpha \in [0.5, 1]$$</p>
+<p>这样既保持了训练时的注意力模式，又允许一定的外推能力。</p>
+<h3 id="7-logn">7. log(n)缩放的理论分析<a class="toc-link" href="#7-logn" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 熵不变性原理<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p><strong>定理12（熵不变缩放）</strong>：将注意力得分乘以 $\log_m n$（$m$ 是训练长度，$n$ 是测试长度）可以近似保持注意力熵不变。</p>
+<p>修改后的注意力为：<br />
+$$\text{Attention}_{\text{log}}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}) = \text{softmax}\left(\frac{\log_m n}{\sqrt{d}}\boldsymbol{Q}\boldsymbol{K}^{\top}\right)\boldsymbol{V}$$</p>
+<p><strong>证明思路</strong>：在均匀注意力近似下，原始注意力熵为 $H = \log n$。缩放后，softmax的温度变为 $\sqrt{d}/\log_m n$，等效注意力熵为：<br />
+$$H' \approx \log n - \log(\log_m n) = \log n - \log \frac{\log n}{\log m}$$</p>
+<p>当 $n \approx m$ 时，$H' \approx \log m = H_{\text{train}}$。</p>
+<h4 id="72">7.2 温度缩放的效果<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p>温度参数 $\tau$ 控制softmax的"锐度"：<br />
+$$\text{softmax}_{\tau}(\boldsymbol{z}) = \frac{\exp(\boldsymbol{z}/\tau)}{\sum_j \exp(z_j/\tau)}$$</p>
+<p><strong>性质5（温度与熵的关系）</strong>：<br />
+- $\tau \to 0$：分布趋向one-hot（熵 $\to 0$）<br />
+- $\tau \to \infty$：分布趋向均匀（熵 $\to \log L$）</p>
+<p>通过设置 $\tau = \sqrt{d}/\log_m n$，可以补偿序列长度变化对熵的影响。</p>
+<h4 id="73">7.3 与局部注意力的结合<a class="toc-link" href="#73" title="Permanent link">&para;</a></h4>
+<p>结合局部注意力和log缩放：<br />
+$$A_{m,n}^{\text{combined}} = \text{softmax}\left(\frac{\log_m n}{\sqrt{d}}(\boldsymbol{Q}\boldsymbol{K}^{\top} + \boldsymbol{M}_w)\right)$$</p>
+<p><strong>定理13（组合优势）</strong>：局部注意力 + log缩放可以同时解决：<br />
+1. 位置编码外推问题（通过局部窗口）<br />
+2. 注意力熵变化问题（通过log缩放）</p>
+<p>从而达到最佳外推效果。</p>
+<h3 id="8-alibikerple">8. ALIBI与KERPLE的数学分析<a class="toc-link" href="#8-alibikerple" title="Permanent link">&para;</a></h3>
+<h4 id="81-alibi">8.1 ALIBI的衰减特性<a class="toc-link" href="#81-alibi" title="Permanent link">&para;</a></h4>
+<p>ALIBI的注意力权重为：<br />
+$$A_{m,n}^{\text{ALIBI}} = \frac{\exp\left(s_{m,n} - \lambda|m-n|\right)}{\sum_j \exp\left(s_{m,j} - \lambda|m-j|\right)}$$</p>
+<p>其中 $s_{m,n} = \boldsymbol{q}_m^{\top}\boldsymbol{k}_n/\sqrt{d}$。</p>
+<p><strong>渐近行为</strong>：当 $|m-n| \to \infty$：<br />
+$$A_{m,n}^{\text{ALIBI}} \sim \exp(-\lambda|m-n|) \to 0$$</p>
+<p>等效窗口大小可定义为：<br />
+$$w_{\text{eff}} = \frac{1}{\lambda} \log \frac{1}{\epsilon}$$</p>
+<p>其中 $\epsilon$ 是注意力权重的阈值（如 $\epsilon = 0.01$）。</p>
+<h4 id="82-kerple">8.2 KERPLE的幂律和对数形式<a class="toc-link" href="#82-kerple" title="Permanent link">&para;</a></h4>
+<p>KERPLE提供两种形式：</p>
+<p><strong>幂律形式</strong>：<br />
+$$\text{score}(m,n) = s_{m,n} - r_1|m-n|^{r_2}$$</p>
+<p>其中 $0 &lt; r_2 \leq 2$。</p>
+<ul>
+<li>$r_2 = 1$：线性衰减（ALIBI）</li>
+<li>$r_2 = 2$：二次衰减（更快局部化）</li>
+<li>$r_2 &lt; 1$：次线性衰减（更缓慢局部化）</li>
+</ul>
+<p><strong>对数形式</strong>：<br />
+$$\text{score}(m,n) = s_{m,n} - r_1 \log(1 + r_2|m-n|)$$</p>
+<p>对数形式的衰减更慢，适合需要较大感受野的任务。</p>
+<h4 id="83">8.3 衰减函数的比较<a class="toc-link" href="#83" title="Permanent link">&para;</a></h4>
+<p>定义有效注意力范围为使得 $A_{m,n} &gt; \epsilon$ 的最大 $|m-n|$：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>衰减函数 $f(d)$</th>
+<th>有效范围 $d_{\text{eff}}$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>硬窗口</td>
+<td>$\begin{cases}0, &amp; d \leq w \ -\infty, &amp; d &gt; w\end{cases}$</td>
+<td>$w$</td>
+</tr>
+<tr>
+<td>ALIBI</td>
+<td>$-\lambda d$</td>
+<td>$O(\log(1/\epsilon)/\lambda)$</td>
+</tr>
+<tr>
+<td>KERPLE幂律</td>
+<td>$-r_1 d^{r_2}$</td>
+<td>$O((1/r_1)^{1/r_2})$</td>
+</tr>
+<tr>
+<td>KERPLE对数</td>
+<td>$-r_1\log(1+r_2 d)$</td>
+<td>$O(\exp(1/r_1))$</td>
+</tr>
+</tbody>
+</table>
+<h3 id="9-xpos">9. XPOS的理论分析<a class="toc-link" href="#9-xpos" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 指数衰减项的引入<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p>XPOS在RoPE基础上添加指数衰减：<br />
+$$\boldsymbol{q}_m \to \xi^m \boldsymbol{\mathcal{R}}_m \boldsymbol{q}_m, \quad \boldsymbol{k}_n \to \xi^{-n} \boldsymbol{\mathcal{R}}_n \boldsymbol{k}_n$$</p>
+<p>注意力得分为：<br />
+$$\text{score}(m,n) = \xi^{m-n} \boldsymbol{q}<em n-m="n-m">m^{\top} \boldsymbol{\mathcal{R}}</em>_n$$} \boldsymbol{k</p>
+<h4 id="92">9.2 单向性的保证<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p>对于因果注意力（$m \geq n$），相对位置 $m - n \geq 0$，选择 $\xi &lt; 1$ 使得：<br />
+$$\xi^{m-n} \leq 1, \quad \forall m \geq n$$</p>
+<p>且随 $m - n$ 增大而衰减。</p>
+<p><strong>定理14（XPOS的衰减率）</strong>：XPOS的注意力权重满足：<br />
+$$A_{m,n}^{\text{XPOS}} \propto \xi^{m-n}$$</p>
+<p>衰减时间常数为：<br />
+$$\tau = \frac{1}{-\log \xi}$$</p>
+<h4 id="93-alibi">9.3 与ALIBI的关系<a class="toc-link" href="#93-alibi" title="Permanent link">&para;</a></h4>
+<p>XPOS和ALIBI都实现了距离衰减，但方式不同：<br />
+- ALIBI：加法偏置，$\exp(-\lambda d)$<br />
+- XPOS：乘法因子，$\xi^d$</p>
+<p>两者等价当 $\xi = e^{-\lambda}$。</p>
+<h3 id="10">10. 总结与理论启示<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 主要理论结果<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>局部性原理</strong>：局部注意力通过限制感受野，保持了训练与测试的注意力熵一致性</li>
+<li><strong>外推误差界</strong>：局部注意力的外推误差主要来自位置编码，与序列长度关系较弱</li>
+<li><strong>计算效率</strong>：局部注意力将复杂度从 $O(L^2d)$ 降至 $O(Lwd)$，$w \ll L$</li>
+<li><strong>感受野增长</strong>：多层局部注意力的感受野线性增长，需要 $O(L/w)$ 层覆盖全序列</li>
+</ol>
+<h4 id="102">10.2 设计指导原则<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>窗口大小选择</strong>：$w \approx L_{\text{train}}$ 以匹配训练时的注意力模式</li>
+<li><strong>层数设计</strong>：$\ell \geq L_{\text{test}}/(2w)$ 以保证足够的感受野</li>
+<li><strong>混合策略</strong>：结合局部和全局注意力，平衡效率与表达能力</li>
+<li><strong>缩放调整</strong>：使用log缩放补偿序列长度变化</li>
+</ol>
+<h4 id="103">10.3 开放问题<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<ol>
+<li>最优窗口大小的理论下界？</li>
+<li>不同任务对感受野的最小需求？</li>
+<li>稀疏模式的自适应学习方法？</li>
+<li>长度外推的泛化界是否可证明？</li>
+</ol>
+<p>本文通过严格的数学分析，阐明了局部注意力在长度外推中的关键作用，为Transformer的长序列建模提供了理论基础。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -265,7 +645,19 @@ url={\url{https://spaces.ac.cn/archives/9431}},<br />
 </ul>
 </li>
 <li><a href="#_4">文章小结</a></li>
-<li><a href="#_5">公式推导与注释</a></li>
+<li><a href="#_5">公式推导与注释</a><ul>
+<li><a href="#1">1. 局部注意力的窗口函数表示</a></li>
+<li><a href="#2">2. 稀疏注意力模式的数学定义</a></li>
+<li><a href="#3">3. 长度外推的理论界限</a></li>
+<li><a href="#4">4. 滑动窗口与全局注意力的权衡</a></li>
+<li><a href="#5">5. 计算复杂度分析</a></li>
+<li><a href="#6">6. 外推误差的定量估计</a></li>
+<li><a href="#7-logn">7. log(n)缩放的理论分析</a></li>
+<li><a href="#8-alibikerple">8. ALIBI与KERPLE的数学分析</a></li>
+<li><a href="#9-xpos">9. XPOS的理论分析</a></li>
+<li><a href="#10">10. 总结与理论启示</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

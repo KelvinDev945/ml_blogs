@@ -149,27 +149,27 @@
 <p>具体来说，我们假设每个Expert在初始化阶段具有相同的模长（不失一般性，可以直接设为1），并且满足两两正交，然后假设Router的logits服从标准正态分布（即零均值、单位方差，当然如果觉得有必要，也可以考虑其他方差）。这样一来，$s$个Shared Expert的总模长就是$\sqrt{s}$，而Routed Expert的总模长是<br />
 \begin{equation}\lambda\sqrt{\sum_{i\in \mathop{\text{argtop}}<em _s:_="[s:]">{k-s} \boldsymbol{\rho}</em>}} \rho_{i+s}^2}\end{equation<br />
 通过让它等于$\sqrt{s}$，就可以估计出$\lambda$。由于激活函数、是否重归一化等选择，不同MoE的Router差别可能比较大，所以我们也不设法求解析解，而是直接数值模拟：</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<pre class="highlight"><code>import numpy as np
 
-<span class="k">def</span><span class="w"> </span><span class="nf">sigmoid</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
-    <span class="k">return</span> <span class="mi">1</span> <span class="o">/</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="kp">exp</span><span class="p">(</span><span class="o">-</span><span class="n">x</span><span class="p">))</span>
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
 
-<span class="k">def</span><span class="w"> </span><span class="nf">softmax</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
-    <span class="k">return</span> <span class="p">(</span><span class="n">p</span> <span class="o">:=</span> <span class="n">np</span><span class="o">.</span><span class="kp">exp</span><span class="p">(</span><span class="n">x</span><span class="p">))</span> <span class="o">/</span> <span class="n">p</span><span class="o">.</span><span class="kp">sum</span><span class="p">()</span>
+def softmax(x):
+    return (p := np.exp(x)) / p.sum()
 
-<span class="k">def</span><span class="w"> </span><span class="nf">scaling_factor</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">k</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">act</span><span class="o">=</span><span class="s1">&#39;softmax&#39;</span><span class="p">,</span> <span class="n">renorm</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
-    <span class="n">factors</span> <span class="o">=</span> <span class="p">[]</span>
-    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10000</span><span class="p">):</span>
-        <span class="n">logits</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">n</span> <span class="o">-</span> <span class="n">s</span><span class="p">)</span>
-        <span class="n">p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">sort</span><span class="p">(</span><span class="nb">eval</span><span class="p">(</span><span class="n">act</span><span class="p">)(</span><span class="n">logits</span><span class="p">))[::</span><span class="o">-</span><span class="mi">1</span><span class="p">][:</span><span class="n">k</span> <span class="o">-</span> <span class="n">s</span><span class="p">]</span>
-        <span class="k">if</span> <span class="n">renorm</span><span class="p">:</span>
-            <span class="n">p</span> <span class="o">/=</span> <span class="n">p</span><span class="o">.</span><span class="kp">sum</span><span class="p">()</span>
-        <span class="n">factors</span><span class="o">.</span><span class="kp">append</span><span class="p">(</span><span class="n">s</span><span class="o">**</span><span class="mf">0.5</span> <span class="o">/</span> <span class="p">(</span><span class="n">p</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="kp">sum</span><span class="p">()</span><span class="o">**</span><span class="mf">0.5</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="kp">mean</span><span class="p">(</span><span class="n">factors</span><span class="p">)</span>
+def scaling_factor(n, k, s, act='softmax', renorm=False):
+    factors = []
+    for _ in range(10000):
+        logits = np.random.randn(n - s)
+        p = np.sort(eval(act)(logits))[::-1][:k - s]
+        if renorm:
+            p /= p.sum()
+        factors.append(s**0.5 / (p**2).sum()**0.5)
+    return np.mean(factors)
 
-<span class="n">scaling_factor</span><span class="p">(</span><span class="mi">162</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="s1">&#39;softmax&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
-<span class="n">scaling_factor</span><span class="p">(</span><span class="mi">257</span><span class="p">,</span> <span class="mi">9</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="s1">&#39;sigmoid&#39;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)</span>
-</code></pre></div>
+scaling_factor(162, 8, 2, 'softmax', False)
+scaling_factor(257, 9, 1, 'sigmoid', True)
+</code></pre>
 
 <p>非常巧的是，这个脚本的模拟结果跟DeepSeek-V2、DeepSeek-V3的设置都很吻合。其中，DeepSeek-V2有$n=162,k=8,s=2$，Softmax激活并且没有重归一化，上述脚本的模拟结果约等于16，而DeepSeek-V2的$\lambda$正好是16[<a href="https://huggingface.co/deepseek-ai/DeepSeek-V2/blob/main/config.json#L48">来源</a>]；DeepSeek-V3则有$n=257,k=9,s=1$，Sigmoid激活且重归一化，脚本的结果大约是2.83，而DeepSeek-V3的$\lambda$则是2.5[<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json#L57">来源</a>]。</p>
 <h2 id="_4">非均匀性<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>

@@ -2,10 +2,9 @@
 title: 圆内随机n点在同一个圆心角为θ的扇形的概率
 slug: 圆内随机n点在同一个圆心角为θ的扇形的概率
 date: 2022-10-25
-tags: 概率, 竞赛, 随机, 生成模型, attention
+tags: 详细推导, 概率, 竞赛, 随机, 生成模型, attention
 status: pending
 ---
-
 # 圆内随机n点在同一个圆心角为θ的扇形的概率
 
 **原文链接**: [https://spaces.ac.cn/archives/9324](https://spaces.ac.cn/archives/9324)

@@ -3,10 +3,9 @@ title: 低精度Attention可能存在有偏的舍入误差
 slug: 低精度attention可能存在有偏的舍入误差
 date: 2025-10-27
 source: https://spaces.ac.cn/archives/11371
-tags: 机器学习
+tags: 详细推导, 机器学习
 status: pending
 ---
-
 # 低精度Attention可能存在有偏的舍入误差
 
 **原文链接**: [https://spaces.ac.cn/archives/11371](https://spaces.ac.cn/archives/11371)

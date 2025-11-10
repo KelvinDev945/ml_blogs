@@ -2,10 +2,9 @@
 title: 生成扩散模型漫谈（十七）：构建ODE的一般步骤（下）
 slug: 生成扩散模型漫谈十七构建ode的一般步骤下
 date: 2023-02-23
-tags: 概率, 微分方程, 生成模型, 扩散, 生成模型
+tags: 详细推导, 概率, 微分方程, 生成模型, 扩散, 生成模型
 status: pending
 ---
-
 # 生成扩散模型漫谈（十七）：构建ODE的一般步骤（下）
 
 **原文链接**: [https://spaces.ac.cn/archives/9497](https://spaces.ac.cn/archives/9497)

@@ -213,8 +213,723 @@ month={Dec},<br />
 url={\url{https://spaces.ac.cn/archives/9881}},<br />
 } </p>
 <hr />
-<h2 id="_7">公式推导与注释<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h2 id="_7">推导<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
+<p>本节提供关于中值定理加速ODE采样的详细数学推导，从微积分基础到扩散模型的具体应用，全方位解析各种数值方法的原理、误差分析及其在生成模型中的实践。</p>
+<h3 id="1">1. 微积分中值定理回顾<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 积分中值定理<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p><strong>定理（积分第一中值定理）</strong>：设函数$f(x)$在闭区间$[a,b]$上连续，则至少存在一点$\xi\in[a,b]$，使得<br />
+$$\int_a^b f(x)dx = f(\xi)(b-a)$$</p>
+<p><strong>证明</strong>：由连续函数的性质，$f(x)$在$[a,b]$上必有最大值$M$和最小值$m$。因此对任意$x\in[a,b]$，有<br />
+$$m \leq f(x) \leq M$$</p>
+<p>对上式在$[a,b]$上积分，得<br />
+$$m(b-a) \leq \int_a^b f(x)dx \leq M(b-a)$$</p>
+<p>即<br />
+$$m \leq \frac{1}{b-a}\int_a^b f(x)dx \leq M$$</p>
+<p>记$\mu = \frac{1}{b-a}\int_a^b f(x)dx$，则$m\leq \mu \leq M$。由连续函数的介值定理，存在$\xi\in[a,b]$使得$f(\xi)=\mu$，即<br />
+$$f(\xi) = \frac{1}{b-a}\int_a^b f(x)dx$$</p>
+<p>整理即得原式。$\square$</p>
+<p><strong>推广（积分第二中值定理）</strong>：若$f(x)$在$[a,b]$上连续，$g(x)$在$[a,b]$上可积且不变号，则存在$\xi\in[a,b]$使得<br />
+$$\int_a^b f(x)g(x)dx = f(\xi)\int_a^b g(x)dx$$</p>
+<p>这个定理可以理解为带权重的中值定理。特别地，当$g(x)\equiv 1$时，即回到第一中值定理。</p>
+<h4 id="12">1.2 微分中值定理<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p><strong>定理（Lagrange中值定理）</strong>：若函数$f(x)$在$[a,b]$上连续，在$(a,b)$内可导，则存在$\xi\in(a,b)$使得<br />
+$$f(b) - f(a) = f'(\xi)(b-a)$$</p>
+<p>这个定理告诉我们，函数在两点间的平均变化率等于某个中间点的瞬时变化率。</p>
+<p><strong>与积分中值定理的联系</strong>：由微积分基本定理，<br />
+$$f(b) - f(a) = \int_a^b f'(x)dx$$</p>
+<p>结合积分中值定理，存在$\xi\in[a,b]$使得<br />
+$$\int_a^b f'(x)dx = f'(\xi)(b-a)$$</p>
+<p>因此$f(b) - f(a) = f'(\xi)(b-a)$，这正是Lagrange中值定理。</p>
+<h4 id="13">1.3 向量值函数的中值定理<a class="toc-link" href="#13" title="Permanent link">&para;</a></h4>
+<p>对于向量值函数$\boldsymbol{f}:[a,b]\to\mathbb{R}^d$，积分中值定理<strong>不一定成立</strong>。</p>
+<p><strong>反例</strong>：考虑二维函数$\boldsymbol{f}(t) = (\cos t, \sin t)$，$t\in[0,2\pi]$。则<br />
+$$\int_0^{2\pi}\boldsymbol{f}(t)dt = \left(\int_0^{2\pi}\cos t\,dt, \int_0^{2\pi}\sin t\,dt\right) = (0, 0)$$</p>
+<p>但对任意$\xi\in[0,2\pi]$，有$|\boldsymbol{f}(\xi)| = 1 \neq 0$，因此不存在$\xi$使得<br />
+$$\boldsymbol{f}(\xi) = \frac{1}{2\pi}\int_0^{2\pi}\boldsymbol{f}(t)dt = \boldsymbol{0}$$</p>
+<p><strong>近似成立的条件</strong>：尽管严格的中值定理不成立，但在以下情况下可以近似成立：</p>
+<ol>
+<li>
+<p><strong>轨迹近似直线</strong>：若$\boldsymbol{f}(t) \approx \boldsymbol{f}(a) + \frac{t-a}{b-a}(\boldsymbol{f}(b)-\boldsymbol{f}(a))$，即轨迹接近直线段，则中值定理近似成立。</p>
+</li>
+<li>
+<p><strong>低维子空间</strong>：若$\boldsymbol{f}(t)$的值域主要集中在一个低维子空间中，特别是一维子空间（直线），则近似程度更好。</p>
+</li>
+<li>
+<p><strong>步长充分小</strong>：当$b-a$足够小时，$\boldsymbol{f}(t)$在$[a,b]$上的变化可以用线性近似，此时中值定理近似成立。</p>
+</li>
+</ol>
+<p>这些观察对于理解扩散ODE中AMED方法的有效性至关重要。</p>
+<h3 id="2-ode">2. ODE数值积分基础理论<a class="toc-link" href="#2-ode" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 问题描述<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>考虑一阶常微分方程的初值问题（IVP）：<br />
+$$\begin{cases}<br />
+\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}(\boldsymbol{x}, t), &amp; t\in[t_0, T]\<br />
+\boldsymbol{x}(t_0) = \boldsymbol{x}_0<br />
+\end{cases}$$</p>
+<p>其中$\boldsymbol{x}\in\mathbb{R}^d$，$\boldsymbol{f}:\mathbb{R}^d\times\mathbb{R}\to\mathbb{R}^d$。</p>
+<p><strong>解的存在唯一性</strong>：在Lipschitz条件下（即存在常数$L$使得$|\boldsymbol{f}(\boldsymbol{x}_1,t) - \boldsymbol{f}(\boldsymbol{x}_2,t)| \leq L|\boldsymbol{x}_1-\boldsymbol{x}_2|$），初值问题有唯一解。</p>
+<p><strong>数值求解的基本思想</strong>：<br />
+1. 将时间区间离散化：$t_0 &lt; t_1 &lt; \cdots &lt; t_N = T$<br />
+2. 定义步长：$h_n = t_{n+1} - t_n$<br />
+3. 用离散点上的值$\boldsymbol{x}<em n_1="n+1">n \approx \boldsymbol{x}(t_n)$逼近真实解<br />
+4. 构造递推关系：$\boldsymbol{x}</em>_n, t_n, h_n)$} = \boldsymbol{x}_n + h_n\boldsymbol{\Phi}(\boldsymbol{x</p>
+<p>其中$\boldsymbol{\Phi}$称为<strong>增量函数</strong>，不同的数值方法对应不同的$\boldsymbol{\Phi}$。</p>
+<h4 id="22-taylor">2.2 Taylor展开与局部截断误差<a class="toc-link" href="#22-taylor" title="Permanent link">&para;</a></h4>
+<p>设$\boldsymbol{x}(t)$是精确解，在$t_n$处进行Taylor展开：<br />
+$$\boldsymbol{x}(t_{n+1}) = \boldsymbol{x}(t_n) + h_n\boldsymbol{x}'(t_n) + \frac{h_n^2}{2}\boldsymbol{x}''(t_n) + \frac{h_n^3}{6}\boldsymbol{x}'''(t_n) + \mathcal{O}(h_n^4)$$</p>
+<p>由于$\boldsymbol{x}'(t) = \boldsymbol{f}(\boldsymbol{x}(t), t)$，我们可以计算高阶导数：</p>
+<p><strong>一阶导数</strong>：<br />
+$$\boldsymbol{x}'(t) = \boldsymbol{f}(\boldsymbol{x}(t), t)$$</p>
+<p><strong>二阶导数</strong>：<br />
+$$\boldsymbol{x}''(t) = \frac{d}{dt}\boldsymbol{f}(\boldsymbol{x}(t), t) = \frac{\partial \boldsymbol{f}}{\partial \boldsymbol{x}}\boldsymbol{x}'(t) + \frac{\partial \boldsymbol{f}}{\partial t} = \frac{\partial \boldsymbol{f}}{\partial \boldsymbol{x}}\boldsymbol{f} + \frac{\partial \boldsymbol{f}}{\partial t}$$</p>
+<p><strong>三阶导数</strong>：通过链式法则继续求导，<br />
+$$\boldsymbol{x}'''(t) = \frac{\partial^2\boldsymbol{f}}{\partial \boldsymbol{x}^2}(\boldsymbol{f}, \boldsymbol{f}) + \frac{\partial \boldsymbol{f}}{\partial \boldsymbol{x}}\left(\frac{\partial\boldsymbol{f}}{\partial \boldsymbol{x}}\boldsymbol{f} + \frac{\partial\boldsymbol{f}}{\partial t}\right) + \frac{\partial^2\boldsymbol{f}}{\partial \boldsymbol{x}\partial t}\boldsymbol{f} + \frac{\partial^2\boldsymbol{f}}{\partial t^2}$$</p>
+<p><strong>局部截断误差（Local Truncation Error, LTE）</strong>：定义为在假设$\boldsymbol{x}<em n_1="n+1">n = \boldsymbol{x}(t_n)$精确的情况下，单步计算产生的误差：<br />
+$$\boldsymbol{\tau}</em>_n, t_n, h_n)]$$} = \boldsymbol{x}(t_{n+1}) - [\boldsymbol{x}_n + h_n\boldsymbol{\Phi}(\boldsymbol{x</p>
+<p>若$\boldsymbol{\tau}_{n+1} = \mathcal{O}(h_n^{p+1})$，则称该方法具有<strong>p阶精度</strong>。</p>
+<h4 id="23">2.3 全局误差分析<a class="toc-link" href="#23" title="Permanent link">&para;</a></h4>
+<p><strong>全局误差</strong>定义为$\boldsymbol{e}_n = \boldsymbol{x}(t_n) - \boldsymbol{x}_n$，是累积误差。</p>
+<p>设数值方法为<br />
+$$\boldsymbol{x}_{n+1} = \boldsymbol{x}_n + h_n\boldsymbol{\Phi}(\boldsymbol{x}_n, t_n, h_n)$$</p>
+<p>则全局误差满足递推关系：<br />
+$$\boldsymbol{e}<em n_1="n+1">{n+1} = \boldsymbol{x}(t</em>}) - \boldsymbol{x<em n_1="n+1">{n+1} = \boldsymbol{x}(t</em>_n, t_n, h_n)$$}) - \boldsymbol{x}_n - h_n\boldsymbol{\Phi}(\boldsymbol{x</p>
+<p>代入$\boldsymbol{x}<em n_1="n+1">n = \boldsymbol{x}(t_n) - \boldsymbol{e}_n$：<br />
+$$\boldsymbol{e}</em>_n, t_n, h_n)$$} = \boldsymbol{x}(t_{n+1}) - \boldsymbol{x}(t_n) + \boldsymbol{e}_n - h_n\boldsymbol{\Phi}(\boldsymbol{x}(t_n)-\boldsymbol{e</p>
+<p>利用Taylor展开和Lipschitz条件，可以证明：</p>
+<p><strong>定理</strong>：若数值方法的局部截断误差为$\mathcal{O}(h^{p+1})$，且增量函数$\boldsymbol{\Phi}$关于$\boldsymbol{x}$满足Lipschitz条件，则全局误差为$\mathcal{O}(h^p)$。</p>
+<p>即：<strong>局部p+1阶精度 $\Rightarrow$ 全局p阶精度</strong>。</p>
+<p><strong>证明梗概</strong>：假设步长固定为$h$，总步数为$N = (T-t_0)/h$。每步的局部误差为$\mathcal{O}(h^{p+1})$，累积$N$步后：<br />
+$$|\boldsymbol{e}_N| \leq C_1 Nh^{p+1} = C_1\frac{T-t_0}{h}h^{p+1} = C_1(T-t_0)h^p = \mathcal{O}(h^p)$$</p>
+<p>这说明局部误差的阶数会在全局累积时降低一阶。</p>
+<h3 id="3">3. 经典数值方法详解<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<h4 id="31-euler-method">3.1 欧拉方法（Euler Method）<a class="toc-link" href="#31-euler-method" title="Permanent link">&para;</a></h4>
+<p><strong>显式欧拉方法（前向欧拉）</strong>：<br />
+$$\boldsymbol{x}_{n+1} = \boldsymbol{x}_n + h_n\boldsymbol{f}(\boldsymbol{x}_n, t_n)$$</p>
+<p><strong>推导</strong>：将ODE积分形式<br />
+$$\boldsymbol{x}(t_{n+1}) = \boldsymbol{x}(t_n) + \int_{t_n}^{t_{n+1}}\boldsymbol{f}(\boldsymbol{x}(t), t)dt$$</p>
+<p>用最简单的左端点矩形公式近似积分：<br />
+$$\int_{t_n}^{t_{n+1}}\boldsymbol{f}(\boldsymbol{x}(t), t)dt \approx \boldsymbol{f}(\boldsymbol{x}(t_n), t_n)(t_{n+1}-t_n)$$</p>
+<p><strong>局部截断误差分析</strong>：<br />
+$$\begin{align}<br />
+\boldsymbol{\tau}<em n_1="n+1">{n+1} &amp;= \boldsymbol{x}(t</em>(t_n), t_n)]\}) - [\boldsymbol{x}(t_n) + h_n\boldsymbol{f}(\boldsymbol{x<br />
+&amp;= \boldsymbol{x}(t_n) + h_n\boldsymbol{x}'(t_n) + \frac{h_n^2}{2}\boldsymbol{x}''(t_n) + \mathcal{O}(h_n^3) - \boldsymbol{x}(t_n) - h_n\boldsymbol{f}(\boldsymbol{x}(t_n), t_n)\<br />
+&amp;= \frac{h_n^2}{2}\boldsymbol{x}''(t_n) + \mathcal{O}(h_n^3)\<br />
+&amp;= \mathcal{O}(h_n^2)<br />
+\end{align}$$</p>
+<p>因此欧拉方法是<strong>1阶方法</strong>（局部2阶，全局1阶）。</p>
+<p><strong>在扩散模型中的应用</strong>：对于扩散ODE（记为逆向时间）<br />
+$$\frac{d\boldsymbol{x}<em _theta="\theta">t}{dt} = \boldsymbol{v}</em>_t, t)$$}(\boldsymbol{x</p>
+<p>从$t_{n+1}$到$t_n$（$t_{n+1} &gt; t_n$），欧拉法给出：<br />
+$$\boldsymbol{x}<em t__n_1="t_{n+1">{t_n} = \boldsymbol{x}</em>}} + (t_n - t_{n+1})\boldsymbol{v<em t__n_1="t_{n+1">{\theta}(\boldsymbol{x}</em>}}, t_{n+1}) = \boldsymbol{x<em n_1="n+1">{t</em>}} - h_n\boldsymbol{v<em t__n_1="t_{n+1">{\theta}(\boldsymbol{x}</em>)$$}}, t_{n+1</p>
+<p>其中$h_n = t_{n+1} - t_n &gt; 0$。这正是DDIM采样的形式。</p>
+<p><strong>隐式欧拉方法（后向欧拉）</strong>：<br />
+$$\boldsymbol{x}<em n_1="n+1">{n+1} = \boldsymbol{x}_n + h_n\boldsymbol{f}(\boldsymbol{x}</em>)$$}, t_{n+1</p>
+<p>这是一个关于$\boldsymbol{x}_{n+1}$的隐式方程，需要迭代求解（如Newton迭代），但稳定性更好，特别适合刚性（stiff）问题。</p>
+<h4 id="32-midpoint-method">3.2 中点方法（Midpoint Method）<a class="toc-link" href="#32-midpoint-method" title="Permanent link">&para;</a></h4>
+<p><strong>中点方法</strong>：<br />
+$$\boldsymbol{x}<em n_1_2="n+1/2">{n+1} = \boldsymbol{x}_n + h_n\boldsymbol{f}\left(\boldsymbol{x}</em>\right)$$}, t_{n+1/2</p>
+<p>其中$t_{n+1/2} = \frac{t_n + t_{n+1}}{2}$，中点值$\boldsymbol{x}_{n+1/2}$需要先估计。</p>
+<p><strong>显式中点法（预测-校正）</strong>：<br />
+$$\begin{cases}<br />
+\boldsymbol{x}<em n_1_2="n+1/2">{n+1/2}^<em> = \boldsymbol{x}<em n_1="n+1">n + \frac{h_n}{2}\boldsymbol{f}(\boldsymbol{x}_n, t_n) &amp; \text{(预测)}\<br />
+\boldsymbol{x}</em>} = \boldsymbol{x<em n_1_2="n+1/2">n + h_n\boldsymbol{f}(\boldsymbol{x}</em>^</em>, t</em>}) &amp; \text{(校正)<br />
+\end{cases}$$</p>
+<p><strong>几何意义</strong>：用区间中点的斜率代表整个区间的平均斜率，比端点更准确。</p>
+<p><strong>精度分析</strong>：将$\boldsymbol{x}(t_{n+1})$和$\boldsymbol{f}(\boldsymbol{x}<em n_1_2="n+1/2">{n+1/2}^*, t</em>)$都在$t_n$处展开：</p>
+<p>首先，$\boldsymbol{x}_{n+1/2}^<em>$的误差为：<br />
+$$\boldsymbol{x}_{n+1/2}^</em> = \boldsymbol{x}(t_n) + \frac{h_n}{2}\boldsymbol{f}(\boldsymbol{x}(t_n), t_n)$$</p>
+<p>而真实的$\boldsymbol{x}(t_{n+1/2})$为：<br />
+$$\boldsymbol{x}(t_{n+1/2}) = \boldsymbol{x}(t_n) + \frac{h_n}{2}\boldsymbol{f}(\boldsymbol{x}(t_n), t_n) + \frac{1}{2}\left(\frac{h_n}{2}\right)^2\boldsymbol{x}''(t_n) + \mathcal{O}(h_n^3)$$</p>
+<p>因此$\boldsymbol{x}<em n_1_2="n+1/2">{n+1/2}^* = \boldsymbol{x}(t</em>(h_n^2)$。}) + \mathcal{O</p>
+<p>接着展开$\boldsymbol{f}(\boldsymbol{x}<em n_1_2="n+1/2">{n+1/2}^<em>, t_{n+1/2})$：<br />
+$$\begin{align}<br />
+\boldsymbol{f}(\boldsymbol{x}_{n+1/2}^</em>, t</em>(h_n^2)\}) &amp;= \boldsymbol{f}(\boldsymbol{x}(t_{n+1/2}), t_{n+1/2}) + \mathcal{O<br />
+&amp;= \boldsymbol{f}(\boldsymbol{x}(t_n), t_n) + \frac{h_n}{2}\boldsymbol{x}''(t_n) + \mathcal{O}(h_n^2)<br />
+\end{align}$$</p>
+<p>代入中点公式：<br />
+$$\begin{align}<br />
+\boldsymbol{x}_{n+1} &amp;= \boldsymbol{x}(t_n) + h_n\left[\boldsymbol{f}(\boldsymbol{x}(t_n), t_n) + \frac{h_n}{2}\boldsymbol{x}''(t_n) + \mathcal{O}(h_n^2)\right]\<br />
+&amp;= \boldsymbol{x}(t_n) + h_n\boldsymbol{f}(\boldsymbol{x}(t_n), t_n) + \frac{h_n^2}{2}\boldsymbol{x}''(t_n) + \mathcal{O}(h_n^3)<br />
+\end{align}$$</p>
+<p>与Taylor展开比较：<br />
+$$\boldsymbol{x}(t_{n+1}) = \boldsymbol{x}(t_n) + h_n\boldsymbol{f}(\boldsymbol{x}(t_n), t_n) + \frac{h_n^2}{2}\boldsymbol{x}''(t_n) + \frac{h_n^3}{6}\boldsymbol{x}'''(t_n) + \mathcal{O}(h_n^4)$$</p>
+<p>因此局部截断误差为：<br />
+$$\boldsymbol{\tau}_{n+1} = \frac{h_n^3}{6}\boldsymbol{x}'''(t_n) + \mathcal{O}(h_n^4) = \mathcal{O}(h_n^3)$$</p>
+<p><strong>中点法是2阶方法</strong>（局部3阶，全局2阶）。</p>
+<h4 id="33-trapezoidal-rule">3.3 梯形法则（Trapezoidal Rule）<a class="toc-link" href="#33-trapezoidal-rule" title="Permanent link">&para;</a></h4>
+<p><strong>梯形法则</strong>基于用梯形面积近似积分：<br />
+$$\int_{t_n}^{t_{n+1}}\boldsymbol{f}(\boldsymbol{x}(t), t)dt \approx \frac{h_n}{2}[\boldsymbol{f}(\boldsymbol{x}(t_n), t_n) + \boldsymbol{f}(\boldsymbol{x}(t_{n+1}), t_{n+1})]$$</p>
+<p><strong>隐式梯形法</strong>：<br />
+$$\boldsymbol{x}<em n_1="n+1">{n+1} = \boldsymbol{x}_n + \frac{h_n}{2}[\boldsymbol{f}(\boldsymbol{x}_n, t_n) + \boldsymbol{f}(\boldsymbol{x}</em>)]$$}, t_{n+1</p>
+<p>这是隐式方程，需要迭代求解。</p>
+<p><strong>显式梯形法（Heun方法的一种形式）</strong>：<br />
+$$\begin{cases}<br />
+\tilde{\boldsymbol{x}}<em n_1="n+1">{n+1} = \boldsymbol{x}_n + h_n\boldsymbol{f}(\boldsymbol{x}_n, t_n) &amp; \text{(预测)}\<br />
+\boldsymbol{x}</em>} = \boldsymbol{x<em n_1="n+1">n + \frac{h_n}{2}[\boldsymbol{f}(\boldsymbol{x}_n, t_n) + \boldsymbol{f}(\tilde{\boldsymbol{x}}</em>}, t_{n+1})] &amp; \text{(校正)<br />
+\end{cases}$$</p>
+<p><strong>精度分析</strong>：对隐式梯形法，设$\boldsymbol{x}<em n_1="n+1">n = \boldsymbol{x}(t_n)$，则<br />
+$$\begin{align}<br />
+\boldsymbol{\tau}</em>)]\} &amp;= \boldsymbol{x}(t_{n+1}) - \boldsymbol{x}(t_n) - \frac{h_n}{2}[\boldsymbol{f}(\boldsymbol{x}(t_n), t_n) + \boldsymbol{f}(\boldsymbol{x}(t_{n+1}), t_{n+1<br />
+&amp;= h_n\boldsymbol{x}'(t_n) + \frac{h_n^2}{2}\boldsymbol{x}''(t_n) + \frac{h_n^3}{6}\boldsymbol{x}'''(t_n) + \mathcal{O}(h_n^4)\<br />
+&amp;\quad - \frac{h_n}{2}[\boldsymbol{x}'(t_n) + \boldsymbol{x}'(t_{n+1})]<br />
+\end{align}$$</p>
+<p>其中<br />
+$$\boldsymbol{x}'(t_{n+1}) = \boldsymbol{x}'(t_n) + h_n\boldsymbol{x}''(t_n) + \frac{h_n^2}{2}\boldsymbol{x}'''(t_n) + \mathcal{O}(h_n^3)$$</p>
+<p>代入得：<br />
+$$\begin{align}<br />
+\boldsymbol{\tau}_{n+1} &amp;= h_n\boldsymbol{x}'(t_n) + \frac{h_n^2}{2}\boldsymbol{x}''(t_n) + \frac{h_n^3}{6}\boldsymbol{x}'''(t_n)\<br />
+&amp;\quad - \frac{h_n}{2}\left[2\boldsymbol{x}'(t_n) + h_n\boldsymbol{x}''(t_n) + \frac{h_n^2}{2}\boldsymbol{x}'''(t_n)\right] + \mathcal{O}(h_n^4)\<br />
+&amp;= -\frac{h_n^3}{12}\boldsymbol{x}'''(t_n) + \mathcal{O}(h_n^4) = \mathcal{O}(h_n^3)<br />
+\end{align}$$</p>
+<p><strong>梯形法是2阶方法</strong>，且误差系数比中点法小。</p>
+<p><strong>在扩散模型中的应用</strong>：对于扩散ODE的逆向采样，梯形法给出：<br />
+$$\boldsymbol{x}<em t__n_1="t_{n+1">{t_n} = \boldsymbol{x}</em>}} - \frac{h_n}{2}[\boldsymbol{v<em t_n="t_n">{\theta}(\boldsymbol{x}</em>}, t_n) + \boldsymbol{v<em t__n_1="t_{n+1">{\theta}(\boldsymbol{x}</em>)]$$}}, t_{n+1</p>
+<p>由于右端含有$\boldsymbol{x}<em t_n="t_n">{t_n}$，需要用欧拉法预测：<br />
+$$\begin{cases}<br />
+\tilde{\boldsymbol{x}}</em>} = \boldsymbol{x<em n_1="n+1">{t</em>}} - h_n\boldsymbol{v<em t__n_1="t_{n+1">{\theta}(\boldsymbol{x}</em>)\}}, t_{n+1<br />
+\boldsymbol{x}<em t__n_1="t_{n+1">{t_n} = \boldsymbol{x}</em>}} - \frac{h_n}{2}[\boldsymbol{v<em t_n="t_n">{\theta}(\tilde{\boldsymbol{x}}</em>}, t_n) + \boldsymbol{v<em t__n_1="t_{n+1">{\theta}(\boldsymbol{x}</em>)]}}, t_{n+1<br />
+\end{cases}$$</p>
+<p>这正是文中提到的Heun方法。</p>
+<h4 id="34-heun">3.4 Heun方法详解<a class="toc-link" href="#34-heun" title="Permanent link">&para;</a></h4>
+<p><strong>Heun方法</strong>（也称改进欧拉法）是预测-校正方法的典型代表：</p>
+<p><strong>算法步骤</strong>：<br />
+1. <strong>预测</strong>（Predictor）：用欧拉法预测$\boldsymbol{x}<em n_1="n+1">{n+1}$：<br />
+   $$\tilde{\boldsymbol{x}}</em>_n, t_n)$$} = \boldsymbol{x}_n + h_n\boldsymbol{f}(\boldsymbol{x</p>
+<ol start="2">
+<li><strong>校正</strong>（Corrector）：用梯形法校正：<br />
+   $$\boldsymbol{x}<em n_1="n+1">{n+1} = \boldsymbol{x}_n + \frac{h_n}{2}[\boldsymbol{f}(\boldsymbol{x}_n, t_n) + \boldsymbol{f}(\tilde{\boldsymbol{x}}</em>)]$$}, t_{n+1</li>
+</ol>
+<p><strong>几何解释</strong>：<br />
+- 预测步用起点的斜率外推<br />
+- 校正步用起点和预测终点的平均斜率修正<br />
+- 相当于用梯形面积代替矩形面积</p>
+<p><strong>与RK2的关系</strong>：Heun方法是2阶Runge-Kutta方法（RK2）的一种形式。标准RK2形式为：<br />
+$$\begin{cases}<br />
+\boldsymbol{k}<em n_1="n+1">1 = \boldsymbol{f}(\boldsymbol{x}_n, t_n)\<br />
+\boldsymbol{k}_2 = \boldsymbol{f}(\boldsymbol{x}_n + h_n\boldsymbol{k}_1, t</em>)\<br />
+\boldsymbol{x}_{n+1} = \boldsymbol{x}_n + \frac{h_n}{2}(\boldsymbol{k}_1 + \boldsymbol{k}_2)<br />
+\end{cases}$$</p>
+<p>这与Heun方法完全等价。</p>
+<p><strong>在扩散模型中的优势</strong>：<br />
+1. <strong>每步需要2次NFE</strong>，比1阶方法多1次<br />
+2. <strong>精度提升显著</strong>，可以用更大步长<br />
+3. <strong>总NFE可以减少</strong>，因为所需步数大幅降低<br />
+4. <strong>实现简单</strong>，不需要复杂的自适应控制</p>
+<p>例如，对于扩散ODE，若欧拉法需要100步达到某精度，Heun方法可能只需25步，虽然每步2次NFE，总NFE从100降到50，加速2倍。</p>
+<h4 id="35-runge-kutta">3.5 Runge-Kutta方法<a class="toc-link" href="#35-runge-kutta" title="Permanent link">&para;</a></h4>
+<p><strong>经典4阶Runge-Kutta方法（RK4）</strong>：<br />
+$$\begin{cases}<br />
+\boldsymbol{k}<em n_1="n+1">1 = \boldsymbol{f}(\boldsymbol{x}_n, t_n)\<br />
+\boldsymbol{k}_2 = \boldsymbol{f}(\boldsymbol{x}_n + \frac{h_n}{2}\boldsymbol{k}_1, t_n + \frac{h_n}{2})\<br />
+\boldsymbol{k}_3 = \boldsymbol{f}(\boldsymbol{x}_n + \frac{h_n}{2}\boldsymbol{k}_2, t_n + \frac{h_n}{2})\<br />
+\boldsymbol{k}_4 = \boldsymbol{f}(\boldsymbol{x}_n + h_n\boldsymbol{k}_3, t</em>)\<br />
+\boldsymbol{x}_{n+1} = \boldsymbol{x}_n + \frac{h_n}{6}(\boldsymbol{k}_1 + 2\boldsymbol{k}_2 + 2\boldsymbol{k}_3 + \boldsymbol{k}_4)<br />
+\end{cases}$$</p>
+<p><strong>推导思想</strong>：用Simpson积分公式：<br />
+$$\int_{t_n}^{t_{n+1}}\boldsymbol{f}(t)dt \approx \frac{h_n}{6}[\boldsymbol{f}(t_n) + 4\boldsymbol{f}(t_{n+1/2}) + \boldsymbol{f}(t_{n+1})]$$</p>
+<p>但$\boldsymbol{f}$依赖于$\boldsymbol{x}(t)$，需要多次预测中间点。</p>
+<p><strong>精度</strong>：RK4是<strong>4阶方法</strong>（局部5阶，全局4阶），局部截断误差为$\mathcal{O}(h^5)$。</p>
+<p><strong>计算代价</strong>：每步需要<strong>4次NFE</strong>，对扩散模型而言代价较高，通常2阶方法已足够。</p>
+<p><strong>一般Runge-Kutta方法</strong>：由Butcher表刻画，形式为：<br />
+$$\begin{cases}<br />
+\boldsymbol{k}<em j="1">i = \boldsymbol{f}\left(\boldsymbol{x}_n + h_n\sum</em>}^{i-1}a_{ij}\boldsymbol{k<em n_1="n+1">j, t_n + c_ih_n\right), &amp; i=1,\ldots,s\<br />
+\boldsymbol{x}</em>} = \boldsymbol{x<em i="1">n + h_n\sum</em>_i}^s b_i\boldsymbol{k<br />
+\end{cases}$$</p>
+<p>其中$s$是级数，$(a_{ij}, b_i, c_i)$由精度要求确定。</p>
+<h3 id="4">4. 误差理论深入分析<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 局部截断误差的详细推导<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p>考虑一般的s级Runge-Kutta方法，局部截断误差为：<br />
+$$\boldsymbol{\tau}<em n_1="n+1">{n+1} = \boldsymbol{x}(t</em>_i\right]$$}) - \left[\boldsymbol{x}(t_n) + h_n\sum_{i=1}^s b_i\boldsymbol{k</p>
+<p>其中$\boldsymbol{k}_i$定义如前。要使方法达到p阶，需要满足一系列<strong>阶条件</strong>（order conditions）。</p>
+<p><strong>1阶条件</strong>（$\mathcal{O}(h)$）：<br />
+$$\sum_{i=1}^s b_i = 1$$</p>
+<p>这确保了与Taylor展开的0阶项匹配。</p>
+<p><strong>2阶条件</strong>（$\mathcal{O}(h^2)$）：<br />
+$$\sum_{i=1}^s b_ic_i = \frac{1}{2}$$</p>
+<p>这确保了与Taylor展开的1阶项匹配。</p>
+<p><strong>3阶条件</strong>（$\mathcal{O}(h^3)$）：需要满足<br />
+$$\sum_{i=1}^s b_ic_i^2 = \frac{1}{3}, \quad \sum_{i,j}b_ia_{ij}c_j = \frac{1}{6}$$</p>
+<p><strong>验证Heun方法</strong>：Heun方法对应$s=2$，<br />
+$$a_{11}=0, a_{12}=0, a_{21}=1, a_{22}=0, \quad b_1=\frac{1}{2}, b_2=\frac{1}{2}, \quad c_1=0, c_2=1$$</p>
+<p>检验1阶条件：$b_1+b_2 = \frac{1}{2}+\frac{1}{2} = 1$ ✓</p>
+<p>检验2阶条件：$b_1c_1+b_2c_2 = 0 + \frac{1}{2}\cdot 1 = \frac{1}{2}$ ✓</p>
+<p>检验3阶条件：$b_1c_1^2+b_2c_2^2 = 0 + \frac{1}{2} = \frac{1}{2} \neq \frac{1}{3}$ ✗</p>
+<p>因此Heun方法满足2阶条件，不满足3阶条件，确实是2阶方法。</p>
+<h4 id="42">4.2 全局误差的传播<a class="toc-link" href="#42" title="Permanent link">&para;</a></h4>
+<p>设第$n$步的全局误差为$\boldsymbol{e}<em n_1="n+1">n = \boldsymbol{x}(t_n) - \boldsymbol{x}_n$，则<br />
+$$\begin{align}<br />
+\boldsymbol{e}</em>} &amp;= \boldsymbol{x}(t_{n+1}) - \boldsymbol{x<em n_1="n+1">{n+1}\<br />
+&amp;= \boldsymbol{x}(t</em>}) - [\boldsymbol{x<em n_1="n+1">n + h_n\boldsymbol{\Phi}(\boldsymbol{x}_n, t_n, h_n)]\<br />
+&amp;= \boldsymbol{x}(t</em>_n, t_n, h_n)]}) - [\boldsymbol{x}(t_n) - \boldsymbol{e}_n + h_n\boldsymbol{\Phi}(\boldsymbol{x}(t_n)-\boldsymbol{e<br />
+\end{align}$$</p>
+<p>利用Taylor展开：<br />
+$$\boldsymbol{x}(t_{n+1}) = \boldsymbol{x}(t_n) + h_n\boldsymbol{\Phi}(\boldsymbol{x}(t_n), t_n, h_n) + \boldsymbol{\tau}_{n+1}$$</p>
+<p>以及Lipschitz条件：<br />
+$$|\boldsymbol{\Phi}(\boldsymbol{x}(t_n), t_n, h_n) - \boldsymbol{\Phi}(\boldsymbol{x}(t_n)-\boldsymbol{e}_n, t_n, h_n)| \leq L|\boldsymbol{e}_n|$$</p>
+<p>得到：<br />
+$$|\boldsymbol{e}<em n_1="n+1">{n+1}| \leq |\boldsymbol{e}_n| + h_nL|\boldsymbol{e}_n| + |\boldsymbol{\tau}</em>}| = (1+h_nL)|\boldsymbol{e<em n_1="n+1">n| + |\boldsymbol{\tau}</em>|$$</p>
+<p>递推地，初始误差$\boldsymbol{e}<em N-1="N-1">0 = 0$，则<br />
+$$\begin{align}<br />
+|\boldsymbol{e}_N| &amp;\leq (1+h</em>}L)|\boldsymbol{e<em N-1="N-1">{N-1}| + |\boldsymbol{\tau}_N|\<br />
+&amp;\leq (1+h</em>}L)[(1+h_{N-2}L)|\boldsymbol{e<em N-1="N-1">{N-2}| + |\boldsymbol{\tau}</em>}|] + |\boldsymbol{\tau<em n="1">N|\<br />
+&amp;\leq \cdots\<br />
+&amp;\leq \sum</em>}^N |\boldsymbol{\tau<em k="n">n|\prod</em>(1+h_kL)}^{N-1<br />
+\end{align}$$</p>
+<p>若步长固定$h_n = h$，且局部误差$|\boldsymbol{\tau}_n| \leq Ch^{p+1}$，则<br />
+$$\begin{align}<br />
+|\boldsymbol{e}_N| &amp;\leq NCh^{p+1}(1+hL)^{N-1}\<br />
+&amp;\leq NCh^{p+1}e^{(N-1)hL}\<br />
+&amp;\leq \frac{T-t_0}{h}Ch^{p+1}e^{(T-t_0)L}\<br />
+&amp;= C(T-t_0)e^{(T-t_0)L}h^p = \mathcal{O}(h^p)<br />
+\end{align}$$</p>
+<p>其中用到了$1+x\leq e^x$和$Nh = T-t_0$。</p>
+<p><strong>结论</strong>：局部$p+1$阶方法的全局误差为$\mathcal{O}(h^p)$。</p>
+<h4 id="43">4.3 稳定性分析<a class="toc-link" href="#43" title="Permanent link">&para;</a></h4>
+<p>考虑测试方程（test equation）：<br />
+$$\frac{dx}{dt} = \lambda x, \quad \lambda\in\mathbb{C}$$</p>
+<p>精确解为$x(t) = x_0 e^{\lambda t}$。当$\text{Re}(\lambda) &lt; 0$时，解指数衰减。</p>
+<p><strong>欧拉方法的稳定性</strong>：应用欧拉法得<br />
+$$x_{n+1} = x_n + h\lambda x_n = (1+h\lambda)x_n$$</p>
+<p>因此$x_n = (1+h\lambda)^n x_0$。要使数值解也衰减（$|x_n|\to 0$），需要<br />
+$$|1+h\lambda| &lt; 1$$</p>
+<p>这定义了<strong>绝对稳定域</strong>：${z\in\mathbb{C}: |1+z|&lt;1}$，其中$z=h\lambda$。</p>
+<p><strong>A-稳定性</strong>：若方法对所有$\text{Re}(h\lambda)&lt;0$都稳定，称该方法<strong>A-稳定</strong>。</p>
+<ul>
+<li>显式欧拉法：不是A-稳定</li>
+<li>隐式欧拉法：A-稳定</li>
+<li>梯形法：A-稳定</li>
+<li>RK4：不是A-稳定</li>
+</ul>
+<p>对于扩散ODE，稳定性通常不是主要问题，因为我们更关心精度而非长时间行为。</p>
+<h3 id="5-richardson">5. Richardson外推法<a class="toc-link" href="#5-richardson" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 基本思想<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>Richardson外推是一种<strong>后处理技术</strong>，通过组合不同步长的数值解来提高精度。</p>
+<p><strong>原理</strong>：假设数值解的误差有渐近展开：<br />
+$$\boldsymbol{x}_h - \boldsymbol{x}^* = C_1h^p + C_2h^{p+1} + \cdots$$</p>
+<p>其中$\boldsymbol{x}_h$是步长为$h$的数值解，$\boldsymbol{x}^*$是精确解。</p>
+<p>若用步长$h$和$h/2$分别计算，得到$\boldsymbol{x}<em h_2="h/2">h$和$\boldsymbol{x}</em>$，则<br />
+$$\begin{cases}<br />
+\boldsymbol{x}_h = \boldsymbol{x}^<em> + C_1h^p + C_2h^{p+1} + \mathcal{O}(h^{p+2})\<br />
+\boldsymbol{x}_{h/2} = \boldsymbol{x}^</em> + C_1(h/2)^p + C_2(h/2)^{p+1} + \mathcal{O}(h^{p+2})<br />
+\end{cases}$$</p>
+<p>将第二式乘以$2^p$再减去第一式：<br />
+$$2^p\boldsymbol{x}_{h/2} - \boldsymbol{x}_h = (2^p-1)\boldsymbol{x}^* + C_2(2^{p+1}-2)h^{p+1}/2^{p+1} + \mathcal{O}(h^{p+2})$$</p>
+<p>解出：<br />
+$$\boldsymbol{x}^* = \frac{2^p\boldsymbol{x}_{h/2} - \boldsymbol{x}_h}{2^p-1} + \mathcal{O}(h^{p+1})$$</p>
+<p>定义<strong>外推解</strong>：<br />
+$$\boldsymbol{x}<em h_2="h/2">h^{\text{ext}} = \frac{2^p\boldsymbol{x}</em>$$} - \boldsymbol{x}_h}{2^p-1</p>
+<p>其误差为$\mathcal{O}(h^{p+1})$，比原方法高一阶！</p>
+<h4 id="52-ode">5.2 应用于扩散ODE<a class="toc-link" href="#52-ode" title="Permanent link">&para;</a></h4>
+<p><strong>算法流程</strong>：<br />
+1. 用步长$h$计算一次，得$\boldsymbol{x}<em h_2="h/2">h$<br />
+2. 用步长$h/2$计算一次，得$\boldsymbol{x}</em>$<br />
+3. 外推得高精度解$\boldsymbol{x}_h^{\text{ext}}$</p>
+<p><strong>示例（欧拉法）</strong>：$p=1$，外推公式为<br />
+$$\boldsymbol{x}<em h_2="h/2">h^{\text{ext}} = \frac{2\boldsymbol{x}</em>} - \boldsymbol{x<em h_2="h/2">h}{2-1} = 2\boldsymbol{x}</em>_h$$} - \boldsymbol{x</p>
+<p>这将1阶欧拉法提升到2阶！</p>
+<p><strong>示例（Heun法）</strong>：$p=2$，外推公式为<br />
+$$\boldsymbol{x}<em h_2="h/2">h^{\text{ext}} = \frac{4\boldsymbol{x}</em>} - \boldsymbol{x<em h_2="h/2">h}{4-1} = \frac{4\boldsymbol{x}</em>$$} - \boldsymbol{x}_h}{3</p>
+<p>这将2阶Heun法提升到3阶。</p>
+<p><strong>计算成本</strong>：<br />
+- 需要计算$\boldsymbol{x}<em h_2="h/2">h$（1次粗步长）和$\boldsymbol{x}</em>$（2次细步长）<br />
+- 对于欧拉法：总共3次NFE得到2阶精度<br />
+- 对于Heun法：总共6次NFE得到3阶精度</p>
+<p><strong>优劣分析</strong>：<br />
+- <strong>优点</strong>：不改变原方法，容易实现；可迭代应用（多级外推）<br />
+- <strong>缺点</strong>：需要额外计算；不能很好地适应变步长</p>
+<p>在扩散模型中，Richardson外推较少使用，因为直接用2阶方法已经足够高效。</p>
+<h3 id="6">6. 自适应步长控制<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 误差估计<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p><strong>嵌入式Runge-Kutta方法</strong>（Embedded RK）同时给出p阶和p+1阶的解，从而估计局部误差。</p>
+<p>最著名的是<strong>Dormand-Prince方法（DP45或DOPRI5）</strong>，同时给出4阶和5阶解。</p>
+<p><strong>算法</strong>：<br />
+1. 计算p阶解$\boldsymbol{x}<em n_1="n+1">{n+1}^{(p)}$和p+1阶解$\boldsymbol{x}</em>$}^{(p+1)<br />
+2. 估计局部误差：$\boldsymbol{e}<em n_1="n+1">{n+1} \approx \boldsymbol{x}</em>}^{(p+1)} - \boldsymbol{x<em n_1="n+1">{n+1}^{(p)}$<br />
+3. 计算误差范数：$\text{err} = |\boldsymbol{e}</em>|$</p>
+<p><strong>Heun方法的误差估计</strong>：<br />
+- p阶解：Heun公式<br />
+- p-1阶解：欧拉公式（预测步）</p>
+<p>误差估计：<br />
+$$\text{err} \approx |\boldsymbol{x}<em n_1="n+1">{n+1}^{\text{Heun}} - \tilde{\boldsymbol{x}}</em>|$$}^{\text{Euler}</p>
+<h4 id="62">6.2 步长调整策略<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p>设期望的局部误差容限为$\text{tol}$，当前步长为$h$，误差为$\text{err}$。</p>
+<p><strong>基本调整公式</strong>：由于$\text{err} \sim h^{p+1}$，若要使误差达到$\text{tol}$，新步长应为<br />
+$$h_{\text{new}} = h\left(\frac{\text{tol}}{\text{err}}\right)^{1/(p+1)}$$</p>
+<p><strong>安全因子</strong>：为防止步长变化过快，引入安全系数$\beta\in(0,1)$（通常取0.9）：<br />
+$$h_{\text{new}} = \beta h\left(\frac{\text{tol}}{\text{err}}\right)^{1/(p+1)}$$</p>
+<p><strong>步长限制</strong>：<br />
+$$h_{\text{new}} = \max(h_{\min}, \min(h_{\max}, h_{\text{new}}))$$</p>
+<p>其中$h_{\min}$和$h_{\max}$是人为设定的步长范围。</p>
+<p><strong>步长变化限制</strong>：防止步长剧烈变化：<br />
+$$\frac{h_{\min}}{h} \leq \frac{h_{\text{new}}}{h} \leq \frac{h_{\max}}{h}$$</p>
+<p>典型取值：$h_{\min}/h = 0.2$，$h_{\max}/h = 5$。</p>
+<h4 id="63-pi">6.3 PI控制器<a class="toc-link" href="#63-pi" title="Permanent link">&para;</a></h4>
+<p>更先进的步长控制采用<strong>PI控制器</strong>（Proportional-Integral Controller）：<br />
+$$h_{n+1} = h_n\left(\frac{\text{tol}}{\text{err}<em n-1="n-1">n}\right)^{k_P}\left(\frac{\text{err}</em>$$}}{\text{err}_n}\right)^{k_I</p>
+<p>其中$k_P$和$k_I$是控制参数，典型取值：<br />
+$$k_P = \frac{0.7}{p+1}, \quad k_I = \frac{0.4}{p+1}$$</p>
+<p><strong>优点</strong>：平滑步长变化，避免振荡。</p>
+<h4 id="64-ode">6.4 在扩散ODE中的应用<a class="toc-link" href="#64-ode" title="Permanent link">&para;</a></h4>
+<p>对于扩散模型，自适应步长的应用较为特殊：</p>
+<p><strong>挑战</strong>：<br />
+1. 扩散ODE在不同时间段的"刚度"不同（$t$接近0或$T$时变化更快）<br />
+2. 需要控制总NFE而非总时间<br />
+3. 图像质量指标（如FID）不完全等同于数值误差</p>
+<p><strong>可能的策略</strong>：<br />
+1. <strong>预先规划节点</strong>：通过实验确定最优节点分布（如EDM的节点公式）<br />
+2. <strong>分段策略</strong>：在$t$接近边界时用小步长，中间用大步长<br />
+3. <strong>基于梯度的调整</strong>：在$|\boldsymbol{v}_{\theta}(\boldsymbol{x}_t,t)|$大的区域用小步长</p>
+<p><strong>实践中</strong>：大多数工作采用固定节点，因为：<br />
+- 简单易实现<br />
+- 可预测NFE<br />
+- 节点分布可通过超参数搜索优化</p>
+<h3 id="7-ode">7. 中值定理在扩散ODE中的应用<a class="toc-link" href="#7-ode" title="Permanent link">&para;</a></h3>
+<h4 id="71-amed">7.1 AMED方法的数学基础<a class="toc-link" href="#71-amed" title="Permanent link">&para;</a></h4>
+<p>回顾扩散ODE的积分形式：<br />
+$$\boldsymbol{x}<em t__n_1="t_{n+1">{t_n} = \boldsymbol{x}</em>_t, t)dt$$}} + \int_{t_n}^{t_{n+1}}\boldsymbol{v}_{\theta}(\boldsymbol{x</p>
+<p>（注意积分方向是从$t_{n+1}$到$t_n$，因为$t_{n+1} &gt; t_n$，符号已包含在方程定义中）</p>
+<p><strong>标量情况的中值定理</strong>：若$v$是标量函数，则存在$s\in(t_n, t_{n+1})$使得<br />
+$$\int_{t_n}^{t_{n+1}} v(x_t, t)dt = v(x_s, s)(t_{n+1} - t_n)$$</p>
+<p><strong>向量情况的推广</strong>：虽然严格的中值定理不成立，但我们可以寻找"最优中值点"$s^<em>$使得<br />
+$$\left|\int_{t_n}^{t_{n+1}}\boldsymbol{v}<em _theta="\theta">{\theta}(\boldsymbol{x}_t, t)dt - \boldsymbol{v}</em>_{s^}(\boldsymbol{x</em>}, s^*)(t_{n+1}-t_n)\right|$$<br />
+最小化。</p>
+<p><strong>AMED的近似</strong>：假设存在$s_n\approx s^*$使得<br />
+$$\int_{t_n}^{t_{n+1}}\boldsymbol{v}<em _theta="\theta">{\theta}(\boldsymbol{x}_t, t)dt \approx \boldsymbol{v}</em>}(\boldsymbol{x<em n_1="n+1">{s_n}, s_n)(t</em>-t_n)$$</p>
+<p>从而<br />
+$$\boldsymbol{x}<em t__n_1="t_{n+1">{t_n} \approx \boldsymbol{x}</em>}} - \boldsymbol{v<em s_n="s_n">{\theta}(\boldsymbol{x}</em>-t_n)$$}, s_n)(t_{n+1</p>
+<h4 id="72">7.2 中值点的学习<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p><strong>问题</strong>：如何确定$s_n$和$\boldsymbol{x}_{s_n}$？</p>
+<p><strong>AMED的解决方案</strong>：<br />
+1. <strong>学习时间点$s_n$</strong>：用神经网络$g_{\phi}$预测<br />
+   $$s_n = g_{\phi}(\boldsymbol{h}<em n_1="n+1">{t</em>)$$}}, t_{n+1<br />
+   其中$\boldsymbol{h}<em n_1="n+1">{t</em>$是U-Net中间特征。}</p>
+<ol start="2">
+<li><strong>预测空间点$\boldsymbol{x}_{s_n}$</strong>：用欧拉法从$\boldsymbol{x}<em n_1="n+1">{t</em>$外推}<br />
+   $$\tilde{\boldsymbol{x}}<em t__n_1="t_{n+1">{s_n} = \boldsymbol{x}</em>}} - \boldsymbol{v<em t__n_1="t_{n+1">{\theta}(\boldsymbol{x}</em> - s_n)$$}}, t_{n+1})(t_{n+1</li>
+</ol>
+<p><strong>训练目标</strong>：最小化与高精度轨迹的差距。设用高精度solver（如大步数Heun）得到参考轨迹${\bar{\boldsymbol{x}}<em t_1="t_1">{t_0}, \bar{\boldsymbol{x}}</em>}, \ldots, \bar{\boldsymbol{x}<em t_n="t_n">{t_N}}$，则损失函数为<br />
+$$\mathcal{L}(\phi) = \mathbb{E}\left[\left|\boldsymbol{x}</em>\right|^2\right]$$}^{\text{AMED}} - \bar{\boldsymbol{x}}_{t_n</p>
+<p>其中$\boldsymbol{x}<em t_n="t_n">{t_n}^{\text{AMED}}$是用AMED-Solver计算的结果：<br />
+$$\boldsymbol{x}</em>}^{\text{AMED}} = \boldsymbol{x<em n_1="n+1">{t</em>}} - \boldsymbol{v<em s_n="s_n">{\theta}(\tilde{\boldsymbol{x}}</em>-t_n)$$}, s_n)(t_{n+1</p>
+<h4 id="73">7.3 误差分析<a class="toc-link" href="#73" title="Permanent link">&para;</a></h4>
+<p><strong>假设</strong>：扩散轨迹近似为直线，即存在$\boldsymbol{x}_0, \boldsymbol{x}_T$使得<br />
+$$\boldsymbol{x}_t \approx \boldsymbol{x}_T + \frac{t-T}{0-T}(\boldsymbol{x}_0 - \boldsymbol{x}_T) = \boldsymbol{x}_T + \frac{T-t}{T}(\boldsymbol{x}_0 - \boldsymbol{x}_T)$$</p>
+<p>则速度场近似为<br />
+$$\boldsymbol{v}_{\theta}(\boldsymbol{x}_t, t) = \frac{d\boldsymbol{x}_t}{dt} \approx -\frac{\boldsymbol{x}_0 - \boldsymbol{x}_T}{T} = \text{const}$$</p>
+<p>在这种情况下，积分精确为：<br />
+$$\int_{t_n}^{t_{n+1}}\boldsymbol{v}<em _theta="\theta">{\theta}(\boldsymbol{x}_t, t)dt = \boldsymbol{v}</em>-t_n)$$}(t_{n+1</p>
+<p>此时任意$s_n\in[t_n, t_{n+1}]$都是精确的中值点。</p>
+<p><strong>实际情况</strong>：轨迹不完全是直线，但PCA分析显示主要在低维子空间中，因此近似程度较好。</p>
+<p>设速度场的变化率为<br />
+$$\left|\frac{\partial \boldsymbol{v}_{\theta}}{\partial t}\right| \leq C_v$$</p>
+<p>则中值近似的误差为<br />
+$$\left|\int_{t_n}^{t_{n+1}}\boldsymbol{v}<em _theta="\theta">{\theta}(\boldsymbol{x}_t, t)dt - \boldsymbol{v}</em>}(\boldsymbol{x<em n_1="n+1">{s_n}, s_n)(t</em>$$}-t_n)\right| \leq C_v\frac{(t_{n+1}-t_n)^2}{2</p>
+<p>这是$\mathcal{O}(h^2)$的误差，与1阶方法相当。</p>
+<p><strong>AMED的优势</strong>：通过学习最优$s_n$，可以使常数因子更小，从而在相同步长下获得更高精度。</p>
+<h4 id="74">7.4 与其他方法的比较<a class="toc-link" href="#74" title="Permanent link">&para;</a></h4>
+<p><strong>AMED vs 欧拉法</strong>：<br />
+- 欧拉法：$s_n = t_{n+1}$（固定端点）<br />
+- AMED：$s_n$是学习得到的最优点<br />
+- 精度：AMED更高（通过优化$s_n$减小误差常数）<br />
+- NFE：都是每步2次（AMED需要额外计算$s_n$，但计算量小）</p>
+<p><strong>AMED vs Heun法</strong>：<br />
+- Heun：用两个端点的平均，$s_n$隐含在平均中<br />
+- AMED：显式学习$s_n$，更灵活<br />
+- 精度：理论上都是2阶，但AMED在扩散ODE上表现更好（针对性优化）<br />
+- NFE：都是每步2次</p>
+<p><strong>AMED vs 中点法</strong>：<br />
+- 中点法：$s_n = (t_n+t_{n+1})/2$（固定中点）<br />
+- AMED：$s_n$自适应<br />
+- 精度：中点法理论2阶，AMED实践更优<br />
+- NFE：都是每步2次</p>
+<p><strong>关键区别</strong>：AMED通过数据驱动的方式学习最优$s_n$，而传统方法使用固定规则（端点、中点、加权平均等）。对于扩散ODE这种特定结构，学习方法能更好地适应轨迹特性。</p>
+<h3 id="8">8. 与其他加速方法的对比<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 方法分类<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p>扩散模型加速方法大致可分为三类：</p>
+<p><strong>1. 纯数值方法</strong>（Training-free）：<br />
+- 欧拉法（DDIM）<br />
+- Heun法（EDM）<br />
+- 高阶RK方法<br />
+- DPM-Solver系列<br />
+- 优点：无需额外训练<br />
+- 缺点：精度受限于通用ODE理论</p>
+<p><strong>2. 蒸馏方法</strong>（Distillation-based）：<br />
+- Progressive Distillation<br />
+- Consistency Models<br />
+- Latent Consistency Models<br />
+- 优点：可达到极少步数（1-4步）<br />
+- 缺点：训练成本高（数天到数周）</p>
+<p><strong>3. 混合方法</strong>（Hybrid）：<br />
+- AMED（轻量蒸馏 + 数值方法）<br />
+- DPM-Solver++（分析解 + 数值方法）<br />
+- 优点：平衡精度和成本<br />
+- 缺点：实现复杂度较高</p>
+<h4 id="82-dpm-solver">8.2 DPM-Solver系列<a class="toc-link" href="#82-dpm-solver" title="Permanent link">&para;</a></h4>
+<p><strong>DPM-Solver的核心思想</strong>：将扩散ODE改写为特殊形式，利用半线性结构求解析解。</p>
+<p>对于VP（Variance Preserving）扩散，ODE可写为：<br />
+$$\frac{d\boldsymbol{x}<em _theta="\theta">t}{dt} = f(t)\boldsymbol{x}_t + g(t)\boldsymbol{\epsilon}</em>_t, t)$$}(\boldsymbol{x</p>
+<p>其中$f(t), g(t)$是确定的系数函数。</p>
+<p><strong>变量替换</strong>：定义$\boldsymbol{y}<em _theta="\theta">t = \boldsymbol{x}_t/\alpha_t$（其中$\alpha_t = e^{\int f(t)dt}$），方程变为<br />
+$$\frac{d\boldsymbol{y}_t}{dt} = \frac{g(t)}{\alpha_t}\boldsymbol{\epsilon}</em>_t, t)$$}(\alpha_t\boldsymbol{y</p>
+<p><strong>积分求解</strong>：<br />
+$$\boldsymbol{y}<em t__n_1="t_{n+1">{t_n} = \boldsymbol{y}</em>_t, t)dt$$}} + \int_{t_{n+1}}^{t_n}\frac{g(t)}{\alpha_t}\boldsymbol{\epsilon}_{\theta}(\alpha_t\boldsymbol{y</p>
+<p>对积分部分用数值方法（如Lagrange插值），得到高阶公式。</p>
+<p><strong>DPM-Solver-2</strong>（前文式$\eqref{eq:dpm-solver-2}$）：<br />
+$$\boldsymbol{x}<em t__n_1="t_{n+1">{t_n} \approx \boldsymbol{x}</em>}} - \boldsymbol{v<em _sqrt_t_nt__n_1="\sqrt{t_nt_{n+1">{\theta}(\boldsymbol{x}</em>-t_n)$$}}}, \sqrt{t_nt_{n+1}})(t_{n+1</p>
+<p>这里中点取几何平均而非算术平均，源于VP扩散的对数尺度性质。</p>
+<p><strong>与AMED的对比</strong>：<br />
+- DPM-Solver：基于数学分析，中点位置由理论确定<br />
+- AMED：基于数据学习，中点位置由训练优化<br />
+- DPM-Solver：适用于特定扩散形式（VP）<br />
+- AMED：更通用，可适应不同扩散形式</p>
+<h4 id="83-consistency-models">8.3 一致性模型（Consistency Models）<a class="toc-link" href="#83-consistency-models" title="Permanent link">&para;</a></h4>
+<p><strong>基本思想</strong>：学习一个函数$f_{\theta}$，将轨迹上任意点映射到起点：<br />
+$$f_{\theta}(\boldsymbol{x}_t, t) \approx \boldsymbol{x}_0, \quad \forall t\in[0,T]$$</p>
+<p><strong>一致性条件</strong>：<br />
+$$f_{\theta}(\boldsymbol{x}<em _theta="\theta">t, t) = f</em>, t'), \quad \forall t, t'$$}(\boldsymbol{x}_{t'</p>
+<p>即同一条轨迹上的所有点映射到相同的$\boldsymbol{x}_0$。</p>
+<p><strong>训练</strong>：通过蒸馏预训练扩散模型或直接从数据训练。</p>
+<p><strong>采样</strong>：一步即可：$\boldsymbol{x}<em _theta="\theta">0 = f</em>_T, T)$。}(\boldsymbol{x</p>
+<p><strong>优缺点</strong>：<br />
+- 优点：采样极快（1步）<br />
+- 缺点：训练成本高，质量略低于多步方法</p>
+<p><strong>与AMED的对比</strong>：<br />
+- Consistency Models：改变模型架构和训练范式<br />
+- AMED：保持原模型，仅优化采样器<br />
+- Consistency Models：1步采样<br />
+- AMED：仍需多步（5-10步），但每步更优</p>
+<h4 id="84">8.4 定量对比<a class="toc-link" href="#84" title="Permanent link">&para;</a></h4>
+<p>基于原论文Table 2，在CIFAR-10上（32×32图像）：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>NFE=5</th>
+<th>NFE=9</th>
+<th>NFE=13</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DDIM (1阶)</td>
+<td>67.82</td>
+<td>38.59</td>
+<td>25.50</td>
+</tr>
+<tr>
+<td>DPM-Solver (2阶)</td>
+<td>79.16</td>
+<td>21.75</td>
+<td>14.34</td>
+</tr>
+<tr>
+<td>Heun/EDM (2阶)</td>
+<td>75.12</td>
+<td>17.43</td>
+<td>11.28</td>
+</tr>
+<tr>
+<td>AMED (2阶+学习)</td>
+<td><strong>16.70</strong></td>
+<td><strong>8.94</strong></td>
+<td><strong>7.12</strong></td>
+</tr>
+</tbody>
+</table>
+<p>（数值为FID，越低越好）</p>
+<p><strong>关键观察</strong>：<br />
+1. NFE=5时，2阶方法（DPM、Heun）甚至不如1阶DDIM，因为步长太大<br />
+2. AMED在所有NFE下都显著优于其他方法<br />
+3. NFE从9降到5，AMED的FID仅增加87%，而Heun增加331%</p>
+<p>这显示AMED在低NFE区间的优势。</p>
+<h3 id="9">9. 扩散模型轨迹的几何性质<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91-pca">9.1 主成分分析（PCA）<a class="toc-link" href="#91-pca" title="Permanent link">&para;</a></h4>
+<p>原论文对扩散轨迹进行PCA，验证中值定理近似成立的条件。</p>
+<p><strong>设置</strong>：<br />
+- 用高精度solver（NFE=1000）采样得到轨迹${\boldsymbol{x}<em t_1="t_1">{t_0}, \boldsymbol{x}</em>}, \ldots, \boldsymbol{x<em t_i="t_i">{t_N}}$<br />
+- 每个$\boldsymbol{x}</em>^d$（如CIFAR-10，$d=32\times32\times3=3072$）}\in\mathbb{R<br />
+- 对轨迹点做PCA，分析主成分的贡献</p>
+<p><strong>数学描述</strong>：设轨迹矩阵为$\boldsymbol{X} = [\boldsymbol{x}<em t_N="t_N">{t_0}, \ldots, \boldsymbol{x}</em>$，中心化后：}]^T \in\mathbb{R}^{(N+1)\times d<br />
+$$\tilde{\boldsymbol{X}} = \boldsymbol{X} - \frac{1}{N+1}\sum_{i=0}^N \boldsymbol{x}_{t_i}$$</p>
+<p>协方差矩阵：<br />
+$$\boldsymbol{C} = \frac{1}{N}\tilde{\boldsymbol{X}}^T\tilde{\boldsymbol{X}} \in\mathbb{R}^{d\times d}$$</p>
+<p>特征值分解：$\boldsymbol{C} = \boldsymbol{U}\boldsymbol{\Lambda}\boldsymbol{U}^T$，其中$\boldsymbol{\Lambda} = \text{diag}(\lambda_1, \ldots, \lambda_d)$，$\lambda_1 \geq \lambda_2 \geq \cdots \geq \lambda_d$。</p>
+<p><strong>第k主成分的贡献率</strong>：<br />
+$$r_k = \frac{\lambda_k}{\sum_{i=1}^d\lambda_i}$$</p>
+<p><strong>累积贡献率</strong>：<br />
+$$R_K = \frac{\sum_{k=1}^K\lambda_k}{\sum_{i=1}^d\lambda_i}$$</p>
+<p>$R_K$表示前$K$个主成分保留的方差比例。</p>
+<h4 id="92">9.2 实验结果<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p>根据原论文Figure（扩散ODE采样轨迹的主成分分析）：</p>
+<p><strong>观察</strong>：<br />
+1. <strong>第1主成分</strong>：$r_1 \approx 95\%$，即第1个主成分解释了95%的方差<br />
+2. <strong>前2主成分</strong>：$R_2 \approx 99\%$，前2个主成分几乎解释了全部方差<br />
+3. <strong>后续主成分</strong>：$r_k &lt; 1\%$，$k\geq 3$，贡献极小</p>
+<p><strong>结论</strong>：扩散轨迹近似位于一个<strong>2维子空间</strong>中，甚至非常接近<strong>1维直线</strong>。</p>
+<h4 id="93">9.3 理论解释<a class="toc-link" href="#93" title="Permanent link">&para;</a></h4>
+<p><strong>为何轨迹接近直线？</strong></p>
+<p>回顾扩散模型的构造（见文章提到的（十五）、（十七）篇）：</p>
+<p><strong>伪轨迹</strong>：构造扩散ODE时，通常设计伪轨迹为<br />
+$$\boldsymbol{x}_t^{\text{pseudo}} = \alpha(t)\boldsymbol{x}_0 + \beta(t)\boldsymbol{x}_T$$</p>
+<p>其中$\alpha(t), \beta(t)$是时间的标量函数，满足边界条件$\alpha(0)=1, \beta(0)=0, \alpha(T)=0, \beta(T)=1$。</p>
+<p><strong>线性插值性质</strong>：对于固定的$\boldsymbol{x}_0, \boldsymbol{x}_T$，伪轨迹是连接两点的直线（参数化可能非线性，但轨迹本身是直线）。</p>
+<p><strong>真实轨迹</strong>：扩散ODE的设计目标是使真实轨迹接近伪轨迹，因此真实轨迹也倾向于接近直线。</p>
+<p><strong>数学表述</strong>：设$\boldsymbol{d} = \boldsymbol{x}_0 - \boldsymbol{x}_T$为方向向量，则<br />
+$$\boldsymbol{x}_t \approx \boldsymbol{x}_T + \gamma(t)\boldsymbol{d}$$</p>
+<p>其中$\gamma(t):[0,T]\to[0,1]$是单调函数，$\gamma(0)=1, \gamma(T)=0$。</p>
+<p>所有点都在向量$\boldsymbol{d}$张成的1维子空间中（加上偏移$\boldsymbol{x}_T$）。</p>
+<h4 id="94-amed">9.4 对AMED的启示<a class="toc-link" href="#94-amed" title="Permanent link">&para;</a></h4>
+<p><strong>中值定理成立的条件</strong>：轨迹越接近直线，向量值函数的积分中值定理越接近成立。</p>
+<p><strong>PCA结果的支持</strong>：$R_1 \approx 95\%$说明轨迹主要在1维子空间中，因此中值定理近似成立，AMED的理论基础得到验证。</p>
+<p><strong>步长的影响</strong>：<br />
+- 步长小时，局部轨迹更接近直线，近似更好<br />
+- 步长大时，曲率效应显现，近似误差增大<br />
+- 这解释了为何AMED在NFE=5时优势最明显（步长大，传统方法误差大，AMED通过学习$s_n$能更好补偿）</p>
+<h3 id="10">10. 总结与展望<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 主要方法对比总结<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法类型</th>
+<th>代表方法</th>
+<th>阶数</th>
+<th>NFE/步</th>
+<th>优点</th>
+<th>缺点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1阶方法</td>
+<td>DDIM/欧拉</td>
+<td>1</td>
+<td>1</td>
+<td>简单快速</td>
+<td>精度低，需多步</td>
+</tr>
+<tr>
+<td>2阶方法</td>
+<td>Heun/梯形</td>
+<td>2</td>
+<td>2</td>
+<td>精度提升显著</td>
+<td>仍需较多步数</td>
+</tr>
+<tr>
+<td>高阶方法</td>
+<td>RK4</td>
+<td>4</td>
+<td>4</td>
+<td>精度高</td>
+<td>NFE开销大</td>
+</tr>
+<tr>
+<td>分析方法</td>
+<td>DPM-Solver</td>
+<td>2-3</td>
+<td>1-2</td>
+<td>利用扩散结构</td>
+<td>限于特定形式</td>
+</tr>
+<tr>
+<td>蒸馏方法</td>
+<td>Consistency</td>
+<td>-</td>
+<td>1</td>
+<td>采样极快</td>
+<td>训练成本极高</td>
+</tr>
+<tr>
+<td>混合方法</td>
+<td>AMED</td>
+<td>2+</td>
+<td>2</td>
+<td>低NFE下最优</td>
+<td>需轻量训练</td>
+</tr>
+</tbody>
+</table>
+<h4 id="102">10.2 理论要点回顾<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>局部vs全局误差</strong>：局部$p+1$阶方法的全局误差为$\mathcal{O}(h^p)$</p>
+</li>
+<li>
+<p><strong>NFE与步数</strong>：$\text{总NFE} = \text{步数} \times \text{每步NFE}$，高阶方法通过减少步数降低总NFE</p>
+</li>
+<li>
+<p><strong>中值定理</strong>：向量值函数的积分中值定理在轨迹接近直线时近似成立</p>
+</li>
+<li>
+<p><strong>PCA分析</strong>：扩散轨迹主要在低维（1-2维）子空间中，支持中值定理近似</p>
+</li>
+<li>
+<p><strong>步长策略</strong>：<br />
+   - 固定步长：实现简单，可预测<br />
+   - 自适应步长：精度更高，但复杂<br />
+   - 扩散模型多用固定节点（通过超参数优化）</p>
+</li>
+</ol>
+<h4 id="103">10.3 实践建议<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<p><strong>选择采样器的原则</strong>：</p>
+<ol>
+<li>
+<p><strong>极低NFE（&lt;5）</strong>：<br />
+   - 首选AMED或蒸馏方法<br />
+   - 欧拉法基本不可用<br />
+   - 2阶方法效果有限</p>
+</li>
+<li>
+<p><strong>低NFE（5-10）</strong>：<br />
+   - AMED表现最佳<br />
+   - Heun/EDM是Training-free的好选择<br />
+   - DPM-Solver对VP扩散很有效</p>
+</li>
+<li>
+<p><strong>中等NFE（10-50）</strong>：<br />
+   - Heun/EDM已经足够好<br />
+   - 高阶方法（RK4）可能过度<br />
+   - 自适应步长可考虑</p>
+</li>
+<li>
+<p><strong>高NFE（&gt;50）</strong>：<br />
+   - 欧拉法已经收敛<br />
+   - 无需复杂方法</p>
+</li>
+</ol>
+<p><strong>训练成本考虑</strong>：<br />
+- AMED：几小时（可接受）<br />
+- Progressive Distillation：数天（较高）<br />
+- Consistency Models：数周（很高）</p>
+<p><strong>应用场景</strong>：<br />
+- <strong>实时应用</strong>（如交互式编辑）：需要NFE&lt;10，选AMED或蒸馏<br />
+- <strong>批量生成</strong>（如数据集生成）：可用NFE=20-50，选Heun<br />
+- <strong>研究评估</strong>：可用NFE=100+，选欧拉法即可</p>
+<h4 id="104">10.4 未来方向<a class="toc-link" href="#104" title="Permanent link">&para;</a></h4>
+<p><strong>理论方向</strong>：<br />
+1. 更深入理解扩散轨迹的几何性质（为何近似直线？）<br />
+2. 严格的误差界和收敛性证明<br />
+3. 向量值中值定理的充要条件</p>
+<p><strong>方法方向</strong>：<br />
+1. 结合AMED思想与DPM-Solver的分析结构<br />
+2. 可学习的高阶方法（3阶、4阶）<br />
+3. 多模态采样器（不同阶段用不同方法）</p>
+<p><strong>应用方向</strong>：<br />
+1. 视频扩散模型的加速（时空ODE）<br />
+2. 3D扩散模型的加速（高维ODE）<br />
+3. 条件生成的专用采样器</p>
+<h4 id="105">10.5 关键数学工具总结<a class="toc-link" href="#105" title="Permanent link">&para;</a></h4>
+<p>本文涉及的核心数学工具：</p>
+<ol>
+<li><strong>微积分</strong>：Taylor展开、中值定理、积分</li>
+<li><strong>数值分析</strong>：有限差分、Runge-Kutta方法、误差分析</li>
+<li><strong>线性代数</strong>：PCA、特征值分解、范数</li>
+<li><strong>优化理论</strong>：梯度下降、损失函数设计</li>
+<li><strong>微分方程</strong>：ODE理论、稳定性分析、Lipschitz条件</li>
+</ol>
+<p>这些工具的综合应用展现了现代机器学习与经典数学的深度融合。</p>
+<hr />
+<p><strong>附注</strong>：以上推导展示了从基础的微积分中值定理到先进的扩散模型采样加速的完整理论脉络。通过数值分析、微分方程和机器学习的交叉视角，我们不仅理解了各种方法的原理，也看到了AMED等创新方法如何巧妙地结合数学洞察与数据驱动优化。这正是当代AI研究的魅力所在：深厚的数学基础与灵活的工程实践相辅相成，推动技术不断进步。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -263,7 +978,19 @@ url={\url{https://spaces.ac.cn/archives/9881}},<br />
 <li><a href="#_4">实验结果</a></li>
 <li><a href="#_5">假设分析</a></li>
 <li><a href="#_6">文章小结</a></li>
-<li><a href="#_7">公式推导与注释</a></li>
+<li><a href="#_7">推导</a><ul>
+<li><a href="#1">1. 微积分中值定理回顾</a></li>
+<li><a href="#2-ode">2. ODE数值积分基础理论</a></li>
+<li><a href="#3">3. 经典数值方法详解</a></li>
+<li><a href="#4">4. 误差理论深入分析</a></li>
+<li><a href="#5-richardson">5. Richardson外推法</a></li>
+<li><a href="#6">6. 自适应步长控制</a></li>
+<li><a href="#7-ode">7. 中值定理在扩散ODE中的应用</a></li>
+<li><a href="#8">8. 与其他加速方法的对比</a></li>
+<li><a href="#9">9. 扩散模型轨迹的几何性质</a></li>
+<li><a href="#10">10. 总结与展望</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
