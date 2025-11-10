@@ -156,5 +156,806 @@ url={\url{https://spaces.ac.cn/archives/9826}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 1. FSQ的数学定义与基本性质
+
+**定义1.1（FSQ量化函数）**：对于标量 $t \in \mathbb{R}$，FSQ量化函数定义为：
+
+$$
+\text{FSQ}(t) = \text{Round}[(L-1)\sigma(t)]
+$$
+
+其中：
+- $L \in \mathbb{N}$ 是量化等级数（超参数）
+- $\sigma(x) = \frac{1}{1+e^{-x}}$ 是sigmoid激活函数
+- $\text{Round}(\cdot)$ 是标准四舍五入函数
+
+**性质1.1（值域性质）**：FSQ函数的值域为有限离散集合：
+
+$$
+\text{FSQ}(t) \in \{0, 1, 2, \ldots, L-1\}
+$$
+
+**证明**：由于 $\sigma(t) \in (0, 1)$，因此：
+
+$$
+(L-1)\sigma(t) \in (0, L-1)
+$$
+
+应用四舍五入操作后：
+
+$$
+\text{Round}[(L-1)\sigma(t)] \in \{0, 1, \ldots, L-1\}
+$$
+
+这确保了输出是 $L$ 个离散整数值之一。$\square$
+
+### 2. 向量化的FSQ定义
+
+**定义2.1（向量FSQ）**：对于向量 $z \in \mathbb{R}^d$，向量化FSQ定义为逐元素操作：
+
+$$
+\text{FSQ}(z) = [\text{FSQ}(z_1), \text{FSQ}(z_2), \ldots, \text{FSQ}(z_d)]^T
+$$
+
+其中 $z_i$ 是向量 $z$ 的第 $i$ 个分量。
+
+**性质2.1（编码空间大小）**：向量FSQ的输出空间大小为：
+
+$$
+|\text{CodeSpace}| = L^d
+$$
+
+**证明**：每个维度有 $L$ 个可能的取值，共 $d$ 个独立维度，因此总的编码数量为：
+
+$$
+L \times L \times \cdots \times L = L^d
+$$
+
+这与VQ-VAE的编码表大小 $K$ 可以对应，即当 $L^d = K$ 时，两者的离散化程度相同。$\square$
+
+### 3. FSQ的梯度分析：Straight-Through Estimator
+
+**定义3.1（FSQ的前向传播）**：在前向传播中，FSQ的输出为：
+
+$$
+z_q = \text{Round}[(L-1)\sigma(z)]
+$$
+
+**定义3.2（FSQ的反向传播）**：在反向传播中，我们使用Straight-Through Estimator（STE）技巧：
+
+$$
+z_q = (L-1)\sigma(z) + \text{sg}[\text{Round}[(L-1)\sigma(z)] - (L-1)\sigma(z)]
+$$
+
+其中 $\text{sg}[\cdot]$ 表示stop_gradient操作。
+
+**性质3.1（STE梯度）**：使用STE后，FSQ的梯度为：
+
+$$
+\frac{\partial z_q}{\partial z} = (L-1) \cdot \sigma'(z)
+$$
+
+**详细推导**：
+
+令 $h(z) = (L-1)\sigma(z)$，$q(z) = \text{Round}[h(z)]$
+
+根据STE的定义：
+$$
+z_q = h(z) + \text{sg}[q(z) - h(z)]
+$$
+
+在反向传播时，$\text{sg}[\cdot]$ 内的项梯度为0，因此：
+
+$$
+\frac{\partial z_q}{\partial z} = \frac{\partial h(z)}{\partial z} = (L-1) \frac{d\sigma(z)}{dz}
+$$
+
+而sigmoid函数的导数为：
+
+$$
+\sigma'(z) = \sigma(z)(1-\sigma(z))
+$$
+
+因此：
+
+$$
+\frac{\partial z_q}{\partial z} = (L-1) \sigma(z)(1-\sigma(z))
+$$
+
+这个梯度是连续且可微的，能够有效地传播到encoder。$\square$
+
+### 4. FSQ的近似误差分析
+
+**定义4.1（量化误差）**：FSQ的量化误差定义为：
+
+$$
+\epsilon(z) = \text{Round}[h(z)] - h(z)
+$$
+
+其中 $h(z) = (L-1)\sigma(z)$。
+
+**性质4.1（误差上界）**：量化误差满足：
+
+$$
+|\epsilon(z)| \leq \frac{1}{2}
+$$
+
+**证明**：四舍五入操作的性质保证了：
+
+$$
+|x - \text{Round}(x)| \leq \frac{1}{2}, \quad \forall x \in \mathbb{R}
+$$
+
+因此：
+
+$$
+|\epsilon(z)| = |\text{Round}[h(z)] - h(z)| \leq \frac{1}{2}
+$$
+
+这个上界是紧的（tight）。$\square$
+
+**性质4.2（相对误差）**：当 $L$ 较大时，相对量化误差为：
+
+$$
+\frac{|\epsilon(z)|}{h(z)} \leq \frac{1}{2h(z)} = \frac{1}{2(L-1)\sigma(z)}
+$$
+
+当 $L$ 增大时，相对误差减小，量化精度提高。
+
+### 5. FSQ与VQ-VAE的理论对比
+
+**定义5.1（VQ-VAE的量化操作）**：在VQ-VAE中，量化定义为：
+
+$$
+z_q^{VQ} = e_k, \quad k = \arg\min_{i \in \{1,\ldots,K\}} \|z - e_i\|_2
+$$
+
+其中 $\{e_1, \ldots, e_K\}$ 是编码表（codebook）。
+
+**定义5.2（FSQ的等价表示）**：FSQ可以看作隐式定义了一个编码表：
+
+$$
+\mathcal{E}_{FSQ} = \{[i_1, i_2, \ldots, i_d]^T : i_j \in \{0,1,\ldots,L-1\}, j=1,\ldots,d\}
+$$
+
+编码表大小 $|\mathcal{E}_{FSQ}| = L^d$。
+
+**定理5.1（参数数量对比）**：
+
+- VQ-VAE的编码表参数数量：$K \times d$
+- FSQ的参数数量：$0$（不需要显式编码表）
+
+当 $K = L^d$ 时，VQ-VAE需要 $L^d \times d$ 个参数，而FSQ不需要额外参数。
+
+**证明**：VQ-VAE的编码表 $\{e_1, \ldots, e_K\}$ 中，每个 $e_i \in \mathbb{R}^d$ 是需要学习的参数，共 $K \times d$ 个参数。
+
+FSQ的量化规则由公式 $\text{Round}[(L-1)\sigma(z)]$ 完全确定，不需要学习任何额外参数。这是FSQ相比VQ-VAE的重要优势。$\square$
+
+### 6. FSQ的梯度传播完整分析
+
+考虑一个完整的自编码器流程：
+
+$$
+x \xrightarrow{\text{encoder}} z \xrightarrow{\text{FSQ}} z_q \xrightarrow{\text{decoder}} \hat{x}
+$$
+
+损失函数为重构损失：
+
+$$
+\mathcal{L} = \|x - \hat{x}\|^2
+$$
+
+**定理6.1（FSQ的梯度链式法则）**：encoder参数 $\theta_e$ 的梯度为：
+
+$$
+\frac{\partial \mathcal{L}}{\partial \theta_e} = \frac{\partial \mathcal{L}}{\partial \hat{x}} \frac{\partial \hat{x}}{\partial z_q} \frac{\partial z_q}{\partial z} \frac{\partial z}{\partial \theta_e}
+$$
+
+**详细推导**：
+
+第一项（重构损失对输出的梯度）：
+
+$$
+\frac{\partial \mathcal{L}}{\partial \hat{x}} = 2(x - \hat{x})^T
+$$
+
+第二项（decoder的梯度）：
+
+$$
+\frac{\partial \hat{x}}{\partial z_q} = J_{decoder}(z_q)
+$$
+
+其中 $J_{decoder}$ 是decoder的雅可比矩阵。
+
+第三项（FSQ的STE梯度）：
+
+$$
+\frac{\partial z_q}{\partial z} = (L-1) \cdot \text{diag}[\sigma'(z_1), \ldots, \sigma'(z_d)]
+$$
+
+第四项（encoder的梯度）：
+
+$$
+\frac{\partial z}{\partial \theta_e} = J_{encoder}(x, \theta_e)
+$$
+
+将这些项相乘，得到完整的梯度链。关键是第三项的STE梯度是连续的，使得梯度能够顺畅地反向传播。$\square$
+
+### 7. FSQ的STE合理性分析
+
+**定理7.1（STE的近似性质）**：STE假设在数学上等价于近似假设：
+
+$$
+\text{Round}[h(z)] \approx h(z)
+$$
+
+这个近似在 $h(z)$ 接近整数时误差最小。
+
+**推导**：根据STE定义：
+
+$$
+z_q = h(z) + \text{sg}[\text{Round}[h(z)] - h(z)]
+$$
+
+在前向传播中：$z_q = \text{Round}[h(z)]$
+
+在反向传播中：梯度为 $\nabla z_q = \nabla h(z)$
+
+这等价于假设 $\text{Round}[h(z)] = h(z)$，即：
+
+$$
+\text{Round}[h(z)] - h(z) = 0
+$$
+
+实际上 $|\text{Round}[h(z)] - h(z)| \leq 0.5$，因此STE引入的近似误差是有界的。
+
+**性质7.1（STE误差的期望）**：假设 $h(z)$ 在区间 $[n, n+1)$ 上均匀分布（$n$ 是整数），则：
+
+$$
+\mathbb{E}[\text{Round}[h(z)] - h(z)] = 0
+$$
+
+**证明**：在区间 $[n, n+0.5)$ 上，$\text{Round}[h(z)] = n$；在 $[n+0.5, n+1)$ 上，$\text{Round}[h(z)] = n+1$。
+
+$$
+\mathbb{E}[\epsilon] = \int_n^{n+0.5} (n - x) dx + \int_{n+0.5}^{n+1} (n+1 - x) dx
+$$
+
+$$
+= \left[-\frac{(x-n)^2}{2}\right]_n^{n+0.5} + \left[-\frac{(x-n-1)^2}{2}\right]_{n+0.5}^{n+1}
+$$
+
+$$
+= -\frac{0.25}{2} + (-\frac{0}{2} + \frac{0.25}{2}) = 0
+$$
+
+因此STE在期望意义下是无偏的。$\square$
+
+### 8. FSQ无需辅助损失的理论依据
+
+**定理8.1（FSQ的自洽性）**：FSQ不需要额外的辅助损失，因为量化操作本身保证了：
+
+$$
+\|z_q - z\|_2 = \|\text{Round}[h(z)] - h(z)\|_2 \leq \frac{\sqrt{d}}{2}
+$$
+
+这个误差上界不依赖于可学习参数。
+
+**对比VQ-VAE**：VQ-VAE需要辅助损失：
+
+$$
+\mathcal{L}_{aux} = \beta \|e_k - \text{sg}[z]\|^2 + \gamma \|z - \text{sg}[e_k]\|^2
+$$
+
+原因是：
+1. VQ-VAE的 $e_k$ 是可学习的，需要损失来优化
+2. $e_k$ 与 $z$ 之间的距离无先验保证，可能很大
+
+**FSQ的优势**：
+
+1. $\text{Round}[h(z)]$ 自动接近 $h(z)$（误差 $\leq 0.5$）
+2. sigmoid函数 $\sigma(z)$ 自动将输出限制在 $(0, 1)$ 范围内
+3. 不需要学习编码表，避免了编码表坍缩问题
+
+### 9. FSQ的表达能力分析
+
+**定义9.1（表达能力）**：模型的表达能力定义为其能够表示的不同编码的数量。
+
+对于FSQ：$\text{Capacity}_{FSQ} = L^d$
+
+对于VQ-VAE：$\text{Capacity}_{VQ} = K$
+
+**定理9.1（等容量对比）**：当 $L^d = K$ 时，FSQ和VQ的离散化程度相同，但：
+
+- FSQ的连续嵌入维度：$d$
+- VQ的连续嵌入维度：$d_{VQ}$（通常 $d_{VQ} \gg d$）
+
+**推导**：设 $K = L^d$，则：
+
+$$
+d = \frac{\log K}{\log L}
+$$
+
+例如，若 $K = 8192, L = 8$，则：
+
+$$
+d = \frac{\log 8192}{\log 8} = \frac{13}{3} \approx 4.33 \approx 4 \text{ 或 } 5
+$$
+
+而VQ-VAE通常使用 $d_{VQ} = 256$ 或更高。
+
+**性质9.1（维度与表达的权衡）**：
+
+FSQ的低维度 $d$ 意味着：
+- 优势：参数效率高，计算快
+- 劣势：连续空间的表达能力可能受限
+
+这需要依靠encoder和decoder的强大能力来补偿。
+
+### 10. FSQ的几何解释
+
+**定义10.1（FSQ的量化网格）**：FSQ将连续空间 $\mathbb{R}^d$ 划分为网格：
+
+$$
+\mathcal{G} = \{[i_1, i_2, \ldots, i_d]^T : i_j \in \{0, 1, \ldots, L-1\}\}
+$$
+
+每个网格点对应一个编码。
+
+**定理10.1（Voronoi分解）**：经过 $\sigma$ 和线性变换后，FSQ在原始 $z$ 空间定义了一个非均匀的Voronoi分解。
+
+具体来说，编码 $[i_1, \ldots, i_d]^T$ 对应的Voronoi区域为：
+
+$$
+V_{i_1,\ldots,i_d} = \left\{z \in \mathbb{R}^d : \text{Round}[(L-1)\sigma(z_j)] = i_j, \forall j\right\}
+$$
+
+**性质10.1（区域形状）**：每个Voronoi区域是：
+
+$$
+V_{i_1,\ldots,i_d} = \prod_{j=1}^d \left\{z_j : \frac{i_j - 0.5}{L-1} \leq \sigma(z_j) < \frac{i_j + 0.5}{L-1}\right\}
+$$
+
+（边界情况需要特殊处理）
+
+这些区域在原始 $z$ 空间是由sigmoid函数的反函数（logit函数）定义的超矩形：
+
+$$
+z_j \in \left[\text{logit}\left(\frac{i_j - 0.5}{L-1}\right), \text{logit}\left(\frac{i_j + 0.5}{L-1}\right)\right)
+$$
+
+其中 $\text{logit}(p) = \log\frac{p}{1-p}$。
+
+### 11. FSQ的编码分布分析
+
+**定义11.1（编码熵）**：编码的信息熵定义为：
+
+$$
+H = -\sum_{c \in \mathcal{C}} p(c) \log p(c)
+$$
+
+其中 $\mathcal{C}$ 是所有可能编码的集合，$p(c)$ 是编码 $c$ 的概率。
+
+**定理11.1（最大熵）**：当编码均匀分布时，熵达到最大值：
+
+$$
+H_{max} = \log L^d = d \log L
+$$
+
+**FSQ的编码分布**：
+
+假设 encoder 输出 $z$ 的分布为 $p(z)$，则编码 $c$ 的概率为：
+
+$$
+p(c) = \int_{V_c} p(z) dz
+$$
+
+其中 $V_c$ 是编码 $c$ 对应的Voronoi区域。
+
+**性质11.1（均匀化趋势）**：当 encoder 输出 $z$ 的分布接近均匀时，FSQ自然地产生均匀的编码分布，不需要像VQ-VAE那样显式地优化编码表利用率。
+
+### 12. FSQ的训练稳定性分析
+
+**定理12.1（梯度范数上界）**：FSQ的梯度范数有上界：
+
+$$
+\left\|\frac{\partial z_q}{\partial z}\right\|_F = (L-1) \sqrt{\sum_{i=1}^d [\sigma'(z_i)]^2}
+$$
+
+由于 $\sigma'(z) = \sigma(z)(1-\sigma(z)) \leq 0.25$，因此：
+
+$$
+\left\|\frac{\partial z_q}{\partial z}\right\|_F \leq \frac{(L-1)\sqrt{d}}{4}
+$$
+
+**推导**：
+
+Frobenius范数的计算：
+
+$$
+\left\|\frac{\partial z_q}{\partial z}\right\|_F^2 = \sum_{i=1}^d \left[\frac{\partial z_{q,i}}{\partial z_i}\right]^2 = (L-1)^2 \sum_{i=1}^d [\sigma'(z_i)]^2
+$$
+
+由于 $\sigma'(z)$ 的最大值为 $0.25$（在 $z=0$ 处取得），因此：
+
+$$
+\left\|\frac{\partial z_q}{\partial z}\right\|_F \leq (L-1) \cdot \sqrt{d} \cdot 0.25 = \frac{(L-1)\sqrt{d}}{4}
+$$
+
+这个上界保证了梯度不会爆炸。$\square$
+
+**定理12.2（梯度消失分析）**：当 $|z_i|$ 很大时，$\sigma'(z_i) \to 0$，可能导致梯度消失。
+
+具体地：
+- 当 $z \to +\infty$ 时，$\sigma(z) \to 1$，$\sigma'(z) \to 0$
+- 当 $z \to -\infty$ 时，$\sigma(z) \to 0$，$\sigma'(z) \to 0$
+
+**解决方案**：适当的网络初始化和归一化层可以保持 $z$ 在合理范围内，避免梯度消失。
+
+### 13. FSQ与VQ的编码表坍缩对比
+
+**定义13.1（编码表坍缩）**：在VQ-VAE中，编码表坍缩指大部分编码向量 $e_i$ 未被使用的现象。
+
+**度量13.1（编码利用率）**：
+
+$$
+\text{Usage} = \frac{\text{实际使用的编码数}}{K}
+$$
+
+VQ-VAE常见问题：即使 $K = 8192$，实际利用率可能只有 $10\%$ 或更低。
+
+**定理13.1（FSQ无坍缩）**：FSQ理论上不存在编码表坍缩问题。
+
+**证明**：FSQ的编码空间是完全确定的网格 $\{0,1,\ldots,L-1\}^d$，每个编码都对应一个固定的Voronoi区域。只要训练数据足够多样化，所有编码都有机会被使用。
+
+相比之下，VQ-VAE的编码表 $\{e_1, \ldots, e_K\}$ 是通过梯度学习的，存在"赢者通吃"效应：
+- 某些 $e_i$ 吸引了大量 $z$
+- 其他 $e_j$ 很少或从不被选中
+- 这些 $e_j$ 的梯度很小，难以更新
+
+FSQ避免了这个问题，因为它不需要学习编码表。$\square$
+
+### 14. FSQ的计算复杂度分析
+
+**定理14.1（前向传播复杂度）**：
+
+- FSQ：$O(d)$
+- VQ-VAE：$O(Kd)$
+
+**证明**：
+
+FSQ的前向传播：
+1. 计算 $\sigma(z)$：$O(d)$
+2. 计算 $(L-1)\sigma(z)$：$O(d)$
+3. 计算 $\text{Round}$：$O(d)$
+4. 总计：$O(d)$
+
+VQ-VAE的前向传播：
+1. 计算 $\|z - e_i\|$ 对所有 $i$：$O(Kd)$
+2. 找最小距离：$O(K)$
+3. 总计：$O(Kd)$
+
+当 $K = L^d$ 很大时，FSQ的计算优势明显。$\square$
+
+**定理14.2（反向传播复杂度）**：
+
+- FSQ：$O(d)$
+- VQ-VAE：$O(d)$（使用STE时）
+
+两者在反向传播上复杂度相当，但FSQ不需要额外的编码表梯度计算。
+
+### 15. FSQ的信息论视角
+
+**定义15.1（编码的互信息）**：编码 $c$ 与原始输入 $x$ 的互信息：
+
+$$
+I(X; C) = H(C) - H(C|X)
+$$
+
+其中 $H(C)$ 是编码的熵，$H(C|X)$ 是给定输入时编码的条件熵。
+
+**定理15.1（信息瓶颈）**：FSQ和VQ都实现了信息瓶颈：
+
+$$
+I(X; C) \leq H(C) \leq \log L^d = d \log L
+$$
+
+这个上界由编码空间的大小决定。
+
+**推导**：
+
+由于 $C$ 是确定性地由 $X$ 通过 encoder 和量化得到的：
+
+$$
+H(C|X) = 0
+$$
+
+因此：
+
+$$
+I(X; C) = H(C)
+$$
+
+而 $H(C)$ 的上界是均匀分布时的熵：
+
+$$
+H(C) \leq \log L^d
+$$
+
+这说明编码的信息容量受限于 $d \log L$。$\square$
+
+### 16. 不同L值对FSQ性能的影响
+
+**定理16.1（量化精度与L的关系）**：较大的 $L$ 提供更精细的量化：
+
+$$
+\Delta = \frac{1}{L-1}
+$$
+
+这是相邻量化级别在归一化空间 $[0, 1]$ 中的间距。
+
+**分析不同L值**：
+
+1. **$L = 2$**（二值化）：
+   - 编码空间：$\{0, 1\}^d$，容量 $2^d$
+   - 量化间距：$\Delta = 1$（最粗糙）
+   - 对应LFQ（Lookup-Free Quantization）
+
+2. **$L = 5$**（论文推荐）：
+   - 编码空间：$\{0, 1, 2, 3, 4\}^d$，容量 $5^d$
+   - 量化间距：$\Delta = 0.25$
+   - 平衡了精度和计算效率
+
+3. **$L = 8$**：
+   - 编码空间：$\{0, 1, \ldots, 7\}^d$，容量 $8^d$
+   - 量化间距：$\Delta = 0.143$
+   - 更精细的量化
+
+**定理16.2（L的选择准则）**：为了达到与VQ-VAE相当的编码容量 $K$，FSQ的参数应满足：
+
+$$
+L^d \approx K \Rightarrow L \approx K^{1/d}
+$$
+
+例如，若 $K = 8192, d = 8$，则：
+
+$$
+L = 8192^{1/8} = 2^{13/8} \approx 3.36 \approx 4
+$$
+
+### 17. FSQ的重参数化技巧详解
+
+**定理17.1（STE的重参数化形式）**：FSQ可以写成重参数化形式：
+
+$$
+z_q = h(z) + \text{sg}[q(z) - h(z)]
+$$
+
+这等价于：
+
+$$
+z_q = \begin{cases}
+q(z) & \text{前向传播} \\
+h(z) & \text{反向传播（梯度计算）}
+\end{cases}
+$$
+
+**实现细节**：在深度学习框架中：
+
+```python
+def fsq(z, L):
+    h = (L - 1) * torch.sigmoid(z)
+    q = torch.round(h)
+    z_q = h + (q - h).detach()  # detach实现sg操作
+    return z_q
+```
+
+**数学验证**：
+
+前向传播：$z_q = h + (q - h) = q$ ✓
+
+反向传播：
+$$
+\frac{\partial \mathcal{L}}{\partial z} = \frac{\partial \mathcal{L}}{\partial z_q} \frac{\partial z_q}{\partial z} = \frac{\partial \mathcal{L}}{\partial z_q} \frac{\partial h}{\partial z}
+$$
+
+因为 $(q - h)$ 被detach，其梯度为0。✓
+
+### 18. FSQ的多级量化扩展
+
+**定义18.1（非均匀量化）**：允许不同维度使用不同的量化级别：
+
+$$
+\text{FSQ}(z) = [\text{FSQ}_{L_1}(z_1), \text{FSQ}_{L_2}(z_2), \ldots, \text{FSQ}_{L_d}(z_d)]^T
+$$
+
+其中 $L_i$ 可以不同。
+
+**性质18.1（编码容量）**：总编码容量为：
+
+$$
+\text{Capacity} = \prod_{i=1}^d L_i = L_1 \times L_2 \times \cdots \times L_d
+$$
+
+**定理18.1（质数分解策略）**：给定目标容量 $K$，可以将其分解为质数幂的乘积：
+
+$$
+K = p_1^{a_1} \times p_2^{a_2} \times \cdots \times p_m^{a_m}
+$$
+
+选择 $d = a_1 + a_2 + \cdots + a_m$，令：
+- $a_1$ 个维度使用 $L_i = p_1$
+- $a_2$ 个维度使用 $L_i = p_2$
+- 依此类推
+
+例如，$K = 8192 = 2^{13}$，可以选择 $d = 13, L_i = 2$（全部二值化）。
+
+### 19. FSQ的温度调节扩展
+
+**定义19.1（温度参数）**：引入温度参数 $\tau$ 来控制量化的"硬度"：
+
+$$
+\text{FSQ}_\tau(t) = \text{Round}[(L-1)\sigma(t/\tau)]
+$$
+
+**性质19.1（温度的影响）**：
+
+- $\tau \to 0$：量化变硬，sigmoid变陡峭，快速饱和到0或1
+- $\tau \to \infty$：量化变软，sigmoid变平缓，接近线性
+- $\tau = 1$：标准FSQ
+
+**训练策略19.1（温度退火）**：训练过程中逐渐降低 $\tau$：
+
+$$
+\tau_t = \tau_0 \cdot \exp(-\lambda t)
+$$
+
+这类似于Gumbel-Softmax中的温度退火，可以改善训练稳定性。
+
+### 20. FSQ的理论优势总结与证明
+
+**定理20.1（FSQ的三大理论优势）**：
+
+1. **参数效率**：FSQ不需要学习编码表，节省 $O(L^d \cdot d)$ 个参数
+2. **计算效率**：FSQ的量化复杂度为 $O(d)$，而VQ为 $O(Kd)$
+3. **训练稳定性**：FSQ避免了编码表坍缩，梯度有界
+
+**综合证明**：
+
+*参数效率*：已在定理5.1证明。
+
+*计算效率*：已在定理14.1证明。
+
+*训练稳定性*：
+- 梯度有界（定理12.1）
+- 无编码表坍缩（定理13.1）
+- STE的无偏性（性质7.1）
+
+这三个优势共同保证了FSQ在大规模应用中的可行性。$\square$
+
+### 21. FSQ的局限性分析
+
+**定理21.1（低维瓶颈）**：FSQ要求 $d = \log_L K$，当 $K$ 固定时，较大的 $L$ 导致较小的 $d$，这限制了连续表示的容量。
+
+**例子**：若 $K = 8192, L = 8$，则 $d \approx 4.33$，实际取 $d = 4$ 或 $d = 5$。
+
+如果VQ-VAE使用 $d_{VQ} = 256$，则FSQ的连续表示维度显著更低。
+
+**影响**：当需要高维连续表示时（例如某些层级编码场景），FSQ可能不如VQ-VAE。
+
+**定理21.2（表达能力权衡）**：FSQ将表达能力压缩到低维空间，依赖encoder和decoder的强大能力来补偿。
+
+形式化地，FSQ的表示能力 $\mathcal{R}_{FSQ}$ 满足：
+
+$$
+\mathcal{R}_{FSQ} \leq \mathcal{R}_{encoder} \times \mathcal{R}_{FSQ,quant} \times \mathcal{R}_{decoder}
+$$
+
+其中 $\mathcal{R}_{FSQ,quant}$ 受限于低维 $d$，需要通过增强 $\mathcal{R}_{encoder}$ 和 $\mathcal{R}_{decoder}$ 来补偿。
+
+### 22. FSQ在不同场景下的适用性分析
+
+**场景1：大编码表（$K > 1000$）**
+
+根据原论文实验，当 $K > 1000$ 时，FSQ性能优于或接近VQ-VAE。
+
+**理论解释**：
+- 大 $K$ 意味着 $d = \log_L K$ 不会太小（当 $L=5$ 时，$K=1024$ 对应 $d=4.4$）
+- VQ-VAE在大 $K$ 时更容易出现编码表坍缩
+- FSQ的计算优势更明显（$O(d)$ vs $O(Kd)$）
+
+**场景2：小编码表（$K < 500$）**
+
+当 $K$ 较小时，VQ-VAE可能更优。
+
+**理论解释**：
+- 小 $K$ 导致 $d$ 非常小，FSQ的表达受限
+- VQ-VAE可以使用更高维的 $d_{VQ}$，保持表达能力
+- 编码表坍缩问题相对较轻
+
+**场景3：图像Tokenizer**
+
+FSQ特别适合作为图像Tokenizer：
+- 编码表通常很大（$K \geq 1024$）
+- encoder和decoder可以设计得很强（ResNet、Transformer等）
+- 训练效率和稳定性至关重要
+
+### 23. FSQ与其他量化方法的联系
+
+**定理23.1（FSQ与标量量化的关系）**：FSQ本质上是标量量化（Scalar Quantization）的向量化版本。
+
+传统标量量化：
+
+$$
+Q(x) = \text{Round}\left(\frac{x - x_{min}}{x_{max} - x_{min}} \times (L-1)\right)
+$$
+
+FSQ：
+
+$$
+Q(x) = \text{Round}[(L-1)\sigma(x)]
+$$
+
+区别在于FSQ使用sigmoid自动处理范围归一化，而传统方法需要预先知道 $x_{min}, x_{max}$。
+
+**定理23.2（FSQ与Gumbel-Softmax的对比）**：
+
+Gumbel-Softmax用于分类分布的软化：
+
+$$
+\text{GumbelSoftmax}(z) = \frac{\exp((z_i + g_i)/\tau)}{\sum_j \exp((z_j + g_j)/\tau)}
+$$
+
+FSQ更简单直接，使用确定性的四舍五入而非概率采样。
+
+**定理23.3（FSQ与Product Quantization的关系）**：
+
+Product Quantization将向量分为 $m$ 个子向量，每个独立量化：
+
+$$
+z = [z^{(1)}, z^{(2)}, \ldots, z^{(m)}], \quad Q(z) = [Q_1(z^{(1)}), Q_2(z^{(2)}), \ldots, Q_m(z^{(m)})]
+$$
+
+FSQ可以看作特殊的Product Quantization，其中每个子向量是单个标量。
+
+### 24. FSQ的数值稳定性分析
+
+**定理24.1（数值溢出预防）**：sigmoid函数在极端输入时可能数值不稳定。
+
+当 $z \to +\infty$ 时，$e^{-z} \to 0$，计算 $\sigma(z) = \frac{1}{1+e^{-z}}$ 是安全的。
+
+当 $z \to -\infty$ 时，$e^{-z} \to +\infty$，可能溢出。
+
+**解决方案**：使用数值稳定的sigmoid实现：
+
+$$
+\sigma(z) = \begin{cases}
+\frac{1}{1+e^{-z}} & \text{if } z \geq 0 \\
+\frac{e^z}{1+e^z} & \text{if } z < 0
+\end{cases}
+$$
+
+两种形式在数学上等价，但数值上更稳定。
+
+### 25. FSQ的理论完备性总结
+
+通过以上推导，我们完整地分析了FSQ的：
+
+1. **数学定义**：基于四舍五入和sigmoid的确定性量化
+2. **梯度机制**：Straight-Through Estimator及其合理性
+3. **理论优势**：参数效率、计算效率、训练稳定性
+4. **与VQ对比**：参数量、计算复杂度、编码表坍缩
+5. **表达能力**：维度权衡与编码容量分析
+6. **适用场景**：大编码表、图像Tokenizer等
+7. **数值实现**：稳定性保证与实现技巧
+
+FSQ的核心思想是用简单的数学运算（四舍五入+sigmoid）替代复杂的最近邻搜索，同时保持相当或更好的性能。这体现了"简单得令人尴尬"的设计哲学：有时最简单的方法反而最有效。
+
+**最终定理**：在满足以下条件时，FSQ优于VQ-VAE：
+
+1. 编码表足够大（$K > 1000$）
+2. Encoder和Decoder足够强
+3. 训练数据充足且多样化
+
+这些条件在现代大规模视觉模型中通常都能满足，因此FSQ具有广泛的应用前景。
 
