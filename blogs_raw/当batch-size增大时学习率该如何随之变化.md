@@ -2,10 +2,9 @@
 title: 当Batch Size增大时，学习率该如何随之变化？
 slug: 当batch-size增大时学习率该如何随之变化
 date: 2024-11-14
-tags: 梯度, 学习率, 优化器, 尺度定律, 生成模型
+tags: 详细推导, 梯度, 学习率, 优化器, 尺度定律, 生成模型
 status: pending
 ---
-
 # 当Batch Size增大时，学习率该如何随之变化？
 
 **原文链接**: [https://spaces.ac.cn/archives/10542](https://spaces.ac.cn/archives/10542)
@@ -232,5 +231,687 @@ url={\url{https://spaces.ac.cn/archives/10542}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节提供极其详细的数学推导，深入探讨Batch Size与学习率之间的Scaling Law，涵盖从方差分析到实际应用的完整理论框架。
+
+### 1. 梯度估计的基础理论
+
+**推导1：单样本梯度的定义**
+
+假设损失函数为 $\mathcal{L}(\boldsymbol{w})$，第 $i$ 个样本的损失为 $\ell_i(\boldsymbol{w})$，则：
+
+$$
+\mathcal{L}(\boldsymbol{w}) = \frac{1}{N}\sum_{i=1}^N \ell_i(\boldsymbol{w})
+$$
+
+其中 $N$ 是总样本数。真实梯度为：
+
+$$
+\boldsymbol{g}(\boldsymbol{w}) = \nabla_{\boldsymbol{w}}\mathcal{L}(\boldsymbol{w}) = \frac{1}{N}\sum_{i=1}^N \nabla_{\boldsymbol{w}}\ell_i(\boldsymbol{w})
+$$
+
+**推导2：随机梯度的期望和方差**
+
+定义单个样本的随机梯度 $\tilde{\boldsymbol{g}}^{(i)} = \nabla_{\boldsymbol{w}}\ell_i(\boldsymbol{w})$。若样本是从总体中均匀随机抽取的，则：
+
+$$
+\mathbb{E}[\tilde{\boldsymbol{g}}^{(i)}] = \boldsymbol{g}(\boldsymbol{w})
+$$
+
+定义梯度的协方差矩阵：
+
+$$
+\boldsymbol{\Sigma} = \mathbb{E}[(\tilde{\boldsymbol{g}}^{(i)} - \boldsymbol{g})(\tilde{\boldsymbol{g}}^{(i)} - \boldsymbol{g})^T]
+$$
+
+**注释1**：协方差矩阵 $\boldsymbol{\Sigma}$ 衡量了单个样本梯度的不确定性。对角元素 $\Sigma_{ii}$ 表示第 $i$ 个参数的梯度方差。
+
+**推导3：Batch梯度的期望和方差**
+
+使用Batch Size为 $B$ 的小批量，梯度估计为：
+
+$$
+\tilde{\boldsymbol{g}}_B = \frac{1}{B}\sum_{i=1}^B \tilde{\boldsymbol{g}}^{(i)}
+$$
+
+由于样本独立同分布：
+
+$$
+\begin{aligned}
+\mathbb{E}[\tilde{\boldsymbol{g}}_B] &= \mathbb{E}\left[\frac{1}{B}\sum_{i=1}^B \tilde{\boldsymbol{g}}^{(i)}\right] = \frac{1}{B}\sum_{i=1}^B \mathbb{E}[\tilde{\boldsymbol{g}}^{(i)}] = \boldsymbol{g} \\
+\text{Cov}[\tilde{\boldsymbol{g}}_B] &= \text{Cov}\left[\frac{1}{B}\sum_{i=1}^B \tilde{\boldsymbol{g}}^{(i)}\right] = \frac{1}{B^2}\sum_{i=1}^B \text{Cov}[\tilde{\boldsymbol{g}}^{(i)}] = \frac{\boldsymbol{\Sigma}}{B}
+\end{aligned}
+$$
+
+**注释2**：这个关键结果表明，增大Batch Size使梯度估计的方差按 $1/B$ 缩小。
+
+### 2. 平方根缩放规律的推导
+
+**推导4：SGD增量的方差分析**
+
+SGD的参数更新为：
+
+$$
+\boldsymbol{w}_{t+1} = \boldsymbol{w}_t - \eta\tilde{\boldsymbol{g}}_B
+$$
+
+更新量的期望和方差为：
+
+$$
+\begin{aligned}
+\mathbb{E}[\Delta\boldsymbol{w}] &= -\eta\boldsymbol{g} \\
+\text{Var}[\Delta\boldsymbol{w}] &= \eta^2\text{Var}[\tilde{\boldsymbol{g}}_B] = \frac{\eta^2\boldsymbol{\Sigma}}{B}
+\end{aligned}
+$$
+
+**推导5：等方差原则**
+
+假设我们希望在改变Batch Size时，保持更新量的方差不变：
+
+$$
+\frac{\eta_1^2}{B_1} = \frac{\eta_2^2}{B_2}
+$$
+
+整理得：
+
+$$
+\frac{\eta_2}{\eta_1} = \sqrt{\frac{B_2}{B_1}}
+$$
+
+**注释3**：这就是平方根缩放规律的理论基础——通过调整学习率，保持参数更新的噪声强度恒定。
+
+**推导6：信噪比分析**
+
+定义信噪比（SNR）：
+
+$$
+\text{SNR} = \frac{\|\mathbb{E}[\Delta\boldsymbol{w}]\|}{\sqrt{\text{Tr}(\text{Var}[\Delta\boldsymbol{w}])}} = \frac{\eta\|\boldsymbol{g}\|}{\eta\sqrt{\text{Tr}(\boldsymbol{\Sigma})/B}} = \sqrt{B}\frac{\|\boldsymbol{g}\|}{\sqrt{\text{Tr}(\boldsymbol{\Sigma})}}
+$$
+
+**注释4**：信噪比与 $\sqrt{B}$ 成正比。如果保持 $\eta$ 不变增大 $B$，SNR会增加，可能导致训练过于确定性，损失泛化能力。
+
+### 3. 线性缩放规律的SDE推导
+
+**推导7：从离散到连续**
+
+将SGD迭代改写为：
+
+$$
+\boldsymbol{w}_{t+1} - \boldsymbol{w}_t = -\eta\boldsymbol{g}_t - \eta(\tilde{\boldsymbol{g}}_{B,t} - \boldsymbol{g}_t)
+$$
+
+假设梯度噪声服从高斯分布 $\tilde{\boldsymbol{g}}_{B,t} - \boldsymbol{g}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{\Sigma}_t/B)$。
+
+**推导8：重参数化技巧**
+
+利用重参数化技巧，设 $\boldsymbol{z}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$：
+
+$$
+\tilde{\boldsymbol{g}}_{B,t} - \boldsymbol{g}_t = \frac{1}{\sqrt{B}}\boldsymbol{\Sigma}_t^{1/2}\boldsymbol{z}_t
+$$
+
+其中 $\boldsymbol{\Sigma}_t^{1/2}$ 是协方差矩阵的平方根。代入更新公式：
+
+$$
+\boldsymbol{w}_{t+1} = \boldsymbol{w}_t - \eta\boldsymbol{g}_t - \frac{\eta}{\sqrt{B}}\boldsymbol{\Sigma}_t^{1/2}\boldsymbol{z}_t
+$$
+
+**推导9：分离学习率的幂次**
+
+关键步骤：将 $\eta$ 重写为 $\sqrt{\eta}\cdot\sqrt{\eta}$：
+
+$$
+\boldsymbol{w}_{t+1} = \boldsymbol{w}_t - \eta\boldsymbol{g}_t - \sqrt{\eta}\cdot\frac{\sqrt{\eta}}{\sqrt{B}}\boldsymbol{\Sigma}_t^{1/2}\boldsymbol{z}_t
+$$
+
+**推导10：连续极限（SDE）**
+
+当 $\eta \to 0$ 时，离散迭代趋向于随机微分方程：
+
+$$
+d\boldsymbol{w}_t = -\boldsymbol{g}_t dt - \sqrt{\frac{\eta}{B}}\boldsymbol{\Sigma}_t^{1/2}d\boldsymbol{W}_t
+$$
+
+其中 $d\boldsymbol{W}_t$ 是Wiener过程（布朗运动），满足 $d\boldsymbol{W}_t \sim \mathcal{N}(\boldsymbol{0}, dt\boldsymbol{I})$。
+
+**注释5**：SDE的噪声项系数是 $\sqrt{\eta/B}$ 而非 $\eta/B$，这是因为布朗运动的方差与时间成正比。
+
+**推导11：不变性条件**
+
+要使SDE在改变 $B$ 时保持不变，需要：
+
+$$
+\frac{\eta_1}{B_1} = \frac{\eta_2}{B_2}
+$$
+
+因此：
+
+$$
+\frac{\eta_2}{\eta_1} = \frac{B_2}{B_1}
+$$
+
+**注释6**：这就是线性缩放规律！与平方根缩放的区别在于，SDE考虑了噪声累积的长期效应。
+
+### 4. 损失函数的二阶近似分析
+
+**推导12：泰勒展开**
+
+设当前参数为 $\boldsymbol{w}$，更新后为 $\boldsymbol{w}' = \boldsymbol{w} - \eta\tilde{\boldsymbol{g}}_B$。损失函数的二阶泰勒展开：
+
+$$
+\mathcal{L}(\boldsymbol{w}') = \mathcal{L}(\boldsymbol{w}) + \nabla\mathcal{L}(\boldsymbol{w})^T(\boldsymbol{w}'-\boldsymbol{w}) + \frac{1}{2}(\boldsymbol{w}'-\boldsymbol{w})^T\boldsymbol{H}(\boldsymbol{w}'-\boldsymbol{w}) + O(\|\boldsymbol{w}'-\boldsymbol{w}\|^3)
+$$
+
+其中 $\boldsymbol{H} = \nabla^2\mathcal{L}(\boldsymbol{w})$ 是Hessian矩阵。
+
+**推导13：代入更新公式**
+
+$$
+\begin{aligned}
+\mathcal{L}(\boldsymbol{w}') &= \mathcal{L}(\boldsymbol{w}) + \boldsymbol{g}^T(-\eta\tilde{\boldsymbol{g}}_B) + \frac{1}{2}(-\eta\tilde{\boldsymbol{g}}_B)^T\boldsymbol{H}(-\eta\tilde{\boldsymbol{g}}_B) \\
+&= \mathcal{L}(\boldsymbol{w}) - \eta\boldsymbol{g}^T\tilde{\boldsymbol{g}}_B + \frac{\eta^2}{2}\tilde{\boldsymbol{g}}_B^T\boldsymbol{H}\tilde{\boldsymbol{g}}_B
+\end{aligned}
+$$
+
+**推导14：取期望**
+
+$$
+\mathbb{E}[\mathcal{L}(\boldsymbol{w}')] = \mathcal{L}(\boldsymbol{w}) - \eta\boldsymbol{g}^T\mathbb{E}[\tilde{\boldsymbol{g}}_B] + \frac{\eta^2}{2}\mathbb{E}[\tilde{\boldsymbol{g}}_B^T\boldsymbol{H}\tilde{\boldsymbol{g}}_B]
+$$
+
+**推导15：二阶矩的展开**
+
+利用 $\mathbb{E}[\tilde{\boldsymbol{g}}_B] = \boldsymbol{g}$ 和 $\mathbb{E}[\tilde{\boldsymbol{g}}_B\tilde{\boldsymbol{g}}_B^T] = \boldsymbol{g}\boldsymbol{g}^T + \boldsymbol{\Sigma}/B$：
+
+$$
+\begin{aligned}
+\mathbb{E}[\tilde{\boldsymbol{g}}_B^T\boldsymbol{H}\tilde{\boldsymbol{g}}_B] &= \mathbb{E}[\text{Tr}(\tilde{\boldsymbol{g}}_B^T\boldsymbol{H}\tilde{\boldsymbol{g}}_B)] = \text{Tr}(\boldsymbol{H}\mathbb{E}[\tilde{\boldsymbol{g}}_B\tilde{\boldsymbol{g}}_B^T]) \\
+&= \text{Tr}(\boldsymbol{H}(\boldsymbol{g}\boldsymbol{g}^T + \boldsymbol{\Sigma}/B)) \\
+&= \boldsymbol{g}^T\boldsymbol{H}\boldsymbol{g} + \frac{1}{B}\text{Tr}(\boldsymbol{H}\boldsymbol{\Sigma})
+\end{aligned}
+$$
+
+**推导16：最终的期望损失**
+
+$$
+\mathbb{E}[\mathcal{L}(\boldsymbol{w}')] = \mathcal{L}(\boldsymbol{w}) - \eta\|\boldsymbol{g}\|^2 + \frac{\eta^2}{2}\left(\boldsymbol{g}^T\boldsymbol{H}\boldsymbol{g} + \frac{1}{B}\text{Tr}(\boldsymbol{H}\boldsymbol{\Sigma})\right)
+$$
+
+**注释7**：第一项是损失减少（我们希望最大化），第二项是二阶修正（通常为正，限制了学习率）。
+
+### 5. 最优学习率的精确推导
+
+**推导17：一阶最优性条件**
+
+对 $\eta$ 求导并令其为零：
+
+$$
+\frac{d}{d\eta}\mathbb{E}[\mathcal{L}(\boldsymbol{w}')] = -\|\boldsymbol{g}\|^2 + \eta\left(\boldsymbol{g}^T\boldsymbol{H}\boldsymbol{g} + \frac{1}{B}\text{Tr}(\boldsymbol{H}\boldsymbol{\Sigma})\right) = 0
+$$
+
+解得最优学习率：
+
+$$
+\eta^* = \frac{\|\boldsymbol{g}\|^2}{\boldsymbol{g}^T\boldsymbol{H}\boldsymbol{g} + \frac{1}{B}\text{Tr}(\boldsymbol{H}\boldsymbol{\Sigma})}
+$$
+
+**推导18：引入噪声批量大小**
+
+定义两个关键量：
+
+$$
+\begin{aligned}
+\eta_{\max} &= \frac{\|\boldsymbol{g}\|^2}{\boldsymbol{g}^T\boldsymbol{H}\boldsymbol{g}} \\
+\mathcal{B}_{\text{noise}} &= \frac{\text{Tr}(\boldsymbol{H}\boldsymbol{\Sigma})}{\boldsymbol{g}^T\boldsymbol{H}\boldsymbol{g}}
+\end{aligned}
+$$
+
+**注释8**：$\eta_{\max}$ 是全量梯度下降（$B\to\infty$）的最优学习率；$\mathcal{B}_{\text{noise}}$ 是一个特征Batch Size。
+
+**推导19：统一形式**
+
+将最优学习率重写为：
+
+$$
+\eta^* = \frac{\eta_{\max}}{1 + \mathcal{B}_{\text{noise}}/B}
+$$
+
+**推导20：小Batch极限**
+
+当 $B \ll \mathcal{B}_{\text{noise}}$ 时：
+
+$$
+\eta^* \approx \frac{\eta_{\max}B}{\mathcal{B}_{\text{noise}}} \propto B
+$$
+
+这就是线性缩放规律的适用范围。
+
+**推导21：大Batch极限**
+
+当 $B \gg \mathcal{B}_{\text{noise}}$ 时：
+
+$$
+\eta^* \approx \eta_{\max}
+$$
+
+此时学习率趋于饱和，继续增大Batch Size不能再提高学习率。
+
+### 6. 噪声尺度理论
+
+**推导22：噪声对训练的影响**
+
+定义噪声尺度（noise scale）：
+
+$$
+g_{\text{noise}} = \frac{\eta}{B}\text{Tr}(\boldsymbol{H}\boldsymbol{\Sigma})
+$$
+
+这个量衡量了噪声对损失函数曲率的影响。
+
+**推导23：简化假设下的噪声尺度**
+
+假设 $\boldsymbol{H} \approx \lambda\boldsymbol{I}$（各向同性近似），则：
+
+$$
+g_{\text{noise}} = \frac{\eta\lambda}{B}\text{Tr}(\boldsymbol{\Sigma}) = \frac{\eta\lambda}{B}\sum_i \sigma_i^2
+$$
+
+**推导24：简化的噪声批量大小**
+
+定义简化版本：
+
+$$
+\mathcal{B}_{\text{simple}} = \frac{\text{Tr}(\boldsymbol{\Sigma})}{\|\boldsymbol{g}\|^2}
+$$
+
+与完整版的关系：
+
+$$
+\mathcal{B}_{\text{noise}} = \frac{\text{Tr}(\boldsymbol{H}\boldsymbol{\Sigma})}{\boldsymbol{g}^T\boldsymbol{H}\boldsymbol{g}} \approx \mathcal{B}_{\text{simple}}
+$$
+
+当Hessian矩阵接近各向同性时成立。
+
+**注释9**：$\mathcal{B}_{\text{simple}}$ 的优势是只需要计算梯度的方差，不需要Hessian矩阵。
+
+### 7. 有效批量大小的概念
+
+**推导25：训练步数与样本数的关系**
+
+设完成训练需要 $S$ 步，每步使用 $B$ 个样本，则总样本数：
+
+$$
+E = B \cdot S
+$$
+
+**推导26：损失下降速率**
+
+每步的期望损失下降：
+
+$$
+\Delta\mathcal{L} = \mathcal{L}(\boldsymbol{w}) - \mathbb{E}[\mathcal{L}(\boldsymbol{w}')] = \eta\|\boldsymbol{g}\|^2 - \frac{\eta^2}{2}\left(\boldsymbol{g}^T\boldsymbol{H}\boldsymbol{g} + \frac{1}{B}\text{Tr}(\boldsymbol{H}\boldsymbol{\Sigma})\right)
+$$
+
+在最优学习率下：
+
+$$
+\Delta\mathcal{L}^* = \frac{(\|\boldsymbol{g}\|^2)^2}{2(\boldsymbol{g}^T\boldsymbol{H}\boldsymbol{g} + \frac{1}{B}\text{Tr}(\boldsymbol{H}\boldsymbol{\Sigma}))} = \frac{\Delta\mathcal{L}_{\max}}{1 + \mathcal{B}_{\text{noise}}/B}
+$$
+
+其中 $\Delta\mathcal{L}_{\max} = \frac{(\|\boldsymbol{g}\|^2)^2}{2\boldsymbol{g}^T\boldsymbol{H}\boldsymbol{g}}$。
+
+**推导27：达到目标的最少步数**
+
+当 $B\to\infty$（全量梯度）时，每步下降最大，需要最少步数 $S_{\min}$。有限 $B$ 时需要 $S$ 步，满足：
+
+$$
+S \cdot \Delta\mathcal{L}^* = S_{\min} \cdot \Delta\mathcal{L}_{\max}
+$$
+
+因此：
+
+$$
+S = S_{\min}(1 + \mathcal{B}_{\text{noise}}/B)
+$$
+
+**推导28：总样本数**
+
+$$
+E = BS = S_{\min}(B + \mathcal{B}_{\text{noise}})
+$$
+
+当 $B \to 0$ 时，$E_{\min} = S_{\min}\mathcal{B}_{\text{noise}}$。
+
+**推导29：数据效率与计算效率的权衡**
+
+定义归一化量：
+
+$$
+\tilde{S} = \frac{S}{S_{\min}}, \quad \tilde{E} = \frac{E}{E_{\min}}
+$$
+
+则：
+
+$$
+(\tilde{S} - 1)(\tilde{E} - 1) = 1
+$$
+
+**注释10**：这个双曲线关系表明，数据效率和计算效率不可兼得——要减少总样本数就要增加训练步数。
+
+### 8. 泛化差距的理论分析
+
+**推导30：大Batch的泛化问题**
+
+定义训练损失和测试损失的差距：
+
+$$
+\text{Gap} = \mathcal{L}_{\text{test}} - \mathcal{L}_{\text{train}}
+$$
+
+**推导31：噪声正则化效应**
+
+SGD的噪声可以看作隐式正则化。噪声协方差矩阵：
+
+$$
+\boldsymbol{C}_{\text{noise}} = \frac{\eta^2\boldsymbol{\Sigma}}{B}
+$$
+
+噪声强度：
+
+$$
+\|\boldsymbol{C}_{\text{noise}}\|_F = \frac{\eta^2}{B}\|\boldsymbol{\Sigma}\|_F
+$$
+
+**推导32：平坦最小值假说**
+
+大噪声倾向于找到平坦（Hessian特征值小）的最小值，而平坦最小值通常泛化性能更好。用Hessian的迹衡量"尖锐度"：
+
+$$
+\text{Sharpness} = \text{Tr}(\boldsymbol{H})
+$$
+
+噪声帮助逃离高sharpness区域。
+
+**推导33：SDE中的有效温度**
+
+在SDE框架下，可以定义"温度"：
+
+$$
+T_{\text{eff}} = \frac{\eta}{B}
+$$
+
+高温（大 $\eta/B$）导致更广泛的探索，可能改善泛化。
+
+### 9. 预热机制的数学原理
+
+**推导34：初始阶段的不稳定性**
+
+训练开始时，梯度通常很大且不稳定。如果立即使用大学习率：
+
+$$
+\|\boldsymbol{w}_1 - \boldsymbol{w}_0\| = \eta\|\tilde{\boldsymbol{g}}_0\|
+$$
+
+可能非常大，超出二阶近似的有效范围。
+
+**推导35：线性预热策略**
+
+定义预热步数 $T_{\text{warmup}}$，在前 $T_{\text{warmup}}$ 步内学习率线性增长：
+
+$$
+\eta_t = \frac{t}{T_{\text{warmup}}}\eta_{\text{target}}, \quad t \leq T_{\text{warmup}}
+$$
+
+**推导36：预热的稳定性分析**
+
+小学习率阶段的更新：
+
+$$
+\boldsymbol{w}_t = \boldsymbol{w}_0 - \sum_{s=0}^{t-1}\frac{s}{T_{\text{warmup}}}\eta_{\text{target}}\tilde{\boldsymbol{g}}_s
+$$
+
+总位移：
+
+$$
+\|\boldsymbol{w}_t - \boldsymbol{w}_0\| \lesssim \frac{t^2}{2T_{\text{warmup}}}\eta_{\text{target}}\mathbb{E}[\|\tilde{\boldsymbol{g}}\|]
+$$
+
+增长是二次的而非线性的，更加平稳。
+
+**推导37：最优预热步数**
+
+一种启发式选择：让预热期间的总位移与一步大学习率更新的位移相当：
+
+$$
+\frac{T_{\text{warmup}}^2}{2T_{\text{warmup}}}\eta_{\text{target}}\|\boldsymbol{g}\| \approx \eta_{\text{target}}\|\boldsymbol{g}\|
+$$
+
+解得 $T_{\text{warmup}} \approx 2$，但实践中通常取几百到几千步。
+
+### 10. Adam优化器的Batch Size缩放
+
+**推导38：Adam的更新方向**
+
+Adam的更新可以写为：
+
+$$
+\boldsymbol{w}_{t+1} = \boldsymbol{w}_t - \eta\boldsymbol{\varphi}_t, \quad \boldsymbol{\varphi}_t = \frac{\hat{\boldsymbol{m}}_t}{\sqrt{\hat{\boldsymbol{v}}_t}+\epsilon}
+$$
+
+**推导39：符号梯度近似**
+
+在 $\epsilon$ 较小时，Adam近似于符号梯度：
+
+$$
+\varphi_{t,i} \approx \text{sign}(m_{t,i})
+$$
+
+**推导40：符号梯度的期望（回顾）**
+
+$$
+\mathbb{E}[\text{sign}(\tilde{g}_B)] = \text{erf}\left(\frac{g}{\sigma}\sqrt{\frac{B}{2}}\right)
+$$
+
+**推导41：Adam的平方根缩放**
+
+对于Adam，最优学习率的形式为：
+
+$$
+\eta^*_{\text{Adam}} \approx \frac{\eta_{\max,\text{Adam}}}{(1 + \mathcal{B}_{\text{noise}}/B)^{\alpha}}
+$$
+
+其中 $0.5 < \alpha < 1$。OpenAI的经验建议 $\alpha \approx 0.5$，即平方根缩放：
+
+$$
+\eta^*_{\text{Adam}} \propto \sqrt{B} \quad \text{when } B \ll \mathcal{B}_{\text{noise}}
+$$
+
+**推导42：Adam与SGD的对比**
+
+- SGD：$\eta \propto B$（线性）
+- Adam：$\eta \propto \sqrt{B}$（平方根）
+
+原因是Adam的自适应缩放改变了噪声的累积方式。
+
+### 11. 实际训练的复杂性
+
+**推导43：动态的Batch Size调整**
+
+在训练过程中，$\mathcal{B}_{\text{noise}}$ 是动态变化的：
+
+$$
+\mathcal{B}_{\text{noise}}(t) = \frac{\text{Tr}(\boldsymbol{H}_t\boldsymbol{\Sigma}_t)}{\boldsymbol{g}_t^T\boldsymbol{H}_t\boldsymbol{g}_t}
+$$
+
+通常在训练后期，$\|\boldsymbol{g}_t\|$ 减小，$\mathcal{B}_{\text{noise}}(t)$ 可能增大。
+
+**推导44：自适应Batch Size策略**
+
+理想情况下，可以根据估计的 $\mathcal{B}_{\text{noise}}(t)$ 动态调整 $B(t)$：
+
+$$
+B(t) = \min\left(B_{\max}, \alpha \mathcal{B}_{\text{noise}}(t)\right)
+$$
+
+其中 $\alpha$ 是一个常数（如0.1-1）。
+
+### 12. 分布式训练的通信开销
+
+**推导45：同步时间模型**
+
+在数据并行训练中，每步的时间包括：
+
+$$
+T_{\text{step}} = T_{\text{compute}} + T_{\text{comm}}
+$$
+
+计算时间与Batch Size无关（假设每个worker的local batch固定）：
+
+$$
+T_{\text{compute}} = c_1
+$$
+
+通信时间（All-Reduce）依赖于模型大小 $P$ 和worker数量 $W$：
+
+$$
+T_{\text{comm}} = c_2 P \log W
+$$
+
+**推导46：总训练时间**
+
+总时间：
+
+$$
+T_{\text{total}} = S(B) \cdot (T_{\text{compute}} + T_{\text{comm}})
+$$
+
+其中 $S(B) = S_{\min}(1 + \mathcal{B}_{\text{noise}}/B)$。
+
+**推导47：最优Batch Size（考虑通信）**
+
+最小化总时间不再等价于最大化Batch Size。定义效率：
+
+$$
+\text{Efficiency} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{comm}}}
+$$
+
+当效率低于某个阈值（如0.9）时，增大Batch Size的收益有限。
+
+### 13. 临界Batch Size的估计
+
+**推导48：实验拟合方法**
+
+进行多组实验，记录不同 $(B, S, E)$ 的组合。根据关系：
+
+$$
+S = S_{\min}\left(1 + \frac{\mathcal{B}_{\text{noise}}}{B}\right)
+$$
+
+拟合得到 $S_{\min}$ 和 $\mathcal{B}_{\text{noise}}$。
+
+**推导49：梯度方差估计**
+
+在数据并行中，每个worker计算local batch的梯度 $\boldsymbol{g}_i$。在All-Reduce前，可以计算：
+
+$$
+\bar{\boldsymbol{g}} = \frac{1}{W}\sum_{i=1}^W \boldsymbol{g}_i, \quad \hat{\boldsymbol{\Sigma}} = \frac{1}{W-1}\sum_{i=1}^W (\boldsymbol{g}_i - \bar{\boldsymbol{g}})(\boldsymbol{g}_i - \bar{\boldsymbol{g}})^T
+$$
+
+然后估计：
+
+$$
+\mathcal{B}_{\text{simple}} \approx \frac{\text{Tr}(\hat{\boldsymbol{\Sigma}})}{\|\bar{\boldsymbol{g}}\|^2}
+$$
+
+**注释11**：这个估计只需要额外的一点通信和计算，可以在线监控。
+
+### 14. 学习率调度策略
+
+**推导50：余弦退火的数学形式**
+
+常用的余弦退火：
+
+$$
+\eta_t = \eta_{\min} + \frac{\eta_{\max} - \eta_{\min}}{2}\left(1 + \cos\left(\frac{\pi t}{T}\right)\right)
+$$
+
+**推导51：退火与Batch Size的耦合**
+
+在训练后期，梯度变小，$\mathcal{B}_{\text{noise}}$ 可能增大。如果同时进行学习率退火：
+
+$$
+\eta_t = \frac{\eta_{\max,t}}{1 + \mathcal{B}_{\text{noise}}(t)/B}
+$$
+
+其中 $\eta_{\max,t}$ 本身在减小。
+
+**推导52：渐进式增大Batch Size**
+
+另一种策略是固定学习率，逐渐增大Batch Size：
+
+$$
+B_t = B_0 \cdot r^t, \quad r > 1
+$$
+
+这在某些情况下可以替代学习率退火。
+
+### 15. 高级主题：二阶优化方法
+
+**推导53：牛顿法的Batch Size依赖**
+
+牛顿法的更新：
+
+$$
+\boldsymbol{w}_{t+1} = \boldsymbol{w}_t - \eta\boldsymbol{H}^{-1}\tilde{\boldsymbol{g}}_B
+$$
+
+更新量的方差：
+
+$$
+\text{Var}[\Delta\boldsymbol{w}] = \eta^2\boldsymbol{H}^{-1}\frac{\boldsymbol{\Sigma}}{B}\boldsymbol{H}^{-1}
+$$
+
+**推导54：自然梯度的缩放**
+
+自然梯度使用Fisher信息矩阵 $\boldsymbol{F}$：
+
+$$
+\boldsymbol{w}_{t+1} = \boldsymbol{w}_t - \eta\boldsymbol{F}^{-1}\tilde{\boldsymbol{g}}_B
+$$
+
+Fisher矩阵本身依赖于Batch Size的估计，使得缩放关系更加复杂。
+
+### 16. 理论极限与实践差距
+
+**推导55：理论最优与实际最优**
+
+理论分析基于：
+1. 二阶近似有效
+2. Hessian矩阵稳定
+3. 梯度噪声高斯分布
+
+实际训练中这些假设可能不成立，导致：
+
+$$
+\eta_{\text{practice}}^* \neq \eta_{\text{theory}}^*
+$$
+
+**推导56：安全系数**
+
+实践中通常使用理论值的一个比例：
+
+$$
+\eta_{\text{practice}} = \alpha \eta_{\text{theory}}, \quad 0.5 < \alpha < 1
+$$
+
+### 总结
+
+本节系统推导了Batch Size与学习率之间的缩放关系，主要结论：
+
+1. **平方根缩放**：从方差不变性导出 $\eta \propto \sqrt{B}$
+2. **线性缩放**：从SDE连续极限导出 $\eta \propto B$（小Batch Size下）
+3. **饱和效应**：存在临界Batch Size $\mathcal{B}_{\text{noise}}$，超过后学习率不应继续增大
+4. **Adam的特殊性**：遵循平方根缩放而非线性缩放
+5. **数据-计算权衡**：$(\tilde{S}-1)(\tilde{E}-1)=1$ 描述了效率的基本限制
+
+这些理论为大规模分布式训练提供了重要指导。
 

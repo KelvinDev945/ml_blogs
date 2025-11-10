@@ -147,23 +147,23 @@
 <h2 id="_2">提升采样<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>那么本文开头说的提升GAN模型生成质量的方案，跟Hubness现象又有什么关系呢？论文<a href="https://papers.cool/arxiv/2206.06014">《Exploring and Exploiting Hubness Priors for High-Quality GAN Latent Sampling》</a>提出了一个先验假设：Hub值越大，对应点的生成质量就越好。</p>
 <p>具体来说，一般GAN的采样生成流程是$z\sim \mathcal{N}(0,1), x=G(z)$，我们可以从$\mathcal{N}(0,1)$中先采样$N$个样本点$z_1,z_2,\cdots,z_N$，然后就可以算出每个样本点的Hub值，原论文发现Hub值跟生成质量是正相关的，所以只保留Hub值大于等于阈值$t$的样本点用来做生成。这是一种“事前”的筛选思路，参考代码如下：</p>
-<div class="highlight"><pre><span></span><code><span class="n">def</span><span class="w"> </span><span class="n">get_z_samples</span><span class="p">(</span><span class="k">size</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="o">=</span><span class="mi">50</span><span class="p">)</span><span class="err">:</span>
-<span class="w">    </span><span class="ss">&quot;&quot;&quot;通过Hub值对采样结果进行筛选</span>
-<span class="ss">    &quot;&quot;&quot;</span>
-<span class="w">    </span><span class="n">Z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">empty</span><span class="p">((</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">z_dim</span><span class="p">))</span>
-<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="nf">len</span><span class="p">(</span><span class="n">Z</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="k">size</span><span class="err">:</span>
-<span class="w">        </span><span class="n">z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">10000</span><span class="p">,</span><span class="w"> </span><span class="n">z_dim</span><span class="p">)</span>
-<span class="w">        </span><span class="n">s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">zeros</span><span class="p">(</span><span class="mi">10000</span><span class="p">)</span>
-<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span><span class="err">:</span>
-<span class="w">            </span><span class="n">zi</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">z</span><span class="o">[</span><span class="n">i * 1000:(i + 1) * 1000</span><span class="o">]</span>
-<span class="w">            </span><span class="n">d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">z</span><span class="o">**</span><span class="mi">2</span><span class="p">).</span><span class="nf">sum</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">[</span><span class="n">:, None</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">zi</span><span class="o">**</span><span class="mi">2</span><span class="p">).</span><span class="nf">sum</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="o">[</span><span class="n">None</span><span class="o">]</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">z</span><span class="p">.</span><span class="n">dot</span><span class="p">(</span><span class="n">zi</span><span class="p">.</span><span class="n">T</span><span class="p">)</span>
-<span class="w">            </span><span class="k">for</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">argsort</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">[</span><span class="n">1:1 + 5</span><span class="o">]</span><span class="p">.</span><span class="nl">T</span><span class="p">:</span>
-<span class="w">                </span><span class="n">s</span><span class="o">[</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">1</span>
-<span class="w">        </span><span class="n">z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">z</span><span class="o">[</span><span class="n">s &gt; t</span><span class="o">]</span>
-<span class="w">        </span><span class="n">Z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">concatenate</span><span class="p">(</span><span class="o">[</span><span class="n">Z, z</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="o">[</span><span class="n">:size</span><span class="o">]</span>
-<span class="w">        </span><span class="k">print</span><span class="p">(</span><span class="s1">&#39;%s / %s&#39;</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="p">(</span><span class="nf">len</span><span class="p">(</span><span class="n">Z</span><span class="p">),</span><span class="w"> </span><span class="k">size</span><span class="p">))</span>
-<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">Z</span>
-</code></pre></div>
+<pre class="highlight"><code>def get_z_samples(size, t=50):
+    &quot;&quot;&quot;通过Hub值对采样结果进行筛选
+    &quot;&quot;&quot;
+    Z = np.empty((0, z_dim))
+    while len(Z) &lt; size:
+        z = np.random.randn(10000, z_dim)
+        s = np.zeros(10000)
+        for i in range(10):
+            zi = z[i * 1000:(i + 1) * 1000]
+            d = (z**2).sum(1)[:, None] + (zi**2).sum(1)[None] - 2 * z.dot(zi.T)
+            for j in d.argsort(0)[1:1 + 5].T:
+                s[j] += 1
+        z = z[s &gt; t]
+        Z = np.concatenate([Z, z], 0)[:size]
+        print('%s / %s' % (len(Z), size))
+    return Z
+</code></pre>
 
 <p>为什么通过Hub值来筛选呢？由前面的讨论可以知道，Hub值越大，那么就越接近样本中心，其实更准确率来说是接近密度中心，意味着周围有很多临近点，那么它就不大可能是没有被充分训练的离群点，因此采样质量相对高一些。论文的多个实验结果肯定了这一结论。</p>
 <p><a href="/usr/uploads/2022/06/430095810.jpg" title="点击查看原图"><img alt="基于Hub值进行筛选的生成质量对比" src="/usr/uploads/2022/06/430095810.jpg" /></a></p>

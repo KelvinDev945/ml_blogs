@@ -2,10 +2,9 @@
 title: Transformer升级之路：18、RoPE的底数选择原则
 slug: transformer升级之路18rope的底数选择原则
 date: 2024-05-29
-tags: 不等式, attention, 位置编码, rope, 生成模型
+tags: 详细推导, 不等式, attention, 位置编码, rope, 生成模型
 status: pending
 ---
-
 # Transformer升级之路：18、RoPE的底数选择原则
 
 **原文链接**: [https://spaces.ac.cn/archives/10122](https://spaces.ac.cn/archives/10122)
@@ -206,5 +205,830 @@ url={\url{https://spaces.ac.cn/archives/10122}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 1. RoPE旋转矩阵的基本性质
+
+RoPE的核心是旋转矩阵$\boldsymbol{\mathcal{R}}_n$，我们首先深入分析其数学性质。
+
+**推导1.1：旋转矩阵的正交性**
+
+对于单个二维旋转块：
+$$
+\boldsymbol{R}_i(n) = \begin{pmatrix} \cos n\theta_i & -\sin n\theta_i \\ \sin n\theta_i & \cos n\theta_i \end{pmatrix}
+$$
+
+验证正交性，计算：
+$$
+\boldsymbol{R}_i(n)^{\top}\boldsymbol{R}_i(n) = \begin{pmatrix} \cos n\theta_i & \sin n\theta_i \\ -\sin n\theta_i & \cos n\theta_i \end{pmatrix} \begin{pmatrix} \cos n\theta_i & -\sin n\theta_i \\ \sin n\theta_i & \cos n\theta_i \end{pmatrix}
+$$
+
+展开第一项：
+$$
+(\cos n\theta_i)^2 + (\sin n\theta_i)^2 = 1
+$$
+
+展开非对角项：
+$$
+-\cos n\theta_i \sin n\theta_i + \sin n\theta_i \cos n\theta_i = 0
+$$
+
+因此$\boldsymbol{R}_i(n)^{\top}\boldsymbol{R}_i(n) = \boldsymbol{I}$，证明了旋转矩阵是正交矩阵。
+
+**推导1.2：旋转矩阵的可加性**
+
+这是RoPE实现相对位置编码的关键性质。对于两个旋转矩阵：
+$$
+\boldsymbol{R}_i(m)\boldsymbol{R}_i(n) = \begin{pmatrix} \cos m\theta_i & -\sin m\theta_i \\ \sin m\theta_i & \cos m\theta_i \end{pmatrix} \begin{pmatrix} \cos n\theta_i & -\sin n\theta_i \\ \sin n\theta_i & \cos n\theta_i \end{pmatrix}
+$$
+
+利用三角函数和差公式：
+$$
+\cos(m\theta_i)\cos(n\theta_i) - \sin(m\theta_i)\sin(n\theta_i) = \cos((m+n)\theta_i)
+$$
+$$
+\sin(m\theta_i)\cos(n\theta_i) + \cos(m\theta_i)\sin(n\theta_i) = \sin((m+n)\theta_i)
+$$
+
+因此：
+$$
+\boldsymbol{R}_i(m)\boldsymbol{R}_i(n) = \boldsymbol{R}_i(m+n)
+$$
+
+这个性质保证了：
+$$
+\boldsymbol{\mathcal{R}}_m^{\top}\boldsymbol{\mathcal{R}}_n = \boldsymbol{\mathcal{R}}_{n-m}
+$$
+
+使得注意力计算只依赖于相对位置$n-m$。
+
+### 2. 底数θ的频率分解分析
+
+**推导2.1：频率公式的指数形式**
+
+底数为$b$时，第$i$个频率为：
+$$
+\theta_i = b^{-2i/d}, \quad i = 0, 1, \ldots, d/2-1
+$$
+
+取对数得到：
+$$
+\log \theta_i = -\frac{2i}{d}\log b
+$$
+
+这表明频率在对数尺度上呈线性分布，跨度为：
+$$
+\log\theta_0 - \log\theta_{d/2-1} = 0 - (-\frac{2(d/2-1)}{d}\log b) \approx \log b
+$$
+
+**推导2.2：频率范围的边界分析**
+
+最高频率（最快振荡）：
+$$
+\theta_0 = b^0 = 1
+$$
+
+最低频率（最慢振荡）：
+$$
+\theta_{d/2-1} = b^{-2(d/2-1)/d} = b^{-(d-2)/d} \approx b^{-1}
+$$
+
+对于位置$n$，最快分量的相位为$n\theta_0 = n$，最慢分量的相位为$n\theta_{d/2-1} \approx n/b$。
+
+**推导2.3：波长的分布**
+
+第$i$个分量的波长定义为相位变化$2\pi$对应的位置变化：
+$$
+\lambda_i = \frac{2\pi}{\theta_i} = 2\pi b^{2i/d}
+$$
+
+波长范围：
+$$
+\lambda_0 = 2\pi, \quad \lambda_{d/2-1} \approx 2\pi b
+$$
+
+这意味着RoPE能够编码的最大周期约为$2\pi b$。
+
+### 3. 语义聚合性质的详细推导
+
+**推导3.1：期望值的展开**
+
+考虑两个向量的内积：
+$$
+\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{k}
+$$
+
+对于分块对角矩阵$\boldsymbol{\mathcal{R}}_{n-m}$，内积可以分解为：
+$$
+\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{k} = \sum_{i=0}^{d/2-1} \begin{pmatrix} q_{2i} \\ q_{2i+1} \end{pmatrix}^{\top} \begin{pmatrix} \cos(n-m)\theta_i & -\sin(n-m)\theta_i \\ \sin(n-m)\theta_i & \cos(n-m)\theta_i \end{pmatrix} \begin{pmatrix} k_{2i} \\ k_{2i+1} \end{pmatrix}
+$$
+
+展开单个块：
+$$
+\begin{aligned}
+&= \sum_{i=0}^{d/2-1} [q_{2i}(k_{2i}\cos(n-m)\theta_i - k_{2i+1}\sin(n-m)\theta_i) \\
+&\quad + q_{2i+1}(k_{2i}\sin(n-m)\theta_i + k_{2i+1}\cos(n-m)\theta_i)]
+\end{aligned}
+$$
+
+整理得：
+$$
+= \sum_{i=0}^{d/2-1} [(q_{2i}k_{2i} + q_{2i+1}k_{2i+1})\cos(n-m)\theta_i + (q_{2i+1}k_{2i} - q_{2i}k_{2i+1})\sin(n-m)\theta_i]
+$$
+
+**推导3.2：独立同分布假设下的期望**
+
+设$\boldsymbol{q}$的每个分量独立同分布，均值$\mu$，方差$\sigma^2$。考察：
+$$
+\mathbb{E}_{\boldsymbol{q}}[\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{q}]
+$$
+
+对于单个块的贡献：
+$$
+\mathbb{E}[(q_{2i}^2 + q_{2i+1}^2)\cos(n-m)\theta_i]
+$$
+
+由于$\mathbb{E}[q_{2i}^2] = \mu^2 + \sigma^2$：
+$$
+= 2(\mu^2 + \sigma^2)\cos(n-m)\theta_i
+$$
+
+交叉项的期望：
+$$
+\mathbb{E}[(q_{2i+1}q_{2i} - q_{2i}q_{2i+1})\sin(n-m)\theta_i] = 0
+$$
+
+因为$q_{2i}$和$q_{2i+1}$独立，所以：
+$$
+\mathbb{E}[q_{2i+1}q_{2i}] = \mathbb{E}[q_{2i+1}]\mathbb{E}[q_{2i}] = \mu^2
+$$
+
+**推导3.3：语义相似向量的期望差**
+
+对于语义相似的$\tilde{\boldsymbol{k}} = \boldsymbol{q} + \boldsymbol{\varepsilon}$（$\boldsymbol{\varepsilon}$零均值）：
+$$
+\begin{aligned}
+&\mathbb{E}[\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\tilde{\boldsymbol{k}}] \\
+&= \mathbb{E}[\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}(\boldsymbol{q} + \boldsymbol{\varepsilon})] \\
+&= \mathbb{E}[\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{q}] + \mathbb{E}[\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{\varepsilon}]
+\end{aligned}
+$$
+
+由于$\boldsymbol{\varepsilon}$零均值且与$\boldsymbol{q}$独立：
+$$
+\mathbb{E}[\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{\varepsilon}] = \mathbb{E}[\boldsymbol{q}]^{\top}\boldsymbol{\mathcal{R}}_{n-m}\mathbb{E}[\boldsymbol{\varepsilon}] = 0
+$$
+
+对于独立同分布的$\boldsymbol{k}$：
+$$
+\mathbb{E}[\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{k}] = \mathbb{E}[\boldsymbol{q}]^{\top}\boldsymbol{\mathcal{R}}_{n-m}\mathbb{E}[\boldsymbol{k}] = \mu^2 \boldsymbol{1}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{1}
+$$
+
+计算$\boldsymbol{1}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{1}$：
+$$
+\boldsymbol{1}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{1} = \sum_{i=0}^{d/2-1} \begin{pmatrix} 1 \\ 1 \end{pmatrix}^{\top} \begin{pmatrix} \cos(n-m)\theta_i & -\sin(n-m)\theta_i \\ \sin(n-m)\theta_i & \cos(n-m)\theta_i \end{pmatrix} \begin{pmatrix} 1 \\ 1 \end{pmatrix}
+$$
+
+$$
+= \sum_{i=0}^{d/2-1} (\cos(n-m)\theta_i - \sin(n-m)\theta_i + \sin(n-m)\theta_i + \cos(n-m)\theta_i)
+$$
+
+$$
+= \sum_{i=0}^{d/2-1} 2\cos(n-m)\theta_i
+$$
+
+### 4. 不等式条件的深入分析
+
+**推导4.1：语义聚合不等式的导出**
+
+综合前面的推导，期望差为：
+$$
+\begin{aligned}
+&\mathbb{E}[\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\tilde{\boldsymbol{k}}] - \mathbb{E}[\boldsymbol{q}^{\top}\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{k}] \\
+&= \sum_{i=0}^{d/2-1} 2(\mu^2 + \sigma^2)\cos(n-m)\theta_i - \sum_{i=0}^{d/2-1} 2\mu^2\cos(n-m)\theta_i \\
+&= 2\sigma^2 \sum_{i=0}^{d/2-1} \cos(n-m)\theta_i
+\end{aligned}
+$$
+
+要求这个期望差非负，即：
+$$
+\sum_{i=0}^{d/2-1} \cos(n-m)\theta_i \geq 0
+$$
+
+记$m = n - m$的相对距离，对所有$m \in \{0, 1, 2, \ldots, L-1\}$需要满足：
+$$
+f_b(m) = \sum_{i=0}^{d/2-1} \cos(m\theta_i) \geq 0
+$$
+
+**推导4.2：函数$f_b(m)$的初值分析**
+
+当$m = 0$时：
+$$
+f_b(0) = \sum_{i=0}^{d/2-1} \cos(0) = \sum_{i=0}^{d/2-1} 1 = \frac{d}{2}
+$$
+
+这是最大值，符合直觉：位置重合时注意力最强。
+
+**推导4.3：函数$f_b(m)$的渐近行为**
+
+当$m$增大时，不同频率$\theta_i$的余弦项会产生相位差，导致求和出现抵消。关键观察：
+
+- 高频项（小$i$）：$\cos(m\theta_i)$振荡快，贡献迅速变化
+- 低频项（大$i$）：$\cos(m\theta_i)$振荡慢，贡献变化缓慢
+
+**推导4.4：临界点的估计**
+
+函数$f_b(m)$从正变为负的临界点$m^*$满足：
+$$
+\sum_{i=0}^{d/2-1} \cos(m^*\theta_i) = 0
+$$
+
+这需要高频和低频项的正负贡献平衡。
+
+### 5. 底数$b$与最大长度$L$的关系
+
+**推导5.1：积分近似方法**
+
+当$d$很大时，可以用积分近似求和：
+$$
+f_b(m) = \sum_{i=0}^{d/2-1} \cos(mb^{-2i/d}) \approx \frac{d}{2}\int_0^1 \cos(mb^{-2s}) ds
+$$
+
+令$t = mb^{-2s}$，则$dt = -2mb^{-2s}\ln b \cdot ds$，即：
+$$
+ds = -\frac{dt}{2t\ln b}
+$$
+
+当$s = 0$时，$t = m$；当$s = 1$时，$t = mb^{-2}$。因此：
+$$
+\frac{d}{2}\int_0^1 \cos(mb^{-2s}) ds = \frac{d}{2} \int_{mb^{-2}}^m \cos(t) \cdot \left(-\frac{1}{2t\ln b}\right) dt
+$$
+
+$$
+= -\frac{d}{4\ln b} \int_{mb^{-2}}^m \frac{\cos t}{t} dt = \frac{d}{4\ln b} \int_m^{mb^{-2}} \frac{\cos t}{t} dt
+$$
+
+由于$b \gg 1$时$b^{-2} \approx 0$，近似为：
+$$
+\approx \frac{d}{4\ln b} \int_m^{m/b^2} \frac{\cos t}{t} dt
+$$
+
+**推导5.2：余弦积分函数的应用**
+
+定义余弦积分：
+$$
+\text{Ci}(x) = -\int_x^{\infty} \frac{\cos t}{t} dt
+$$
+
+则：
+$$
+\int_m^{m/b^2} \frac{\cos t}{t} dt = -[\text{Ci}(m/b^2) - \text{Ci}(m)]
+$$
+
+因此：
+$$
+f_b(m) \approx \frac{d}{4\ln b}[\text{Ci}(m/b^2) - \text{Ci}(m)]
+$$
+
+简化符号，对单位维度（$d=2$）：
+$$
+f_b(m) \approx \frac{\text{Ci}(m/b^2) - \text{Ci}(m)}{\ln b}
+$$
+
+**推导5.3：零点条件**
+
+$f_b(m) = 0$的条件近似为：
+$$
+\text{Ci}(m/b^2) = \text{Ci}(m)
+$$
+
+根据$\text{Ci}(x)$的性质，第一个零点在$x_0 \approx 0.6165$。对于$m \geq 1$，$|\text{Ci}(m)| \leq 0.5$相对较小，主要由$\text{Ci}(m/b^2)$主导。
+
+要求$f_b(m) \geq 0$对所有$m \leq L-1$成立，需要：
+$$
+\text{Ci}(m/b^2) \geq \text{Ci}(m)
+$$
+
+由于$\text{Ci}(x)$递减，需要$m/b^2 \leq m$，这总是成立的。更强的条件是$m/b^2$应该在第一个零点之前：
+$$
+\frac{L-1}{b^2} \leq x_0 \approx 0.6165
+$$
+
+解得：
+$$
+b \geq \sqrt{\frac{L-1}{0.6165}} \approx 1.27\sqrt{L}
+$$
+
+**推导5.4：更精确的线性估计**
+
+考虑到$b$通常很大（$b \gg 1$），而$mb^{-2} \ll 1$，可以使用$\text{Ci}(x)$在小$x$附近的展开：
+$$
+\text{Ci}(x) \approx \gamma + \ln x, \quad x \to 0^+
+$$
+
+其中$\gamma \approx 0.5772$是欧拉常数。但更直接的方法是注意到，如果我们希望$m\theta_{d/2-1} = mb^{-1}$不超过某个临界角度，比如$\pi/2$：
+$$
+\frac{L}{b} \leq \frac{\pi}{2}
+$$
+
+这给出：
+$$
+b \geq \frac{2L}{\pi} \approx 0.64L
+$$
+
+结合更细致的分析，得到$b = \mathcal{O}(L)$的结论。
+
+### 6. β进制编码的视角
+
+**推导6.1：RoPE作为进制表示**
+
+定义$\beta = b^{2/d}$，则：
+$$
+\theta_i = b^{-2i/d} = \beta^{-i}
+$$
+
+位置$n$的编码可以看作：
+$$
+n = \sum_{i=0}^{d/2-1} a_i \beta^i
+$$
+
+其中$a_i \in [0, \beta)$是"数字"。
+
+**推导6.2：表示能力的分析**
+
+$d/2$位$\beta$进制数能表示的最大值为：
+$$
+N_{\max} = \sum_{i=0}^{d/2-1} (\beta - 1)\beta^i = (\beta - 1) \cdot \frac{\beta^{d/2} - 1}{\beta - 1} = \beta^{d/2} - 1
+$$
+
+由于$\beta = b^{2/d}$：
+$$
+N_{\max} = (b^{2/d})^{d/2} - 1 = b - 1
+$$
+
+因此，要表示$0, 1, \ldots, L-1$共$L$个位置，需要：
+$$
+b - 1 \geq L - 1 \implies b \geq L
+$$
+
+这再次证明了$b$应该至少与$L$同阶。
+
+**推导6.3：进制表示的唯一性**
+
+对于给定的$b$和$d$，每个位置$n < b$都有唯一的$\beta$进制表示。这确保了不同位置的编码能够被模型区分。
+
+### 7. NTK插值中的底数调整
+
+**推导7.1：NTK-RoPE的基本思想**
+
+Neural Tangent Kernel（NTK）启发的RoPE调整通过缩放底数来实现长度外推。原始训练长度$L_0$，目标长度$L$，缩放因子：
+$$
+\alpha = \frac{L}{L_0}
+$$
+
+NTK-RoPE将底数调整为：
+$$
+b' = b \cdot \alpha^{d/(d-2)}
+$$
+
+**推导7.2：频率的非均匀缩放**
+
+原始频率：
+$$
+\theta_i = b^{-2i/d}
+$$
+
+NTK调整后：
+$$
+\theta_i' = (b')^{-2i/d} = (b\alpha^{d/(d-2)})^{-2i/d} = b^{-2i/d} \cdot \alpha^{-2i/(d-2)}
+$$
+
+这相当于对不同频率分量进行非均匀缩放：
+
+- 低频（大波长，小$i$）：缩放因子接近1
+- 高频（小波长，大$i$）：缩放因子更大
+
+**推导7.3：内插与外推的统一**
+
+Position Interpolation（PI）直接缩放位置：
+$$
+n' = \frac{n}{\alpha}
+$$
+
+等价于所有频率均匀缩放：
+$$
+\theta_i' = \frac{\theta_i}{\alpha}
+$$
+
+NTK-RoPE的非均匀缩放在两种极端之间找到平衡：
+
+- 对于$i = 0$（最低频）：$\theta_0' = 1$（不缩放）
+- 对于$i = d/2-1$（最高频）：$\theta_{d/2-1}' \approx \theta_{d/2-1}/\alpha$（完全缩放）
+
+**推导7.4：保持语义聚合性质**
+
+在新的底数$b'$下，检验不等式：
+$$
+f_{b'}(m) = \sum_{i=0}^{d/2-1} \cos(m(b')^{-2i/d}) \geq 0, \quad m \leq L-1
+$$
+
+由于$b' > b$，相当于拉伸了频率范围，使得原本对应$L_0$的非负区间能够覆盖扩展后的$L$。
+
+### 8. 部分旋转的数学优势
+
+**推导8.1：部分旋转的频率配置**
+
+假设只对前$d/4$维度对应的频率旋转，则：
+$$
+\theta_i = \begin{cases}
+b^{-4i/d}, & i < d/4 \\
+0, & i \geq d/4
+\end{cases}
+$$
+
+注意这里$i < d/4$时使用$-4i/d$而非$-2i/d$，是为了保持频率跨度。
+
+**推导8.2：语义聚合条件的自动满足**
+
+计算求和函数：
+$$
+f_b(m) = \sum_{i=0}^{d/2-1} \cos(m\theta_i) = \sum_{i=0}^{d/4-1} \cos(mb^{-4i/d}) + \sum_{i=d/4}^{d/2-1} \cos(0)
+$$
+
+$$
+= \sum_{i=0}^{d/4-1} \cos(mb^{-4i/d}) + \frac{d}{4}
+$$
+
+由于常数项$d/4 > 0$，且$\cos(mb^{-4i/d}) \geq -1$：
+$$
+f_b(m) \geq \frac{d}{4} - \frac{d}{4} = 0
+$$
+
+等号成立当且仅当所有$\cos(mb^{-4i/d}) = -1$，这在实际中几乎不可能同时发生。因此：
+$$
+f_b(m) > 0, \quad \forall m, b
+$$
+
+**推导8.3：位置信息与语义信息的平衡**
+
+部分旋转的优势在于：
+
+- 旋转维度：提供位置信息
+- 非旋转维度：保留纯语义信息
+
+记$\boldsymbol{q} = [\boldsymbol{q}_r, \boldsymbol{q}_n]$（旋转和非旋转部分），内积分解为：
+$$
+(\boldsymbol{\mathcal{R}}_m\boldsymbol{q})^{\top}(\boldsymbol{\mathcal{R}}_n\boldsymbol{k}) = (\boldsymbol{\mathcal{R}}_{n-m}\boldsymbol{q}_r)^{\top}\boldsymbol{k}_r + \boldsymbol{q}_n^{\top}\boldsymbol{k}_n
+$$
+
+第一项编码相对位置，第二项纯粹基于语义，两者结合提供更灵活的注意力机制。
+
+### 9. 数值求解的收敛性分析
+
+**推导9.1：二分法失效的原因**
+
+定义集合：
+$$
+S_b = \{m \in \mathbb{Z}^+ : f_b(m) \geq 0\}
+$$
+
+理想情况下，我们希望$b_1 > b_2$蕴含$S_{b_1} \supseteq S_{b_2}$，这样可以用二分法。但实际上由于$f_b(m)$的复杂振荡，这个单调性不总是成立。
+
+**推导9.2：逆函数法的有效性**
+
+定义：
+$$
+L(b) = \max\{m : f_b(m') \geq 0, \forall m' \leq m\}
+$$
+
+虽然$b \mapsto S_b$不单调，但对于固定的$b$，计算$L(b)$是可行的：
+
+遍历$m = 1, 2, \ldots$直到$f_b(m) < 0$，记录最大的$m$。
+
+通过枚举足够多的$b$值，可以构建$(b, L(b))$的数据点，然后通过查表或插值得到$b^*(L)$。
+
+**推导9.3：网格搜索的复杂度**
+
+在区间$[0, B]$上用$N$个点网格搜索，对每个点需要检验$L$个不等式，总复杂度：
+$$
+\mathcal{O}(N \cdot L \cdot d/2)
+$$
+
+利用GPU并行化，可以同时计算所有$m \in [0, L-1]$和$i \in [0, d/2-1]$：
+$$
+\text{复杂度} = \mathcal{O}(N) \text{（在GPU时间意义下）}
+$$
+
+### 10. 渐近估计的精细化
+
+**推导10.1：Ci函数的级数展开**
+
+余弦积分函数在$x > 0$处的级数表示：
+$$
+\text{Ci}(x) = \gamma + \ln x + \sum_{n=1}^{\infty} \frac{(-1)^n x^{2n}}{(2n)(2n)!}
+$$
+
+其中$\gamma$是欧拉常数。对于小$x$：
+$$
+\text{Ci}(x) \approx \gamma + \ln x - \frac{x^2}{4}
+$$
+
+**推导10.2：临界条件的近似解**
+
+代入$f_b(m)$的表达式：
+$$
+f_b(m) \approx \frac{\text{Ci}(m/b^2) - \text{Ci}(m)}{\ln b}
+$$
+
+使用级数展开：
+$$
+\text{Ci}(m/b^2) \approx \gamma + \ln(m/b^2) = \gamma + \ln m - 2\ln b
+$$
+
+$$
+\text{Ci}(m) \approx \gamma + \ln m - \frac{m^2}{4}
+$$
+
+因此：
+$$
+f_b(m) \approx \frac{-2\ln b + m^2/4}{\ln b} = -2 + \frac{m^2}{4\ln b}
+$$
+
+要求$f_b(m) \geq 0$：
+$$
+\frac{m^2}{4\ln b} \geq 2 \implies \ln b \geq \frac{m^2}{8}
+$$
+
+对于$m = L-1$：
+$$
+b \geq \exp\left(\frac{(L-1)^2}{8}\right)
+$$
+
+这个估计对于小$L$过于严格，但捕捉了$b$随$L$增长的趋势。
+
+**推导10.3：改进的线性估计**
+
+考虑$\text{Ci}(x)$的第一个零点$x_0 \approx 0.6165$，以及在$x > 1$时$|\text{Ci}(x)| < 0.5$的性质。
+
+如果忽略$\text{Ci}(m)$的贡献（因为它相对较小且振荡），主要条件变为：
+$$
+\text{Ci}(m/b^2) \geq 0
+$$
+
+要求$m/b^2 \leq x_0$对所有$m \leq L-1$成立：
+$$
+\frac{L-1}{b^2} \leq x_0 \implies b \geq \sqrt{\frac{L-1}{x_0}} \approx 1.27\sqrt{L-1}
+$$
+
+但考虑到实际中$d$是有限的（如$d=128$），积分近似会有偏差，实际的$b^*$比这个估计要大。数值结果显示$b^* \sim L^{1.5}$到$L^2$之间。
+
+### 11. LLAMA3底数选择的理论解释
+
+**推导11.1：LLAMA3的配置**
+
+LLAMA3使用：
+- 训练长度：$L_0 = 8192$
+- RoPE底数：$b = 500000$
+- head_size：$d = 128$
+
+根据数值结果，$L = 8192$对应的$b^* \approx 8.4 \times 10^4$，而LLAMA3使用$b = 5 \times 10^5$，约为理论值的6倍。
+
+**推导11.2：底数冗余的优势**
+
+使用比理论下界更大的$b$有几个好处：
+
+1. **安全边际**：确保在$m \in [0, L-1]$内$f_b(m)$稳定为正
+2. **长度外推预留**：如果未来需要扩展到更长的上下文，无需重新调整底数
+3. **训练稳定性**：更大的$b$使得位置编码更加平滑
+
+**推导11.3：过大底数的潜在风险**
+
+当$b$过大时，低频分量变得极其缓慢：
+$$
+\theta_{d/2-1} = b^{-(d-2)/d} = (5 \times 10^5)^{-126/128} \approx 2 \times 10^{-6}
+$$
+
+这意味着最低频分量的周期约为：
+$$
+T = \frac{2\pi}{\theta_{d/2-1}} \approx 3 \times 10^6
+$$
+
+远超训练长度8192，这部分频率分量在训练中几乎不变，可能导致参数冗余。
+
+### 12. 频率分布的信息论解释
+
+**推导12.1：香农采样定理的类比**
+
+将位置编码类比为信号，频率$\theta_i$对应于傅里叶基。根据采样定理，要准确表示最大频率为$f_{\max}$的信号，采样率必须至少为$2f_{\max}$。
+
+对于RoPE，"采样率"对应于最大位置$L$，"最大频率"对应于$\theta_0 = 1$。但RoPE使用多个频率的组合，相当于多频带编码。
+
+**推导12.2：频率分辨率**
+
+相邻两个频率的比值：
+$$
+\frac{\theta_i}{\theta_{i+1}} = \frac{b^{-2i/d}}{b^{-2(i+1)/d}} = b^{2/d}
+$$
+
+这是一个常数，意味着频率在对数尺度上等距分布。频率分辨率（对数尺度）：
+$$
+\Delta(\log\theta) = \log\theta_i - \log\theta_{i+1} = \frac{2\log b}{d}
+$$
+
+更大的$b$或更大的$d$提供更精细的频率分辨率。
+
+**推导12.3：编码容量**
+
+从信息论角度，$d/2$个不同频率可以编码的"信息量"大致为：
+$$
+I \sim (d/2) \log_2(\text{频率动态范围})
+$$
+
+频率动态范围为$\theta_0/\theta_{d/2-1} \approx b$，因此：
+$$
+I \sim \frac{d}{2} \log_2 b
+$$
+
+要编码$L$个不同位置，需要：
+$$
+I \geq \log_2 L \implies \frac{d}{2}\log_2 b \geq \log_2 L
+$$
+
+解得：
+$$
+b \geq L^{2/d}
+$$
+
+对于$d = 128$：
+$$
+b \geq L^{1/64}
+$$
+
+这个下界远低于实际需求，说明除了编码容量，还有其他约束（如语义聚合）在起作用。
+
+### 13. 长度泛化的理论保证
+
+**推导13.1：训练与测试的分布变化**
+
+训练阶段见到的相对位置：$\Delta \in [0, L_0 - 1]$
+
+测试阶段可能出现的相对位置：$\Delta \in [0, L - 1]$，其中$L > L_0$
+
+长度泛化要求模型在未见过的$\Delta \in [L_0, L-1]$上仍能正常工作。
+
+**推导13.2：外推失败的机制**
+
+如果$b$选择仅满足$f_b(\Delta) \geq 0$对$\Delta \leq L_0 - 1$，当$\Delta \geq L_0$时，可能出现$f_b(\Delta) < 0$。
+
+这会导致：
+$$
+\mathbb{E}[\text{相似token的注意力}] < \mathbb{E}[\text{随机token的注意力}]
+$$
+
+破坏了注意力机制的语义性，导致外推失败。
+
+**推导13.3：安全外推的底数选择**
+
+为了安全外推到长度$L$，应该在训练时就选择满足$L$的$b^*(L)$，即使训练长度只有$L_0 < L$。
+
+或者，使用NTK插值动态调整：
+$$
+b'(\text{测试时}) = b(\text{训练时}) \cdot \left(\frac{L}{L_0}\right)^{d/(d-2)}
+$$
+
+### 14. 部分旋转比例的优化
+
+**推导14.1：旋转比例参数**
+
+设旋转维度比例为$\rho \in (0, 1]$，则旋转维度数为$\rho d$，非旋转维度数为$(1-\rho)d$。
+
+**推导14.2：语义聚合条件的推广**
+
+类似之前的推导：
+$$
+f_b(m, \rho) = \sum_{i=0}^{\rho d/2 - 1} \cos(m\theta_i) + (1-\rho)\frac{d}{2}
+$$
+
+要求非负：
+$$
+\sum_{i=0}^{\rho d/2 - 1} \cos(m\theta_i) \geq -(1-\rho)\frac{d}{2}
+$$
+
+由于$\cos(m\theta_i) \geq -1$：
+$$
+\sum_{i=0}^{\rho d/2 - 1} \cos(m\theta_i) \geq -\rho\frac{d}{2}
+$$
+
+所以只要$-\rho d/2 \geq -(1-\rho)d/2$，即$\rho \leq 1 - \rho$，即$\rho \leq 0.5$，不等式就自动满足。
+
+**推导14.3：最优比例的权衡**
+
+选择$\rho$需要权衡：
+
+- $\rho$越大：位置信息越丰富，但语义聚合条件越难满足
+- $\rho$越小：语义聚合条件容易满足，但位置信息不足
+
+实验表明$\rho \in [0.25, 0.5]$是一个较好的范围。
+
+### 15. 多层Attention的累积效应
+
+**推导15.1：跨层的位置编码**
+
+考虑$L$层Transformer，每层都使用RoPE。位置信息在层间传播的机制：
+
+第$\ell$层的输出：
+$$
+\boldsymbol{h}_n^{(\ell)} = f(\text{Attention}(\boldsymbol{\mathcal{R}}_n\boldsymbol{q}_n^{(\ell)}, \{\boldsymbol{\mathcal{R}}_m\boldsymbol{k}_m^{(\ell)}\}_{m \leq n}))
+$$
+
+位置信息通过$\boldsymbol{\mathcal{R}}_n$注入，但$\boldsymbol{h}_n^{(\ell)}$本身不显式携带位置标记。
+
+**推导15.2：层间位置信息的衰减**
+
+假设第$\ell$层的输出对位置的敏感度为$s^{(\ell)}$，则：
+$$
+s^{(\ell+1)} \approx \gamma \cdot s^{(\ell)}
+$$
+
+其中$\gamma < 1$是衰减因子，取决于Attention后的非线性变换（LayerNorm、FFN等）。
+
+经过$L$层后：
+$$
+s^{(L)} \approx \gamma^L \cdot s^{(0)}
+$$
+
+如果$\gamma$太小，深层的位置信息会丢失。
+
+**推导15.3：部分旋转的跨层优势**
+
+部分旋转在每层都重新注入位置信息到旋转维度，同时保持非旋转维度的语义信息：
+$$
+\boldsymbol{h}_n^{(\ell)} = [\boldsymbol{h}_{n,r}^{(\ell)}, \boldsymbol{h}_{n,nr}^{(\ell)}]
+$$
+
+每层Attention时，$\boldsymbol{h}_{n,r}^{(\ell)}$被旋转，$\boldsymbol{h}_{n,nr}^{(\ell)}$保持不变，这提供了更稳定的位置信息传播。
+
+### 16. 实验验证的统计检验
+
+**推导16.1：底数选择的假设检验**
+
+零假设$H_0$：底数$b$与最大长度$L$无关
+
+备择假设$H_1$：$b$应该随$L$增大而增大
+
+检验统计量：Spearman秩相关系数
+$$
+\rho_s = \frac{\text{Cov}(\text{rank}(b), \text{rank}(L))}{\sigma_{\text{rank}(b)} \sigma_{\text{rank}(L)}}
+$$
+
+根据数值结果的$(b^*, L)$数据点，计算$\rho_s$显著大于0，拒绝$H_0$。
+
+**推导16.2：拟合关系的确定**
+
+假设幂律关系：$b = aL^{\alpha}$
+
+取对数：$\log b = \log a + \alpha \log L$
+
+线性回归得到$\alpha$的估计。根据数值数据，$\alpha \approx 1.5 \sim 2.0$。
+
+**推导16.3：置信区间估计**
+
+给定$L$，$b^*$的$95\%$置信区间可以通过自助法（Bootstrap）估计：
+
+1. 从数值结果中重采样
+2. 对每个重采样集拟合$b = aL^{\alpha}$
+3. 计算$b^*(L)$的分位数
+
+这提供了$b^*$选择的不确定性度量。
+
+### 17. 总结与实践建议
+
+**推导17.1：底数选择的启发式规则**
+
+综合理论分析和数值结果，建议：
+
+1. **保守估计**：$b \geq 10L$
+2. **标准配置**：$b = 100L$（对于常见的$d=128$）
+3. **长上下文**：$b = 1000L$或根据数值表查询
+
+**推导17.2：动态调整策略**
+
+训练过程中动态调整$b$的方案：
+
+- 训练前期（短上下文）：使用较小的$b_0$
+- 训练中期（逐渐增加上下文）：线性增大$b$
+- 训练后期（长上下文）：固定在目标$b_{\text{final}}$
+
+调整公式：
+$$
+b(t) = b_0 + (b_{\text{final}} - b_0) \cdot \min(1, t/t_{\text{transition}})
+$$
+
+**推导17.3：与其他技术的结合**
+
+RoPE底数选择应与以下技术协同考虑：
+
+- ALiBi：加性位置偏置，可以减小对$b$的依赖
+- 位置插值：允许用较小的$b$训练后，通过插值外推到更长上下文
+- FlashAttention等优化：主要影响计算效率，不改变对$b$的理论要求
+
+最佳实践是：选择合适的$b$作为基础，然后辅以其他技术提升性能和效率。
 

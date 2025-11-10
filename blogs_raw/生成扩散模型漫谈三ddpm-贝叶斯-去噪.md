@@ -2,10 +2,9 @@
 title: 生成扩散模型漫谈（三）：DDPM = 贝叶斯 + 去噪
 slug: 生成扩散模型漫谈三ddpm-贝叶斯-去噪
 date: 2022-07-19
-tags: 概率, 生成模型, DDPM, 扩散, 生成模型
+tags: 详细推导, 概率, 生成模型, DDPM, 扩散, 生成模型
 status: pending
 ---
-
 # 生成扩散模型漫谈（三）：DDPM = 贝叶斯 + 去噪
 
 **原文链接**: [https://spaces.ac.cn/archives/9164](https://spaces.ac.cn/archives/9164)
@@ -148,5 +147,562 @@ url={\url{https://spaces.ac.cn/archives/9164}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 一、高斯分布的基础性质
+
+在深入DDPM的数学推导之前，我们首先回顾高斯分布的一些重要性质，这些性质是整个推导的基础。
+
+**性质1：高斯分布的概率密度函数**
+
+对于$d$维高斯分布$\mathcal{N}(\boldsymbol{x}; \boldsymbol{\mu}, \boldsymbol{\Sigma})$，其概率密度函数为：
+$$p(\boldsymbol{x}) = \frac{1}{(2\pi)^{d/2}|\boldsymbol{\Sigma}|^{1/2}} \exp\left(-\frac{1}{2}(\boldsymbol{x}-\boldsymbol{\mu})^T\boldsymbol{\Sigma}^{-1}(\boldsymbol{x}-\boldsymbol{\mu})\right)$$
+
+当协方差矩阵为对角矩阵$\boldsymbol{\Sigma} = \sigma^2\boldsymbol{I}$时，可以简化为：
+$$p(\boldsymbol{x}) = \frac{1}{(2\pi\sigma^2)^{d/2}} \exp\left(-\frac{\|\boldsymbol{x}-\boldsymbol{\mu}\|^2}{2\sigma^2}\right)$$
+
+对数概率密度（忽略常数项）为：
+$$\log p(\boldsymbol{x}) = -\frac{\|\boldsymbol{x}-\boldsymbol{\mu}\|^2}{2\sigma^2} + C$$
+
+**性质2：高斯分布的线性变换**
+
+如果$\boldsymbol{x} \sim \mathcal{N}(\boldsymbol{\mu}_x, \boldsymbol{\Sigma}_x)$，$\boldsymbol{y} = A\boldsymbol{x} + \boldsymbol{b}$，则：
+$$\boldsymbol{y} \sim \mathcal{N}(A\boldsymbol{\mu}_x + \boldsymbol{b}, A\boldsymbol{\Sigma}_x A^T)$$
+
+特别地，若$\boldsymbol{x} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$，$\boldsymbol{y} = \alpha\boldsymbol{x}_0 + \beta\boldsymbol{x}$，则：
+$$\boldsymbol{y} \sim \mathcal{N}(\alpha\boldsymbol{x}_0, \beta^2\boldsymbol{I})$$
+
+**性质3：独立高斯变量的和**
+
+如果$\boldsymbol{x}_1 \sim \mathcal{N}(\boldsymbol{\mu}_1, \sigma_1^2\boldsymbol{I})$和$\boldsymbol{x}_2 \sim \mathcal{N}(\boldsymbol{\mu}_2, \sigma_2^2\boldsymbol{I})$相互独立，则：
+$$\boldsymbol{x}_1 + \boldsymbol{x}_2 \sim \mathcal{N}(\boldsymbol{\mu}_1 + \boldsymbol{\mu}_2, (\sigma_1^2 + \sigma_2^2)\boldsymbol{I})$$
+
+这个性质解释了为什么在前向扩散过程中，多个独立噪声的累积仍然服从高斯分布。
+
+### 二、前向扩散过程的完整推导
+
+**定理1：单步扩散的边缘分布**
+
+给定前向扩散过程：
+$$q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) = \mathcal{N}(\boldsymbol{x}_t; \alpha_t\boldsymbol{x}_{t-1}, \beta_t^2\boldsymbol{I})$$
+
+等价于重参数化形式：
+$$\boldsymbol{x}_t = \alpha_t\boldsymbol{x}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t, \quad \boldsymbol{\varepsilon}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$$
+
+**证明：** 这是高斯分布重参数化技巧的直接应用。$\square$
+
+**定理2：多步扩散的累积效应**
+
+在约束$\alpha_t^2 + \beta_t^2 = 1$下，从$\boldsymbol{x}_0$到$\boldsymbol{x}_t$的边缘分布为：
+$$q(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t\boldsymbol{x}_0, \bar{\beta}_t^2\boldsymbol{I})$$
+
+其中$\bar{\alpha}_t = \prod_{i=1}^t \alpha_i$，$\bar{\beta}_t = \sqrt{1-\bar{\alpha}_t^2}$。
+
+**详细证明：**
+
+我们通过数学归纳法证明此结果。
+
+*基础步骤（$t=1$）：*
+
+由定义，$q(\boldsymbol{x}_1|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_1; \alpha_1\boldsymbol{x}_0, \beta_1^2\boldsymbol{I})$。
+
+由于$\alpha_1^2 + \beta_1^2 = 1$，我们有$\beta_1 = \sqrt{1-\alpha_1^2}$。
+
+同时，$\bar{\alpha}_1 = \alpha_1$，$\bar{\beta}_1 = \sqrt{1-\bar{\alpha}_1^2} = \sqrt{1-\alpha_1^2} = \beta_1$。
+
+所以$q(\boldsymbol{x}_1|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_1; \bar{\alpha}_1\boldsymbol{x}_0, \bar{\beta}_1^2\boldsymbol{I})$成立。
+
+*归纳步骤（假设对$t-1$成立，证明对$t$也成立）：*
+
+假设$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_{t-1}; \bar{\alpha}_{t-1}\boldsymbol{x}_0, \bar{\beta}_{t-1}^2\boldsymbol{I})$成立。
+
+根据重参数化，我们可以写成：
+$$\boldsymbol{x}_{t-1} = \bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\boldsymbol{\varepsilon}_{t-1}', \quad \boldsymbol{\varepsilon}_{t-1}' \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$$
+
+现在考虑从$\boldsymbol{x}_{t-1}$到$\boldsymbol{x}_t$的转移：
+$$\boldsymbol{x}_t = \alpha_t\boldsymbol{x}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t, \quad \boldsymbol{\varepsilon}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$$
+
+将$\boldsymbol{x}_{t-1}$的表达式代入：
+$$\boldsymbol{x}_t = \alpha_t(\bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\boldsymbol{\varepsilon}_{t-1}') + \beta_t\boldsymbol{\varepsilon}_t$$
+
+$$= \alpha_t\bar{\alpha}_{t-1}\boldsymbol{x}_0 + \alpha_t\bar{\beta}_{t-1}\boldsymbol{\varepsilon}_{t-1}' + \beta_t\boldsymbol{\varepsilon}_t$$
+
+$$= \bar{\alpha}_t\boldsymbol{x}_0 + \alpha_t\bar{\beta}_{t-1}\boldsymbol{\varepsilon}_{t-1}' + \beta_t\boldsymbol{\varepsilon}_t$$
+
+其中$\bar{\alpha}_t = \alpha_t\bar{\alpha}_{t-1}$。
+
+现在关键是计算噪声项$\alpha_t\bar{\beta}_{t-1}\boldsymbol{\varepsilon}_{t-1}' + \beta_t\boldsymbol{\varepsilon}_t$的分布。由于$\boldsymbol{\varepsilon}_{t-1}'$和$\boldsymbol{\varepsilon}_t$相互独立且都服从标准高斯分布，根据高斯分布的加性：
+$$\alpha_t\bar{\beta}_{t-1}\boldsymbol{\varepsilon}_{t-1}' + \beta_t\boldsymbol{\varepsilon}_t \sim \mathcal{N}(\boldsymbol{0}, (\alpha_t^2\bar{\beta}_{t-1}^2 + \beta_t^2)\boldsymbol{I})$$
+
+现在计算方差：
+$$\alpha_t^2\bar{\beta}_{t-1}^2 + \beta_t^2 = \alpha_t^2(1-\bar{\alpha}_{t-1}^2) + \beta_t^2$$
+
+$$= \alpha_t^2 - \alpha_t^2\bar{\alpha}_{t-1}^2 + \beta_t^2$$
+
+由于$\alpha_t^2 + \beta_t^2 = 1$，我们有：
+$$= 1 - \alpha_t^2\bar{\alpha}_{t-1}^2 = 1 - \bar{\alpha}_t^2 = \bar{\beta}_t^2$$
+
+因此：
+$$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$$
+
+即$q(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t\boldsymbol{x}_0, \bar{\beta}_t^2\boldsymbol{I})$。$\square$
+
+**推论：标准化噪声的解释**
+
+约束$\alpha_t^2 + \beta_t^2 = 1$确保了在每一步扩散过程中，数据的总方差保持恒定（假设初始数据已标准化）。这可以从以下计算看出：
+
+假设$\mathbb{E}[\boldsymbol{x}_{t-1}] = \boldsymbol{0}$，$\text{Var}[\boldsymbol{x}_{t-1}] = \boldsymbol{I}$，则：
+$$\mathbb{E}[\boldsymbol{x}_t] = \alpha_t\mathbb{E}[\boldsymbol{x}_{t-1}] = \boldsymbol{0}$$
+
+$$\text{Var}[\boldsymbol{x}_t] = \alpha_t^2\text{Var}[\boldsymbol{x}_{t-1}] + \beta_t^2\boldsymbol{I} = \alpha_t^2\boldsymbol{I} + \beta_t^2\boldsymbol{I} = \boldsymbol{I}$$
+
+这种方差保持的性质对于训练的数值稳定性至关重要。
+
+### 三、贝叶斯公式在DDPM中的应用
+
+**定理3：条件后验分布的贝叶斯推导**
+
+给定前向过程的转移概率$q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})$和边缘分布$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0)$、$q(\boldsymbol{x}_t|\boldsymbol{x}_0)$，后验分布可以通过贝叶斯公式计算：
+
+$$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \frac{q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}, \boldsymbol{x}_0) \cdot q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0)}{q(\boldsymbol{x}_t|\boldsymbol{x}_0)}$$
+
+**证明：** 这是贝叶斯定理的直接应用。根据条件概率的定义：
+$$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \frac{q(\boldsymbol{x}_{t-1}, \boldsymbol{x}_t|\boldsymbol{x}_0)}{q(\boldsymbol{x}_t|\boldsymbol{x}_0)}$$
+
+而联合分布可以分解为：
+$$q(\boldsymbol{x}_{t-1}, \boldsymbol{x}_t|\boldsymbol{x}_0) = q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}, \boldsymbol{x}_0) \cdot q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0)$$
+
+代入即得证。$\square$
+
+**观察：马尔可夫性质的应用**
+
+注意到在前向扩散过程中，由于马尔可夫性质，有：
+$$q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}, \boldsymbol{x}_0) = q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})$$
+
+这是因为给定$\boldsymbol{x}_{t-1}$后，$\boldsymbol{x}_t$的分布与$\boldsymbol{x}_0$条件独立。因此：
+$$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \frac{q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) \cdot q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0)}{q(\boldsymbol{x}_t|\boldsymbol{x}_0)}$$
+
+### 四、高斯分布的贝叶斯更新（核心推导）
+
+现在我们详细推导后验分布$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$的具体形式。这是整个DDPM理论的核心计算。
+
+**已知信息：**
+1. $q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) = \mathcal{N}(\boldsymbol{x}_t; \alpha_t\boldsymbol{x}_{t-1}, \beta_t^2\boldsymbol{I})$
+2. $q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_{t-1}; \bar{\alpha}_{t-1}\boldsymbol{x}_0, \bar{\beta}_{t-1}^2\boldsymbol{I})$
+3. $q(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t\boldsymbol{x}_0, \bar{\beta}_t^2\boldsymbol{I})$
+
+**目标：** 计算$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$的均值和方差。
+
+**步骤1：写出对数概率密度**
+
+根据贝叶斯公式，后验分布的对数概率密度（忽略与$\boldsymbol{x}_{t-1}$无关的常数）为：
+$$\log q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \log q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) + \log q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) - \log q(\boldsymbol{x}_t|\boldsymbol{x}_0) + C$$
+
+**步骤2：展开每一项**
+
+第一项：
+$$\log q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) = -\frac{1}{2\beta_t^2}\|\boldsymbol{x}_t - \alpha_t\boldsymbol{x}_{t-1}\|^2 + C_1$$
+
+第二项：
+$$\log q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) = -\frac{1}{2\bar{\beta}_{t-1}^2}\|\boldsymbol{x}_{t-1} - \bar{\alpha}_{t-1}\boldsymbol{x}_0\|^2 + C_2$$
+
+第三项（与$\boldsymbol{x}_{t-1}$无关，可以并入常数）：
+$$\log q(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\frac{1}{2\bar{\beta}_t^2}\|\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0\|^2 + C_3$$
+
+**步骤3：合并并展开二次项**
+
+合并前两项：
+$$\log q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) \propto -\frac{1}{2}\left[\frac{\|\boldsymbol{x}_t - \alpha_t\boldsymbol{x}_{t-1}\|^2}{\beta_t^2} + \frac{\|\boldsymbol{x}_{t-1} - \bar{\alpha}_{t-1}\boldsymbol{x}_0\|^2}{\bar{\beta}_{t-1}^2}\right]$$
+
+展开第一项：
+$$\frac{\|\boldsymbol{x}_t - \alpha_t\boldsymbol{x}_{t-1}\|^2}{\beta_t^2} = \frac{1}{\beta_t^2}\left(\|\boldsymbol{x}_t\|^2 - 2\alpha_t\boldsymbol{x}_t^T\boldsymbol{x}_{t-1} + \alpha_t^2\|\boldsymbol{x}_{t-1}\|^2\right)$$
+
+展开第二项：
+$$\frac{\|\boldsymbol{x}_{t-1} - \bar{\alpha}_{t-1}\boldsymbol{x}_0\|^2}{\bar{\beta}_{t-1}^2} = \frac{1}{\bar{\beta}_{t-1}^2}\left(\|\boldsymbol{x}_{t-1}\|^2 - 2\bar{\alpha}_{t-1}\boldsymbol{x}_{t-1}^T\boldsymbol{x}_0 + \bar{\alpha}_{t-1}^2\|\boldsymbol{x}_0\|^2\right)$$
+
+**步骤4：提取$\boldsymbol{x}_{t-1}$的二次项系数**
+
+$\boldsymbol{x}_{t-1}$的二次项（$\|\boldsymbol{x}_{t-1}\|^2$）的系数为：
+$$\frac{\alpha_t^2}{\beta_t^2} + \frac{1}{\bar{\beta}_{t-1}^2}$$
+
+为了简化，我们找一个公分母：
+$$\frac{\alpha_t^2}{\beta_t^2} + \frac{1}{\bar{\beta}_{t-1}^2} = \frac{\alpha_t^2\bar{\beta}_{t-1}^2 + \beta_t^2}{\beta_t^2\bar{\beta}_{t-1}^2}$$
+
+利用$\alpha_t^2 + \beta_t^2 = 1$和$\bar{\beta}_{t-1}^2 = 1 - \bar{\alpha}_{t-1}^2$：
+$$\text{分子} = \alpha_t^2(1-\bar{\alpha}_{t-1}^2) + \beta_t^2 = \alpha_t^2 - \alpha_t^2\bar{\alpha}_{t-1}^2 + \beta_t^2$$
+
+$$= 1 - \alpha_t^2\bar{\alpha}_{t-1}^2 = 1 - \bar{\alpha}_t^2 = \bar{\beta}_t^2$$
+
+因此：
+$$\frac{\alpha_t^2}{\beta_t^2} + \frac{1}{\bar{\beta}_{t-1}^2} = \frac{\bar{\beta}_t^2}{\beta_t^2\bar{\beta}_{t-1}^2}$$
+
+这意味着后验分布的精度（方差的倒数）为$\frac{\bar{\beta}_t^2}{\beta_t^2\bar{\beta}_{t-1}^2}$，因此方差为：
+$$\tilde{\beta}_t^2 = \frac{\beta_t^2\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}$$
+
+**步骤5：提取$\boldsymbol{x}_{t-1}$的一次项系数**
+
+$\boldsymbol{x}_{t-1}$的一次项系数为：
+$$\frac{2\alpha_t\boldsymbol{x}_t}{\beta_t^2} + \frac{2\bar{\alpha}_{t-1}\boldsymbol{x}_0}{\bar{\beta}_{t-1}^2}$$
+
+根据配方法，高斯分布$\mathcal{N}(\boldsymbol{x}; \boldsymbol{\mu}, \sigma^2\boldsymbol{I})$的指数形式为：
+$$-\frac{1}{2\sigma^2}\|\boldsymbol{x} - \boldsymbol{\mu}\|^2 = -\frac{1}{2\sigma^2}\|\boldsymbol{x}\|^2 + \frac{1}{\sigma^2}\boldsymbol{x}^T\boldsymbol{\mu} - \frac{1}{2\sigma^2}\|\boldsymbol{\mu}\|^2$$
+
+一次项系数为$\frac{2\boldsymbol{\mu}}{\sigma^2}$，因此均值为：
+$$\tilde{\boldsymbol{\mu}}_t = \frac{\text{一次项系数}}{2 \times \text{精度}} = \frac{\frac{2\alpha_t\boldsymbol{x}_t}{\beta_t^2} + \frac{2\bar{\alpha}_{t-1}\boldsymbol{x}_0}{\bar{\beta}_{t-1}^2}}{2 \times \frac{\bar{\beta}_t^2}{\beta_t^2\bar{\beta}_{t-1}^2}}$$
+
+$$= \frac{\frac{\alpha_t\boldsymbol{x}_t}{\beta_t^2} + \frac{\bar{\alpha}_{t-1}\boldsymbol{x}_0}{\bar{\beta}_{t-1}^2}}{\frac{\bar{\beta}_t^2}{\beta_t^2\bar{\beta}_{t-1}^2}}$$
+
+$$= \frac{\alpha_t\bar{\beta}_{t-1}^2\boldsymbol{x}_t + \bar{\alpha}_{t-1}\beta_t^2\boldsymbol{x}_0}{\bar{\beta}_t^2}$$
+
+$$= \frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\boldsymbol{x}_t + \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\beta}_t^2}\boldsymbol{x}_0$$
+
+**结论：**
+$$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \mathcal{N}\left(\boldsymbol{x}_{t-1}; \tilde{\boldsymbol{\mu}}_t(\boldsymbol{x}_t, \boldsymbol{x}_0), \tilde{\beta}_t^2\boldsymbol{I}\right)$$
+
+其中：
+$$\tilde{\boldsymbol{\mu}}_t(\boldsymbol{x}_t, \boldsymbol{x}_0) = \frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\boldsymbol{x}_t + \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\beta}_t^2}\boldsymbol{x}_0$$
+
+$$\tilde{\beta}_t^2 = \frac{\beta_t^2\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}$$
+
+### 五、去噪过程的概率解释
+
+**定理4：从$\boldsymbol{x}_t$预测$\boldsymbol{x}_0$的最优性**
+
+给定噪声观测$\boldsymbol{x}_t$，预测原始数据$\boldsymbol{x}_0$的最小二乘估计为：
+$$\hat{\boldsymbol{x}}_0 = \mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t]$$
+
+这是因为条件期望最小化均方误差：
+$$\mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] = \arg\min_{\hat{\boldsymbol{x}}_0} \mathbb{E}[\|\boldsymbol{x}_0 - \hat{\boldsymbol{x}}_0\|^2|\boldsymbol{x}_t]$$
+
+**证明：** 设$\hat{\boldsymbol{x}}_0$为任意预测函数，均方误差为：
+$$\text{MSE} = \mathbb{E}[\|\boldsymbol{x}_0 - \hat{\boldsymbol{x}}_0\|^2|\boldsymbol{x}_t]$$
+
+$$= \mathbb{E}[\|\boldsymbol{x}_0 - \mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] + \mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] - \hat{\boldsymbol{x}}_0\|^2|\boldsymbol{x}_t]$$
+
+展开：
+$$= \mathbb{E}[\|\boldsymbol{x}_0 - \mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t]\|^2|\boldsymbol{x}_t] + \|\mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] - \hat{\boldsymbol{x}}_0\|^2$$
+
+第一项是不可约误差（irreducible error），第二项在$\hat{\boldsymbol{x}}_0 = \mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t]$时最小。$\square$
+
+**推论：去噪模型的目标函数**
+
+在DDPM中，我们训练一个神经网络$\bar{\boldsymbol{\mu}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$来预测$\boldsymbol{x}_0$，使用损失函数：
+$$\mathcal{L}_{\text{simple}} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}}\left[\|\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\|^2\right]$$
+
+其中$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$。
+
+### 六、Score函数与Tweedie公式
+
+**定义：Score函数**
+
+给定概率分布$p(\boldsymbol{x})$，其score函数定义为对数概率密度的梯度：
+$$\nabla_{\boldsymbol{x}} \log p(\boldsymbol{x}) = \frac{\nabla_{\boldsymbol{x}} p(\boldsymbol{x})}{p(\boldsymbol{x})}$$
+
+对于高斯分布$\mathcal{N}(\boldsymbol{x}; \boldsymbol{\mu}, \sigma^2\boldsymbol{I})$：
+$$\log p(\boldsymbol{x}) = -\frac{\|\boldsymbol{x} - \boldsymbol{\mu}\|^2}{2\sigma^2} + C$$
+
+$$\nabla_{\boldsymbol{x}} \log p(\boldsymbol{x}) = -\frac{\boldsymbol{x} - \boldsymbol{\mu}}{\sigma^2} = \frac{\boldsymbol{\mu} - \boldsymbol{x}}{\sigma^2}$$
+
+**定理5：Tweedie公式（去噪公式）**
+
+对于高斯观测模型$\boldsymbol{x}_t = \boldsymbol{x}_0 + \sigma\boldsymbol{\varepsilon}$，其中$\boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$，后验均值（去噪估计）满足：
+$$\mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] = \boldsymbol{x}_t + \sigma^2 \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t)$$
+
+这称为Tweedie公式，它将去噪问题与score匹配联系起来。
+
+**详细证明：**
+
+首先，根据贝叶斯公式：
+$$p(\boldsymbol{x}_0|\boldsymbol{x}_t) = \frac{p(\boldsymbol{x}_t|\boldsymbol{x}_0)p(\boldsymbol{x}_0)}{p(\boldsymbol{x}_t)}$$
+
+后验均值为：
+$$\mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] = \int \boldsymbol{x}_0 p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0$$
+
+$$= \int \boldsymbol{x}_0 \frac{p(\boldsymbol{x}_t|\boldsymbol{x}_0)p(\boldsymbol{x}_0)}{p(\boldsymbol{x}_t)} d\boldsymbol{x}_0$$
+
+$$= \frac{1}{p(\boldsymbol{x}_t)} \int \boldsymbol{x}_0 p(\boldsymbol{x}_t|\boldsymbol{x}_0)p(\boldsymbol{x}_0) d\boldsymbol{x}_0$$
+
+现在计算$\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t)$：
+$$\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t) = \frac{\nabla_{\boldsymbol{x}_t} p(\boldsymbol{x}_t)}{p(\boldsymbol{x}_t)}$$
+
+其中：
+$$\nabla_{\boldsymbol{x}_t} p(\boldsymbol{x}_t) = \nabla_{\boldsymbol{x}_t} \int p(\boldsymbol{x}_t|\boldsymbol{x}_0)p(\boldsymbol{x}_0) d\boldsymbol{x}_0$$
+
+$$= \int \nabla_{\boldsymbol{x}_t} p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0) d\boldsymbol{x}_0$$
+
+对于高斯似然$p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \boldsymbol{x}_0, \sigma^2\boldsymbol{I})$：
+$$\log p(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\frac{\|\boldsymbol{x}_t - \boldsymbol{x}_0\|^2}{2\sigma^2} + C$$
+
+$$\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{\sigma^2}$$
+
+因此：
+$$\nabla_{\boldsymbol{x}_t} p(\boldsymbol{x}_t|\boldsymbol{x}_0) = p(\boldsymbol{x}_t|\boldsymbol{x}_0) \cdot \left(-\frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{\sigma^2}\right)$$
+
+代入：
+$$\nabla_{\boldsymbol{x}_t} p(\boldsymbol{x}_t) = \int p(\boldsymbol{x}_t|\boldsymbol{x}_0) \cdot \left(-\frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{\sigma^2}\right) p(\boldsymbol{x}_0) d\boldsymbol{x}_0$$
+
+$$= -\frac{1}{\sigma^2} \int (\boldsymbol{x}_t - \boldsymbol{x}_0) p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0) d\boldsymbol{x}_0$$
+
+因此：
+$$\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t) = -\frac{1}{\sigma^2} \cdot \frac{1}{p(\boldsymbol{x}_t)} \int (\boldsymbol{x}_t - \boldsymbol{x}_0) p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0) d\boldsymbol{x}_0$$
+
+$$= -\frac{1}{\sigma^2} \int (\boldsymbol{x}_t - \boldsymbol{x}_0) p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0$$
+
+$$= -\frac{1}{\sigma^2} \left(\boldsymbol{x}_t - \int \boldsymbol{x}_0 p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0\right)$$
+
+$$= -\frac{1}{\sigma^2} (\boldsymbol{x}_t - \mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t])$$
+
+重新整理：
+$$\mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] = \boldsymbol{x}_t + \sigma^2 \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t)$$
+
+这就是Tweedie公式。$\square$
+
+**应用到DDPM：**
+
+在DDPM中，我们有$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$，可以改写为：
+$$\bar{\alpha}_t\boldsymbol{x}_0 = \boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\varepsilon}$$
+
+$$\boldsymbol{x}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\varepsilon}}{\bar{\alpha}_t}$$
+
+根据Tweedie公式，对于标准化形式$\boldsymbol{x}_t = \mu\boldsymbol{x}_0 + \sigma\boldsymbol{\varepsilon}$：
+$$\mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] = \frac{1}{\mu}\left(\boldsymbol{x}_t + \sigma^2 \nabla_{\boldsymbol{x}_t} \log q(\boldsymbol{x}_t)\right)$$
+
+在DDPM中，$\mu = \bar{\alpha}_t$，$\sigma = \bar{\beta}_t$，因此：
+$$\mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] = \frac{1}{\bar{\alpha}_t}\left(\boldsymbol{x}_t + \bar{\beta}_t^2 \nabla_{\boldsymbol{x}_t} \log q(\boldsymbol{x}_t)\right)$$
+
+另一方面，从$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$可得：
+$$\nabla_{\boldsymbol{x}_t} \log q(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t^2} = -\frac{\boldsymbol{\varepsilon}}{\bar{\beta}_t}$$
+
+因此噪声估计等价于score估计：
+$$\boldsymbol{\varepsilon} = -\bar{\beta}_t \nabla_{\boldsymbol{x}_t} \log q(\boldsymbol{x}_t|\boldsymbol{x}_0)$$
+
+### 七、噪声预测与数据预测的等价性
+
+**定理6：噪声预测与数据预测的等价性**
+
+在DDPM框架下，以下三种预测目标是等价的：
+1. 预测噪声$\boldsymbol{\varepsilon}$
+2. 预测原始数据$\boldsymbol{x}_0$
+3. 预测score函数$\nabla_{\boldsymbol{x}_t} \log q(\boldsymbol{x}_t)$
+
+**证明：**
+
+给定关系$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$，我们可以建立如下转换：
+
+**(1) 从噪声预测到数据预测：**
+$$\boldsymbol{x}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\varepsilon}}{\bar{\alpha}_t}$$
+
+给定噪声预测$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$，数据预测为：
+$$\hat{\boldsymbol{x}}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)}{\bar{\alpha}_t}$$
+
+**(2) 从数据预测到噪声预测：**
+$$\boldsymbol{\varepsilon} = \frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t}$$
+
+给定数据预测$\boldsymbol{\mu}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$，噪声预测为：
+$$\hat{\boldsymbol{\varepsilon}} = \frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{\mu}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)}{\bar{\beta}_t}$$
+
+**(3) score与噪声的关系：**
+
+从高斯分布的score：
+$$\nabla_{\boldsymbol{x}_t} \log q(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t^2} = -\frac{\boldsymbol{\varepsilon}}{\bar{\beta}_t}$$
+
+因此：
+$$\boldsymbol{\varepsilon} = -\bar{\beta}_t \nabla_{\boldsymbol{x}_t} \log q(\boldsymbol{x}_t|\boldsymbol{x}_0)$$
+
+**损失函数的等价性：**
+
+*噪声预测损失：*
+$$\mathcal{L}_{\boldsymbol{\varepsilon}} = \mathbb{E}\left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\|^2\right]$$
+
+*数据预测损失：*
+$$\mathcal{L}_{\boldsymbol{x}_0} = \mathbb{E}\left[\|\boldsymbol{x}_0 - \boldsymbol{\mu}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\|^2\right]$$
+
+利用转换关系$\boldsymbol{x}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\varepsilon}}{\bar{\alpha}_t}$：
+$$\mathcal{L}_{\boldsymbol{x}_0} = \mathbb{E}\left[\left\|\frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\varepsilon}}{\bar{\alpha}_t} - \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}}{\bar{\alpha}_t}\right\|^2\right]$$
+
+$$= \mathbb{E}\left[\frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}\|^2\right] = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2} \mathcal{L}_{\boldsymbol{\varepsilon}}$$
+
+这表明两种损失函数相差一个常数因子，优化一个等价于优化另一个。$\square$
+
+### 八、反向过程的完整推导
+
+现在我们推导反向采样过程$p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)$的具体形式。
+
+**策略：** 我们希望构造：
+$$p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) \approx q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$$
+
+但我们需要用$\boldsymbol{x}_t$来预测$\boldsymbol{x}_0$。
+
+**步骤1：参数化数据预测**
+
+使用神经网络$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$预测噪声，然后推导数据预测：
+$$\hat{\boldsymbol{x}}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)}{\bar{\alpha}_t}$$
+
+**步骤2：代入后验均值公式**
+
+回忆后验均值：
+$$\tilde{\boldsymbol{\mu}}_t(\boldsymbol{x}_t, \boldsymbol{x}_0) = \frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\boldsymbol{x}_t + \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\beta}_t^2}\boldsymbol{x}_0$$
+
+将$\boldsymbol{x}_0$替换为$\hat{\boldsymbol{x}}_0$：
+$$\boldsymbol{\mu}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = \frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\boldsymbol{x}_t + \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\beta}_t^2} \cdot \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}}{\bar{\alpha}_t}$$
+
+**步骤3：化简**
+
+展开第二项：
+$$\frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\beta}_t^2\bar{\alpha}_t}\boldsymbol{x}_t - \frac{\bar{\alpha}_{t-1}\beta_t^2\bar{\beta}_t}{\bar{\beta}_t^2\bar{\alpha}_t}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$$
+
+合并$\boldsymbol{x}_t$的系数：
+$$\frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2} + \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\beta}_t^2\bar{\alpha}_t} = \frac{\alpha_t\bar{\beta}_{t-1}^2\bar{\alpha}_t + \bar{\alpha}_{t-1}\beta_t^2}{\bar{\beta}_t^2\bar{\alpha}_t}$$
+
+$$= \frac{\bar{\alpha}_t^2\bar{\beta}_{t-1}^2 + \bar{\alpha}_{t-1}\beta_t^2}{\bar{\beta}_t^2\bar{\alpha}_t}$$
+
+利用$\bar{\alpha}_t = \alpha_t\bar{\alpha}_{t-1}$：
+$$= \frac{\alpha_t^2\bar{\alpha}_{t-1}^2(1-\bar{\alpha}_{t-1}^2) + \bar{\alpha}_{t-1}\beta_t^2}{\bar{\beta}_t^2\bar{\alpha}_t}$$
+
+$$= \frac{\bar{\alpha}_{t-1}[\alpha_t^2\bar{\alpha}_{t-1}(1-\bar{\alpha}_{t-1}^2) + \beta_t^2]}{\bar{\beta}_t^2\bar{\alpha}_t}$$
+
+$$= \frac{\bar{\alpha}_{t-1}[\alpha_t^2(1-\bar{\alpha}_{t-1}^2) + \beta_t^2]\bar{\alpha}_{t-1}}{\bar{\beta}_t^2\bar{\alpha}_t}$$
+
+这个计算比较复杂，我们换一个更直接的方法。
+
+**替代方法：直接化简**
+
+利用恒等式（之前已证）：
+$$\frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2} + \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\alpha}_t\bar{\beta}_t^2} = \frac{1}{\alpha_t}$$
+
+因此：
+$$\boldsymbol{\mu}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = \frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\boldsymbol{x}_t + \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\alpha}_t\bar{\beta}_t^2}(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}})$$
+
+$$= \left(\frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2} + \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\alpha}_t\bar{\beta}_t^2}\right)\boldsymbol{x}_t - \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\alpha}_t\bar{\beta}_t}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$$
+
+$$= \frac{1}{\alpha_t}\boldsymbol{x}_t - \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\alpha}_t\bar{\beta}_t}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$$
+
+利用$\bar{\alpha}_t = \alpha_t\bar{\alpha}_{t-1}$：
+$$= \frac{1}{\alpha_t}\boldsymbol{x}_t - \frac{\beta_t^2}{\alpha_t\bar{\beta}_t}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$$
+
+$$= \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\right)$$
+
+这正是DDPM论文中的采样公式！
+
+**最终反向过程：**
+$$p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) = \mathcal{N}\left(\boldsymbol{x}_{t-1}; \boldsymbol{\mu}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t), \tilde{\beta}_t^2\boldsymbol{I}\right)$$
+
+其中：
+$$\boldsymbol{\mu}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\right)$$
+
+$$\tilde{\beta}_t^2 = \frac{\beta_t^2\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}$$
+
+### 九、条件期望的计算
+
+在去噪过程中，我们需要计算条件期望$\mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t]$。这里我们给出详细的计算。
+
+**设定：** $\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$，其中$\boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。
+
+**直接计算（使用高斯条件分布）：**
+
+联合分布$[\boldsymbol{x}_0, \boldsymbol{x}_t]$是高斯的。假设$\boldsymbol{x}_0 \sim p_{\text{data}}(\boldsymbol{x}_0)$，则：
+$$\boldsymbol{x}_t|\boldsymbol{x}_0 \sim \mathcal{N}(\bar{\alpha}_t\boldsymbol{x}_0, \bar{\beta}_t^2\boldsymbol{I})$$
+
+对于高斯分布，条件期望是线性的：
+$$\mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] = \boldsymbol{x}_0^* = \arg\min_{\boldsymbol{x}_0} \mathbb{E}[\|\boldsymbol{x}_0 - \boldsymbol{x}_0^*\|^2|\boldsymbol{x}_t]$$
+
+利用正交投影原理，最优估计满足：
+$$\mathbb{E}[(\boldsymbol{x}_0 - \boldsymbol{x}_0^*)|\boldsymbol{x}_t] = \boldsymbol{0}$$
+
+从$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$，我们知道：
+$$\mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t] = \frac{1}{\bar{\alpha}_t}\mathbb{E}[\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\varepsilon}|\boldsymbol{x}_t]$$
+
+$$= \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t\mathbb{E}[\boldsymbol{\varepsilon}|\boldsymbol{x}_t])$$
+
+关键是计算$\mathbb{E}[\boldsymbol{\varepsilon}|\boldsymbol{x}_t]$。根据贝叶斯定理：
+$$p(\boldsymbol{\varepsilon}|\boldsymbol{x}_t) \propto p(\boldsymbol{x}_t|\boldsymbol{\varepsilon})p(\boldsymbol{\varepsilon})$$
+
+由于$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$，给定$\boldsymbol{\varepsilon}$和数据分布$p_{\text{data}}(\boldsymbol{x}_0)$，有：
+$$p(\boldsymbol{x}_t|\boldsymbol{\varepsilon}) = \int p(\boldsymbol{x}_t|\boldsymbol{x}_0, \boldsymbol{\varepsilon})p_{\text{data}}(\boldsymbol{x}_0)d\boldsymbol{x}_0$$
+
+$$= \int \delta(\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0 - \bar{\beta}_t\boldsymbol{\varepsilon})p_{\text{data}}(\boldsymbol{x}_0)d\boldsymbol{x}_0$$
+
+$$= p_{\text{data}}\left(\frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\varepsilon}}{\bar{\alpha}_t}\right) \cdot \frac{1}{\bar{\alpha}_t^d}$$
+
+这依赖于数据分布，一般无闭式解，需要神经网络$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$来近似。
+
+**结论：** 在实践中，我们训练神经网络来直接预测$\mathbb{E}[\boldsymbol{\varepsilon}|\boldsymbol{x}_t] \approx \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$。
+
+### 十、数值稳定性考虑
+
+在实现DDPM时，有几个数值稳定性的问题需要注意。
+
+**问题1：$\bar{\alpha}_t$的数值下溢**
+
+当$t$很大时，$\bar{\alpha}_t = \prod_{i=1}^t \alpha_i$可能变得非常小，导致数值下溢。
+
+**解决方案：** 在对数空间计算：
+$$\log \bar{\alpha}_t = \sum_{i=1}^t \log \alpha_i$$
+
+然后使用$\bar{\alpha}_t = \exp(\log \bar{\alpha}_t)$。
+
+**问题2：除法的数值不稳定**
+
+在计算$\hat{\boldsymbol{x}}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}}{\bar{\alpha}_t}$时，当$\bar{\alpha}_t$很小时可能不稳定。
+
+**解决方案：** 使用clipping或添加小的epsilon：
+$$\hat{\boldsymbol{x}}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}}{\max(\bar{\alpha}_t, \epsilon)}$$
+
+或者对$\hat{\boldsymbol{x}}_0$进行clip：
+$$\hat{\boldsymbol{x}}_0 = \text{clip}(\hat{\boldsymbol{x}}_0, -1, 1)$$
+
+**问题3：方差调度的选择**
+
+方差$\tilde{\beta}_t^2 = \frac{\beta_t^2\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}$在$t=1$时可能变为0，导致采样退化。
+
+**解决方案：** 使用下界：
+$$\tilde{\beta}_t^2 = \max\left(\frac{\beta_t^2\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}, \beta_{\min}^2\right)$$
+
+或者使用线性插值：
+$$\tilde{\beta}_t^2 = \eta \cdot \frac{\beta_t^2\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2} + (1-\eta)\beta_t^2$$
+
+其中$\eta \in [0, 1]$是超参数。
+
+### 十一、理论总结与多角度解释
+
+**从贝叶斯推断的角度：**
+
+DDPM的核心是贝叶斯后验推断。给定观测$\boldsymbol{x}_t$（噪声数据）和先验知识$\boldsymbol{x}_0$（干净数据的条件分布），我们通过贝叶斯公式计算后验分布$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$。由于所有分布都是高斯的，后验也是高斯的，且可以解析计算。
+
+**从统计学的角度：**
+
+DDPM实际上是在解决一个序列的去噪问题。每一步$t$，我们观测到带噪声的数据$\boldsymbol{x}_t$，目标是估计前一时刻的状态$\boldsymbol{x}_{t-1}$。最优估计器是条件期望$\mathbb{E}[\boldsymbol{x}_{t-1}|\boldsymbol{x}_t]$，它最小化均方误差。
+
+**从概率论的角度：**
+
+前向过程定义了一个马尔可夫链，将数据分布逐渐转化为标准高斯分布。反向过程是该马尔可夫链的逆过程，但由于我们不知道数据的边缘分布，无法直接计算逆转移概率。通过引入$\boldsymbol{x}_0$作为条件，我们可以计算$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$，然后用神经网络预测$\boldsymbol{x}_0$来近似$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)$。
+
+**关键见解：**
+
+1. **高斯性的保持**：整个推导依赖于高斯分布在线性变换下的封闭性。
+2. **马尔可夫性**：前向过程的马尔可夫性简化了后验计算。
+3. **预测-校正**：通过预测$\boldsymbol{x}_0$来校正当前步的预测，体现了数值算法中的预测-校正思想。
+4. **score匹配的联系**：噪声预测等价于score匹配，将生成模型与能量模型统一起来。
+
+### 十二、附录：重要公式汇总
+
+**前向过程：**
+$$q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) = \mathcal{N}(\boldsymbol{x}_t; \alpha_t\boldsymbol{x}_{t-1}, \beta_t^2\boldsymbol{I})$$
+$$q(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t\boldsymbol{x}_0, \bar{\beta}_t^2\boldsymbol{I})$$
+
+**后验分布：**
+$$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \mathcal{N}\left(\boldsymbol{x}_{t-1}; \tilde{\boldsymbol{\mu}}_t, \tilde{\beta}_t^2\boldsymbol{I}\right)$$
+$$\tilde{\boldsymbol{\mu}}_t = \frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\boldsymbol{x}_t + \frac{\bar{\alpha}_{t-1}\beta_t^2}{\bar{\beta}_t^2}\boldsymbol{x}_0$$
+$$\tilde{\beta}_t^2 = \frac{\beta_t^2\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}$$
+
+**反向过程（采样）：**
+$$p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) = \mathcal{N}\left(\boldsymbol{x}_{t-1}; \boldsymbol{\mu}_{\boldsymbol{\theta}}, \tilde{\beta}_t^2\boldsymbol{I}\right)$$
+$$\boldsymbol{\mu}_{\boldsymbol{\theta}} = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\right)$$
+
+**预测关系：**
+$$\hat{\boldsymbol{x}}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}}{\bar{\alpha}_t}$$
+$$\boldsymbol{\epsilon}_{\boldsymbol{\theta}} = \frac{\boldsymbol{x}_t - \bar{\alpha}_t\hat{\boldsymbol{x}}_0}{\bar{\beta}_t}$$
+
+**训练损失：**
+$$\mathcal{L}_{\text{simple}} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}}\left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\|^2\right]$$
+
+其中$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$。
 

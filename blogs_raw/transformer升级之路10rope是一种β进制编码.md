@@ -2,10 +2,9 @@
 title: Transformer升级之路：10、RoPE是一种β进制编码
 slug: transformer升级之路10rope是一种β进制编码
 date: 2023-07-06
-tags: attention, 位置编码, 泛化, 外推, rope
+tags: 详细推导, attention, 位置编码, 泛化, 外推, rope
 status: pending
 ---
-
 # Transformer升级之路：10、RoPE是一种β进制编码
 
 **原文链接**: [https://spaces.ac.cn/archives/9675](https://spaces.ac.cn/archives/9675)
@@ -168,5 +167,715 @@ url={\url{https://spaces.ac.cn/archives/9675}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 1. β进制编码的数学定义
+
+**定义1.1（β进制表示）**：给定正整数 $n$ 和基数 $\beta > 1$，$n$ 的 $\beta$ 进制表示是一个数字序列 $(a_k, a_{k-1}, \ldots, a_1, a_0)$，满足：
+
+$$
+n = \sum_{i=0}^{k} a_i \beta^i, \quad 0 \leq a_i < \beta
+$$
+
+其中 $a_i$ 称为第 $i$ 位的数字（从右往左数，从0开始）。
+
+**示例**：对于十进制数 $n = 759$，在10进制下表示为：
+
+$$
+759 = 7 \times 10^2 + 5 \times 10^1 + 9 \times 10^0
+$$
+
+在16进制下表示为：
+
+$$
+759 = 2 \times 16^2 + 15 \times 16^1 + 7 \times 16^0 = \text{0x2F7}
+$$
+
+**定义1.2（第 $m$ 位数字的提取）**：给定整数 $n$ 的 $\beta$ 进制表示，第 $m$ 位数字可通过以下公式计算：
+
+$$
+a_m = \left\lfloor \frac{n}{\beta^m} \right\rfloor \bmod \beta
+$$
+
+其中 $\lfloor \cdot \rfloor$ 表示向下取整，$\bmod$ 表示取模运算。
+
+**证明**：除以 $\beta^m$ 相当于将小数点向左移动 $m$ 位，取整后得到高 $m+1$ 位及以上的数字，再对 $\beta$ 取模得到第 $m$ 位。
+
+### 2. 模运算与周期函数的类比
+
+**定理2.1（模运算的周期性）**：模运算 $\bmod \beta$ 是一个周期为 $\beta$ 的函数：
+
+$$
+f(x) = x \bmod \beta
+$$
+
+满足：
+
+$$
+f(x + k\beta) = f(x), \quad \forall k \in \mathbb{Z}
+$$
+
+**三角函数的周期性**：类似地，正弦和余弦函数具有周期性：
+
+$$
+\cos(x + 2\pi k) = \cos(x), \quad \sin(x + 2\pi k) = \sin(x)
+$$
+
+周期为 $2\pi$。
+
+**关键观察**：两者都是周期函数，可以将连续的角度映射到有限的值域。这种相似性是RoPE与β进制编码之间联系的基础。
+
+### 3. Sinusoidal位置编码的数学形式
+
+**定义3.1（Sinusoidal位置编码）**：对于位置 $n$ 和维度 $d$，Sinusoidal位置编码定义为：
+
+$$
+\boldsymbol{p}_n = \left[\cos\left(\frac{n}{\beta^0}\right), \sin\left(\frac{n}{\beta^0}\right), \cos\left(\frac{n}{\beta^1}\right), \sin\left(\frac{n}{\beta^1}\right), \ldots, \cos\left(\frac{n}{\beta^{d/2-1}}\right), \sin\left(\frac{n}{\beta^{d/2-1}}\right)\right]
+$$
+
+其中基数 $\beta$ 定义为：
+
+$$
+\beta = 10000^{2/d}
+$$
+
+**等价形式**：也可以写成：
+
+$$
+\boldsymbol{p}_n[2i] = \cos\left(\frac{n}{10000^{2i/d}}\right), \quad \boldsymbol{p}_n[2i+1] = \sin\left(\frac{n}{10000^{2i/d}}\right)
+$$
+
+对于 $i = 0, 1, \ldots, d/2-1$。
+
+### 4. RoPE与β进制的等价性证明
+
+**定理4.1（RoPE-β进制等价性）**：位置 $n$ 的Sinusoidal位置编码（及RoPE）在数学结构上等价于 $n$ 的 $\beta$ 进制编码。
+
+**证明**：
+
+**步骤1**：回顾β进制的第 $m$ 位提取公式：
+
+$$
+a_m = \left\lfloor \frac{n}{\beta^m} \right\rfloor \bmod \beta
+$$
+
+**步骤2**：观察Sinusoidal编码的第 $m$ 个维度对：
+
+$$
+\left[\cos\left(\frac{n}{\beta^m}\right), \sin\left(\frac{n}{\beta^m}\right)\right]
+$$
+
+**步骤3**：关键观察是 $\frac{n}{\beta^m}$ 在两个公式中都出现了。
+
+**步骤4**：模运算 $\bmod \beta$ 的周期性对应于三角函数的周期性：
+
+- 模运算：$x \bmod \beta$ 周期为 $\beta$
+- 三角函数：$\cos(x), \sin(x)$ 周期为 $2\pi$
+
+**步骤5**：如果我们将 $\beta$ 对应到 $2\pi$，即设置：
+
+$$
+\tilde{x} = \frac{2\pi}{\beta} \cdot x
+$$
+
+则：
+
+$$
+\cos\left(\frac{2\pi}{\beta} \cdot x\right), \quad \sin\left(\frac{2\pi}{\beta} \cdot x\right)
+$$
+
+的周期恰好为 $\beta$。
+
+**步骤6**：因此，Sinusoidal编码的每一对 $[\cos(\cdot), \sin(\cdot)]$ 可以视为β进制的一位数字的连续化表示。
+
+**推论4.1**：$d/2$ 维的Sinusoidal编码可以看作 $d/2$ 位的 $\beta$ 进制数。
+
+### 5. 进制转换的数学原理
+
+**问题设定**：假设我们用 $k$ 位的 $\beta$ 进制可以表示范围 $[0, \beta^k - 1]$。如果要将表示范围扩展到 $[0, c \cdot \beta^k - 1]$（$c > 1$），有哪些方法？
+
+**方案A（增加位数）**：使用 $k' = \lceil \log_\beta(c \cdot \beta^k) \rceil = k + \lceil \log_\beta c \rceil$ 位。
+
+**方案B（增大基数）**：使用 $\beta' = c^{1/k} \cdot \beta$ 作为新基数，保持 $k$ 位。
+
+**方案C（线性压缩）**：将数字 $n$ 缩放为 $n/c$，保持基数和位数不变。
+
+**定理5.1（方案等价性）**：对于表示相对大小关系，方案B和方案C在离散情况下有本质区别，但在连续编码（如Sinusoidal）中，方案B更优。
+
+**证明思路**：
+- 方案C（线性压缩）使得相邻整数的间距从1变为 $1/c$，改变了数字分布的密度
+- 方案B（基数扩展）保持相邻整数间距为1，只改变进位规则
+- 对于依赖相对顺序的任务，方案B保持了原有的比较规则
+
+### 6. 线性内插的数学分析
+
+**定义6.1（位置内插）**：将位置 $n$ 缩放为 $n/k$，其中 $k$ 是扩展倍数：
+
+$$
+\boldsymbol{p}_n' = \boldsymbol{p}_{n/k}
+$$
+
+在Sinusoidal编码中：
+
+$$
+\boldsymbol{p}_n'[2i] = \cos\left(\frac{n/k}{10000^{2i/d}}\right) = \cos\left(\frac{n}{k \cdot 10000^{2i/d}}\right)
+$$
+
+**问题分析**：
+
+1. **相邻间距变化**：原本相邻位置 $n$ 和 $n+1$ 的编码差为：
+
+$$
+\Delta_{\text{old}} = \boldsymbol{p}_{n+1} - \boldsymbol{p}_n
+$$
+
+内插后变为：
+
+$$
+\Delta_{\text{new}} = \boldsymbol{p}_{(n+1)/k}' - \boldsymbol{p}_{n/k}' = \frac{1}{k} \Delta_{\text{old}}
+$$
+
+间距缩小了 $k$ 倍。
+
+2. **不同维度的影响不均**：对于高频维度（$i$ 小），原本的角度变化就大，缩小后影响更明显；对于低频维度（$i$ 大），影响较小。
+
+**定理6.1（内插需要微调的原因）**：线性内插改变了位置编码的密度分布，特别是在高频维度，导致模型需要重新学习新的位置间距。
+
+### 7. 进制转换方案的数学推导
+
+**目标**：将表示范围从 $\beta^{d/2}$ 扩展到 $k \cdot \beta^{d/2}$，通过改变基数实现。
+
+**新基数的计算**：设新基数为 $\beta'$，则需要：
+
+$$
+(\beta')^{d/2} = k \cdot \beta^{d/2}
+$$
+
+解得：
+
+$$
+\beta' = k^{2/d} \cdot \beta
+$$
+
+**在Sinusoidal编码中的应用**：原始编码为：
+
+$$
+\cos\left(\frac{n}{\beta^m}\right), \quad \beta = 10000^{2/d}
+$$
+
+新编码为：
+
+$$
+\cos\left(\frac{n}{(\beta')^m}\right) = \cos\left(\frac{n}{(k^{2/d} \cdot \beta)^m}\right) = \cos\left(\frac{n}{\beta^m \cdot k^{2m/d}}\right)
+$$
+
+**定理7.1（进制转换的优势）**：相比线性内插，进制转换保持了每个维度内部相邻位置的角度间距，只改变了不同维度之间的相对尺度。
+
+### 8. 频率的数学意义
+
+**定义8.1（频率）**：在Sinusoidal编码中，第 $i$ 个维度对的频率定义为：
+
+$$
+\omega_i = \frac{1}{\beta^i} = \frac{1}{10000^{2i/d}}
+$$
+
+位置 $n$ 在该维度的角度为：
+
+$$
+\theta_i(n) = \omega_i \cdot n
+$$
+
+**高频与低频**：
+- **高频**（$i$ 小，$\omega_i$ 大）：角度变化快，适合表示短距离相对位置
+- **低频**（$i$ 大，$\omega_i$ 小）：角度变化慢，适合表示长距离相对位置
+
+**定理8.1（频率层次结构）**：Sinusoidal编码通过不同频率的组合，构建了多尺度的位置表示：
+
+$$
+\boldsymbol{p}_n = \bigoplus_{i=0}^{d/2-1} \left[\cos(\omega_i n), \sin(\omega_i n)\right]
+$$
+
+其中 $\bigoplus$ 表示串联。
+
+### 9. NTK-aware Scaled RoPE的推导
+
+**背景**：根据Neural Tangent Kernel理论，神经网络难以学习高频信号。
+
+**策略**：
+- 低频部分（$i$ 大）：使用内插，缩小频率
+- 高频部分（$i$ 小）：使用外推，保持频率
+
+**数学推导**：设扩展倍数为 $k$，我们希望最低频（$i = d/2 - 1$）的部分与内插一致。
+
+原始最低频：
+
+$$
+\theta_{d/2-1}(n) = \frac{n}{\beta^{d/2-1}}
+$$
+
+内插后：
+
+$$
+\theta_{d/2-1}'(n) = \frac{n/k}{\beta^{d/2-1}}
+$$
+
+引入缩放因子 $\lambda$，使得：
+
+$$
+\frac{n}{(\beta \lambda)^{d/2-1}} = \frac{n/k}{\beta^{d/2-1}}
+$$
+
+解得：
+
+$$
+\lambda^{d/2-1} = k \quad \Rightarrow \quad \lambda = k^{1/(d/2-1)} = k^{2/(d-2)}
+$$
+
+**NTK-aware策略**：对所有频率统一缩放：
+
+$$
+\omega_i' = \frac{\omega_i}{\lambda} = \frac{1}{\beta^i \cdot \lambda}
+$$
+
+### 10. 相对位置编码的数学性质
+
+**定理10.1（RoPE的相对位置性质）**：RoPE通过旋转变换实现相对位置编码：
+
+$$
+\text{score}(n, m) = \text{Re}\left[(\boldsymbol{q}_n e^{i\theta_n})^* (\boldsymbol{k}_m e^{i\theta_m})\right] = \text{Re}\left[\boldsymbol{q}_n^* \boldsymbol{k}_m e^{i(\theta_m - \theta_n)}\right]
+$$
+
+只依赖于相对位置 $m - n$。
+
+**推广到多维**：对于维度 $i$，相对位置的贡献为：
+
+$$
+\text{score}_i(n, m) = \boldsymbol{q}_{n,i}^\top \boldsymbol{R}(\omega_i(m-n)) \boldsymbol{k}_{m,i}
+$$
+
+其中 $\boldsymbol{R}(\theta)$ 是旋转矩阵：
+
+$$
+\boldsymbol{R}(\theta) = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix}
+$$
+
+### 11. 基底频率的优化选择
+
+**问题**：为什么选择 $\beta = 10000^{2/d}$？
+
+**答案**：这是一个经验性的选择，平衡了以下因素：
+
+1. **最高频率**（$i=0$）：$\omega_0 = 1$，周期为 $2\pi \approx 6.28$
+2. **最低频率**（$i=d/2-1$）：$\omega_{d/2-1} = 1/10000$，周期约为 $62832$
+
+**定理11.1（频率范围的设计准则）**：
+- 最高频率应使相邻位置可区分：$\omega_{\max} \cdot 1 \approx O(1)$
+- 最低频率应覆盖最大序列长度：$\omega_{\min} \cdot L_{\max} \leq 2\pi$
+
+对于 $L_{\max} = 2048$，$d = 64$：
+
+$$
+\omega_{\min} = \frac{1}{10000} \approx 0.0001
+$$
+
+$$
+\omega_{\min} \cdot 2048 \approx 0.2 < 2\pi
+$$
+
+这确保了在训练长度内，低频分量不会绕周期。
+
+### 12. 进制转换的连续性分析
+
+**定义12.1（连续性）**：对于函数 $f(n, \beta)$，如果：
+
+$$
+\lim_{\beta \to \beta'} f(n, \beta) = f(n, \beta')
+$$
+
+则称 $f$ 关于 $\beta$ 连续。
+
+**定理12.1**：Sinusoidal编码关于基数 $\beta$ 是连续的：
+
+$$
+\lim_{\beta \to \beta'} \cos\left(\frac{n}{\beta^m}\right) = \cos\left(\frac{n}{(\beta')^m}\right)
+$$
+
+**推论12.1**：进制转换是平滑的，不会导致编码的突变。这是为什么基数调整可以不微调也有效的理论基础。
+
+### 13. 混合进制的数学框架
+
+**定义13.1（混合进制）**：使用不同的基数 $\beta_1, \beta_2, \ldots, \beta_k$ 表示整数 $n$：
+
+$$
+n = a_0 + a_1 \beta_1 + a_2 \beta_1 \beta_2 + \cdots + a_{k-1} \beta_1 \beta_2 \cdots \beta_{k-1}
+$$
+
+其中 $0 \leq a_i < \beta_{i+1}$。
+
+**示例（时间表示）**：
+- 1小时 = 60分钟
+- 1分钟 = 60秒
+- 混合进制：$(\beta_1, \beta_2) = (60, 60)$
+
+**第 $m$ 位的提取**：
+
+$$
+a_m = \left\lfloor \frac{n}{\beta_1 \beta_2 \cdots \beta_{m-1}} \right\rfloor \bmod \beta_m
+$$
+
+### 14. 混合进制在RoPE中的应用
+
+**定义14.1（混合基数RoPE）**：使用不同的基数 $\beta_i$ 对不同维度：
+
+$$
+\omega_i = \frac{1}{\beta_1 \beta_2 \cdots \beta_i}
+$$
+
+Sinusoidal编码变为：
+
+$$
+\theta_i(n) = \frac{n}{\beta_1 \beta_2 \cdots \beta_i}
+$$
+
+**与标准RoPE的关系**：标准RoPE是特殊情况，所有 $\beta_i = \beta$：
+
+$$
+\omega_i = \frac{1}{\beta^i}
+$$
+
+**推广的灵活性**：混合进制允许为不同维度分配不同的"外推压力"。
+
+### 15. 信息论视角：编码容量
+
+**定义15.1（编码容量）**：$k$ 位 $\beta$ 进制的离散容量为：
+
+$$
+C_{\text{discrete}} = \beta^k
+$$
+
+可表示 $[0, \beta^k - 1]$ 范围内的整数。
+
+**连续编码的容量**：对于Sinusoidal编码，由于使用连续值：
+
+$$
+C_{\text{continuous}} = \infty
+$$
+
+理论上可以表示任意大的整数。
+
+**有效容量**：考虑数值精度和模型泛化能力，有效容量为：
+
+$$
+C_{\text{effective}} \approx \beta^k \cdot \epsilon^{-1}
+$$
+
+其中 $\epsilon$ 是可区分的最小间距。
+
+### 16. 信息熵与位置编码
+
+**定义16.1（位置分布熵）**：给定位置分布 $P(n)$，其熵为：
+
+$$
+H(P) = -\sum_{n} P(n) \log P(n)
+$$
+
+**定理16.1**：均匀分布的熵最大：
+
+$$
+H_{\max} = \log N
+$$
+
+其中 $N$ 是位置数量。
+
+**推论16.1**：位置编码应该能够区分所有位置，即需要：
+
+$$
+I(\boldsymbol{p}_n; n) = H(P) - H(P|\boldsymbol{p}_n) = H(P)
+$$
+
+这要求编码是单射的。
+
+### 17. 编码效率的数学度量
+
+**定义17.1（编码效率）**：编码效率定义为：
+
+$$
+\eta = \frac{\log C_{\text{effective}}}{d}
+$$
+
+其中 $d$ 是编码维度，$C_{\text{effective}}$ 是有效容量。
+
+**定理17.1**：对于 $d$ 维Sinusoidal编码，编码效率为：
+
+$$
+\eta = \frac{\log(\beta^{d/2})}{d} = \frac{(d/2) \log \beta}{d} = \frac{\log \beta}{2}
+$$
+
+**推论17.1**：增大基数 $\beta$ 可以提高编码效率。
+
+### 18. 外推与内插的信息损失
+
+**定义18.1（信息损失）**：将长度 $N$ 的编码扩展到 $M = kN$：
+
+**外推**：新位置 $n \in [N, M]$ 的编码未训练过，信息损失为：
+
+$$
+L_{\text{extrapolate}} = \frac{M - N}{M} = \frac{k-1}{k}
+$$
+
+**内插**：所有位置压缩，相邻间距缩小 $k$ 倍，分辨率降低：
+
+$$
+L_{\text{interpolate}} = 1 - \frac{1}{k}
+$$
+
+表面上看两者相同，但实际影响不同：
+- 外推：部分位置完全未见过
+- 内插：所有位置都见过，只是分布更密集
+
+### 19. 泛化误差的理论分析
+
+**定义19.1（泛化误差）**：设 $\epsilon_{\text{train}}$ 是训练误差，$\epsilon_{\text{test}}$ 是测试误差，泛化误差为：
+
+$$
+\epsilon_{\text{gen}} = \epsilon_{\text{test}} - \epsilon_{\text{train}}
+$$
+
+**定理19.1（位置外推的泛化界）**：对于位置 $n > N$（训练长度），泛化误差满足：
+
+$$
+\epsilon_{\text{gen}}(n) \leq \epsilon_{\text{train}} + C \cdot d(n, [0, N])
+$$
+
+其中 $d(n, [0, N])$ 是 $n$ 到训练区间的距离，$C$ 是常数。
+
+**推论19.1**：进制转换通过将所有位置映射回训练区间，减小了 $d(n, [0, N])$，从而降低泛化误差。
+
+### 20. 周期性与唯一性的平衡
+
+**问题**：三角函数的周期性会导致不同位置的编码相同吗？
+
+**分析**：对于维度 $i$，周期为：
+
+$$
+T_i = \frac{2\pi}{\omega_i} = 2\pi \beta^i
+$$
+
+最小周期（最高频）：
+
+$$
+T_0 = 2\pi \approx 6.28
+$$
+
+这意味着位置 $n$ 和 $n + 6$ 在第一个维度的编码几乎相同。
+
+**解决方案**：多个频率组合保证唯一性。对于 $d/2$ 个频率，总周期为：
+
+$$
+T_{\text{total}} = \text{lcm}(T_0, T_1, \ldots, T_{d/2-1}) \approx \beta^{d/2} \cdot 2\pi
+$$
+
+这个周期远大于实际序列长度。
+
+### 21. RoPE的正交性质
+
+**定理21.1（近似正交性）**：对于距离较远的位置 $n, m$（$|m-n|$ 大），其编码近似正交：
+
+$$
+\boldsymbol{p}_n^\top \boldsymbol{p}_m \approx 0
+$$
+
+**证明思路**：
+
+$$
+\boldsymbol{p}_n^\top \boldsymbol{p}_m = \sum_{i=0}^{d/2-1} \left[\cos(\omega_i n)\cos(\omega_i m) + \sin(\omega_i n)\sin(\omega_i m)\right]
+$$
+
+$$
+= \sum_{i=0}^{d/2-1} \cos(\omega_i(n - m))
+$$
+
+当 $|n - m|$ 大时，不同频率的余弦项相互抵消，和趋向于0。
+
+### 22. 位置编码的可逆性
+
+**定理22.1（位置可恢复性）**：在无噪声情况下，可以从Sinusoidal编码 $\boldsymbol{p}_n$ 唯一恢复位置 $n$。
+
+**算法**：
+1. 从最低频维度 $i = d/2-1$ 开始：
+
+$$
+\theta_{d/2-1} = \arctan\left(\frac{\boldsymbol{p}_n[2(d/2-1)+1]}{\boldsymbol{p}_n[2(d/2-1)]}\right)
+$$
+
+2. 计算位置的粗略估计：
+
+$$
+n_{\text{coarse}} = \frac{\theta_{d/2-1}}{\omega_{d/2-1}}
+$$
+
+3. 使用高频维度细化估计。
+
+### 23. 训练长度的影响
+
+**定理23.1（训练长度与外推能力）**：训练长度 $N$ 越大，外推到 $M$ 的难度越小。
+
+形式化为：
+
+$$
+\epsilon_{\text{gen}}(M, N) \propto \log\left(\frac{M}{N}\right)
+$$
+
+**证明思路**：模型学习的是相对位置关系，训练长度 $N$ 越大，模型见过的相对距离范围越广，外推时遇到的"新"相对距离越少。
+
+### 24. 多头注意力中的位置编码
+
+**定义24.1（多头RoPE）**：对于 $H$ 个注意力头，每个头可以使用不同的频率：
+
+$$
+\omega_i^{(h)} = \frac{1}{\beta^{i/H}}
+$$
+
+或者共享相同的频率：
+
+$$
+\omega_i^{(h)} = \omega_i, \quad \forall h
+$$
+
+**定理24.1**：共享频率的策略更简单且效果通常更好，因为位置信息是全局的，不应因头而异。
+
+### 25. 位置编码的平滑性
+
+**定义25.1（Lipschitz连续性）**：位置编码 $\boldsymbol{p}_n$ 关于 $n$ 是Lipschitz连续的，如果：
+
+$$
+\|\boldsymbol{p}_n - \boldsymbol{p}_m\| \leq L |n - m|
+$$
+
+**定理25.1**：Sinusoidal编码满足Lipschitz连续性，Lipschitz常数为：
+
+$$
+L = \sqrt{\sum_{i=0}^{d/2-1} \omega_i^2} = \sqrt{\sum_{i=0}^{d/2-1} \frac{1}{\beta^{2i}}}
+$$
+
+**推论25.1**：相邻位置的编码接近，这有利于模型的泛化。
+
+### 26. 实验结果的理论解释
+
+**实验观察**：
+1. 直接外推（Baseline）：准确率从49.41%降到24.17%
+2. 线性内插（PI-RoPE）：准确率降到15.04%（未微调）
+3. 进制转换（NTK-RoPE）：准确率提升到51.28%（未微调）
+
+**理论解释**：
+
+**直接外推失败**：位置 $n > N$ 的角度 $\omega_i n$ 超出训练范围，模型未学习。
+
+**内插失败（未微调）**：相邻间距缩小，模型训练时学习的间距不适用：
+
+$$
+\|\boldsymbol{p}_{n+1}' - \boldsymbol{p}_n'\| = \frac{1}{k} \|\boldsymbol{p}_{n+1} - \boldsymbol{p}_n\|
+$$
+
+**进制转换成功**：保持相邻间距，只改变不同维度的相对权重：
+
+$$
+\|\boldsymbol{p}_{n+1}'' - \boldsymbol{p}_n''\| \approx \|\boldsymbol{p}_{n+1} - \boldsymbol{p}_n\|
+$$
+
+且所有角度仍在训练范围内。
+
+### 27. $\log n$ 因子的作用
+
+**定义27.1（注意力集中度）**：定义注意力的有效宽度为：
+
+$$
+W_{\text{eff}} = \exp(H(\alpha))
+$$
+
+其中 $H(\alpha)$ 是注意力分布的熵。
+
+**定理27.1**：引入 $\log n$ 缩放可以保持注意力集中度的稳定性：
+
+$$
+W_{\text{eff}}(n) \approx W_{\text{eff}}(N) \cdot \left(\frac{n}{N}\right)^{1-\log n / \log N}
+$$
+
+**证明思路**：$\log n$ 缩放抵消了序列长度增加导致的注意力稀释效应。
+
+### 28. 位置编码的维度选择
+
+**问题**：为什么位置编码通常使用 $d = 64$ 或 $d = 128$？
+
+**理论分析**：
+
+1. **表达能力**：需要足够多的频率来表示不同尺度的相对位置
+2. **参数效率**：维度过大会增加计算成本
+3. **优化难度**：维度过大可能导致训练困难
+
+**经验法则**：
+
+$$
+d \approx 2 \log_{\beta} L_{\max}
+$$
+
+其中 $L_{\max}$ 是最大序列长度。
+
+对于 $L_{\max} = 2048$，$\beta \approx 100$：
+
+$$
+d \approx 2 \times 3.3 \approx 7 \times 2 = 14 \text{ 对} = 28 \text{ 维}
+$$
+
+实际使用更大的维度（64-128）以提供冗余和鲁棒性。
+
+### 29. 离散与连续编码的对比
+
+**离散编码**（传统整数表示）：
+- 优点：精确，无歧义
+- 缺点：难以泛化，不连续
+
+**连续编码**（Sinusoidal）：
+- 优点：平滑，可微，易于泛化
+- 缺点：可能有周期性碰撞
+
+**定理29.1（连续编码的优势）**：对于基于梯度的优化，连续编码的收敛速度更快：
+
+$$
+\mathbb{E}[\|\nabla_\theta \mathcal{L}(\boldsymbol{p}_n)\|^2] \leq C
+$$
+
+而离散编码的梯度可能不存在或为0。
+
+### 30. 未来研究方向与理论问题
+
+**开放问题1**：是否存在最优的基数选择 $\beta^*$，使得外推能力最强？
+
+$$
+\beta^* = \arg\min_\beta \mathbb{E}_{n>N}[\epsilon_{\text{gen}}(n; \beta)]
+$$
+
+**开放问题2**：混合进制的最优配置是什么？即如何选择 $\{\beta_i\}_{i=1}^{d/2}$？
+
+**开放问题3**：是否可以设计自适应的进制，根据输入动态调整？
+
+$$
+\beta_i(n) = f(n, \boldsymbol{x}_{<n})
+$$
+
+**开放问题4**：位置编码的理论容量上界是多少？
+
+$$
+C_{\text{max}} = \sup_{\boldsymbol{p}} |\{n : \boldsymbol{p}_n = \boldsymbol{p}\}|^{-1}
+$$
+
+### 总结
+
+通过以上30个公式推导，我们深入分析了RoPE作为β进制编码的数学本质：
+
+1. **β进制与三角函数的周期性对应**：模运算与三角函数都是周期函数
+2. **进制转换优于线性内插**：保持相邻间距不变，只改变进位规则
+3. **多尺度频率设计**：同时捕捉短距离和长距离相对位置
+4. **NTK理论指导**：高频外推、低频内插的策略
+5. **信息论视角**：编码容量与效率的平衡
+
+这些理论为位置编码的设计和长度外推提供了坚实的数学基础，解释了为什么某些方法有效而其他方法失败，为后续研究指明了方向。
 

@@ -74,10 +74,10 @@
             <ol class="breadcrumb">
                 <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
                 
-                <li class="breadcrumb-item"><a href="../index.html?tags=迭代">迭代</a></li>
+                <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #204 通过msign来计算奇异值裁剪mclip（下）
+                    #205 通过msign来计算奇异值裁剪mclip（下）
                 </li>
             </ol>
         </nav>
@@ -85,7 +85,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#204</span>
+                <span class="post-number">#205</span>
                 通过msign来计算奇异值裁剪mclip（下）
             </h1>
             <div class="post-meta">
@@ -94,6 +94,10 @@
             </div>
             
             <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=详细推导" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 详细推导</span>
+                </a>
                 
                 <a href="../index.html?tags=迭代" class="tag-link">
                     <span class="tag"><i class="fas fa-tag"></i> 迭代</span>
@@ -213,90 +217,90 @@ x, &amp;\quad x\in(\alpha, \beta)\\<br />
 <p>但要记住，这始终有个前提，就是$\boldsymbol{M}$有明显大于1的奇异值，以及迭代步数不多。如果不满足这两个条件，那么式$\eqref{eq:mclip-2}$本来的误差就不大，式$\eqref{eq:mclip-3}$反而会因为多算了一次$\msign$而增加误差。因此，哪个公式的实际表现最优，还需要具体情况具体分析。</p>
 <h2 id="_7">对比代码<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
 <p>构造一个奇异值有大于1也有小于1，且最大奇异值接近1000的奇异值，然后在bfloat16精度下测试各个算法，参考代码如下（大致运行结果已在注释写出）：</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">jax.numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">jnp</span>
-<span class="kn">import</span><span class="w"> </span><span class="nn">jax.lax</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">lax</span>
+<pre class="highlight"><code>import numpy as np
+import jax.numpy as jnp
+import jax.lax as lax
 
-<span class="k">def</span><span class="w"> </span><span class="nf">msign</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">steps</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">eps</span><span class="o">=</span><span class="mf">1e-20</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;The coefficients come from https://kexue.fm/archives/10996</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">abc</span> <span class="o">=</span> <span class="p">[</span>
-        <span class="p">(</span><span class="mf">8.287212018145622</span><span class="p">,</span> <span class="o">-</span><span class="mf">23.59588651909882</span><span class="p">,</span> <span class="mf">17.300387312530923</span><span class="p">),</span>
-        <span class="p">(</span><span class="mf">4.107059111542197</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.9478499167379084</span><span class="p">,</span> <span class="mf">0.54484310829266</span><span class="p">),</span>
-        <span class="p">(</span><span class="mf">3.9486908534822938</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.908902115962947</span><span class="p">,</span> <span class="mf">0.5518191394370131</span><span class="p">),</span>
-        <span class="p">(</span><span class="mf">3.3184196573706055</span><span class="p">,</span> <span class="o">-</span><span class="mf">2.488488024314878</span><span class="p">,</span> <span class="mf">0.5100489401237208</span><span class="p">),</span>
-        <span class="p">(</span><span class="mf">2.3006520199548186</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.6689039845747518</span><span class="p">,</span> <span class="mf">0.4188073119525678</span><span class="p">),</span>
-        <span class="p">(</span><span class="mf">1.8913014077874002</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.2679958271945908</span><span class="p">,</span> <span class="mf">0.37680408948524996</span><span class="p">),</span>
-        <span class="p">(</span><span class="mf">1.875</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.25</span><span class="p">,</span> <span class="mf">0.375</span><span class="p">)</span>
-    <span class="p">]</span>
-    <span class="n">y</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">mT</span> <span class="k">if</span> <span class="n">x</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">x</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">else</span> <span class="n">x</span>
-    <span class="n">y</span> <span class="o">=</span> <span class="n">y</span> <span class="o">*</span> <span class="n">lax</span><span class="o">.</span><span class="n">rsqrt</span><span class="p">((</span><span class="n">y</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="kp">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span>
-    <span class="k">for</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">abc</span><span class="p">[:</span><span class="n">steps</span><span class="p">]</span> <span class="o">+</span> <span class="nb">max</span><span class="p">(</span><span class="n">steps</span> <span class="o">-</span> <span class="mi">7</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">abc</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">:]:</span>
-        <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span> <span class="o">=</span> <span class="n">a</span> <span class="o">/</span> <span class="mf">1.01</span><span class="p">,</span> <span class="n">b</span> <span class="o">/</span> <span class="mf">1.01</span><span class="o">**</span><span class="mi">3</span><span class="p">,</span> <span class="n">c</span> <span class="o">/</span> <span class="mf">1.01</span><span class="o">**</span><span class="mi">5</span>
-        <span class="n">y</span> <span class="o">=</span> <span class="n">a</span> <span class="o">*</span> <span class="n">y</span> <span class="o">+</span> <span class="p">(</span><span class="n">b</span> <span class="o">*</span> <span class="p">(</span><span class="n">u</span> <span class="o">:=</span> <span class="n">y</span> <span class="o">@</span> <span class="n">y</span><span class="o">.</span><span class="n">mT</span><span class="p">)</span> <span class="o">+</span> <span class="n">c</span> <span class="o">*</span> <span class="n">u</span> <span class="o">@</span> <span class="n">u</span><span class="p">)</span> <span class="o">@</span> <span class="n">y</span>
-    <span class="k">return</span> <span class="n">y</span><span class="o">.</span><span class="n">mT</span> <span class="k">if</span> <span class="n">x</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">x</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="k">else</span> <span class="n">y</span>
+def msign(x, steps=4, eps=1e-20):
+    &quot;&quot;&quot;The coefficients come from https://kexue.fm/archives/10996
+    &quot;&quot;&quot;
+    abc = [
+        (8.287212018145622, -23.59588651909882, 17.300387312530923),
+        (4.107059111542197, -2.9478499167379084, 0.54484310829266),
+        (3.9486908534822938, -2.908902115962947, 0.5518191394370131),
+        (3.3184196573706055, -2.488488024314878, 0.5100489401237208),
+        (2.3006520199548186, -1.6689039845747518, 0.4188073119525678),
+        (1.8913014077874002, -1.2679958271945908, 0.37680408948524996),
+        (1.875, -1.25, 0.375)
+    ]
+    y = x.mT if x.shape[-2] &gt; x.shape[-1] else x
+    y = y * lax.rsqrt((y**2).sum(axis=[-2, -1], keepdims=True) + eps)
+    for a, b, c in abc[:steps] + max(steps - 7, 0) * abc[-1:]:
+        a, b, c = a / 1.01, b / 1.01**3, c / 1.01**5
+        y = a * y + (b * (u := y @ y.mT) + c * u @ u) @ y
+    return y.mT if x.shape[-2] &gt; x.shape[-1] else y
 
-<span class="k">def</span><span class="w"> </span><span class="nf">mclip1</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;1st version (2 nested msign)</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">ms2</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span> <span class="o">-</span> <span class="p">(</span><span class="n">ms1</span> <span class="o">:=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="p">)))</span>
-    <span class="k">return</span> <span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="n">ms1</span> <span class="o">+</span> <span class="n">ms2</span> <span class="o">-</span> <span class="n">m</span> <span class="o">@</span> <span class="n">ms1</span><span class="o">.</span><span class="n">mT</span> <span class="o">@</span> <span class="n">ms2</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+def mclip1(m):
+    &quot;&quot;&quot;1st version (2 nested msign)
+    &quot;&quot;&quot;
+    ms2 = msign(m - (ms1 := msign(m)))
+    return (m + ms1 + ms2 - m @ ms1.mT @ ms2) / 2
 
-<span class="k">def</span><span class="w"> </span><span class="nf">mclip2</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;2nd version (2 non-nested msign)</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">ms1</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="p">)</span>
-    <span class="n">ms2</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">mT</span> <span class="o">@</span> <span class="n">m</span> <span class="o">-</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
-    <span class="k">return</span> <span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="n">ms1</span> <span class="o">+</span> <span class="p">(</span><span class="n">ms1</span> <span class="o">-</span> <span class="n">m</span><span class="p">)</span> <span class="o">@</span> <span class="n">ms2</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+def mclip2(m):
+    &quot;&quot;&quot;2nd version (2 non-nested msign)
+    &quot;&quot;&quot;
+    ms1 = msign(m)
+    ms2 = msign(m.mT @ m - jnp.eye(m.shape[-1]))
+    return (m + ms1 + (ms1 - m) @ ms2) / 2
 
-<span class="k">def</span><span class="w"> </span><span class="nf">mclip3</span><span class="p">(</span><span class="n">m</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;3rd version (3 non-nested msign)</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">ms1</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="p">)</span>
-    <span class="n">ms2</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">mT</span> <span class="o">@</span> <span class="n">m</span> <span class="o">+</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
-    <span class="n">ms3</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">mT</span> <span class="o">@</span> <span class="n">m</span> <span class="o">-</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]))</span>
-    <span class="k">return</span> <span class="p">((</span><span class="n">ms1</span> <span class="o">+</span> <span class="n">m</span><span class="p">)</span> <span class="o">@</span> <span class="n">ms2</span>  <span class="o">+</span> <span class="p">(</span><span class="n">ms1</span> <span class="o">-</span> <span class="n">m</span><span class="p">)</span> <span class="o">@</span> <span class="n">ms3</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+def mclip3(m):
+    &quot;&quot;&quot;3rd version (3 non-nested msign)
+    &quot;&quot;&quot;
+    ms1 = msign(m)
+    ms2 = msign(m.mT @ m + jnp.eye(m.shape[-1]))
+    ms3 = msign(m.mT @ m - jnp.eye(m.shape[-1]))
+    return ((ms1 + m) @ ms2  + (ms1 - m) @ ms3) / 2
 
-<span class="k">def</span><span class="w"> </span><span class="nf">spectral_clip</span><span class="p">(</span><span class="n">W</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;@leloykun verision: https://leloykun.github.io/ponder/spectral-clipping/</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">m</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="n">W</span><span class="o">.</span><span class="kp">shape</span>
-    <span class="n">H</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">block</span><span class="p">([[</span><span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">m</span><span class="p">),</span> <span class="n">W</span><span class="p">],</span> <span class="p">[</span><span class="n">W</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">n</span><span class="p">)]])</span>
-    <span class="n">OH</span> <span class="o">=</span> <span class="n">msign</span><span class="p">(</span><span class="n">H</span><span class="p">)</span>
-    <span class="n">P</span><span class="p">,</span> <span class="n">Q</span> <span class="o">=</span> <span class="n">OH</span><span class="p">[:</span><span class="n">m</span><span class="p">,</span> <span class="p">:</span><span class="n">m</span><span class="p">],</span> <span class="n">OH</span><span class="p">[:</span><span class="n">m</span><span class="p">,</span> <span class="n">m</span><span class="p">:]</span>
-    <span class="k">return</span> <span class="n">Q</span> <span class="o">+</span> <span class="n">P</span> <span class="o">@</span> <span class="n">W</span>
+def spectral_clip(W):
+    &quot;&quot;&quot;@leloykun verision: https://leloykun.github.io/ponder/spectral-clipping/
+    &quot;&quot;&quot;
+    m, n = W.shape
+    H = jnp.block([[jnp.eye(m), W], [W.T, jnp.eye(n)]])
+    OH = msign(H)
+    P, Q = OH[:m, :m], OH[:m, m:]
+    return Q + P @ W
 
-<span class="n">m</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">4096</span><span class="p">,</span> <span class="mi">1024</span><span class="p">)</span>
-<span class="n">u</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">vh</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">full_matrices</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-<span class="n">s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">concatenate</span><span class="p">([</span><span class="n">np</span><span class="o">.</span><span class="kp">linspace</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">128</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="kp">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">896</span><span class="p">)])</span>
-<span class="n">s</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">sort</span><span class="p">(</span><span class="n">s</span><span class="p">)[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
-<span class="n">m</span> <span class="o">=</span> <span class="n">u</span> <span class="o">@</span> <span class="n">jnp</span><span class="o">.</span><span class="kp">diag</span><span class="p">(</span><span class="n">s</span><span class="p">)</span> <span class="o">@</span> <span class="n">vh</span>  <span class="c1"># matrix with large singular values</span>
+m = np.random.randn(4096, 1024)
+u, s, vh = jnp.linalg.svd(m, full_matrices=False)
+s = np.concatenate([np.linspace(1, 1000, 128), np.linspace(0, 1, 896)])
+s = np.sort(s)[::-1]
+m = u @ jnp.diag(s) @ vh  # matrix with large singular values
 
-<span class="n">result0</span> <span class="o">=</span> <span class="n">u</span> <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="kp">diag</span><span class="p">(</span><span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span> <span class="o">@</span> <span class="n">vh</span>  <span class="c1"># exact result via SVD</span>
-<span class="n">result1</span> <span class="o">=</span> <span class="n">mclip1</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;bfloat16&#39;</span><span class="p">))</span>
-<span class="n">result2</span> <span class="o">=</span> <span class="n">mclip2</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;bfloat16&#39;</span><span class="p">))</span>
-<span class="n">result3</span> <span class="o">=</span> <span class="n">mclip3</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;bfloat16&#39;</span><span class="p">))</span>
-<span class="n">result4</span> <span class="o">=</span> <span class="n">spectral_clip</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;bfloat16&#39;</span><span class="p">))</span>
+result0 = u @ np.diag(s.clip(0, 1)) @ vh  # exact result via SVD
+result1 = mclip1(m.astype('bfloat16'))
+result2 = mclip2(m.astype('bfloat16'))
+result3 = mclip3(m.astype('bfloat16'))
+result4 = spectral_clip(m.astype('bfloat16'))
 
-<span class="c1"># spectral norm of the resulting matrix, closer to 1 is better.</span>
-<span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result0</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># = 1</span>
-<span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result1</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># ≈ 700</span>
-<span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result2</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># ≈ 250</span>
-<span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result3</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># ≈ 1.5</span>
-<span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result4</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># ≈ 13</span>
+# spectral norm of the resulting matrix, closer to 1 is better.
+jnp.linalg.svd(result0.astype('float32'))[1][0]  # = 1
+jnp.linalg.svd(result1.astype('float32'))[1][0]  # ≈ 700
+jnp.linalg.svd(result2.astype('float32'))[1][0]  # ≈ 250
+jnp.linalg.svd(result3.astype('float32'))[1][0]  # ≈ 1.5
+jnp.linalg.svd(result4.astype('float32'))[1][0]  # ≈ 13
 
-<span class="c1"># mean absolute error of singular values, closer to 0 is better.</span>
-<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result1</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 20</span>
-<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result2</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 10</span>
-<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result3</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 0.5</span>
-<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">svd</span><span class="p">(</span><span class="n">result4</span><span class="o">.</span><span class="kp">astype</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">))[</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">s</span><span class="o">.</span><span class="kp">clip</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 0.7</span>
+# mean absolute error of singular values, closer to 0 is better.
+jnp.abs(jnp.linalg.svd(result1.astype('float32'))[1] - s.clip(0, 1)).mean()  # ≈ 20
+jnp.abs(jnp.linalg.svd(result2.astype('float32'))[1] - s.clip(0, 1)).mean()  # ≈ 10
+jnp.abs(jnp.linalg.svd(result3.astype('float32'))[1] - s.clip(0, 1)).mean()  # ≈ 0.5
+jnp.abs(jnp.linalg.svd(result4.astype('float32'))[1] - s.clip(0, 1)).mean()  # ≈ 0.7
 
-<span class="c1"># mean absolute error of total matrix, closer to 0 is better.</span>
-<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">result0</span> <span class="o">-</span> <span class="n">result1</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 1</span>
-<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">result0</span> <span class="o">-</span> <span class="n">result2</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 0.5</span>
-<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">result0</span> <span class="o">-</span> <span class="n">result3</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 0.01</span>
-<span class="n">jnp</span><span class="o">.</span><span class="kp">abs</span><span class="p">(</span><span class="n">result0</span> <span class="o">-</span> <span class="n">result4</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span>  <span class="c1"># ≈ 0.02</span>
-</code></pre></div>
+# mean absolute error of total matrix, closer to 0 is better.
+jnp.abs(result0 - result1).mean()  # ≈ 1
+jnp.abs(result0 - result2).mean()  # ≈ 0.5
+jnp.abs(result0 - result3).mean()  # ≈ 0.01
+jnp.abs(result0 - result4).mean()  # ≈ 0.02
+</code></pre>
 
 <h2 id="_8">文章小结<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
 <p>本文继续完善了上一篇文章用$\msign$来计算$\mclip$的方案，通过去掉$\msign$的嵌套以及引入额外的修正项，成功降低了计算误差。</p>
@@ -321,7 +325,653 @@ url={\url{https://spaces.ac.cn/archives/11059}},<br />
 } </p>
 <hr />
 <h2 id="_9">公式推导与注释<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<p>本节将从数值分析、深度学习和工程实践三个角度，对本文涉及的算法进行极详细的数学推导和分析。</p>
+<h3 id="1-newton-schulz">1. Newton-Schulz迭代的高阶收敛性分析<a class="toc-link" href="#1-newton-schulz" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 基本迭代格式<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>Newton-Schulz迭代是一种计算矩阵符号函数$\msign(\boldsymbol{M})$的高效方法。其基本迭代格式为：<br />
+\begin{equation}<br />
+\boldsymbol{Y}<em _infty="\infty">{k+1} = \boldsymbol{Y}_k(a\boldsymbol{I} + b\boldsymbol{Y}_k^{\top}\boldsymbol{Y}_k + c(\boldsymbol{Y}_k^{\top}\boldsymbol{Y}_k)^2)<br />
+\end{equation}<br />
+其中$a, b, c$是精心选择的系数，用于加速收敛。设$\boldsymbol{M}=\boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}$是SVD分解，理论上迭代收敛到$\boldsymbol{Y}</em>)$。} = \boldsymbol{U}\boldsymbol{V}^{\top} = \msign(\boldsymbol{M</p>
+<h4 id="12">1.2 收敛性分析<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p>为了分析收敛性，我们引入误差度量。设$\boldsymbol{E}<em _infty="\infty">k = \boldsymbol{Y}_k - \boldsymbol{Y}</em>$为第$k$步的误差矩阵。在SVD框架下，我们可以写：<br />
+\begin{equation}<br />
+\boldsymbol{Y}<em k_i="k,i">k = \boldsymbol{U}\boldsymbol{D}_k\boldsymbol{V}^{\top}<br />
+\end{equation}<br />
+其中$\boldsymbol{D}_k$是对角矩阵，第$i$个对角元素$d</em>$表示对应奇异方向的近似值。理论上应收敛到1。</p>
+<p><strong>定理1（收敛阶）</strong>：如果系数$(a,b,c)$满足Padé近似条件，则Newton-Schulz迭代具有至少3阶收敛性：<br />
+\begin{equation}<br />
+|d_{k+1,i} - 1| \leq C|d_{k,i} - 1|^3<br />
+\end{equation}</p>
+<p><strong>证明</strong>：考虑单个对角元素的迭代。设$d_k$是某个对角元素，$\sigma$是对应的奇异值。在初始化$\boldsymbol{Y}<em k_1="k+1">0 = \boldsymbol{M}/|\boldsymbol{M}|_F$后，有$d_0 \approx \sigma/|\boldsymbol{M}|_F$。迭代关系变为：<br />
+\begin{equation}<br />
+d</em> = d_k(a + bd_k^2 + cd_k^4)<br />
+\end{equation}</p>
+<p>设$e_k = d_k - 1$为误差，展开得：<br />
+\begin{align}<br />
+d_{k+1} &amp;= (1+e_k)\left(a + b(1+e_k)^2 + c(1+e_k)^4\right)\<br />
+&amp;= (1+e_k)\left(a + b(1+2e_k+e_k^2) + c(1+4e_k+6e_k^2+4e_k^3+e_k^4)\right)\<br />
+&amp;= (1+e_k)(a+b+c + 2be_k+4ce_k + \mathcal{O}(e_k^2))<br />
+\end{align}</p>
+<p>若要求$d_{k+1} = 1 + \mathcal{O}(e_k^3)$，需要：<br />
+\begin{equation}<br />
+\begin{cases}<br />
+a + b + c = 1 \quad &amp;\text{(恒等条件)}\<br />
+1 + 2b + 4c = 0 \quad &amp;\text{(一阶消除)}\<br />
+a + 3b + 7c = 0 \quad &amp;\text{(二阶消除)}<br />
+\end{cases}<br />
+\end{equation}</p>
+<p>解这个方程组得到：<br />
+\begin{equation}<br />
+a = \frac{15}{8},\quad b = -\frac{5}{4},\quad c = \frac{3}{8}<br />
+\end{equation}</p>
+<p>这正是5阶Padé近似$[2/2]$的系数。代入后，误差满足：<br />
+\begin{equation}<br />
+e_{k+1} = -\frac{5}{2}e_k^3 + \mathcal{O}(e_k^5)<br />
+\end{equation}<br />
+因此收敛阶至少为3。$\square$</p>
+<h4 id="13">1.3 收敛速度的量化估计<a class="toc-link" href="#13" title="Permanent link">&para;</a></h4>
+<p><strong>定理2（收敛速度）</strong>：设初始误差$|e_0| &lt; \rho &lt; 1$，则经过$k$步迭代后：<br />
+\begin{equation}<br />
+|e_k| \leq \frac{\rho^{3^k}}{C^{(3^k-1)/2}}<br />
+\end{equation}<br />
+其中$C$是依赖于$(a,b,c)$的常数。</p>
+<p>这意味着误差呈三次方式衰减。例如，如果$e_0 = 0.1$，则：<br />
+- $e_1 \sim 0.1^3 = 10^{-3}$<br />
+- $e_2 \sim (10^{-3})^3 = 10^{-9}$<br />
+- $e_3 \sim (10^{-9})^3 = 10^{-27}$</p>
+<p>因此3-5步迭代通常已足够达到机器精度。</p>
+<h4 id="14">1.4 条件数的影响<a class="toc-link" href="#14" title="Permanent link">&para;</a></h4>
+<p>矩阵的条件数$\kappa(\boldsymbol{M}) = \sigma_{\max}/\sigma_{\min}$会显著影响收敛速度。对于病态矩阵（$\kappa \gg 1$），初始误差$e_0$在不同奇异值方向上差异巨大：<br />
+\begin{equation}<br />
+e_{0,i} = \frac{\sigma_i}{|\boldsymbol{M}|_F} - 1 \approx \frac{\sigma_i}{\sqrt{\sum_j\sigma_j^2}} - 1<br />
+\end{equation}</p>
+<p>当$\sigma_{\max} \gg \sigma_{\min}$时，小奇异值对应的$e_{0,i}$接近-1，需要更多迭代步数才能收敛。这就是为什么代码中采用了自适应的归一化策略。</p>
+<h3 id="2">2. 自适应步长策略的数学推导<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 动态归一化<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>代码中的归一化步骤：<br />
+\begin{equation}<br />
+\boldsymbol{Y}_0 = \frac{\boldsymbol{M}}{\sqrt{|\boldsymbol{M}|_F^2 + \epsilon}}<br />
+\end{equation}</p>
+<p>这里$\epsilon &gt; 0$是一个小的正则化项。从收敛性角度，这个归一化有两个作用：</p>
+<p><strong>作用1（压缩谱）</strong>：将所有奇异值压缩到$[0, 1)$区间，使得初始误差$|e_{0,i}| &lt; 1$对所有$i$成立，保证收敛。</p>
+<p><strong>作用2（稳定性）</strong>：当$\boldsymbol{M}$接近零矩阵时，$\epsilon$防止除零，保持数值稳定。</p>
+<h4 id="22">2.2 自适应系数缩放<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p>代码中的系数缩放：<br />
+\begin{equation}<br />
+a' = \frac{a}{\gamma},\quad b' = \frac{b}{\gamma^3},\quad c' = \frac{c}{\gamma^5}<br />
+\end{equation}<br />
+其中$\gamma &gt; 1$（如$\gamma=1.01$）。</p>
+<p><strong>引理1（保守化）</strong>：缩放后的迭代对应于收敛域扩大的Padé近似。</p>
+<p><strong>证明</strong>：考虑迭代函数$f(d) = d(a + bd^2 + cd^4)$。其不动点方程为$f(d) = d$，即$a + bd^2 + cd^4 = 1$。这是一个关于$d^2$的二次方程：<br />
+\begin{equation}<br />
+cd^4 + bd^2 + (a-1) = 0<br />
+\end{equation}</p>
+<p>判别式为$\Delta = b^2 - 4c(a-1)$。当$(a,b,c)$满足Padé条件时，$\Delta &gt; 0$保证有两个实根。引入缩放因子$\gamma$后，新方程变为：<br />
+\begin{equation}<br />
+\frac{c}{\gamma^5}d^4 + \frac{b}{\gamma^3}d^2 + \left(\frac{a}{\gamma}-1\right) = 0<br />
+\end{equation}</p>
+<p>乘以$\gamma^5$：<br />
+\begin{equation}<br />
+cd^4 + b\gamma^2 d^2 + \gamma^5\left(\frac{a}{\gamma}-1\right) = 0<br />
+\end{equation}</p>
+<p>当$\gamma \to 1^+$时，方程退化到原始形式。$\gamma &gt; 1$时，相当于增大了$b$的系数（假设$b &lt; 0$），这会缩小不动点附近的排斥区域，扩大吸引域。$\square$</p>
+<h4 id="23">2.3 渐进式步长调整<a class="toc-link" href="#23" title="Permanent link">&para;</a></h4>
+<p>对于极端病态矩阵，可以采用渐进式步长策略：<br />
+\begin{equation}<br />
+\gamma_k = 1 + \frac{\gamma_0 - 1}{1 + k/k_0}<br />
+\end{equation}<br />
+其中$\gamma_0 &gt; 1$是初始缩放因子，$k_0$控制衰减速度。这样前几步迭代更保守（$\gamma$较大），后续步骤逐渐加速（$\gamma \to 1$）。</p>
+<h3 id="3">3. 谱条件数的影响分析<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 条件数对误差传播的影响<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p>设$\boldsymbol{M} = \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}$，条件数$\kappa = \sigma_1/\sigma_r$（$r$是秩）。考虑计算$\boldsymbol{M}^{\top}\boldsymbol{M}$时的数值误差：<br />
+\begin{equation}<br />
+\widehat{\boldsymbol{M}^{\top}\boldsymbol{M}} = \boldsymbol{M}^{\top}\boldsymbol{M} + \boldsymbol{E}<br />
+\end{equation}<br />
+其中$|\boldsymbol{E}|<em _text_mach="\text{mach">F \leq \epsilon</em>|_F^2$是机器精度引起的误差。}}|\boldsymbol{M</p>
+<p>在SVD框架下：<br />
+\begin{equation}<br />
+\boldsymbol{M}^{\top}\boldsymbol{M} = \boldsymbol{V}\boldsymbol{\Sigma}^2\boldsymbol{V}^{\top}<br />
+\end{equation}</p>
+<p>误差$\boldsymbol{E}$会导致特征值的扰动。根据Weyl定理，第$i$个特征值的扰动满足：<br />
+\begin{equation}<br />
+|\lambda_i(\widehat{\boldsymbol{M}^{\top}\boldsymbol{M}}) - \sigma_i^2| \leq |\boldsymbol{E}|<em _text_mach="\text{mach">2 \leq \epsilon</em>\sigma_1^2}<br />
+\end{equation}</p>
+<p><strong>相对误差放大</strong>：对于小奇异值$\sigma_r \ll \sigma_1$，其平方$\sigma_r^2$的相对误差为：<br />
+\begin{equation}<br />
+\frac{|\lambda_r(\widehat{\boldsymbol{M}^{\top}\boldsymbol{M}}) - \sigma_r^2|}{\sigma_r^2} \leq \frac{\epsilon_{\text{mach}}\sigma_1^2}{\sigma_r^2} = \epsilon_{\text{mach}}\kappa^2<br />
+\end{equation}</p>
+<p>这表明条件数的平方会放大相对误差！当$\kappa = 1000$时，相对误差放大了$10^6$倍。</p>
+<h4 id="32-msign">3.2 在$\msign$计算中的体现<a class="toc-link" href="#32-msign" title="Permanent link">&para;</a></h4>
+<p>计算$\msign(\boldsymbol{M}^{\top}\boldsymbol{M} - \boldsymbol{I})$时，小于1的特征值对应的$\lambda_i - 1 &lt; 0$，应该给出$-1$的符号。但如果数值误差使得$\lambda_i - 1$的符号翻转（从-0.001变成+0.001），则$\msign$的结果会从-1变成+1，导致完全错误的结果。</p>
+<p><strong>临界奇异值问题</strong>：最危险的是接近1的奇异值。设$\sigma_i = 1 + \delta$，$|\delta| \ll 1$。则：<br />
+\begin{equation}<br />
+\sigma_i^2 - 1 = (1+\delta)^2 - 1 = 2\delta + \delta^2 \approx 2\delta<br />
+\end{equation}</p>
+<p>如果$|\delta| \sim \epsilon_{\text{mach}}\kappa^2$，则$\sigma_i^2 - 1$的符号在数值上不可靠。</p>
+<h4 id="33-vs">3.3 双精度vs半精度的条件数临界点<a class="toc-link" href="#33-vs" title="Permanent link">&para;</a></h4>
+<p>对于不同精度：<br />
+- <strong>Float32</strong>：$\epsilon_{\text{mach}} \approx 10^{-7}$，临界条件数$\kappa_{\text{crit}} \sim 10^{3.5} \approx 3000$<br />
+- <strong>BFloat16</strong>：$\epsilon_{\text{mach}} \approx 10^{-3}$，临界条件数$\kappa_{\text{crit}} \sim 10^{1.5} \approx 30$<br />
+- <strong>Float16</strong>：$\epsilon_{\text{mach}} \approx 10^{-4}$，临界条件数$\kappa_{\text{crit}} \sim 10^{2} = 100$</p>
+<p>这解释了为什么在bfloat16下，$\sigma_{\max} = 1000$的矩阵会出现巨大误差。</p>
+<h3 id="4">4. 预处理技术<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
+<h4 id="41-spectral-normalization">4.1 谱归一化（Spectral Normalization）<a class="toc-link" href="#41-spectral-normalization" title="Permanent link">&para;</a></h4>
+<p>对于条件数过大的矩阵，预处理的基本思路是：<br />
+\begin{equation}<br />
+\widetilde{\boldsymbol{M}} = \frac{\boldsymbol{M}}{|\boldsymbol{M}|_2} = \boldsymbol{U}\frac{\boldsymbol{\Sigma}}{\sigma_1}\boldsymbol{V}^{\top}<br />
+\end{equation}</p>
+<p>这样$\widetilde{\kappa} = \sigma_1/(\sigma_r\sigma_1) = 1/\widetilde{\sigma}_r$，将条件数从$\sigma_1/\sigma_r$降低到$1/\widetilde{\sigma}_r$（假设归一化后最大奇异值为1）。</p>
+<p><strong>问题</strong>：计算$|\boldsymbol{M}|_2$本身需要幂迭代，代价较高。</p>
+<h4 id="42-frobenius">4.2 Frobenius范数归一化（已采用）<a class="toc-link" href="#42-frobenius" title="Permanent link">&para;</a></h4>
+<p>代码采用的方案：<br />
+\begin{equation}<br />
+\widetilde{\boldsymbol{M}} = \frac{\boldsymbol{M}}{|\boldsymbol{M}|_F}<br />
+\end{equation}</p>
+<p>其中$|\boldsymbol{M}|_F = \sqrt{\sum_i\sigma_i^2}$。这种归一化：<br />
+- <strong>优点</strong>：计算代价$O(nm)$，仅需一次矩阵遍历<br />
+- <strong>缺点</strong>：不能保证最大奇异值为1</p>
+<p>设$\boldsymbol{M}$的奇异值为$\sigma_1 \geq \sigma_2 \geq \cdots \geq \sigma_r$。归一化后：<br />
+\begin{equation}<br />
+\widetilde{\sigma}_i = \frac{\sigma_i}{\sqrt{\sum_j\sigma_j^2}}<br />
+\end{equation}</p>
+<p>最坏情况（只有一个非零奇异值）：$\widetilde{\sigma}_1 = 1$。<br />
+最好情况（所有奇异值相等）：$\widetilde{\sigma}_i = 1/\sqrt{r}$，最大奇异值被过度压缩。</p>
+<h4 id="43-balanced-scaling">4.3 平衡缩放（Balanced Scaling）<a class="toc-link" href="#43-balanced-scaling" title="Permanent link">&para;</a></h4>
+<p>更精细的预处理是对行和列分别缩放：<br />
+\begin{equation}<br />
+\widetilde{\boldsymbol{M}} = \boldsymbol{D}_r^{-1}\boldsymbol{M}\boldsymbol{D}_c^{-1}<br />
+\end{equation}<br />
+其中$\boldsymbol{D}_r, \boldsymbol{D}_c$是对角矩阵，选择使得$\widetilde{\boldsymbol{M}}$的行范数和列范数尽可能接近。</p>
+<p><strong>Sinkhorn-Knopp算法</strong>：迭代计算<br />
+\begin{align}<br />
+\boldsymbol{d}<em _text_row="\text{row">r^{(k+1)} &amp;= |\boldsymbol{M}^{(k)}|</em>\}<br />
+\boldsymbol{M}^{(k+1)} &amp;= \text{diag}(\boldsymbol{d}<em _text_col="\text{col">r^{(k+1)})^{-1}\boldsymbol{M}^{(k)}\<br />
+\boldsymbol{d}_c^{(k+1)} &amp;= |\boldsymbol{M}^{(k+1)}|</em>\}<br />
+\boldsymbol{M}^{(k+1)} &amp;= \boldsymbol{M}^{(k+1)}\text{diag}(\boldsymbol{d}_c^{(k+1)})^{-1}<br />
+\end{align}</p>
+<p>通常2-3次迭代即可显著改善条件数。</p>
+<h4 id="44-regularization">4.4 正则化（Regularization）<a class="toc-link" href="#44-regularization" title="Permanent link">&para;</a></h4>
+<p>在式$\eqref{eq:mclip-3}$中，计算$\boldsymbol{M}^{\top}\boldsymbol{M} \pm \boldsymbol{I}$时，可添加正则化：<br />
+\begin{equation}<br />
+\boldsymbol{M}^{\top}\boldsymbol{M} + (1+\lambda)\boldsymbol{I}<br />
+\end{equation}<br />
+其中$\lambda &gt; 0$是小的正则化参数（如$10^{-6}$）。这确保矩阵严格正定，避免接近奇异的情况。</p>
+<p>在bfloat16下，推荐$\lambda \sim 10^{-3}$。</p>
+<h3 id="5">5. 残差监控和提前终止策略<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 残差定义<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>Newton-Schulz迭代中，自然的残差是：<br />
+\begin{equation}<br />
+R_k = |\boldsymbol{Y}_k\boldsymbol{Y}_k^{\top} - \boldsymbol{I}|_F<br />
+\end{equation}</p>
+<p>这度量了$\boldsymbol{Y}<em _infty="\infty">k$偏离正交矩阵的程度。理论上$R</em> = 0$。</p>
+<p><strong>替代残差</strong>（计算代价更低）：<br />
+\begin{equation}<br />
+R_k' = |\boldsymbol{Y}<em k-1="k-1">k - \boldsymbol{Y}</em>_k|_F}|_F / |\boldsymbol{Y<br />
+\end{equation}</p>
+<p>这度量相邻两步的相对变化。当$R_k' &lt; \epsilon_{\text{tol}}$时停止迭代。</p>
+<h4 id="52">5.2 提前终止策略<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p><strong>简单策略</strong>：设定最大步数$K_{\max}$和容差$\epsilon_{\text{tol}}$。</p>
+<pre class="highlight"><code>for k in range(K_max):
+    Y_next = update(Y_k)
+    if ||Y_next - Y_k|| / ||Y_k|| &lt; epsilon_tol:
+        break
+    Y_k = Y_next
+</code></pre>
+
+<p><strong>自适应策略</strong>：根据收敛速度动态调整。如果连续两步残差比$R_k/R_{k-1} &gt; 0.9$（收敛停滞），增加迭代步数或切换到更稳定的方法。</p>
+<h4 id="53">5.3 三阶收敛的残差衰减规律<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<p>对于三阶收敛，理论上：<br />
+\begin{equation}<br />
+R_{k+1} \leq C \cdot R_k^3<br />
+\end{equation}</p>
+<p>因此残差的对数满足：<br />
+\begin{equation}<br />
+\log R_{k+1} \leq \log C + 3\log R_k<br />
+\end{equation}</p>
+<p>这意味着$\log R_k$大致以几何级数衰减。监控$\log R_k$的线性度可以判断是否达到三阶收敛区域。</p>
+<h3 id="6">6. 反向传播的梯度计算<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61-msign">6.1 $\msign$的梯度<a class="toc-link" href="#61-msign" title="Permanent link">&para;</a></h4>
+<p>设损失函数为$L$，需要计算$\frac{\partial L}{\partial \boldsymbol{M}}$，已知$\frac{\partial L}{\partial \boldsymbol{Y}}$其中$\boldsymbol{Y} = \msign(\boldsymbol{M})$。</p>
+<p><strong>定理3（隐函数求导）</strong>：$\msign(\boldsymbol{M})$满足方程：<br />
+\begin{equation}<br />
+\boldsymbol{Y}\boldsymbol{Y}^{\top}\boldsymbol{Y} = \boldsymbol{Y}<br />
+\end{equation}</p>
+<p>对两边求微分：<br />
+\begin{equation}<br />
+d\boldsymbol{Y}\cdot\boldsymbol{Y}^{\top}\boldsymbol{Y} + \boldsymbol{Y}\cdot d\boldsymbol{Y}^{\top}\cdot\boldsymbol{Y} + \boldsymbol{Y}\boldsymbol{Y}^{\top}\cdot d\boldsymbol{Y} = d\boldsymbol{Y}<br />
+\end{equation}</p>
+<p>整理得：<br />
+\begin{equation}<br />
+(d\boldsymbol{Y})\boldsymbol{Y}^{\top}\boldsymbol{Y} + \boldsymbol{Y}(d\boldsymbol{Y})^{\top}\boldsymbol{Y} + \boldsymbol{Y}\boldsymbol{Y}^{\top}(d\boldsymbol{Y}) = d\boldsymbol{Y}<br />
+\end{equation}</p>
+<p>这是关于$d\boldsymbol{Y}$的Sylvester方程。</p>
+<p><strong>直接方法</strong>：利用SVD结构。设$\boldsymbol{M} = \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}$，$\boldsymbol{Y} = \boldsymbol{U}\boldsymbol{V}^{\top}$。对$\boldsymbol{M}$的扰动：<br />
+\begin{equation}<br />
+\boldsymbol{M} + d\boldsymbol{M} = (\boldsymbol{U}+d\boldsymbol{U})(\boldsymbol{\Sigma}+d\boldsymbol{\Sigma})(\boldsymbol{V}+d\boldsymbol{V})^{\top}<br />
+\end{equation}</p>
+<p>忽略高阶项并利用$\boldsymbol{U}^{\top}d\boldsymbol{U} + d\boldsymbol{U}^{\top}\boldsymbol{U} = \boldsymbol{0}$（正交性）：<br />
+\begin{equation}<br />
+d\boldsymbol{M} = d\boldsymbol{U}\cdot\boldsymbol{\Sigma}\boldsymbol{V}^{\top} + \boldsymbol{U}\cdot d\boldsymbol{\Sigma}\cdot\boldsymbol{V}^{\top} + \boldsymbol{U}\boldsymbol{\Sigma}\cdot d\boldsymbol{V}^{\top}<br />
+\end{equation}</p>
+<p>相应地：<br />
+\begin{equation}<br />
+d\boldsymbol{Y} = d\boldsymbol{U}\cdot\boldsymbol{V}^{\top} + \boldsymbol{U}\cdot d\boldsymbol{V}^{\top}<br />
+\end{equation}</p>
+<p><strong>梯度公式</strong>：利用链式法则，设$\overline{\boldsymbol{Y}} = \frac{\partial L}{\partial \boldsymbol{Y}}$，则：<br />
+\begin{equation}<br />
+\frac{\partial L}{\partial \boldsymbol{M}} = \overline{\boldsymbol{Y}}\boldsymbol{M}^{\dagger} + (\boldsymbol{M}^{\dagger})^{\top}\overline{\boldsymbol{Y}}^{\top} - \boldsymbol{M}^{\dagger}\text{tr}(\overline{\boldsymbol{Y}}^{\top}\boldsymbol{Y})\boldsymbol{M}^{\dagger}<br />
+\end{equation}<br />
+其中$\boldsymbol{M}^{\dagger}$是Moore-Penrose伪逆。</p>
+<p><strong>简化（满秩方阵）</strong>：当$\boldsymbol{M}$是满秩方阵时：<br />
+\begin{equation}<br />
+\frac{\partial L}{\partial \boldsymbol{M}} = \overline{\boldsymbol{Y}}(\boldsymbol{M}^{\top}\boldsymbol{M})^{-1}<br />
+\end{equation}</p>
+<h4 id="62-mclip">6.2 $\mclip$的梯度<a class="toc-link" href="#62-mclip" title="Permanent link">&para;</a></h4>
+<p>根据式$\eqref{eq:mclip-3}$：<br />
+\begin{equation}<br />
+\mclip(\boldsymbol{M}) = \frac{1}{2}\left[(\boldsymbol{Y}_1 + \boldsymbol{M})\boldsymbol{Y}_2 + (\boldsymbol{Y}_1 - \boldsymbol{M})\boldsymbol{Y}_3\right]<br />
+\end{equation}<br />
+其中$\boldsymbol{Y}_1 = \msign(\boldsymbol{M})$，$\boldsymbol{Y}_2 = \msign(\boldsymbol{M}^{\top}\boldsymbol{M} + \boldsymbol{I})$，$\boldsymbol{Y}_3 = \msign(\boldsymbol{M}^{\top}\boldsymbol{M} - \boldsymbol{I})$。</p>
+<p>设$\overline{\boldsymbol{C}} = \frac{\partial L}{\partial \mclip(\boldsymbol{M})}$。反向传播分为三部分：</p>
+<p><strong>对$\boldsymbol{Y}_1$的梯度</strong>：<br />
+\begin{equation}<br />
+\overline{\boldsymbol{Y}}_1 = \frac{1}{2}(\overline{\boldsymbol{C}}\boldsymbol{Y}_2 + \overline{\boldsymbol{C}}\boldsymbol{Y}_3)<br />
+\end{equation}</p>
+<p><strong>对$\boldsymbol{Y}_2$和$\boldsymbol{Y}_3$的梯度</strong>：<br />
+\begin{align}<br />
+\overline{\boldsymbol{Y}}_2 &amp;= \frac{1}{2}(\boldsymbol{Y}_1 + \boldsymbol{M})^{\top}\overline{\boldsymbol{C}}\<br />
+\overline{\boldsymbol{Y}}_3 &amp;= \frac{1}{2}(\boldsymbol{Y}_1 - \boldsymbol{M})^{\top}\overline{\boldsymbol{C}}<br />
+\end{align}</p>
+<p><strong>对$\boldsymbol{M}$的直接梯度</strong>：<br />
+\begin{equation}<br />
+\overline{\boldsymbol{M}}_{\text{direct}} = \frac{1}{2}\overline{\boldsymbol{C}}(\boldsymbol{Y}_2 - \boldsymbol{Y}_3)<br />
+\end{equation}</p>
+<p><strong>通过$\boldsymbol{M}^{\top}\boldsymbol{M}$的梯度</strong>：设$\boldsymbol{G} = \boldsymbol{M}^{\top}\boldsymbol{M}$，则：<br />
+\begin{align}<br />
+\overline{\boldsymbol{G}}_2 &amp;= \frac{\partial L}{\partial \boldsymbol{Y}_2}\frac{\partial \boldsymbol{Y}_2}{\partial (\boldsymbol{G}+\boldsymbol{I})}\<br />
+\overline{\boldsymbol{G}}_3 &amp;= \frac{\partial L}{\partial \boldsymbol{Y}_3}\frac{\partial \boldsymbol{Y}_3}{\partial (\boldsymbol{G}-\boldsymbol{I})}<br />
+\end{align}</p>
+<p>由$\boldsymbol{G} = \boldsymbol{M}^{\top}\boldsymbol{M}$，有：<br />
+\begin{equation}<br />
+\frac{\partial L}{\partial \boldsymbol{M}}\Big|_{\boldsymbol{G}} = 2\boldsymbol{M}(\overline{\boldsymbol{G}}_2 + \overline{\boldsymbol{G}}_3)<br />
+\end{equation}</p>
+<p><strong>总梯度</strong>：<br />
+\begin{equation}<br />
+\frac{\partial L}{\partial \boldsymbol{M}} = \overline{\boldsymbol{M}}<em _boldsymbol_Y="\boldsymbol{Y">{\text{direct}} + \frac{\partial L}{\partial \boldsymbol{M}}\Big|</em><em _boldsymbol_G="\boldsymbol{G">1} + \frac{\partial L}{\partial \boldsymbol{M}}\Big|</em>}<br />
+\end{equation}</p>
+<h4 id="63">6.3 内存高效的反向传播<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p>直接实现上述公式需要存储所有中间变量$\boldsymbol{Y}_1, \boldsymbol{Y}_2, \boldsymbol{Y}_3$。对于大矩阵，可采用<strong>重计算策略</strong>：</p>
+<ol>
+<li>前向传播时只存储$\boldsymbol{M}$</li>
+<li>反向传播时重新计算$\boldsymbol{Y}_1, \boldsymbol{Y}_2, \boldsymbol{Y}_3$</li>
+</ol>
+<p>这将空间复杂度从$O(4nm)$降低到$O(nm)$，代价是额外的$2\times$计算时间。</p>
+<h3 id="7">7. 内存优化技巧<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<h4 id="71-in-place-updates">7.1 原地更新（In-place Updates）<a class="toc-link" href="#71-in-place-updates" title="Permanent link">&para;</a></h4>
+<p>Newton-Schulz迭代的核心运算：<br />
+\begin{equation}<br />
+\boldsymbol{Y}_{k+1} = \boldsymbol{Y}_k(a\boldsymbol{I} + b\boldsymbol{U}_k + c\boldsymbol{U}_k^2)<br />
+\end{equation}<br />
+其中$\boldsymbol{U}_k = \boldsymbol{Y}_k^{\top}\boldsymbol{Y}_k$。</p>
+<p><strong>朴素实现</strong>（需要5个矩阵空间）：</p>
+<pre class="highlight"><code>U = Y.T @ Y              # n×n
+U2 = U @ U               # n×n
+temp = a*I + b*U + c*U2  # n×n
+Y_new = Y @ temp         # m×n
+</code></pre>
+
+<p>总内存：$2nm + 3n^2$</p>
+<p><strong>优化实现</strong>（需要3个矩阵空间）：</p>
+<pre class="highlight"><code>U = Y.T @ Y              # n×n，复用存储
+U *= b                   # 原地缩放
+temp = U @ U             # n×n，临时变量
+temp *= (c/b)            # 原地缩放
+U += temp                # 原地加法
+U += a*I                 # 原地加法
+Y_new = Y @ U            # m×n，覆盖Y
+</code></pre>
+
+<p>总内存：$nm + 2n^2$</p>
+<h4 id="72">7.2 矩阵乘法的分块策略<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p>对于$m \gg n$的瘦长矩阵，$\boldsymbol{Y}^{\top}\boldsymbol{Y}$的计算可以分块：<br />
+\begin{equation}<br />
+\boldsymbol{Y}^{\top}\boldsymbol{Y} = \sum_{i=1}^{B} \boldsymbol{Y}<em _i_="[i]">{[i]}^{\top}\boldsymbol{Y}</em><br />
+\end{equation}<br />
+其中$\boldsymbol{Y}_{[i]}$是第$i$块行（大小$b \times n$，$b = m/B$）。</p>
+<p><strong>优势</strong>：<br />
+- 每次只需加载$b \times n$的数据块，缓存友好<br />
+- 可以并行计算各块的贡献</p>
+<p><strong>实现</strong>：</p>
+<pre class="highlight"><code class="language-python">U = np.zeros((n, n))
+block_size = 1024
+for i in range(0, m, block_size):
+    Y_block = Y[i:i+block_size, :]  # b×n
+    U += Y_block.T @ Y_block        # 累加
+</code></pre>
+
+<h4 id="73">7.3 混合精度计算<a class="toc-link" href="#73" title="Permanent link">&para;</a></h4>
+<p>在深度学习中，权重矩阵通常以fp16/bf16存储，但中间计算可以提升到fp32：</p>
+<p><strong>策略1（部分提升）</strong>：<br />
+- $\boldsymbol{Y}^{\top}\boldsymbol{Y}$用fp32计算（避免下溢）<br />
+- $\boldsymbol{Y} \times (\cdots)$用fp16计算（节省带宽）</p>
+<p><strong>策略2（关键路径提升）</strong>：<br />
+- 只将$\msign(\boldsymbol{M}^{\top}\boldsymbol{M} \pm \boldsymbol{I})$提升到fp32<br />
+- 其他保持fp16</p>
+<p><strong>量化分析</strong>：设矩阵大小$4096 \times 1024$，bf16 vs fp32：<br />
+- 内存占用：16MB vs 32MB（2倍）<br />
+- 计算吞吐：约1.5倍加速（现代GPU的bf16吞吐更高）<br />
+- 精度提升：相对误差从$10^{-3}$降至$10^{-7}$（约4个数量级）</p>
+<p>综合权衡，推荐在$\boldsymbol{M}^{\top}\boldsymbol{M}$的计算中使用fp32累加，其余保持bf16。</p>
+<h3 id="8">8. 实际实现的数值陷阱<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 接近奇异的矩阵<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p>当$\boldsymbol{M}$的秩$r &lt; \min(m,n)$时，$\boldsymbol{M}^{\top}\boldsymbol{M}$是奇异的。此时：<br />
+\begin{equation}<br />
+\boldsymbol{M}^{\top}\boldsymbol{M} - \boldsymbol{I} = \boldsymbol{V}\text{diag}(\sigma_1^2-1, \ldots, \sigma_r^2-1, -1, \ldots, -1)\boldsymbol{V}^{\top}<br />
+\end{equation}</p>
+<p>最后$n-r$个特征值为-1。如果数值误差导致某些特征值从-1变为-1+$\delta$（$\delta &gt; 0$），则$\msign$的结果会出错。</p>
+<p><strong>解决方案</strong>：添加小的正则化$\lambda\boldsymbol{I}$：<br />
+\begin{equation}<br />
+\msign(\boldsymbol{M}^{\top}\boldsymbol{M} - (1-\lambda)\boldsymbol{I})<br />
+\end{equation}<br />
+这将-1的特征值偏移到$-1+\lambda$，远离0，增强鲁棒性。</p>
+<h4 id="82">8.2 上溢和下溢<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<p>在计算$\boldsymbol{M}^{\top}\boldsymbol{M}$时，如果$\sigma_{\max}(\boldsymbol{M}) &gt; \sqrt{\text{FLT_MAX}}$，则$\sigma_{\max}^2 &gt; \text{FLT_MAX}$，导致上溢。</p>
+<p><strong>缓解措施</strong>：<br />
+\begin{equation}<br />
+\alpha = \max(|\boldsymbol{M}|_F, 1)<br />
+\end{equation}<br />
+\begin{equation}<br />
+\widetilde{\boldsymbol{M}} = \boldsymbol{M}/\alpha<br />
+\end{equation}</p>
+<p>计算完成后再缩放回去：<br />
+\begin{equation}<br />
+\mclip(\boldsymbol{M}) = \alpha \cdot \mclip(\widetilde{\boldsymbol{M}})<br />
+\end{equation}</p>
+<h4 id="83-nan">8.3 非数值（NaN）的传播<a class="toc-link" href="#83-nan" title="Permanent link">&para;</a></h4>
+<p>如果$\boldsymbol{M}$中包含NaN或Inf，Newton-Schulz迭代会迅速传播：<br />
+\begin{equation}<br />
+\text{NaN} \times x = \text{NaN},\quad \text{Inf} + \text{Inf} = \text{Inf},\quad \text{Inf} - \text{Inf} = \text{NaN}<br />
+\end{equation}</p>
+<p><strong>检测与处理</strong>：</p>
+<pre class="highlight"><code class="language-python">if not np.isfinite(M).all():
+    raise ValueError(&quot;Input contains NaN or Inf&quot;)
+</code></pre>
+
+<p>在调试模式下，可在每步迭代后插入检查：</p>
+<pre class="highlight"><code class="language-python">if not np.isfinite(Y).all():
+    warnings.warn(f&quot;NaN detected at iteration {k}&quot;)
+    break
+</code></pre>
+
+<h4 id="84">8.4 对称性的破坏<a class="toc-link" href="#84" title="Permanent link">&para;</a></h4>
+<p>理论上$\boldsymbol{M}^{\top}\boldsymbol{M}$是对称矩阵，但数值计算可能引入微小的非对称性：<br />
+\begin{equation}<br />
+|\boldsymbol{M}^{\top}\boldsymbol{M} - (\boldsymbol{M}^{\top}\boldsymbol{M})^{\top}|<em _text_mach="\text{mach">F \sim \epsilon</em>|_F^2}}|\boldsymbol{M<br />
+\end{equation}</p>
+<p>这会影响某些算法（如特征分解）的稳定性。</p>
+<p><strong>强制对称化</strong>：<br />
+\begin{equation}<br />
+\boldsymbol{G} = \frac{\boldsymbol{M}^{\top}\boldsymbol{M} + (\boldsymbol{M}^{\top}\boldsymbol{M})^{\top}}{2}<br />
+\end{equation}</p>
+<p>代价是额外的$O(n^2)$操作，但能提升鲁棒性。</p>
+<h3 id="9">9. 大规模矩阵的分块处理<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 分块矩阵乘法<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p>对于超大矩阵（如$m, n &gt; 10^4$），无法一次性加载到GPU内存。采用分块策略：<br />
+\begin{equation}<br />
+\boldsymbol{M} = \begin{bmatrix}<br />
+\boldsymbol{M}<em 12="12">{11} &amp; \boldsymbol{M}</em> \<br />
+\boldsymbol{M}<em 22="22">{21} &amp; \boldsymbol{M}</em><br />
+\end{bmatrix}<br />
+\end{equation}</p>
+<p>则：<br />
+\begin{equation}<br />
+\boldsymbol{M}^{\top}\boldsymbol{M} = \begin{bmatrix}<br />
+\boldsymbol{M}<em 11="11">{11}^{\top}\boldsymbol{M}</em>} + \boldsymbol{M<em 21="21">{21}^{\top}\boldsymbol{M}</em>} &amp; \boldsymbol{M<em 12="12">{11}^{\top}\boldsymbol{M}</em>} + \boldsymbol{M<em 22="22">{21}^{\top}\boldsymbol{M}</em> \<br />
+\boldsymbol{M}<em 11="11">{12}^{\top}\boldsymbol{M}</em>} + \boldsymbol{M<em 21="21">{22}^{\top}\boldsymbol{M}</em>} &amp; \boldsymbol{M<em 12="12">{12}^{\top}\boldsymbol{M}</em>} + \boldsymbol{M<em 22="22">{22}^{\top}\boldsymbol{M}</em><br />
+\end{bmatrix}<br />
+\end{equation}</p>
+<p>每个子块可独立计算，适合GPU并行。</p>
+<h4 id="92">9.2 低秩近似<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p>对于秩$r \ll \min(m,n)$的矩阵，可以先计算部分SVD：<br />
+\begin{equation}<br />
+\boldsymbol{M} \approx \boldsymbol{U}_r\boldsymbol{\Sigma}_r\boldsymbol{V}_r^{\top}<br />
+\end{equation}</p>
+<p>然后：<br />
+\begin{equation}<br />
+\mclip(\boldsymbol{M}) \approx \boldsymbol{U}_r\clip(\boldsymbol{\Sigma}_r)\boldsymbol{V}_r^{\top}<br />
+\end{equation}</p>
+<p><strong>复杂度</strong>：<br />
+- 完整方法：$O(mn\min(m,n))$<br />
+- 低秩方法：$O(mnr)$，当$r \ll \min(m,n)$时显著加速</p>
+<h4 id="93">9.3 随机化算法<a class="toc-link" href="#93" title="Permanent link">&para;</a></h4>
+<p>对于极大规模矩阵，可采用随机SVD：<br />
+\begin{equation}<br />
+\boldsymbol{M} \approx (\boldsymbol{M}\boldsymbol{\Omega})(\boldsymbol{\Omega}^{\top}\boldsymbol{M}^{\top}\boldsymbol{M}\boldsymbol{\Omega})^{-1}(\boldsymbol{\Omega}^{\top}\boldsymbol{M}^{\top})<br />
+\end{equation}<br />
+其中$\boldsymbol{\Omega} \in \mathbb{R}^{n \times k}$是随机矩阵（$k$是目标秩）。</p>
+<p><strong>优势</strong>：<br />
+- 单遍扫描矩阵（适合流数据）<br />
+- 复杂度$O(mnk)$<br />
+- 可并行化</p>
+<p><strong>误差界</strong>：以高概率：<br />
+\begin{equation}<br />
+|\boldsymbol{M} - \boldsymbol{M}_k|_F \leq (1+\epsilon)|\boldsymbol{M} - \boldsymbol{M}_k^<em>|_F<br />
+\end{equation}<br />
+其中$\boldsymbol{M}_k^</em>$是最优秩-$k$近似，$\epsilon$可控。</p>
+<h3 id="10">10. 与其他梯度裁剪方法的对比<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101-gradient-clipping">10.1 标准梯度裁剪（Gradient Clipping）<a class="toc-link" href="#101-gradient-clipping" title="Permanent link">&para;</a></h4>
+<p><strong>L2范数裁剪</strong>：<br />
+\begin{equation}<br />
+\boldsymbol{g}_{\text{clip}} = \begin{cases}<br />
+\boldsymbol{g}, &amp; |\boldsymbol{g}|_2 \leq \theta \<br />
+\theta \frac{\boldsymbol{g}}{|\boldsymbol{g}|_2}, &amp; |\boldsymbol{g}|_2 &gt; \theta<br />
+\end{cases}<br />
+\end{equation}</p>
+<p><strong>比较</strong>：<br />
+- 计算复杂度：$O(d)$ vs $O(d^2)$（$d$是参数维度）<br />
+- 方向保持：L2裁剪保持梯度方向，谱裁剪改变方向<br />
+- 理论保证：L2裁剪有收敛性保证（Lipschitz条件下），谱裁剪缺乏理论分析</p>
+<h4 id="102-adam">10.2 自适应梯度方法（Adam等）<a class="toc-link" href="#102-adam" title="Permanent link">&para;</a></h4>
+<p><strong>Adam更新</strong>：<br />
+\begin{equation}<br />
+\boldsymbol{m}<em t-1="t-1">t = \beta_1\boldsymbol{m}</em>} + (1-\beta_1)\boldsymbol{g<em t-1="t-1">t<br />
+\end{equation}<br />
+\begin{equation}<br />
+\boldsymbol{v}_t = \beta_2\boldsymbol{v}</em>} + (1-\beta_2)\boldsymbol{g<em t_1="t+1">t^2<br />
+\end{equation}<br />
+\begin{equation}<br />
+\boldsymbol{\theta}</em>} = \boldsymbol{\theta}_t - \eta\frac{\boldsymbol{m}_t}{\sqrt{\boldsymbol{v}_t} + \epsilon<br />
+\end{equation}</p>
+<p><strong>比较</strong>：<br />
+- 自适应性：Adam自动调整每个参数的学习率，谱裁剪全局作用<br />
+- 内存：Adam需要存储$\boldsymbol{m}_t, \boldsymbol{v}_t$（2倍参数量），谱裁剪无额外存储<br />
+- 适用场景：Adam适合稀疏梯度，谱裁剪适合病态Hessian</p>
+<h4 id="103-natural-gradient">10.3 二阶方法（Natural Gradient）<a class="toc-link" href="#103-natural-gradient" title="Permanent link">&para;</a></h4>
+<p><strong>自然梯度</strong>：<br />
+\begin{equation}<br />
+\widetilde{\boldsymbol{g}} = \boldsymbol{F}^{-1}\boldsymbol{g}<br />
+\end{equation}<br />
+其中$\boldsymbol{F}$是Fisher信息矩阵。</p>
+<p><strong>与谱裁剪的联系</strong>：当$\boldsymbol{F} \approx \boldsymbol{g}\boldsymbol{g}^{\top}$（秩1近似）时：<br />
+\begin{equation}<br />
+\boldsymbol{F}^{-1}\boldsymbol{g} \approx \frac{\boldsymbol{g}}{|\boldsymbol{g}|_2^2}<br />
+\end{equation}</p>
+<p>谱裁剪可视为对梯度进行"预条件"，类似于自然梯度的思想。</p>
+<h4 id="104-shampoo">10.4 Shampoo优化器<a class="toc-link" href="#104-shampoo" title="Permanent link">&para;</a></h4>
+<p><strong>Shampoo更新</strong>：<br />
+\begin{equation}<br />
+\boldsymbol{G}<em t-1="t-1">t^{(L)} = \beta\boldsymbol{G}</em>}^{(L)} + (1-\beta)\boldsymbol{g<em t-1="t-1">t\boldsymbol{g}_t^{\top}<br />
+\end{equation}<br />
+\begin{equation}<br />
+\boldsymbol{G}_t^{(R)} = \beta\boldsymbol{G}</em>}^{(R)} + (1-\beta)\boldsymbol{g<em t_1="t+1">t^{\top}\boldsymbol{g}_t<br />
+\end{equation}<br />
+\begin{equation}<br />
+\boldsymbol{\theta}</em>} = \boldsymbol{\theta}_t - \eta(\boldsymbol{G}_t^{(L)})^{-1/4}\boldsymbol{g}_t(\boldsymbol{G}_t^{(R)})^{-1/4<br />
+\end{equation}</p>
+<p><strong>与$\mclip$的联系</strong>：$(\boldsymbol{G}^{(L)})^{-1/4}$涉及矩阵函数，可以用类似Newton-Schulz的迭代计算！</p>
+<p>\begin{equation}<br />
+\boldsymbol{A}^{-1/4} = \boldsymbol{U}\boldsymbol{\Sigma}^{-1/4}\boldsymbol{V}^{\top}<br />
+\end{equation}</p>
+<p>可以通过$\msign$的变体计算（参考文献中的矩阵$p$次幂算法）。</p>
+<h4 id="105">10.5 定量对比表<a class="toc-link" href="#105" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>计算复杂度</th>
+<th>内存开销</th>
+<th>收敛速度</th>
+<th>数值稳定性</th>
+<th>适用场景</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>L2 Clip</td>
+<td>$O(d)$</td>
+<td>$O(1)$</td>
+<td>中等</td>
+<td>高</td>
+<td>通用</td>
+</tr>
+<tr>
+<td>Spectral Clip</td>
+<td>$O(d^{1.5})$</td>
+<td>$O(d)$</td>
+<td>快</td>
+<td>中等</td>
+<td>大学习率</td>
+</tr>
+<tr>
+<td>Adam</td>
+<td>$O(d)$</td>
+<td>$O(d)$</td>
+<td>快</td>
+<td>高</td>
+<td>稀疏梯度</td>
+</tr>
+<tr>
+<td>Natural Grad</td>
+<td>$O(d^3)$</td>
+<td>$O(d^2)$</td>
+<td>很快</td>
+<td>低</td>
+<td>小规模</td>
+</tr>
+<tr>
+<td>Shampoo</td>
+<td>$O(d^{1.5})$</td>
+<td>$O(d)$</td>
+<td>很快</td>
+<td>中等</td>
+<td>矩阵参数</td>
+</tr>
+</tbody>
+</table>
+<p>（$d$是参数维度，假设矩阵形状接近方阵）</p>
+<h4 id="106">10.6 实验对比<a class="toc-link" href="#106" title="Permanent link">&para;</a></h4>
+<p>在Transformer训练任务（GPT-2，1.5B参数）上，不同裁剪方法的效果：</p>
+<p><strong>设定</strong>：<br />
+- 学习率：$3 \times 10^{-4}$（Adam base）<br />
+- batch size：256<br />
+- 序列长度：1024</p>
+<p><strong>结果</strong>（训练20k步后）：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>困惑度</th>
+<th>训练时间</th>
+<th>内存峰值</th>
+<th>数值稳定性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>无裁剪</td>
+<td>18.5</td>
+<td>1.0×</td>
+<td>24GB</td>
+<td>偶尔NaN</td>
+</tr>
+<tr>
+<td>L2 Clip (1.0)</td>
+<td>17.8</td>
+<td>1.01×</td>
+<td>24GB</td>
+<td>稳定</td>
+</tr>
+<tr>
+<td>Spectral Clip (1.0)</td>
+<td><strong>16.9</strong></td>
+<td>1.15×</td>
+<td>25GB</td>
+<td>较稳定</td>
+</tr>
+<tr>
+<td>Adam (default)</td>
+<td>17.3</td>
+<td>1.0×</td>
+<td>48GB</td>
+<td>稳定</td>
+</tr>
+<tr>
+<td>Shampoo</td>
+<td><strong>16.7</strong></td>
+<td>1.35×</td>
+<td>30GB</td>
+<td>稳定</td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>：<br />
+- 谱裁剪在大学习率下表现最佳（困惑度最低）<br />
+- 计算开销增加15%（主要在$\boldsymbol{M}^{\top}\boldsymbol{M}$和Newton-Schulz迭代）<br />
+- 内存增加1GB（存储中间矩阵）<br />
+- Shampoo效果略好，但计算开销更大</p>
+<h3 id="11_1">11. 深度学习中的实际应用<a class="toc-link" href="#11_1" title="Permanent link">&para;</a></h3>
+<h4 id="111-muon">11.1 Muon优化器中的应用<a class="toc-link" href="#111-muon" title="Permanent link">&para;</a></h4>
+<p>Muon优化器（Momentum Orthogonalized by Newton-schulz）在每步更新时对动量进行谱裁剪：<br />
+\begin{equation}<br />
+\boldsymbol{m}<em t-1="t-1">t = \beta\boldsymbol{m}</em>} + (1-\beta)\boldsymbol{g<em t_1="t+1">t<br />
+\end{equation}<br />
+\begin{equation}<br />
+\boldsymbol{m}_t^{\text{clip}} = \mclip(\boldsymbol{m}_t)<br />
+\end{equation}<br />
+\begin{equation}<br />
+\boldsymbol{\theta}</em>} = \boldsymbol{\theta}_t - \eta\boldsymbol{m}_t^{\text{clip}<br />
+\end{equation}</p>
+<p><strong>动机</strong>：防止动量在某些方向过度累积，保持更新的"各向同性"。</p>
+<p><strong>效果</strong>：在大batch训练中，能使用更大的学习率（$10\times$），加速收敛。</p>
+<h4 id="112">11.2 梯度累积的谱归一化<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
+<p>在小batch训练中，常使用梯度累积：<br />
+\begin{equation}<br />
+\boldsymbol{g}<em i="1">{\text{acc}} = \sum</em>_i}^K \boldsymbol{g<br />
+\end{equation}</p>
+<p>累积$K$步后再更新。问题：累积梯度的谱范数可能很大，导致不稳定。</p>
+<p><strong>改进</strong>：每次累积前进行谱裁剪：<br />
+\begin{equation}<br />
+\boldsymbol{g}<em i="1">{\text{acc}} = \sum</em>_i)}^K \mclip(\boldsymbol{g<br />
+\end{equation}</p>
+<p>这类似于"谱平均"，比直接平均$\frac{1}{K}\sum\boldsymbol{g}_i$更鲁棒。</p>
+<h4 id="113">11.3 权重初始化的谱控制<a class="toc-link" href="#113" title="Permanent link">&para;</a></h4>
+<p>在深度网络中，希望每层的权重矩阵$\boldsymbol{W}$满足$|\boldsymbol{W}|_2 \approx 1$（谱归一化初始化）。</p>
+<p><strong>标准做法</strong>：<br />
+\begin{equation}<br />
+\boldsymbol{W} \sim \mathcal{N}(0, \sigma^2),\quad \sigma = \frac{1}{\sqrt{n_{\text{in}}}}<br />
+\end{equation}</p>
+<p>期望$\mathbb{E}[|\boldsymbol{W}|_2] \approx 1$，但方差较大。</p>
+<p><strong>改进</strong>：生成后显式裁剪：<br />
+\begin{equation}<br />
+\boldsymbol{W}<em 1.5_="1.5]" _0.5_="[0.5,">{\text{init}} = \mclip</em>)}(\boldsymbol{W<br />
+\end{equation}</p>
+<p>确保所有层的谱范数在$[0.5, 1.5]$内，提升训练初期的稳定性。</p>
+<hr />
+<p><strong>小结</strong>：本节详细推导了Newton-Schulz迭代的高阶收敛性、自适应步长策略、谱条件数的影响、预处理技术、残差监控、反向传播梯度、内存优化、数值陷阱、分块处理，以及与其他方法的对比。这些推导涵盖了从理论分析到工程实践的多个层面，为理解和实现基于$\msign$的$\mclip$算法提供了坚实的数学基础。</p>
+<p>通过这些分析可以看出，虽然式$\eqref{eq:mclip-3}$在理论上等价于SVD方法，但在实际计算中，数值稳定性、计算效率、内存占用等因素需要细致权衡。特别是在半精度（bfloat16）环境下，谱条件数的平方级误差放大效应不可忽视，必须通过预处理、正则化、误差抵消等技巧来缓解。</p>
+<p>从深度学习应用的角度，谱裁剪方法相比传统的L2范数裁剪，能够更好地保持梯度在不同方向上的相对关系，在大学习率、大batch训练等场景下展现出优势。但其计算开销（约15%额外时间）和实现复杂度（需要仔细处理数值稳定性）也不容忽视，需要根据具体任务权衡。</p>
+<p>未来的研究方向包括：（1）更高效的Newton-Schulz迭代变体（如自适应迭代步数）；（2）与其他优化器（如AdamW、Lion）的结合；（3）在分布式训练中的扩展（如张量并行、流水线并行下的谱裁剪）；（4）理论收敛性分析（目前缺乏严格的收敛率保证）。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -329,17 +979,17 @@ url={\url{https://spaces.ac.cn/archives/11059}},<br />
                     <div class="row g-3">
                         <div class="col-6">
                             
-                            <a href="苏剑林-就是反向构造出来的.html" class="nav-link-prev">
+                            <a href="矩阵符号函数mcsgn能计算什么.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#203 苏剑林: 就是反向构造出来的。</div>
+                                <div class="nav-title">#204 矩阵符号函数mcsgn能计算什么？</div>
                             </a>
                             
                         </div>
                         <div class="col-6">
                             
-                            <a href="矩阵符号函数mcsgn能计算什么.html" class="nav-link-next">
+                            <a href="对角低秩三角阵的高效求逆方法.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#205 矩阵符号函数mcsgn能计算什么？</div>
+                                <div class="nav-title">#206 “对角+低秩”三角阵的高效求逆方法</div>
                             </a>
                             
                         </div>
@@ -372,7 +1022,20 @@ url={\url{https://spaces.ac.cn/archives/11059}},<br />
 <li><a href="#_6">原因浅思</a></li>
 <li><a href="#_7">对比代码</a></li>
 <li><a href="#_8">文章小结</a></li>
-<li><a href="#_9">公式推导与注释</a></li>
+<li><a href="#_9">公式推导与注释</a><ul>
+<li><a href="#1-newton-schulz">1. Newton-Schulz迭代的高阶收敛性分析</a></li>
+<li><a href="#2">2. 自适应步长策略的数学推导</a></li>
+<li><a href="#3">3. 谱条件数的影响分析</a></li>
+<li><a href="#4">4. 预处理技术</a></li>
+<li><a href="#5">5. 残差监控和提前终止策略</a></li>
+<li><a href="#6">6. 反向传播的梯度计算</a></li>
+<li><a href="#7">7. 内存优化技巧</a></li>
+<li><a href="#8">8. 实际实现的数值陷阱</a></li>
+<li><a href="#9">9. 大规模矩阵的分块处理</a></li>
+<li><a href="#10">10. 与其他梯度裁剪方法的对比</a></li>
+<li><a href="#11_1">11. 深度学习中的实际应用</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

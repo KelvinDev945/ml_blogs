@@ -155,59 +155,59 @@
 <p>注意，这个过程需要我们遍历每个低置信度结果$j\in\{n+1,n+2,\cdots,N\}$执行，也就是说是 <em>逐个样本进行修正</em> ，而不是一次性修正的，每个$p^{(j)}$都借助<strong>原始的</strong> 高置信度结果$p^{(1)},p^{(2)},\cdots,p^{(n)}$组合来按照上述步骤迭代，虽然迭代过程中对应的$p^{(1)},p^{(2)},\cdots,p^{(n)}$都会随之更新，但那只是临时结果，最后都是弃之不用的，每次修正都是用原始的$p^{(1)},p^{(2)},\cdots,p^{(n)}$。</p>
 <h2 id="_4">参考实现<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>这是笔者给出的参考实现代码：</p>
-<div class="highlight"><pre><span></span><code><span class="err">#</span><span class="w"> </span><span class="n">预测结果</span><span class="err">，</span><span class="n">计算修正前准确率</span>
-<span class="n">y_pred</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">model</span><span class="p">.</span><span class="n">predict</span><span class="p">(</span>
-<span class="w">    </span><span class="n">valid_generator</span><span class="p">.</span><span class="n">fortest</span><span class="p">(),</span><span class="w"> </span><span class="n">steps</span><span class="o">=</span><span class="nf">len</span><span class="p">(</span><span class="n">valid_generator</span><span class="p">),</span><span class="w"> </span><span class="n">verbose</span><span class="o">=</span><span class="k">True</span>
-<span class="p">)</span>
-<span class="n">y_true</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="k">array</span><span class="p">(</span><span class="o">[</span><span class="n">d[1</span><span class="o">]</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">d</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">valid_data</span><span class="err">]</span><span class="p">)</span>
-<span class="n">acc_original</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">mean</span><span class="p">(</span><span class="o">[</span><span class="n">y_pred.argmax(1) == y_true</span><span class="o">]</span><span class="p">)</span>
-<span class="k">print</span><span class="p">(</span><span class="s1">&#39;original acc: %s&#39;</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">acc_original</span><span class="p">)</span>
+<pre class="highlight"><code># 预测结果，计算修正前准确率
+y_pred = model.predict(
+    valid_generator.fortest(), steps=len(valid_generator), verbose=True
+)
+y_true = np.array([d[1] for d in valid_data])
+acc_original = np.mean([y_pred.argmax(1) == y_true])
+print('original acc: %s' % acc_original)
 
-<span class="err">#</span><span class="w"> </span><span class="n">评价每个预测结果的不确定性</span>
-<span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span>
-<span class="n">y_pred_topk</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">sort</span><span class="p">(</span><span class="n">y_pred</span><span class="p">,</span><span class="w"> </span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">[</span><span class="n">:, -k:</span><span class="o">]</span>
-<span class="n">y_pred_topk</span><span class="w"> </span><span class="o">/=</span><span class="w"> </span><span class="n">y_pred_topk</span><span class="p">.</span><span class="nf">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">keepdims</span><span class="o">=</span><span class="k">True</span><span class="p">)</span>
-<span class="n">y_pred_uncertainty</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="p">(</span><span class="n">y_pred_topk</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="nf">log</span><span class="p">(</span><span class="n">y_pred_topk</span><span class="p">)).</span><span class="nf">sum</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="nf">log</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
+# 评价每个预测结果的不确定性
+k = 3
+y_pred_topk = np.sort(y_pred, axis=1)[:, -k:]
+y_pred_topk /= y_pred_topk.sum(axis=1, keepdims=True)
+y_pred_uncertainty = -(y_pred_topk * np.log(y_pred_topk)).sum(1) / np.log(k)
 
-<span class="err">#</span><span class="w"> </span><span class="n">选择阈值</span><span class="err">，</span><span class="n">划分高</span><span class="err">、</span><span class="n">低置信度两部分</span>
-<span class="n">threshold</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.9</span>
-<span class="n">y_pred_confident</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">y_pred</span><span class="o">[</span><span class="n">y_pred_uncertainty &lt; threshold</span><span class="o">]</span>
-<span class="n">y_pred_unconfident</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">y_pred</span><span class="o">[</span><span class="n">y_pred_uncertainty &gt;= threshold</span><span class="o">]</span>
-<span class="n">y_true_confident</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">y_true</span><span class="o">[</span><span class="n">y_pred_uncertainty &lt; threshold</span><span class="o">]</span>
-<span class="n">y_true_unconfident</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">y_true</span><span class="o">[</span><span class="n">y_pred_uncertainty &gt;= threshold</span><span class="o">]</span>
+# 选择阈值，划分高、低置信度两部分
+threshold = 0.9
+y_pred_confident = y_pred[y_pred_uncertainty &lt; threshold]
+y_pred_unconfident = y_pred[y_pred_uncertainty &gt;= threshold]
+y_true_confident = y_true[y_pred_uncertainty &lt; threshold]
+y_true_unconfident = y_true[y_pred_uncertainty &gt;= threshold]
 
-<span class="err">#</span><span class="w"> </span><span class="n">显示两部分各自的准确率</span>
-<span class="err">#</span><span class="w"> </span><span class="n">一般而言</span><span class="err">，</span><span class="n">高置信度集准确率会远高于低置信度的</span>
-<span class="n">acc_confident</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">y_pred_confident</span><span class="p">.</span><span class="n">argmax</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">y_true_confident</span><span class="p">).</span><span class="n">mean</span><span class="p">()</span>
-<span class="n">acc_unconfident</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">y_pred_unconfident</span><span class="p">.</span><span class="n">argmax</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">y_true_unconfident</span><span class="p">).</span><span class="n">mean</span><span class="p">()</span>
-<span class="k">print</span><span class="p">(</span><span class="s1">&#39;confident acc: %s&#39;</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">acc_confident</span><span class="p">)</span>
-<span class="k">print</span><span class="p">(</span><span class="s1">&#39;unconfident acc: %s&#39;</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">acc_unconfident</span><span class="p">)</span>
+# 显示两部分各自的准确率
+# 一般而言，高置信度集准确率会远高于低置信度的
+acc_confident = (y_pred_confident.argmax(1) == y_true_confident).mean()
+acc_unconfident = (y_pred_unconfident.argmax(1) == y_true_unconfident).mean()
+print('confident acc: %s' % acc_confident)
+print('unconfident acc: %s' % acc_unconfident)
 
-<span class="err">#</span><span class="w"> </span><span class="n">从训练集统计先验分布</span>
-<span class="k">prior</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">num_classes</span><span class="p">)</span>
-<span class="k">for</span><span class="w"> </span><span class="n">d</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="nl">train_data</span><span class="p">:</span>
-<span class="w">    </span><span class="k">prior</span><span class="o">[</span><span class="n">d[1</span><span class="o">]</span><span class="err">]</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mf">1.</span>
+# 从训练集统计先验分布
+prior = np.zeros(num_classes)
+for d in train_data:
+    prior[d[1]] += 1.
 
-<span class="k">prior</span><span class="w"> </span><span class="o">/=</span><span class="w"> </span><span class="k">prior</span><span class="p">.</span><span class="nf">sum</span><span class="p">()</span>
+prior /= prior.sum()
 
-<span class="err">#</span><span class="w"> </span><span class="n">逐个修改低置信度样本</span><span class="err">，</span><span class="n">并重新评价准确率</span>
-<span class="nf">right</span><span class="p">,</span><span class="w"> </span><span class="n">alpha</span><span class="p">,</span><span class="w"> </span><span class="n">iters</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span>
-<span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">enumerate</span><span class="p">(</span><span class="n">y_pred_unconfident</span><span class="p">)</span><span class="err">:</span>
-<span class="w">    </span><span class="n">Y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">concatenate</span><span class="p">(</span><span class="o">[</span><span class="n">y_pred_confident, y[None</span><span class="o">]</span><span class="err">]</span><span class="p">,</span><span class="w"> </span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">iters</span><span class="p">)</span><span class="err">:</span>
-<span class="w">        </span><span class="n">Y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Y</span><span class="o">**</span><span class="n">alpha</span>
-<span class="w">        </span><span class="n">Y</span><span class="w"> </span><span class="o">/=</span><span class="w"> </span><span class="n">Y</span><span class="p">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">keepdims</span><span class="o">=</span><span class="k">True</span><span class="p">)</span>
-<span class="w">        </span><span class="n">Y</span><span class="w"> </span><span class="o">*=</span><span class="w"> </span><span class="k">prior</span><span class="o">[</span><span class="n">None</span><span class="o">]</span>
-<span class="w">        </span><span class="n">Y</span><span class="w"> </span><span class="o">/=</span><span class="w"> </span><span class="n">Y</span><span class="p">.</span><span class="nf">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">keepdims</span><span class="o">=</span><span class="k">True</span><span class="p">)</span>
-<span class="w">    </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Y</span><span class="o">[</span><span class="n">-1</span><span class="o">]</span>
-<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">y</span><span class="p">.</span><span class="n">argmax</span><span class="p">()</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">y_true_unconfident</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="err">:</span>
-<span class="w">        </span><span class="nf">right</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">1</span>
+# 逐个修改低置信度样本，并重新评价准确率
+right, alpha, iters = 0, 1, 1
+for i, y in enumerate(y_pred_unconfident):
+    Y = np.concatenate([y_pred_confident, y[None]], axis=0)
+    for j in range(iters):
+        Y = Y**alpha
+        Y /= Y.mean(axis=0, keepdims=True)
+        Y *= prior[None]
+        Y /= Y.sum(axis=1, keepdims=True)
+    y = Y[-1]
+    if y.argmax() == y_true_unconfident[i]:
+        right += 1
 
-<span class="err">#</span><span class="w"> </span><span class="n">输出修正后的准确率</span>
-<span class="n">acc_final</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">acc_confident</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="nf">len</span><span class="p">(</span><span class="n">y_pred_confident</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nf">right</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nf">len</span><span class="p">(</span><span class="n">y_pred</span><span class="p">)</span>
-<span class="k">print</span><span class="p">(</span><span class="s1">&#39;new unconfident acc: %s&#39;</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="p">(</span><span class="nf">right</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="n">i</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">1.</span><span class="p">)))</span>
-<span class="k">print</span><span class="p">(</span><span class="s1">&#39;final acc: %s&#39;</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">acc_final</span><span class="p">)</span>
-</code></pre></div>
+# 输出修正后的准确率
+acc_final = (acc_confident * len(y_pred_confident) + right) / len(y_pred)
+print('new unconfident acc: %s' % (right / (i + 1.)))
+print('final acc: %s' % acc_final)
+</code></pre>
 
 <h2 id="_5">实验结果<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>那么，这样的简单后处理，究竟能带来多大的提升呢？原论文给出的实验结果是相当可观的：  </p>

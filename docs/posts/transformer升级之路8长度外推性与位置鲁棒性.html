@@ -74,7 +74,7 @@
             <ol class="breadcrumb">
                 <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
                 
-                <li class="breadcrumb-item"><a href="../index.html?tags=语言模型">语言模型</a></li>
+                <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
                     #75 Transformer升级之路：8、长度外推性与位置鲁棒性
@@ -94,6 +94,10 @@
             </div>
             
             <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=详细推导" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 详细推导</span>
+                </a>
                 
                 <a href="../index.html?tags=语言模型" class="tag-link">
                     <span class="tag"><i class="fas fa-tag"></i> 语言模型</span>
@@ -149,11 +153,11 @@
 <p><strong>随机位置训练</strong> 设$N$为训练长度（论文$N=40$），$M$为预测长度（论文$M=500$），那么选定一个较大$L &gt; M$（这是一个超参，论文$L=2048$），训练阶段原本长度为$N$的序列对应的位置序列是$[0,1,\cdots,N-2,N-1]$，现在改为从$\{0,1,\cdots,L-2,L-1\}$中随机不重复地选$N$个并从小到大排列，作为当前序列的位置序列。</p>
 </blockquote>
 <p>基于numpy的参考代码为：</p>
-<div class="highlight"><pre><span></span><code>def random_position_ids(N, L=2048):
+<pre class="highlight"><code>def random_position_ids(N, L=2048):
     &quot;&quot;&quot;从[0, L)中随机不重复挑N个整数，并从小到大排列
     &quot;&quot;&quot;
     return np.sort(np.random.permutation(L)[:N])
-</code></pre></div>
+</code></pre>
 
 <p>预测阶段，也可以同样的方式随机采样位置序列，也可以直接在区间中均匀取点（个人的实验效果显示均匀取点的效果一般好些），这就解决了预测阶段的位置编码没有被训练过的问题。不难理解，这是一个很朴素的训练技巧（下面称之为“随机位置训练”），目标是希望Transformer能对位置的选择更加鲁棒一些，但后面我们将看到，它能取得长度外推效果的明显提升。笔者也在MLM任务上做了实验，结果显示在MLM上也是有效果的，并且配合“$\log n$缩放注意力”提升幅度更明显（原论文没有“$\log n$缩放注意力”这一步）。</p>
 <h2 id="_3">新的基准<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
@@ -197,12 +201,12 @@ $$\underbrace{\text{Transformer}}<em _text_R="\text{R">{\text{R}^-} &lt; \underb
 <p><strong>等均值随机位置训练</strong> 设$n$服从一个均值为$N$、采样空间为$[0, \infty)$的分布，那么训练阶段随机采样一个$n$，然后从$[0, n]$中均匀取$N$个点作为位置序列。</p>
 </blockquote>
 <p>参考代码为：</p>
-<div class="highlight"><pre><span></span><code>def random_position_ids(N):
+<pre class="highlight"><code>def random_position_ids(N):
     &quot;&quot;&quot;先随机采样n，然后从[0, n]均匀取N个点
     &quot;&quot;&quot;
     n = sample_from_xxx()
     return np.linspace(0, 1, N) * n
-</code></pre></div>
+</code></pre>
 
 <p>注意，这样采样出来的位置序列是浮点数，因此不适用于离散的训练式位置编码，只适用于函数式位置编码如<a href="/archives/8231">Sinusoidal</a>或<a href="/archives/8265">RoPE</a>，下面假设只考虑函数式位置编码。</p>
 <p>该思路的最大问题是如何选择适合的采样分布。笔者的第一反应是<a href="https://en.wikipedia.org/wiki/Poisson_distribution">泊松分布</a>，但考虑到泊松分布的均值和方差都是$n$，那么按照“3$\sigma$法则”来估算，它只能外推到$n+3\sqrt{n}$长度，这显然太短了。经过挑选和测试，笔者发现有两个分布比较适合：一个是<a href="https://en.wikipedia.org/wiki/Exponential_distribution">指数分布</a>，它的均值和标准差都是$n$，那么即便按照“3$\sigma$法则”，也能外推到$4n$的长度，是一个比较理想的范围（实际还更长些）；另一个是<a href="https://en.wikipedia.org/wiki/Beta_distribution">beta分布</a>，它定义在$[0,1]$上，我们可以将测试长度作为1，那么训练长度就是$N/M\in(0,1)$，beta分布有两个参数$\alpha,\beta$，其中均值为$\frac{\alpha}{\alpha+\beta}$，那么确保均值等于$N/M$后，我们还有额外的自由度控制$1$附近的概率，适合想要进一步拓展外推范围的场景。</p>
@@ -230,7 +234,319 @@ url={\url{https://spaces.ac.cn/archives/9444}},<br />
 } </p>
 <hr />
 <h2 id="_8">公式推导与注释<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1">1. 位置鲁棒性的数学定义<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 鲁棒性的形式化定义<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p><strong>定义1（位置鲁棒性）</strong>：设 $f_{\theta}$ 是一个依赖位置编码的模型，位置序列为 $\boldsymbol{p} = (p_1, p_2, \ldots, p_L)$，输入为 $\boldsymbol{x} = (x_1, x_2, \ldots, x_L)$。模型在位置扰动下的鲁棒性定义为：</p>
+<p>$$\text{Robustness}(f_{\theta}, \boldsymbol{p}, \boldsymbol{p}') = \mathbb{E}<em _theta="\theta">{\boldsymbol{x}}\left[|f</em>')|\right]$$}(\boldsymbol{x}, \boldsymbol{p}) - f_{\theta}(\boldsymbol{x}, \boldsymbol{p</p>
+<p>其中 $\boldsymbol{p}'$ 是 $\boldsymbol{p}$ 的扰动版本。</p>
+<p>对于长度外推，扰动来自两个方面：<br />
+1. <strong>位置偏移</strong>：$p_i' = p_i + \delta_i$，其中 $\delta_i$ 是随机偏移<br />
+2. <strong>长度缩放</strong>：$p_i' = \alpha p_i$，其中 $\alpha = L'/L$ 是长度缩放因子</p>
+<h4 id="12">1.2 位置编码的等价类<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p><strong>定义2（位置编码等价类）</strong>：两个位置序列 $\boldsymbol{p}$ 和 $\boldsymbol{p}'$ 属于同一等价类，当且仅当它们诱导相同的相对位置关系：</p>
+<p>$$\boldsymbol{p} \sim \boldsymbol{p}' \iff (p_i - p_j) = (p_i' - p_j'), \quad \forall i, j$$</p>
+<p>对于严格单调递增的位置序列，等价类可以表征为：</p>
+<p>$$[\boldsymbol{p}] = {\boldsymbol{p}' : \text{order}(\boldsymbol{p}') = \text{order}(\boldsymbol{p})}$$</p>
+<p>其中 $\text{order}(\boldsymbol{p})$ 表示序列的单调性。</p>
+<h4 id="13">1.3 鲁棒性度量<a class="toc-link" href="#13" title="Permanent link">&para;</a></h4>
+<p><strong>度量1（位置扰动敏感度）</strong>：模型对位置扰动的敏感度定义为Jacobian范数：</p>
+<p>$$\text{Sensitivity} = \mathbb{E}\left[\left|\frac{\partial f_{\theta}(\boldsymbol{x}, \boldsymbol{p})}{\partial \boldsymbol{p}}\right|_F\right]$$</p>
+<p>鲁棒的模型应该有较小的敏感度。</p>
+<p><strong>度量2（Lipschitz常数）</strong>：位置编码的Lipschitz常数：</p>
+<p>$$L_{\text{PE}} = \sup_{\boldsymbol{p} \neq \boldsymbol{p}'} \frac{|\text{PE}(\boldsymbol{p}) - \text{PE}(\boldsymbol{p}')|}{|\boldsymbol{p} - \boldsymbol{p}'|}$$</p>
+<p>对于RoPE，由于其正交性：</p>
+<p>$$|\boldsymbol{\mathcal{R}}<em m-n="m-n">m \boldsymbol{v} - \boldsymbol{\mathcal{R}}_n \boldsymbol{v}| = |\boldsymbol{\mathcal{R}}</em>|$$} \boldsymbol{v} - \boldsymbol{v</p>
+<p>Lipschitz常数依赖于相对位置 $|m-n|$ 而非绝对位置。</p>
+<h3 id="2-rope">2. RoPE在长度外推中的稳定性分析<a class="toc-link" href="#2-rope" title="Permanent link">&para;</a></h3>
+<h4 id="21-rope">2.1 RoPE的周期性分析<a class="toc-link" href="#21-rope" title="Permanent link">&para;</a></h4>
+<p>RoPE的第 $i$ 个维度对的旋转角度为：</p>
+<p>$$\theta_i(m) = m \cdot \omega_i, \quad \omega_i = \theta_{\text{base}}^{-2i/d}$$</p>
+<p>其周期为：</p>
+<p>$$T_i = \frac{2\pi}{\omega_i} = 2\pi \cdot \theta_{\text{base}}^{2i/d}$$</p>
+<p><strong>定理1（RoPE的多尺度周期性）</strong>：RoPE具有多个不同周期的分量，从最短周期 $T_0 = 2\pi$ 到最长周期 $T_{d/2-1} = 2\pi \cdot \theta_{\text{base}}$。</p>
+<p>对于 $\theta_{\text{base}} = 10000$，最长周期约为 $62832$。</p>
+<h4 id="22">2.2 外推时的频率混叠<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p><strong>定理2（频率混叠定理）</strong>：当外推到长度 $L &gt; T_i$ 时，第 $i$ 个维度对开始出现周期性重复，导致不同位置的编码发生混叠。</p>
+<p>证明：设 $m_1 = m_0 + kT_i$（$k \in \mathbb{Z}$），则：</p>
+<p>$$\begin{aligned}<br />
+\theta_i(m_1) &amp;= (m_0 + kT_i) \omega_i \<br />
+&amp;= m_0\omega_i + kT_i\omega_i \<br />
+&amp;= m_0\omega_i + 2\pi k \<br />
+&amp;\equiv m_0\omega_i \pmod{2\pi}<br />
+\end{aligned}$$</p>
+<p>因此 $\text{RoPE}^{(i)}(m_1) = \text{RoPE}^{(i)}(m_0)$，两个位置的编码相同。</p>
+<h4 id="23">2.3 高频与低频分量的作用<a class="toc-link" href="#23" title="Permanent link">&para;</a></h4>
+<p><strong>高频分量</strong>（小 $i$，大 $\omega_i$）：<br />
+- 周期短，能区分相邻位置<br />
+- 外推时更快出现混叠<br />
+- 对短距离依赖建模重要</p>
+<p><strong>低频分量</strong>（大 $i$，小 $\omega_i$）：<br />
+- 周期长，能编码长距离信息<br />
+- 外推时更稳定<br />
+- 对长距离依赖建模重要</p>
+<p><strong>定理3（频率分量的权衡）</strong>：RoPE需要平衡高频和低频分量，以同时捕捉短距离和长距离依赖。</p>
+<h4 id="24">2.4 稳定性的量化分析<a class="toc-link" href="#24" title="Permanent link">&para;</a></h4>
+<p><strong>定义3（位置编码的稳定性指标）</strong>：对于外推到长度 $L$，稳定性指标为：</p>
+<p>$$\text{Stability}(L) = \frac{1}{d/2} \sum_{i=0}^{d/2-1} \mathbb{1}[L &lt; T_i]$$</p>
+<p>其中 $\mathbb{1}[\cdot]$ 是指示函数。</p>
+<p>这个指标表示有多少比例的维度对在长度 $L$ 内不会出现周期性重复。</p>
+<p>对于RoPE：</p>
+<p>$$\text{Stability}(L) = \frac{1}{d/2} \sum_{i=0}^{d/2-1} \mathbb{1}\left[L &lt; 2\pi \cdot \theta_{\text{base}}^{2i/d}\right]$$</p>
+<p>计算临界维度 $i^<em>$ 使得 $L = T_{i^</em>}$：</p>
+<p>$$L = 2\pi \cdot \theta_{\text{base}}^{2i^<em>/d} \implies i^</em> = \frac{d}{2} \log_{\theta_{\text{base}}} \frac{L}{2\pi}$$</p>
+<p>因此：</p>
+<p>$$\text{Stability}(L) \approx 1 - \frac{2i^*}{d} = 1 - \log_{\theta_{\text{base}}} \frac{L}{2\pi}$$</p>
+<p>当 $L \ll \theta_{\text{base}}$ 时，$\text{Stability}(L) \approx 1$（高稳定性）。</p>
+<p>当 $L \approx \theta_{\text{base}}$ 时，$\text{Stability}(L) \approx 0$（低稳定性）。</p>
+<h3 id="3">3. 插值与外推的理论比较<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 插值的数学定义<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p><strong>定义4（位置插值）</strong>：给定训练长度 $L_{\text{train}}$，要在长度 $L_{\text{test}} &gt; L_{\text{train}}$ 上测试，插值方法将位置序列缩放：</p>
+<p>$$p_i^{\text{interp}} = \frac{L_{\text{train}}}{L_{\text{test}}} \cdot i = \frac{i}{\alpha}, \quad \alpha = \frac{L_{\text{test}}}{L_{\text{train}}}$$</p>
+<p>对于RoPE，这等价于将所有频率缩放：</p>
+<p>$$\omega_i^{\text{interp}} = \frac{\omega_i}{\alpha}$$</p>
+<h4 id="32">3.2 外推的数学定义<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p><strong>定义5（位置外推）</strong>：直接使用原始位置序列，不进行缩放：</p>
+<p>$$p_i^{\text{extrap}} = i$$</p>
+<p>对于RoPE，频率保持不变：</p>
+<p>$$\omega_i^{\text{extrap}} = \omega_i$$</p>
+<h4 id="33">3.3 插值与外推的对比<a class="toc-link" href="#33" title="Permanent link">&para;</a></h4>
+<p><strong>插值的优点</strong>：<br />
+1. <strong>避免周期性重复</strong>：缩放后的位置 $p_i^{\text{interp}} = i/\alpha$ 保持在训练范围 $[0, L_{\text{train}}]$ 内<br />
+2. <strong>位置编码在训练集内</strong>：所有位置的编码都在训练时见过<br />
+3. <strong>稳定性高</strong>：$\text{Stability}(L_{\text{train}}) \approx 1$</p>
+<p><strong>插值的缺点</strong>：<br />
+1. <strong>破坏绝对位置信息</strong>：相邻位置的间距变为 $1/\alpha &lt; 1$<br />
+2. <strong>相对位置扭曲</strong>：相对位置 $p_i - p_j = (i-j)/\alpha$ 被压缩<br />
+3. <strong>注意力模式改变</strong>：如果模型学习到了特定的相对位置模式，插值会破坏这些模式</p>
+<p><strong>外推的优点</strong>：<br />
+1. <strong>保持相对位置</strong>：相对位置 $p_i - p_j = i - j$ 不变<br />
+2. <strong>注意力模式一致</strong>：短距离的注意力模式与训练时相同</p>
+<p><strong>外推的缺点</strong>：<br />
+1. <strong>未见过的位置编码</strong>：$p_i &gt; L_{\text{train}}$ 的编码在训练时未出现<br />
+2. <strong>周期性混叠</strong>：高频分量可能出现重复</p>
+<h4 id="34">3.4 理论比较定理<a class="toc-link" href="#34" title="Permanent link">&para;</a></h4>
+<p><strong>定理4（插值vs外推的误差界）</strong>：</p>
+<p>对于插值：<br />
+$$\mathcal{E}<em _text_test="\text{test">{\text{interp}} = O\left(\alpha - 1\right) = O\left(\frac{L</em>\right)$$}} - L_{\text{train}}}{L_{\text{train}}</p>
+<p>误差来自相对位置的压缩。</p>
+<p>对于外推：<br />
+$$\mathcal{E}<em L__text_test="L_{\text{test" T_i="T_i" _="&lt;" i:="i:">{\text{extrap}} = O\left(\sum</em>\right)$$}}} \frac{1}{d</p>
+<p>误差来自周期性重复的维度。</p>
+<p><strong>推论</strong>：当外推比率 $\alpha$ 较小（$\alpha &lt; 2$）时，外推误差可能小于插值；当 $\alpha$ 较大时，插值更稳定。</p>
+<h3 id="4">4. 随机位置训练的理论分析<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 随机位置采样的数学描述<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p><strong>定义6（随机位置训练）</strong>：从 $[0, L_{\max}]$ 中随机采样 $N$ 个位置：</p>
+<p>$$\boldsymbol{p} = \text{sort}({\text{sample}(L_{\max}) : k = 1, \ldots, N})$$</p>
+<p>其中 $\text{sample}(L_{\max})$ 从 $[0, L_{\max}]$ 均匀采样。</p>
+<p>排序后得到单调递增的位置序列。</p>
+<h4 id="42">4.2 位置间距的分布<a class="toc-link" href="#42" title="Permanent link">&para;</a></h4>
+<p><strong>定理5（位置间距的期望）</strong>：随机采样的位置序列，相邻位置的平均间距为：</p>
+<p>$$\mathbb{E}[\Delta p] = \mathbb{E}[p_{i+1} - p_i] = \frac{L_{\max}}{N}$$</p>
+<p>证明：$N$ 个点将 $[0, L_{\max}]$ 分成 $N+1$ 段，每段的期望长度为：<br />
+$$\mathbb{E}[\text{段长}] = \frac{L_{\max}}{N+1} \approx \frac{L_{\max}}{N}$$</p>
+<p><strong>定理6（位置间距的方差）</strong>：位置间距的方差为：</p>
+<p>$$\text{Var}[\Delta p] = \frac{L_{\max}^2}{N^2(N+1)}$$</p>
+<p>这说明位置间距有一定的随机性，但集中在期望值附近。</p>
+<h4 id="43">4.3 等价类的学习<a class="toc-link" href="#43" title="Permanent link">&para;</a></h4>
+<p><strong>定理7（等价类学习定理）</strong>：随机位置训练迫使模型学习位置编码的等价类，即所有保持单调性的位置序列被视为等价。</p>
+<p>证明：由于训练时位置序列是随机的，模型不能依赖具体的位置值，只能依赖相对顺序。设 $\boldsymbol{p}_1$ 和 $\boldsymbol{p}_2$ 是两个不同的随机采样序列，如果它们具有相同的排序关系（都是单调递增），则模型应该给出相似的输出：</p>
+<p>$$\mathbb{E}<em _theta="\theta">{\boldsymbol{p}_1, \boldsymbol{p}_2}\left[|f</em>}(\boldsymbol{x}, \boldsymbol{p<em _theta="\theta">1) - f</em>_2)|\right] \to 0$$}(\boldsymbol{x}, \boldsymbol{p</p>
+<p>这是通过最小化训练损失间接实现的。</p>
+<h4 id="44">4.4 等均值随机位置训练<a class="toc-link" href="#44" title="Permanent link">&para;</a></h4>
+<p><strong>定义7（等均值随机位置）</strong>：先采样长度 $n \sim p(n)$（期望为 $N$），然后从 $[0, n]$ 均匀采样 $N$ 个点：</p>
+<p>$$p_i = \frac{i-1}{N-1} \cdot n, \quad i = 1, \ldots, N$$</p>
+<p>其中 $n$ 服从某个分布，如指数分布或Beta分布。</p>
+<p><strong>定理8（等均值训练的平均位置）</strong>：等均值训练的平均位置序列为：</p>
+<p>$$\mathbb{E}[p_i] = \frac{i-1}{N-1} \cdot \mathbb{E}[n] = \frac{i-1}{N-1} \cdot N$$</p>
+<p>与测试时均匀采样的位置序列一致。</p>
+<h3 id="5">5. 频率衰减与位置表示能力<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 频率衰减的引入<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>为了改善外推性能，可以引入频率衰减，降低高频分量的权重：</p>
+<p>$$\omega_i^{\text{decay}} = \omega_i \cdot \gamma^i$$</p>
+<p>其中 $\gamma \in (0, 1)$ 是衰减因子。</p>
+<p>或者直接修改基础频率：</p>
+<p>$$\omega_i = \theta_{\text{base}}'^{-2i/d}, \quad \theta_{\text{base}}' &gt; \theta_{\text{base}}$$</p>
+<p>这增加了所有周期，减少了高频振荡。</p>
+<h4 id="52">5.2 频率衰减对表示能力的影响<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p><strong>定理9（频率衰减的权衡）</strong>：增大 $\theta_{\text{base}}$ 可以提高外推稳定性，但会降低短距离位置的区分能力。</p>
+<p>证明：短距离位置（$|m-n| = 1$）的RoPE编码差异为：</p>
+<p>$$|\boldsymbol{\mathcal{R}}<em m_1="m+1">m - \boldsymbol{\mathcal{R}}</em>)\right|$$}| = \left|\sum_{i=0}^{d/2-1} (\boldsymbol{R}_{\omega_i} - \boldsymbol{I</p>
+<p>当 $\omega_i$ 减小时，$\boldsymbol{R}_{\omega_i} \approx \boldsymbol{I}$，差异变小。</p>
+<h4 id="53">5.3 多尺度表示的数学分析<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<p>RoPE的多尺度性质可以表示为不同时间尺度的组合：</p>
+<p>$$\text{RoPE}(\boldsymbol{v}, m) = \bigoplus_{i=0}^{d/2-1} \boldsymbol{R}_{m\omega_i} \boldsymbol{v}^{(i)}$$</p>
+<p>其中 $\bigoplus$ 表示拼接，$\boldsymbol{v}^{(i)}$ 是 $\boldsymbol{v}$ 的第 $i$ 个二维块。</p>
+<p><strong>定义8（有效分辨率）</strong>：第 $i$ 个维度对能够有效区分的最大位置差为：</p>
+<p>$$\Delta_{\max}^{(i)} = \frac{\pi}{\omega_i} = \frac{\pi \cdot \theta_{\text{base}}^{2i/d}}{1}$$</p>
+<p>这是半个周期，对应于旋转角度 $\pi$（最大区分度）。</p>
+<p><strong>定理10（多尺度覆盖定理）</strong>：RoPE的 $d/2$ 个维度对提供了从 $\Delta_{\max}^{(0)} = \pi$ 到 $\Delta_{\max}^{(d/2-1)} = \pi \cdot \theta_{\text{base}}$ 的多尺度覆盖。</p>
+<h3 id="6-logn">6. log(n)缩放注意力的数学原理<a class="toc-link" href="#6-logn" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 注意力熵的详细推导<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p>标准注意力的熵为：</p>
+<p>$$H = -\sum_{n=1}^{L} A_{m,n} \log A_{m,n}$$</p>
+<p>在均匀分布假设下（$A_{m,n} = 1/L$）：</p>
+<p>$$H = -\sum_{n=1}^{L} \frac{1}{L} \log \frac{1}{L} = \log L$$</p>
+<p><strong>定理11（熵随长度的增长）</strong>：全局注意力的熵随序列长度对数增长，导致训练与测试不一致。</p>
+<h4 id="62">6.2 温度缩放的数学原理<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p>引入温度 $\tau$ 的softmax：</p>
+<p>$$A_{m,n}^{(\tau)} = \frac{\exp\left(\frac{s_{m,n}}{\tau}\right)}{\sum_j \exp\left(\frac{s_{m,j}}{\tau}\right)}$$</p>
+<p>其中 $s_{m,n} = \boldsymbol{q}_m^{\top}\boldsymbol{k}_n/\sqrt{d}$。</p>
+<p><strong>性质1（温度对熵的影响）</strong>：<br />
+- $\tau \to 0$：熵 $\to 0$（one-hot分布）<br />
+- $\tau \to \infty$：熵 $\to \log L$（均匀分布）</p>
+<p>要保持熵不变，需要：<br />
+$$\tau(L) \propto \log L$$</p>
+<p>因此，$\log_m n$ 缩放等价于设置温度：<br />
+$$\tau = \frac{\sqrt{d}}{\log_m n}$$</p>
+<h4 id="63-log">6.3 log缩放的理论证明<a class="toc-link" href="#63-log" title="Permanent link">&para;</a></h4>
+<p><strong>定理12（熵不变缩放定理）</strong>：使用 $\log_m n$ 缩放可以近似保持注意力熵不变。</p>
+<p>证明：设训练长度为 $m$，测试长度为 $n$，原始得分为 $s_{ij}$。</p>
+<p>未缩放时，测试时的熵为：<br />
+$$H_n = -\sum_j A_j^{(n)} \log A_j^{(n)} \approx \log n$$</p>
+<p>缩放后：<br />
+$$A_j^{(\text{scaled})} = \frac{\exp\left(\frac{\log_m n}{\sqrt{d}} s_j\right)}{\sum_k \exp\left(\frac{\log_m n}{\sqrt{d}} s_k\right)}$$</p>
+<p>等效温度为：<br />
+$$\tau_{\text{eff}} = \frac{\sqrt{d}}{\log_m n} = \frac{\sqrt{d}}{\log n - \log m}$$</p>
+<p>缩放后的熵约为：<br />
+$$H_{\text{scaled}} \approx \log n - \log(\log_m n) = \log n - \log\frac{\log n}{\log m}$$</p>
+<p>当 $n \approx m$ 时，$H_{\text{scaled}} \approx \log m$，保持一致。</p>
+<h3 id="7">7. 鲁棒性度量与泛化界<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<h4 id="71-pac">7.1 PAC学习框架下的泛化界<a class="toc-link" href="#71-pac" title="Permanent link">&para;</a></h4>
+<p><strong>定义9（位置泛化误差）</strong>：设 $\mathcal{D}<em _text_test="\text{test">{\text{train}}$ 是训练长度的分布，$\mathcal{D}</em>$ 是测试长度的分布，泛化误差为：}</p>
+<p>$$\mathcal{E}<em L="L" _mathcal_D="\mathcal{D" _sim="\sim">{\text{gen}} = \mathbb{E}</em><em _theta="\theta">{\text{test}}}\left[\mathcal{L}(f</em>}, L)\right] - \mathbb{E<em _text_train="\text{train">{L \sim \mathcal{D}</em>, L)\right]$$}}}\left[\mathcal{L}(f_{\theta</p>
+<p><strong>定理13（Rademacher复杂度界）</strong>：在适当的假设下，泛化误差有界：</p>
+<p>$$\mathcal{E}_{\text{gen}} \leq \hat{\mathcal{R}}(\mathcal{F}) + O\left(\sqrt{\frac{\log(1/\delta)}{N}}\right)$$</p>
+<p>其中 $\hat{\mathcal{R}}(\mathcal{F})$ 是函数类 $\mathcal{F}$ 的经验Rademacher复杂度，$N$ 是训练样本数。</p>
+<h4 id="72-lipschitz">7.2 位置编码的Lipschitz连续性<a class="toc-link" href="#72-lipschitz" title="Permanent link">&para;</a></h4>
+<p><strong>定理14（RoPE的Lipschitz性质）</strong>：RoPE满足局部Lipschitz连续性：</p>
+<p>$$|\text{RoPE}(m) - \text{RoPE}(n)| \leq C \cdot |m - n|$$</p>
+<p>其中 $C$ 是Lipschitz常数。</p>
+<p>证明：对于单个维度对：</p>
+<p>$$|\boldsymbol{R}<em n_omega="n\omega">{m\omega} - \boldsymbol{R}</em>|_F^2 = 2 - 2\cos((m-n)\omega)$$</p>
+<p>使用 $1 - \cos\theta \leq \theta^2/2$：</p>
+<p>$$|\boldsymbol{R}<em n_omega="n\omega">{m\omega} - \boldsymbol{R}</em>|_F^2 \leq (m-n)^2\omega^2$$</p>
+<p>因此：<br />
+$$|\boldsymbol{R}<em n_omega="n\omega">{m\omega} - \boldsymbol{R}</em>|_F \leq |m-n| \omega$$</p>
+<p>对所有维度求和：<br />
+$$|\text{RoPE}(m) - \text{RoPE}(n)|<em i="0">F \leq |m-n| \sqrt{\sum</em>$$}^{d/2-1} \omega_i^2</p>
+<h4 id="73">7.3 随机位置训练的泛化界<a class="toc-link" href="#73" title="Permanent link">&para;</a></h4>
+<p><strong>定理15（随机位置训练的泛化保证）</strong>：随机位置训练通过数据增强扩大了训练分布，从而减小了泛化误差。</p>
+<p>形式化地，设原始训练集为 $\mathcal{S} = {(\boldsymbol{x}<em i="1">i, y_i)}</em>^N$，随机位置增强后为：</p>
+<p>$$\tilde{\mathcal{S}} = {(\boldsymbol{x}_i, \boldsymbol{p}_i, y_i) : \boldsymbol{p}_i \sim p(\boldsymbol{p})}$$</p>
+<p>其中 $p(\boldsymbol{p})$ 是位置序列的分布。</p>
+<p>增强后的经验风险为：<br />
+$$\hat{\mathcal{R}}<em _theta="\theta">{\tilde{\mathcal{S}}}(f</em>}) = \frac{1}{N} \sum_{i=1}^N \mathbb{E<em _theta="\theta">{\boldsymbol{p}_i \sim p(\boldsymbol{p})}\left[\mathcal{L}(f</em>_i), y_i)\right]$$}(\boldsymbol{x}_i, \boldsymbol{p</p>
+<p>这更接近测试时的期望风险。</p>
+<h3 id="8-che">8. CHE基准的理论解释<a class="toc-link" href="#8-che" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 非局部性任务的数学特征<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p>CHE基准中的许多任务具有全局依赖性，例如：</p>
+<p><strong>Reverse String</strong>：输出 $y_i = x_{L-i+1}$，需要全局信息传播。</p>
+<p><strong>Duplicate String</strong>：输出 $y_i = x_i$ 和 $y_{L+i} = x_i$，需要识别序列的全局结构。</p>
+<p>这些任务无法通过局部注意力在单层中完成。</p>
+<h4 id="82-che">8.2 局部注意力在CHE上的局限性<a class="toc-link" href="#82-che" title="Permanent link">&para;</a></h4>
+<p><strong>定理16（局部注意力的全局依赖瓶颈）</strong>：对于需要全局信息传播的任务，局部注意力（窗口大小 $w$）需要至少 $\lceil L/(2w) \rceil$ 层才能传播信息到整个序列。</p>
+<p>对于Reverse String任务，端到端的信息传播需要：<br />
+$$\ell_{\min} = \lceil L/w \rceil$$</p>
+<p>当 $w \ll L$ 时，$\ell_{\min}$ 很大，可能导致信息损失和梯度消失。</p>
+<h4 id="83-che">8.3 随机位置训练在CHE上的优势<a class="toc-link" href="#83-che" title="Permanent link">&para;</a></h4>
+<p>随机位置训练不改变注意力的局部性，而是增强了模型对位置变化的鲁棒性。</p>
+<p><strong>关键洞察</strong>：CHE任务虽然需要全局信息，但不依赖于精确的位置值，只依赖于符号的顺序和模式。</p>
+<p>随机位置训练迫使模型学习基于符号模式而非位置的表示，从而在外推时更鲁棒。</p>
+<h3 id="9-beta">9. 指数分布与Beta分布的理论分析<a class="toc-link" href="#9-beta" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 指数分布的性质<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p>指数分布的概率密度函数：</p>
+<p>$$p(n) = \frac{1}{\mu} \exp\left(-\frac{n}{\mu}\right), \quad n \geq 0$$</p>
+<p>其中 $\mu = \mathbb{E}[n] = N$（训练长度）。</p>
+<p><strong>性质2（无记忆性）</strong>：指数分布具有无记忆性：<br />
+$$P(n &gt; s+t | n &gt; s) = P(n &gt; t)$$</p>
+<p>这意味着训练时采样的长度 $n$ 不会偏向任何特定的范围（除了期望值）。</p>
+<p><strong>外推能力</strong>：对于外推到长度 $L$，指数分布给予非零概率：</p>
+<p>$$P(n \geq L) = \exp\left(-\frac{L}{\mu}\right)$$</p>
+<p>当 $L = 2\mu$ 时，$P(n \geq 2\mu) \approx 0.135$，有约13.5%的训练样本长度超过 $2\mu$。</p>
+<p>当 $L = 3\mu$ 时，$P(n \geq 3\mu) \approx 0.050$，有约5%的训练样本长度超过 $3\mu$。</p>
+<p>这提供了一定的外推能力。</p>
+<h4 id="92-beta">9.2 Beta分布的性质<a class="toc-link" href="#92-beta" title="Permanent link">&para;</a></h4>
+<p>Beta分布定义在 $[0, 1]$ 上，PDF为：</p>
+<p>$$p(x; \alpha, \beta) = \frac{x^{\alpha-1}(1-x)^{\beta-1}}{B(\alpha, \beta)}$$</p>
+<p>其中 $B(\alpha, \beta)$ 是Beta函数。</p>
+<p>均值为：<br />
+$$\mathbb{E}[x] = \frac{\alpha}{\alpha+\beta}$$</p>
+<p><strong>应用于长度采样</strong>：设测试长度为 $L_{\max}$，训练长度为 $L_{\text{train}}$，则：</p>
+<p>$$\frac{L_{\text{train}}}{L_{\max}} = \frac{\alpha}{\alpha+\beta}$$</p>
+<p>通过调整 $\alpha$ 和 $\beta$，可以控制长度分布的形状。</p>
+<p>例如，选择 $\alpha = 2, \beta = 3$ 使得均值为 $2/5 = 0.4$，即训练长度为测试长度的40%。</p>
+<p>Beta分布的方差为：<br />
+$$\text{Var}[x] = \frac{\alpha\beta}{(\alpha+\beta)^2(\alpha+\beta+1)}$$</p>
+<p>可以通过调整 $\alpha$ 和 $\beta$ 控制方差，进而控制外推范围。</p>
+<h3 id="10">10. 实验验证的理论解释<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 随机位置训练的性能提升<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p>实验显示，随机位置训练显著提升了外推性能。理论解释：</p>
+<p><strong>解释1（分布匹配）</strong>：随机位置训练使得训练集的位置分布与测试集更匹配。</p>
+<p>设测试时的位置序列为均匀采样：<br />
+$$p_i^{\text{test}} = \frac{i-1}{N-1} \cdot L_{\text{test}}$$</p>
+<p>随机位置训练的平均位置为：<br />
+$$\mathbb{E}[p_i^{\text{train}}] = \frac{i-1}{N-1} \cdot \mathbb{E}[n]$$</p>
+<p>当 $\mathbb{E}[n] = L_{\text{test}}$ 时，两者分布相同。</p>
+<p><strong>解释2（等价类学习）</strong>：随机位置训练迫使模型学习位置不变性，只依赖相对顺序。</p>
+<h4 id="102">10.2 不同位置编码的表现<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p>实验显示，加入随机位置训练后，不同位置编码的性能差距缩小。</p>
+<p><strong>理论解释</strong>：随机位置训练减少了对精确位置值的依赖，使得位置编码的具体形式（Sinusoidal、RoPE、可训练等）变得不那么重要。</p>
+<p>关键在于位置编码能否保持单调性和相对顺序，而非绝对值。</p>
+<h4 id="103-logn">10.3 log(n)缩放的效果<a class="toc-link" href="#103-logn" title="Permanent link">&para;</a></h4>
+<p>实验显示，结合log缩放和随机位置训练效果最佳。</p>
+<p><strong>理论解释</strong>：<br />
+1. <strong>随机位置训练</strong>解决了位置编码未见过的问题<br />
+2. <strong>log缩放</strong>解决了注意力熵变化的问题<br />
+3. 两者互补，共同提升外推性能</p>
+<h3 id="11_1">11. 开放问题与未来方向<a class="toc-link" href="#11_1" title="Permanent link">&para;</a></h3>
+<h4 id="111">11.1 理论开放问题<a class="toc-link" href="#111" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>最优随机分布</strong>：什么样的长度采样分布能最大化外推性能？是否存在理论最优分布？</p>
+</li>
+<li>
+<p><strong>泛化界的紧致性</strong>：当前的泛化界是否紧致？能否给出更精确的界？</p>
+</li>
+<li>
+<p><strong>位置鲁棒性的度量</strong>：如何更精确地度量和量化位置鲁棒性？</p>
+</li>
+<li>
+<p><strong>多任务外推</strong>：不同任务对位置编码的需求不同，如何设计通用的外推策略？</p>
+</li>
+</ol>
+<h4 id="112">11.2 实践问题<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>计算效率</strong>：随机位置训练增加了计算开销（每个样本采样位置），如何优化？</p>
+</li>
+<li>
+<p><strong>超参数选择</strong>：$L_{\max}$、分布类型等超参数如何自动选择？</p>
+</li>
+<li>
+<p><strong>混合策略</strong>：如何结合局部注意力、随机位置、log缩放等多种技术？</p>
+</li>
+<li>
+<p><strong>任务特定调优</strong>：不同任务可能需要不同的外推策略，如何自适应调整？</p>
+</li>
+</ol>
+<h3 id="12_1">12. 总结<a class="toc-link" href="#12_1" title="Permanent link">&para;</a></h3>
+<h4 id="121">12.1 核心理论贡献<a class="toc-link" href="#121" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>位置鲁棒性定义</strong>：形式化了位置鲁棒性的数学定义和度量</li>
+<li><strong>RoPE稳定性分析</strong>：分析了RoPE的周期性和频率混叠问题</li>
+<li><strong>插值vs外推</strong>：理论比较了两种方法的优缺点和误差界</li>
+<li><strong>随机位置训练</strong>：证明了随机位置训练通过等价类学习提升鲁棒性</li>
+<li><strong>log缩放原理</strong>：阐明了log缩放保持注意力熵不变的数学原理</li>
+</ol>
+<h4 id="122">12.2 实践指导<a class="toc-link" href="#122" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>推荐策略</strong>：结合随机位置训练 + log(n)缩放 + 适当的位置编码（如RoPE）</li>
+<li><strong>参数设置</strong>：$L_{\max} \approx 2-3 \times L_{\text{test}}$，使用指数分布或Beta分布</li>
+<li><strong>任务适配</strong>：对于局域性强的任务（如语言模型），局部注意力有效；对于全局依赖任务（如CHE），随机位置训练更重要</li>
+</ol>
+<h4 id="123">12.3 理论意义<a class="toc-link" href="#123" title="Permanent link">&para;</a></h4>
+<p>本文通过严格的数学分析，从位置鲁棒性的角度重新理解了长度外推问题，提出了不依赖于局部注意力的外推方案，为Transformer的长序列建模提供了新的理论视角和实践方法。</p>
+<p>位置鲁棒性的核心在于让模型学习位置的等价类而非绝对值，这通过随机位置训练得以实现，是一种更本质、更优雅的解决方案。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -280,7 +596,21 @@ url={\url{https://spaces.ac.cn/archives/9444}},<br />
 <li><a href="#_5">原理反思</a></li>
 <li><a href="#_6">延伸推广</a></li>
 <li><a href="#_7">文章小结</a></li>
-<li><a href="#_8">公式推导与注释</a></li>
+<li><a href="#_8">公式推导与注释</a><ul>
+<li><a href="#1">1. 位置鲁棒性的数学定义</a></li>
+<li><a href="#2-rope">2. RoPE在长度外推中的稳定性分析</a></li>
+<li><a href="#3">3. 插值与外推的理论比较</a></li>
+<li><a href="#4">4. 随机位置训练的理论分析</a></li>
+<li><a href="#5">5. 频率衰减与位置表示能力</a></li>
+<li><a href="#6-logn">6. log(n)缩放注意力的数学原理</a></li>
+<li><a href="#7">7. 鲁棒性度量与泛化界</a></li>
+<li><a href="#8-che">8. CHE基准的理论解释</a></li>
+<li><a href="#9-beta">9. 指数分布与Beta分布的理论分析</a></li>
+<li><a href="#10">10. 实验验证的理论解释</a></li>
+<li><a href="#11_1">11. 开放问题与未来方向</a></li>
+<li><a href="#12_1">12. 总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

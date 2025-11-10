@@ -2,10 +2,9 @@
 title: Adam的epsilon如何影响学习率的Scaling Law？
 slug: adam的epsilon如何影响学习率的scaling-law
 date: 2024-11-18
-tags: 梯度, 学习率, 优化器, 尺度定律, 生成模型
+tags: 详细推导, 梯度, 学习率, 优化器, 尺度定律, 生成模型
 status: pending
 ---
-
 # Adam的epsilon如何影响学习率的Scaling Law？
 
 **原文链接**: [https://spaces.ac.cn/archives/10563](https://spaces.ac.cn/archives/10563)
@@ -158,5 +157,610 @@ url={\url{https://spaces.ac.cn/archives/10563}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节提供极其详细的数学推导，深入探讨Adam优化器中epsilon参数的作用机制及其对学习率Scaling Law的影响。
+
+### 1. Adam优化器的完整数学定义
+
+**基本更新规则**
+
+Adam优化器的完整更新公式可以写成：
+
+$$
+\begin{aligned}
+\boldsymbol{m}_t &= \beta_1 \boldsymbol{m}_{t-1} + (1-\beta_1)\boldsymbol{g}_t \\
+\boldsymbol{v}_t &= \beta_2 \boldsymbol{v}_{t-1} + (1-\beta_2)\boldsymbol{g}_t^2 \\
+\hat{\boldsymbol{m}}_t &= \frac{\boldsymbol{m}_t}{1-\beta_1^t} \\
+\hat{\boldsymbol{v}}_t &= \frac{\boldsymbol{v}_t}{1-\beta_2^t} \\
+\boldsymbol{w}_{t+1} &= \boldsymbol{w}_t - \eta\frac{\hat{\boldsymbol{m}}_t}{\sqrt{\hat{\boldsymbol{v}}_t}+\epsilon}
+\end{aligned}
+$$
+
+**注释1**：$\boldsymbol{m}_t$ 是梯度的一阶矩（动量）的指数移动平均。$\beta_1$ 通常取0.9，意味着历史梯度的影响以指数衰减的方式保留。
+
+**注释2**：$\boldsymbol{v}_t$ 是梯度平方的二阶矩估计。$\beta_2$ 通常取0.999，相比一阶矩，二阶矩需要更长的历史窗口才能稳定。
+
+**注释3**：偏差修正项 $1-\beta_1^t$ 和 $1-\beta_2^t$ 用于修正初始化为零向量导致的偏差。在训练初期（$t$ 较小时）这些修正非常重要。
+
+**推导1：偏差修正的必要性**
+
+假设初始化 $\boldsymbol{m}_0 = \boldsymbol{0}$，真实梯度为常数 $\boldsymbol{g}$，则：
+
+$$
+\begin{aligned}
+\boldsymbol{m}_1 &= \beta_1 \cdot \boldsymbol{0} + (1-\beta_1)\boldsymbol{g} = (1-\beta_1)\boldsymbol{g} \\
+\boldsymbol{m}_2 &= \beta_1(1-\beta_1)\boldsymbol{g} + (1-\beta_1)\boldsymbol{g} = (1-\beta_1)(1+\beta_1)\boldsymbol{g} \\
+\boldsymbol{m}_t &= (1-\beta_1)\sum_{i=0}^{t-1}\beta_1^i \boldsymbol{g} = (1-\beta_1)\frac{1-\beta_1^t}{1-\beta_1}\boldsymbol{g} = (1-\beta_1^t)\boldsymbol{g}
+\end{aligned}
+$$
+
+因此 $\mathbb{E}[\boldsymbol{m}_t] = (1-\beta_1^t)\boldsymbol{g}$ 而非 $\boldsymbol{g}$，需要除以 $1-\beta_1^t$ 来修正。
+
+### 2. Epsilon参数的数值稳定性作用
+
+**推导2：除零保护**
+
+考虑分母 $\sqrt{\hat{\boldsymbol{v}}_t}+\epsilon$，如果某个参数的梯度始终很小，可能导致 $\hat{v}_{t,i} \approx 0$。此时：
+
+$$
+\frac{\hat{m}_{t,i}}{\sqrt{\hat{v}_{t,i}}+\epsilon} \approx \frac{\hat{m}_{t,i}}{\epsilon}
+$$
+
+**注释4**：$\epsilon$ 为小正数（如 $10^{-7}$ 或 $10^{-8}$）防止除零错误，同时保证数值稳定性。
+
+**推导3：有效学习率的尺度分析**
+
+对于第 $i$ 个参数，实际更新步长为：
+
+$$
+\Delta w_{t,i} = -\eta\frac{\hat{m}_{t,i}}{\sqrt{\hat{v}_{t,i}}+\epsilon}
+$$
+
+定义有效学习率：
+
+$$
+\eta_{\text{eff},i} = \frac{\eta}{\sqrt{\hat{v}_{t,i}}+\epsilon}
+$$
+
+当梯度尺度较大时（$\hat{v}_{t,i} \gg \epsilon^2$）：
+
+$$
+\eta_{\text{eff},i} \approx \frac{\eta}{\sqrt{\hat{v}_{t,i}}} = \frac{\eta}{\text{RMS}(g_{t,i})}
+$$
+
+这是标准的自适应学习率。
+
+当梯度尺度较小时（$\hat{v}_{t,i} \ll \epsilon^2$）：
+
+$$
+\eta_{\text{eff},i} \approx \frac{\eta}{\epsilon}
+$$
+
+此时有效学习率由 $\epsilon$ 主导，不再自适应。
+
+### 3. SoftSign函数的详细分析
+
+**定义与性质**
+
+SoftSign函数定义为：
+
+$$
+\text{softsign}(x, \epsilon) = \frac{x}{\sqrt{x^2+\epsilon^2}}
+$$
+
+**推导4：与Sign函数的关系**
+
+$$
+\lim_{\epsilon\to 0}\text{softsign}(x, \epsilon) = \lim_{\epsilon\to 0}\frac{x}{\sqrt{x^2+\epsilon^2}} = \frac{x}{|x|} = \text{sign}(x)
+$$
+
+**推导5：导数计算**
+
+$$
+\begin{aligned}
+\frac{\partial}{\partial x}\text{softsign}(x, \epsilon) &= \frac{\partial}{\partial x}\left[x(x^2+\epsilon^2)^{-1/2}\right] \\
+&= (x^2+\epsilon^2)^{-1/2} + x \cdot \left(-\frac{1}{2}\right)(x^2+\epsilon^2)^{-3/2}\cdot 2x \\
+&= \frac{1}{\sqrt{x^2+\epsilon^2}} - \frac{x^2}{(x^2+\epsilon^2)^{3/2}} \\
+&= \frac{x^2+\epsilon^2-x^2}{(x^2+\epsilon^2)^{3/2}} \\
+&= \frac{\epsilon^2}{(x^2+\epsilon^2)^{3/2}}
+\end{aligned}
+$$
+
+**注释5**：导数在 $x=0$ 处达到最大值 $1/\epsilon$，且导数恒正，说明softsign是单调递增的光滑函数。
+
+**推导6：渐近行为**
+
+当 $|x| \to \infty$ 时：
+
+$$
+\text{softsign}(x, \epsilon) = \frac{x}{\sqrt{x^2+\epsilon^2}} = \frac{x}{|x|\sqrt{1+\epsilon^2/x^2}} \to \text{sign}(x)
+$$
+
+当 $x \to 0$ 时，使用泰勒展开：
+
+$$
+\text{softsign}(x, \epsilon) = \frac{x}{\epsilon\sqrt{1+x^2/\epsilon^2}} \approx \frac{x}{\epsilon}\left(1-\frac{x^2}{2\epsilon^2}\right) = \frac{x}{\epsilon} - \frac{x^3}{2\epsilon^3}
+$$
+
+### 4. Adam向SGD的插值性质
+
+**推导7：大epsilon极限**
+
+考虑更新方向：
+
+$$
+\boldsymbol{\varphi} = \frac{\boldsymbol{m}}{\sqrt{\boldsymbol{v}}+\epsilon}
+$$
+
+当 $\epsilon \to \infty$ 时，对第 $i$ 个分量：
+
+$$
+\varphi_i = \frac{m_i}{\sqrt{v_i}+\epsilon} = \frac{m_i}{\epsilon\sqrt{v_i/\epsilon^2+1}} \approx \frac{m_i}{\epsilon}\left(1-\frac{v_i}{2\epsilon^2}\right)
+$$
+
+因此整个更新量：
+
+$$
+\eta\boldsymbol{\varphi} = \eta\frac{\boldsymbol{m}}{\epsilon} - \eta\frac{\boldsymbol{m}\odot\boldsymbol{v}}{2\epsilon^3} \approx \frac{\eta}{\epsilon}\boldsymbol{m}
+$$
+
+定义 $\tilde{\eta} = \eta/\epsilon$，则：
+
+$$
+\lim_{\epsilon\to\infty}\eta\frac{\boldsymbol{m}}{\sqrt{\boldsymbol{v}}+\epsilon} = \tilde{\eta}\boldsymbol{m}
+$$
+
+**注释6**：这表明当 $\epsilon$ 足够大时，Adam的行为接近于动量SGD，只是学习率需要相应缩放。
+
+### 5. S型函数的近似理论
+
+**推导8：Clip函数近似softsign**
+
+考虑softsign函数在原点处的斜率：
+
+$$
+\left.\frac{d}{dx}\text{softsign}(x,\epsilon)\right|_{x=0} = \frac{\epsilon^2}{\epsilon^3} = \frac{1}{\epsilon}
+$$
+
+因此线性区域的近似为：
+
+$$
+\text{softsign}(x,\epsilon) \approx \frac{x}{\epsilon}, \quad |x| \ll \epsilon
+$$
+
+当 $|x/\epsilon| \geq 1$ 时，$\text{softsign}(x,\epsilon) \approx \text{sign}(x)$。综合得到clip近似：
+
+$$
+\text{softsign}(x,\epsilon) \approx \text{clip}(x/\epsilon, -1, 1)
+$$
+
+**推导9：误差函数erf的近似**
+
+误差函数定义为：
+
+$$
+\text{erf}(x) = \frac{2}{\sqrt{\pi}}\int_0^x e^{-t^2}dt
+$$
+
+在原点处的泰勒展开：
+
+$$
+\text{erf}(x) = \frac{2}{\sqrt{\pi}}\left(x - \frac{x^3}{3} + \frac{x^5}{10} - \cdots\right)
+$$
+
+原点处的斜率为 $2/\sqrt{\pi}$。使用第一种近似形式，要求在 $x=0$ 处斜率匹配：
+
+$$
+\frac{d}{dx}\frac{x}{\sqrt{x^2+c}}\bigg|_{x=0} = \frac{1}{\sqrt{c}} = \frac{2}{\sqrt{\pi}}
+$$
+
+解得 $c = \pi/4$。
+
+### 6. 梯度期望值的详细推导
+
+**推导10：单个分量的期望计算**
+
+假设梯度的单个分量服从 $\tilde{g}_B \sim \mathcal{N}(g, \sigma^2/B)$，我们要计算：
+
+$$
+\mathbb{E}[\text{softsign}(\tilde{g}_B, \epsilon)]
+$$
+
+使用clip近似：
+
+$$
+\mathbb{E}[\text{clip}(\tilde{g}_B/\epsilon, -1, 1)] = \int_{-\infty}^{\infty} \text{clip}(z/\epsilon, -1, 1) \cdot \frac{B}{2\pi\sigma^2}\exp\left(-\frac{B(z-g)^2}{2\sigma^2}\right)dz
+$$
+
+**推导11：分段积分**
+
+将积分分为三个区域：
+
+区域1：$z < -\epsilon$，此时clip值为-1
+区域2：$-\epsilon \leq z \leq \epsilon$，此时clip值为 $z/\epsilon$
+区域3：$z > \epsilon$，此时clip值为1
+
+$$
+\begin{aligned}
+\mathbb{E}[\text{clip}] &= \int_{-\infty}^{-\epsilon}(-1)\cdot p(z)dz + \int_{-\epsilon}^{\epsilon}\frac{z}{\epsilon}p(z)dz + \int_{\epsilon}^{\infty}1\cdot p(z)dz \\
+&= -P(Z<-\epsilon) + \frac{1}{\epsilon}\mathbb{E}[Z\mathbb{1}_{|Z|\leq\epsilon}] + P(Z>\epsilon)
+\end{aligned}
+$$
+
+其中 $Z \sim \mathcal{N}(g, \sigma^2/B)$。
+
+**推导12：标准化变换**
+
+令 $U = \frac{\sqrt{B}(Z-g)}{\sigma} \sim \mathcal{N}(0,1)$，则 $Z = g + \frac{\sigma U}{\sqrt{B}}$：
+
+$$
+\begin{aligned}
+P(Z < -\epsilon) &= P\left(U < -\frac{\sqrt{B}(g+\epsilon)}{\sigma}\right) = \Phi\left(-\frac{(g+\epsilon)\sqrt{B}}{\sigma}\right) \\
+P(Z > \epsilon) &= P\left(U > \frac{\sqrt{B}(\epsilon-g)}{\sigma}\right) = 1-\Phi\left(\frac{(\epsilon-g)\sqrt{B}}{\sigma}\right)
+\end{aligned}
+$$
+
+这里 $\Phi$ 是标准正态分布的累积分布函数。
+
+**推导13：用erf表示**
+
+利用 $\Phi(x) = \frac{1}{2}\left[1+\text{erf}\left(\frac{x}{\sqrt{2}}\right)\right]$：
+
+$$
+\begin{aligned}
+-P(Z<-\epsilon) + P(Z>\epsilon) &= -\frac{1}{2}\left[1+\text{erf}\left(-\frac{(g+\epsilon)\sqrt{B}}{\sigma\sqrt{2}}\right)\right] + \frac{1}{2}\left[1-\text{erf}\left(\frac{(\epsilon-g)\sqrt{B}}{\sigma\sqrt{2}}\right)\right] \\
+&= \frac{1}{2}\left[\text{erf}\left(\frac{(g+\epsilon)\sqrt{B}}{\sigma\sqrt{2}}\right) - \text{erf}\left(\frac{(\epsilon-g)\sqrt{B}}{\sigma\sqrt{2}}\right)\right]
+\end{aligned}
+$$
+
+**推导14：中间项的计算**
+
+对于中间项：
+
+$$
+\frac{1}{\epsilon}\mathbb{E}[Z\mathbb{1}_{|Z|\leq\epsilon}] = \frac{1}{\epsilon}\int_{-\epsilon}^{\epsilon}z\cdot\frac{1}{\sqrt{2\pi\sigma^2/B}}\exp\left(-\frac{B(z-g)^2}{2\sigma^2}\right)dz
+$$
+
+这个积分比较复杂，最终结果可以用高斯分布的性质表示为：
+
+$$
+\frac{1}{\epsilon}\mathbb{E}[Z\mathbb{1}_{|Z|\leq\epsilon}] = \frac{g}{2\epsilon}\left[\text{erf}\left(\frac{(g+\epsilon)\sqrt{B}}{\sigma\sqrt{2}}\right)-\text{erf}\left(\frac{(g-\epsilon)\sqrt{B}}{\sigma\sqrt{2}}\right)\right] + \frac{\sigma}{\epsilon\sqrt{2\pi B}}\left[e^{-\frac{B(g-\epsilon)^2}{2\sigma^2}} - e^{-\frac{B(g+\epsilon)^2}{2\sigma^2}}\right]
+$$
+
+### 7. 简化为softsign形式
+
+**推导15：引入无量纲参数**
+
+定义：
+- $a = g\sqrt{B}/\sigma$：信号强度参数
+- $b = \epsilon\sqrt{B}/\sigma$：噪声尺度参数
+
+则前面的期望可以重写为关于 $a$ 和 $b$ 的函数。
+
+**推导16：大B极限**
+
+当 $B \to \infty$ 时，$a,b \to \infty$，此时：
+
+$$
+\mathbb{E}[\text{clip}(\tilde{g}_B/\epsilon, -1, 1)] \to \text{sign}(g)
+$$
+
+这是因为噪声 $\sigma/\sqrt{B} \to 0$，梯度估计变得准确。
+
+**推导17：erf函数的softsign近似**
+
+根据前面的分析，复杂的erf表达式可以近似为：
+
+$$
+\mathbb{E}[\tilde{\varphi}_B] \approx \frac{a}{\sqrt{a^2+b^2+\pi/2}} = \frac{g/\sigma}{\sqrt{(g^2+\epsilon^2)/\sigma^2 + \pi/2B}}
+$$
+
+进一步整理：
+
+$$
+\mathbb{E}[\tilde{\varphi}_B] = \frac{g}{\sqrt{g^2+\epsilon^2+\pi\sigma^2/2B}}
+$$
+
+### 8. 平均场近似
+
+**推导18：引入方差比参数**
+
+定义方差比：
+
+$$
+\kappa_i^2 = \frac{\sigma_i^2}{g_i^2+\epsilon^2}
+$$
+
+这个量衡量了噪声相对于信号的强度。
+
+**推导19：分解更新方向**
+
+可以将期望值重写为：
+
+$$
+\mathbb{E}[\tilde{\varphi}_B]_i = \frac{g_i}{\sqrt{g_i^2+\epsilon^2}}\cdot\frac{1}{\sqrt{1+\pi\kappa_i^2/2B}} = \nu_i \beta_i
+$$
+
+其中：
+- $\nu_i = \text{softsign}(g_i, \epsilon)$ 是确定性部分
+- $\beta_i = (1+\pi\kappa_i^2/2B)^{-1/2}$ 是随机性修正
+
+**推导20：平均场假设**
+
+假设存在平均的 $\kappa^2$，使得：
+
+$$
+\kappa^2 \approx \frac{1}{n}\sum_{i=1}^n \kappa_i^2 = \frac{1}{n}\sum_{i=1}^n \frac{\sigma_i^2}{g_i^2+\epsilon^2}
+$$
+
+则所有分量的修正因子近似相同：
+
+$$
+\beta_i \approx \beta = \frac{1}{\sqrt{1+\pi\kappa^2/2B}}
+$$
+
+**注释7**：这个近似假设所有参数的"信噪比"相近，在实际训练中后期通常成立。
+
+### 9. 二阶矩的详细计算
+
+**推导21：sign函数的平方**
+
+对于 $\tilde{\varphi}_B = \text{sign}(\tilde{g}_B)$：
+
+$$
+\tilde{\varphi}_B^2 = \text{sign}(\tilde{g}_B)^2 = 1
+$$
+
+因此：
+
+$$
+\mathbb{E}[\tilde{\varphi}_B^2] = 1
+$$
+
+**推导22：softsign平方的期望**
+
+对于softsign：
+
+$$
+\mathbb{E}[\text{softsign}(\tilde{g}_B, \epsilon)^2] = \mathbb{E}\left[\frac{\tilde{g}_B^2}{\tilde{g}_B^2+\epsilon^2}\right]
+$$
+
+这个期望的精确计算很复杂，我们使用如下近似。当 $|\tilde{g}_B| \gg \epsilon$ 时，softsign$^2 \approx 1$；当 $|\tilde{g}_B| \ll \epsilon$ 时，softsign$^2 \approx \tilde{g}_B^2/\epsilon^2$。
+
+**推导23：倒钟形近似**
+
+基于前面的分析，我们采用如下近似形式：
+
+$$
+\mathbb{E}[\text{softsign}(\tilde{g}_B, \epsilon)^2] \approx 1 - \frac{\epsilon^2/(g^2+\epsilon^2)}{1+\pi\sigma^2/(g^2+\epsilon^2)/2B}
+$$
+
+**注释8**：这个公式的直观解释是：当真实梯度 $g$ 很大时，期望接近1；当 $g$ 接近0时，期望接近 $1-1/(1+\text{const})$，小于1。
+
+**推导24：协方差矩阵的结构**
+
+对于二阶矩矩阵：
+
+$$
+\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B\tilde{\boldsymbol{\varphi}}_B^T]_{ij} = \begin{cases}
+\mathbb{E}[\tilde{\varphi}_{B,i}^2] \approx 1-\frac{\epsilon^2/(g_i^2+\epsilon^2)}{1+\pi\kappa^2/2B}, & i=j \\
+\mathbb{E}[\tilde{\varphi}_{B,i}]\mathbb{E}[\tilde{\varphi}_{B,j}] \approx \nu_i\nu_j\beta^2, & i\neq j
+\end{cases}
+$$
+
+**推导25：对角项的进一步处理**
+
+对角项可以分解为：
+
+$$
+\begin{aligned}
+\mathbb{E}[\tilde{\varphi}_{B,i}^2] &\approx 1 - \frac{\epsilon^2/(g_i^2+\epsilon^2)}{1+\pi\kappa^2/2B} \\
+&= \frac{1+\pi\kappa^2/2B - \epsilon^2/(g_i^2+\epsilon^2)}{1+\pi\kappa^2/2B} \\
+&= \frac{(g_i^2+\epsilon^2+\pi\kappa^2\sigma_i^2/2B)-\epsilon^2}{(g_i^2+\epsilon^2)(1+\pi\kappa^2/2B)} \\
+&\approx \nu_i^2\beta^2 + (1-\beta^2)
+\end{aligned}
+$$
+
+其中最后一步使用了 $\nu_i^2 = g_i^2/(g_i^2+\epsilon^2)$。
+
+### 10. 最优学习率的推导
+
+**推导26：损失函数的二阶近似**
+
+从基本的泰勒展开开始：
+
+$$
+\mathcal{L}(\boldsymbol{w}-\eta\tilde{\boldsymbol{\varphi}}_B) \approx \mathcal{L}(\boldsymbol{w}) - \eta\tilde{\boldsymbol{\varphi}}_B^T\boldsymbol{g} + \frac{\eta^2}{2}\tilde{\boldsymbol{\varphi}}_B^T\boldsymbol{H}\tilde{\boldsymbol{\varphi}}_B
+$$
+
+取期望：
+
+$$
+\mathbb{E}[\mathcal{L}(\boldsymbol{w}-\eta\tilde{\boldsymbol{\varphi}}_B)] \approx \mathcal{L}(\boldsymbol{w}) - \eta\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B]^T\boldsymbol{g} + \frac{\eta^2}{2}\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B^T\boldsymbol{H}\tilde{\boldsymbol{\varphi}}_B]
+$$
+
+**推导27：迹的技巧**
+
+利用标量的迹等于自身：
+
+$$
+\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B^T\boldsymbol{H}\tilde{\boldsymbol{\varphi}}_B] = \mathbb{E}[\text{Tr}(\tilde{\boldsymbol{\varphi}}_B^T\boldsymbol{H}\tilde{\boldsymbol{\varphi}}_B)] = \text{Tr}(\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B\tilde{\boldsymbol{\varphi}}_B^T]\boldsymbol{H})
+$$
+
+**推导28：展开迹**
+
+$$
+\begin{aligned}
+\text{Tr}(\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B\tilde{\boldsymbol{\varphi}}_B^T]\boldsymbol{H}) &= \sum_i\mathbb{E}[\tilde{\varphi}_{B,i}^2]H_{ii} + \sum_{i\neq j}\mathbb{E}[\tilde{\varphi}_{B,i}\tilde{\varphi}_{B,j}]H_{ij} \\
+&\approx \sum_i(\nu_i^2\beta^2+(1-\beta^2))H_{ii} + \sum_{i\neq j}\nu_i\nu_j\beta^2 H_{ij} \\
+&= \beta^2\sum_{i,j}\nu_i\nu_j H_{ij} + (1-\beta^2)\sum_i H_{ii}
+\end{aligned}
+$$
+
+**推导29：最优化问题**
+
+要最小化期望损失，对 $\eta$ 求导并令其为零：
+
+$$
+\frac{d}{d\eta}\mathbb{E}[\mathcal{L}] = -\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B]^T\boldsymbol{g} + \eta\text{Tr}(\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B\tilde{\boldsymbol{\varphi}}_B^T]\boldsymbol{H}) = 0
+$$
+
+解得：
+
+$$
+\eta^* = \frac{\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B]^T\boldsymbol{g}}{\text{Tr}(\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B\tilde{\boldsymbol{\varphi}}_B^T]\boldsymbol{H})}
+$$
+
+**推导30：代入前面的结果**
+
+$$
+\eta^* \approx \frac{\beta\sum_i\nu_i g_i}{\beta^2\sum_{i,j}\nu_i\nu_j H_{ij} + (1-\beta^2)\sum_i H_{ii}}
+$$
+
+### 11. Surge现象的理论分析
+
+**推导31：单调性条件**
+
+$\eta^*$ 关于 $\beta$ 的导数为：
+
+$$
+\frac{d\eta^*}{d\beta} = \frac{d}{d\beta}\left[\frac{\beta\sum_i\nu_i g_i}{\beta^2\sum_{i,j}\nu_i\nu_j H_{ij} + (1-\beta^2)\sum_i H_{ii}}\right]
+$$
+
+记 $A = \sum_i\nu_i g_i$，$B = \sum_{i,j}\nu_i\nu_j H_{ij}$，$C = \sum_i H_{ii}$，则：
+
+$$
+\eta^* = \frac{A\beta}{\beta^2 B + (1-\beta^2)C} = \frac{A\beta}{\beta^2(B-C) + C}
+$$
+
+**推导32：求导**
+
+$$
+\frac{d\eta^*}{d\beta} = \frac{A[\beta^2(B-C)+C] - A\beta\cdot 2\beta(B-C)}{[\beta^2(B-C)+C]^2} = \frac{A[C-\beta^2(B-C)]}{[\beta^2(B-C)+C]^2}
+$$
+
+**推导33：单调性判定**
+
+当 $B > C$ 时，存在临界点 $\beta_c = \sqrt{C/(B-C)}$。当 $\beta < \beta_c$ 时，导数为正（递增）；当 $\beta > \beta_c$ 时，导数为负（递减）。
+
+**注释9**：这就是Surge现象的数学根源——当Hessian矩阵的非对角元素足够大时（$B > C$），最优学习率先增后减。
+
+### 12. Epsilon趋于无穷的极限行为
+
+**推导34**：当 $\epsilon \to \infty$ 时，
+
+$$
+\nu_i = \frac{g_i}{\sqrt{g_i^2+\epsilon^2}} = \frac{g_i/\epsilon}{\sqrt{g_i^2/\epsilon^2+1}} \to 0
+$$
+
+但是：
+
+$$
+\epsilon\nu_i = \frac{g_i}{\sqrt{1+g_i^2/\epsilon^2}} \to g_i
+$$
+
+**推导35**：对于 $\beta$：
+
+$$
+\beta = \frac{1}{\sqrt{1+\pi\kappa^2/2B}} = \frac{1}{\sqrt{1+\frac{\pi\sigma^2}{2B(g_i^2+\epsilon^2)}}}
+$$
+
+当 $\epsilon \to \infty$ 时：
+
+$$
+1-\beta^2 = \frac{\pi\sigma^2/2B}{g_i^2+\epsilon^2} \approx \frac{\pi\sigma^2}{2B\epsilon^2}
+$$
+
+因此：
+
+$$
+\epsilon^2(1-\beta^2) \to \frac{\pi\sigma^2}{2B}
+$$
+
+**推导36**：代入 $\eta^*/\epsilon$：
+
+$$
+\frac{\eta^*}{\epsilon} = \frac{\beta\sum_i(\epsilon\nu_i)g_i}{\beta^2\sum_{i,j}(\epsilon\nu_i)(\epsilon\nu_j)H_{ij} + \epsilon^2(1-\beta^2)\sum_i H_{ii}}
+$$
+
+取极限：
+
+$$
+\lim_{\epsilon\to\infty}\frac{\eta^*}{\epsilon} = \frac{\sum_i g_i^2}{\sum_{i,j}g_i g_j H_{ij} + \frac{\pi\sigma^2}{2B}\sum_i H_{ii}}
+$$
+
+这正是SGD的形式！
+
+### 13. 不同Batch Size下的行为
+
+**推导37**：小Batch Size极限（$B \ll \pi\kappa^2/2$）
+
+$$
+\beta \approx \sqrt{\frac{2B}{\pi\kappa^2}}, \quad \beta^2 \approx \frac{2B}{\pi\kappa^2}
+$$
+
+因此：
+
+$$
+\eta^* \approx \frac{\sqrt{2B/\pi\kappa^2}\sum_i\nu_i g_i}{\frac{2B}{\pi\kappa^2}\sum_{i,j}\nu_i\nu_j H_{ij} + \sum_i H_{ii}} \approx \frac{\sqrt{2B/\pi\kappa^2}\sum_i\nu_i g_i}{\sum_i H_{ii}} \propto \sqrt{B}
+$$
+
+**注释10**：这证明了小Batch Size下的平方根缩放规律。
+
+**推导38**：大Batch Size极限（$B \gg \pi\kappa^2/2$）
+
+$$
+\beta \approx 1 - \frac{\pi\kappa^2}{4B}, \quad 1-\beta^2 \approx \frac{\pi\kappa^2}{2B}
+$$
+
+此时：
+
+$$
+\eta^* \approx \frac{\sum_i\nu_i g_i}{\sum_{i,j}\nu_i\nu_j H_{ij} + \frac{\pi\kappa^2}{2B}\sum_i H_{ii}}
+$$
+
+当 $B$ 继续增大，$\eta^*$ 趋于饱和。
+
+### 14. Epsilon对不同梯度尺度的影响
+
+**推导39**：定义梯度尺度分类
+
+对于不同的参数，根据 $|g_i|$ 与 $\epsilon$ 的大小关系分类：
+
+- 大梯度参数：$|g_i| \gg \epsilon$，此时 $\nu_i \approx \text{sign}(g_i)$
+- 小梯度参数：$|g_i| \ll \epsilon$，此时 $\nu_i \approx g_i/\epsilon$
+
+**推导40**：混合行为
+
+对于大梯度参数，Adam表现为符号更新（接近AdaSign）；对于小梯度参数，Adam表现为缩放的梯度更新（接近SGD）。整体行为是这两种模式的混合。
+
+### 15. 实际影响的定量分析
+
+**推导41**：有效学习率的分布
+
+考虑参数的有效学习率分布：
+
+$$
+\eta_{\text{eff},i} = \eta\frac{\nu_i\beta}{v_i^{1/2}+\epsilon}
+$$
+
+其中 $v_i$ 是第 $i$ 个参数的二阶矩估计。
+
+当 $\epsilon$ 增大时：
+1. 分子中的 $\nu_i$ 减小
+2. 分母中的 $\epsilon$ 增大
+
+两者共同作用使得有效学习率减小。
+
+**注释11**：这解释了为什么LLM训练中使用较大的 $\epsilon$（如 $10^{-5}$）需要相应调整基础学习率。
+
+### 总结
+
+本节详细推导了Adam优化器中epsilon参数的数学机制。关键发现包括：
+
+1. **Epsilon的双重作用**：既提供数值稳定性，又控制Adam到SGD的插值程度
+2. **平方根缩放规律**：在小Batch Size下，Adam遵循 $\eta \propto \sqrt{B}$ 的规律
+3. **Surge现象的抑制**：增大epsilon可以降低Surge现象出现的概率
+4. **自适应性的权衡**：Epsilon越大，自适应程度越弱，但训练稳定性可能提高
+
+这些理论分析为实际训练中epsilon的选择提供了数学依据。
 

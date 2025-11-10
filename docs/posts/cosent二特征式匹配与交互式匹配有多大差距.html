@@ -137,22 +137,22 @@
 作为预测类别，这里的$[t_1,t_2,\cdots,t_n]$就相当于是多类别场景下的阈值。</p>
 <p>那么，怎么搜索出$[t_1,t_2,\cdots,t_n]$呢？搜索目标自然是指标最大，但accuracy或者F1这些都是不可导的，因此梯度下降肯定是不考虑了；而又因为待搜索参数是一个多维向量，所以二分法也不大好用。这里介绍一种名为“Powell法”的求解方案。Powell法的数学细节比较多，这里不打算展开，简单来说，Powell法是一种求解低维无约束优化的算法，它不需要梯度，并且效率也相对较高，这里低维指的是待优化参数通常不超过100个（你总不能指望它去求解神经网络）。最关键是，Powell法在Scipy中有现成实现，在<code>scipy.optimize.minimize</code>中指定<code>method='Powell'</code>即可调用它。</p>
 <p>对于上述问题，参考代码如下：</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">minimize</span>
+<pre class="highlight"><code>import numpy as np
+from scipy.optimize import minimize
 
-<span class="k">def</span><span class="w"> </span><span class="nf">loss</span><span class="p">(</span><span class="n">t</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;这里的y_true.shape=[batch_size],</span>
-<span class="sd">    y_pred.shape=[batch_size, num_classes]</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-    <span class="n">t</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="kp">tanh</span><span class="p">(</span><span class="n">t</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
-    <span class="k">return</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="kp">mean</span><span class="p">(</span><span class="n">y_true</span> <span class="o">==</span> <span class="p">(</span><span class="n">y_pred</span> <span class="o">*</span> <span class="n">t</span><span class="p">[</span><span class="kc">None</span><span class="p">])</span><span class="o">.</span><span class="kp">argmax</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+def loss(t):
+    &quot;&quot;&quot;这里的y_true.shape=[batch_size],
+    y_pred.shape=[batch_size, num_classes]
+    &quot;&quot;&quot;
+    t = (np.tanh(t) + 1) / 2
+    return -np.mean(y_true == (y_pred * t[None]).argmax(1))
 
-<span class="n">options</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;xtol&#39;</span><span class="p">:</span> <span class="mf">1e-10</span><span class="p">,</span> <span class="s1">&#39;ftol&#39;</span><span class="p">:</span> <span class="mf">1e-10</span><span class="p">,</span> <span class="s1">&#39;maxiter&#39;</span><span class="p">:</span> <span class="mi">100000</span><span class="p">}</span>
-<span class="n">result</span> <span class="o">=</span> <span class="n">minimize</span><span class="p">(</span>
-    <span class="n">loss</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="kp">zeros_like</span><span class="p">(</span><span class="n">y_pred</span><span class="p">[:</span><span class="mi">1</span><span class="p">]),</span> <span class="n">method</span><span class="o">=</span><span class="s1">&#39;Powell&#39;</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="n">options</span>
-<span class="p">)</span>
-<span class="n">thresholds</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="kp">tanh</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
-</code></pre></div>
+options = {'xtol': 1e-10, 'ftol': 1e-10, 'maxiter': 100000}
+result = minimize(
+    loss, np.zeros_like(y_pred[:1]), method='Powell', options=options
+)
+thresholds = (np.tanh(result.x) + 1) / 2
+</code></pre>
 
 <h2 id="_2">实验结果<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>有了自动确定阈值的方法后，我们就可以检验分类性能了。笔者在ATEC、BQ、LCQMC、PAWSX这4个数据集上做了实验，分别对比了CoSENT、Sentence-BERT和交互式（记为Interact）三种方案的效果。公平起见，每种方法都用Powell法在验证集上确定最优阈值，然后用该阈值报告测试集的效果，哪怕交互式的也是如此。</p>

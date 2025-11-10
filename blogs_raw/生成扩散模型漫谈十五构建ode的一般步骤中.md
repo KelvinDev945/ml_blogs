@@ -2,10 +2,9 @@
 title: 生成扩散模型漫谈（十五）：构建ODE的一般步骤（中）
 slug: 生成扩散模型漫谈十五构建ode的一般步骤中
 date: 2022-12-22
-tags: 微分方程, 生成模型, 扩散, 格林函数, 生成模型
+tags: 详细推导, 微分方程, 生成模型, 扩散, 格林函数, 生成模型
 status: pending
 ---
-
 # 生成扩散模型漫谈（十五）：构建ODE的一般步骤（中）
 
 **原文链接**: [https://spaces.ac.cn/archives/9379](https://spaces.ac.cn/archives/9379)
@@ -228,5 +227,679 @@ url={\url{https://spaces.ac.cn/archives/9379}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节将从多个角度深入探讨格林函数的数学理论，特别是在扩散过程中的应用。我们将涵盖泛函分析、偏微分方程理论以及扩散过程的概率论视角。
+
+### 1. 格林函数的基本性质
+
+#### 1.1 对称性与正定性
+
+格林函数作为线性算子的逆核，具有重要的代数性质。对于自伴算子$L$，其格林函数满足对称性：
+
+$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = G(t, s; \boldsymbol{y}, \boldsymbol{x})
+$$
+
+**证明**：考虑自伴算子$L = L^*$，其格林函数定义满足：
+
+$$
+L_{\boldsymbol{x}} G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \delta(\boldsymbol{x} - \boldsymbol{y})\delta(t - s)
+$$
+
+对任意测试函数$\phi(\boldsymbol{x}), \psi(\boldsymbol{y})$，有：
+
+$$
+\begin{aligned}
+\int\int \phi(\boldsymbol{x}) L_{\boldsymbol{x}} G(t, s; \boldsymbol{x}, \boldsymbol{y}) \psi(\boldsymbol{y}) d\boldsymbol{x} d\boldsymbol{y} &= \int \phi(\boldsymbol{y}) \psi(\boldsymbol{y}) d\boldsymbol{y} \\
+\int\int (L_{\boldsymbol{x}} \phi(\boldsymbol{x})) G(t, s; \boldsymbol{x}, \boldsymbol{y}) \psi(\boldsymbol{y}) d\boldsymbol{x} d\boldsymbol{y} &= \int \phi(\boldsymbol{y}) \psi(\boldsymbol{y}) d\boldsymbol{y}
+\end{aligned}
+$$
+
+由自伴性和分部积分，交换$\phi, \psi$的角色，得到对称性。
+
+对于扩散型算子，格林函数还满足**正定性**。设$L = -\nabla \cdot (D\nabla) + V(\boldsymbol{x})$，其中$D > 0$是扩散系数，$V \geq 0$是势函数，则：
+
+$$
+\int\int f(\boldsymbol{x}) G(t, t; \boldsymbol{x}, \boldsymbol{y}) f(\boldsymbol{y}) d\boldsymbol{x} d\boldsymbol{y} \geq 0
+$$
+
+这来自于算子的正定性：
+
+$$
+\langle f, Lf \rangle = \int D|\nabla f|^2 + V|f|^2 \geq 0
+$$
+
+#### 1.2 归一化条件与概率解释
+
+对于时间依赖的格林函数$G(t, s; \boldsymbol{x}, \boldsymbol{y})$，当它表示扩散过程的转移概率密度时，必须满足归一化条件：
+
+$$
+\int G(t, s; \boldsymbol{x}, \boldsymbol{y}) d\boldsymbol{y} = 1, \quad \forall t > s, \boldsymbol{x}
+$$
+
+**推导**：从连续性方程出发，
+
+$$
+\frac{\partial}{\partial t} p(t, \boldsymbol{x}) = -\nabla \cdot (p\boldsymbol{f})
+$$
+
+两边对$\boldsymbol{x}$积分，利用散度定理和边界条件（假设$p\boldsymbol{f} \to 0$当$|\boldsymbol{x}| \to \infty$）：
+
+$$
+\frac{d}{dt} \int p(t, \boldsymbol{x}) d\boldsymbol{x} = -\int \nabla \cdot (p\boldsymbol{f}) d\boldsymbol{x} = 0
+$$
+
+因此总概率守恒。对于格林函数解$p(t, \boldsymbol{x}) = \int G(t, 0; \boldsymbol{x}, \boldsymbol{y}) p_0(\boldsymbol{y}) d\boldsymbol{y}$，要求：
+
+$$
+\int p(t, \boldsymbol{x}) d\boldsymbol{x} = \int p_0(\boldsymbol{y}) d\boldsymbol{y} = 1
+$$
+
+这要求格林函数满足归一化条件。
+
+### 2. 谱表示理论
+
+#### 2.1 特征值展开
+
+对于紧域上的自伴算子$L$，可以利用谱分解理论展开格林函数。设$L$的特征值问题为：
+
+$$
+L \phi_n(\boldsymbol{x}) = \lambda_n \phi_n(\boldsymbol{x})
+$$
+
+其中$\{\phi_n\}$构成完备正交系：$\langle \phi_m, \phi_n \rangle = \delta_{mn}$。则格林函数可展开为：
+
+$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \sum_{n=0}^{\infty} \frac{e^{-\lambda_n(t-s)}}{\lambda_n} \phi_n(\boldsymbol{x}) \phi_n^*(\boldsymbol{y})
+$$
+
+**推导**：利用$\delta$函数的展开：
+
+$$
+\delta(\boldsymbol{x} - \boldsymbol{y}) = \sum_{n=0}^{\infty} \phi_n(\boldsymbol{x}) \phi_n^*(\boldsymbol{y})
+$$
+
+对于时间演化算子$\partial_t - L$，其格林函数$G$满足：
+
+$$
+(\partial_t - L) G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \delta(t-s)\delta(\boldsymbol{x} - \boldsymbol{y})
+$$
+
+设$G = \sum_{n} g_n(t, s) \phi_n(\boldsymbol{x}) \phi_n^*(\boldsymbol{y})$，代入得：
+
+$$
+\sum_n \left[\frac{dg_n}{dt} - \lambda_n g_n\right] \phi_n(\boldsymbol{x}) \phi_n^*(\boldsymbol{y}) = \delta(t-s) \sum_n \phi_n(\boldsymbol{x}) \phi_n^*(\boldsymbol{y})
+$$
+
+比较系数：
+
+$$
+\frac{dg_n}{dt} - \lambda_n g_n = \delta(t-s)
+$$
+
+对于$t > s$，解为：
+
+$$
+g_n(t, s) = \frac{e^{\lambda_n(t-s)}}{\lambda_n}
+$$
+
+（这里假设$\lambda_n < 0$以保证收敛，或者理解为$L$是负定的）。
+
+#### 2.2 谱表示的收敛性
+
+谱展开的收敛性依赖于特征值的增长速率。对于$d$维欧氏空间上的拉普拉斯算子$\Delta$，Weyl渐近公式给出：
+
+$$
+N(\lambda) \sim \frac{\omega_d}{(2\pi)^d} \text{Vol}(\Omega) \lambda^{d/2}, \quad \lambda \to \infty
+$$
+
+其中$N(\lambda)$是小于$\lambda$的特征值个数，$\omega_d$是单位球的体积。这意味着特征值增长如：
+
+$$
+\lambda_n \sim C n^{2/d}
+$$
+
+因此谱展开中的项衰减如：
+
+$$
+\left|\frac{e^{-\lambda_n t}}{\lambda_n} \phi_n(\boldsymbol{x}) \phi_n(\boldsymbol{y})\right| \lesssim \frac{e^{-C n^{2/d} t}}{n^{2/d}}
+$$
+
+对于$t > 0$，这个级数快速收敛。
+
+### 3. 半群理论
+
+#### 3.1 演化算子的半群性质
+
+时间演化算子$U(t, s): f \mapsto \int G(t, s; \cdot, \boldsymbol{y}) f(\boldsymbol{y}) d\boldsymbol{y}$构成一个算子半群。半群的基本性质是：
+
+$$
+U(t, r) = U(t, s) \circ U(s, r), \quad t \geq s \geq r
+$$
+
+用格林函数表示，这就是**Chapman-Kolmogorov方程**：
+
+$$
+G(t, r; \boldsymbol{x}, \boldsymbol{z}) = \int G(t, s; \boldsymbol{x}, \boldsymbol{y}) G(s, r; \boldsymbol{y}, \boldsymbol{z}) d\boldsymbol{y}
+$$
+
+**证明**：设$p(r, \boldsymbol{z})$是初始分布，则：
+
+$$
+\begin{aligned}
+p(t, \boldsymbol{x}) &= \int G(t, r; \boldsymbol{x}, \boldsymbol{z}) p(r, \boldsymbol{z}) d\boldsymbol{z} \\
+&= \int G(t, s; \boldsymbol{x}, \boldsymbol{y}) p(s, \boldsymbol{y}) d\boldsymbol{y} \\
+&= \int G(t, s; \boldsymbol{x}, \boldsymbol{y}) \left[\int G(s, r; \boldsymbol{y}, \boldsymbol{z}) p(r, \boldsymbol{z}) d\boldsymbol{z}\right] d\boldsymbol{y} \\
+&= \int \left[\int G(t, s; \boldsymbol{x}, \boldsymbol{y}) G(s, r; \boldsymbol{y}, \boldsymbol{z}) d\boldsymbol{y}\right] p(r, \boldsymbol{z}) d\boldsymbol{z}
+\end{aligned}
+$$
+
+由初始分布的任意性，得到C-K方程。
+
+#### 3.2 无穷小生成元
+
+半群的生成元定义为：
+
+$$
+\mathcal{L} f = \lim_{t \to 0^+} \frac{U(t, 0)f - f}{t}
+$$
+
+对于扩散过程，生成元具有形式：
+
+$$
+\mathcal{L} = \boldsymbol{f}(\boldsymbol{x}) \cdot \nabla + \frac{1}{2} \text{tr}(D(\boldsymbol{x}) \nabla^2)
+$$
+
+其中$\boldsymbol{f}$是漂移系数，$D$是扩散矩阵。这对应于随机微分方程：
+
+$$
+d\boldsymbol{X}_t = \boldsymbol{f}(\boldsymbol{X}_t) dt + \sqrt{D(\boldsymbol{X}_t)} d\boldsymbol{W}_t
+$$
+
+对于本文的ODE情况（无扩散项），生成元简化为：
+
+$$
+\mathcal{L} = \boldsymbol{f}(\boldsymbol{x}, t) \cdot \nabla
+$$
+
+这是一个一阶偏微分算子，对应于无噪声的确定性流。
+
+#### 3.3 Hille-Yosida定理
+
+半群理论的核心结果是Hille-Yosida定理，它刻画了什么样的算子可以作为半群的生成元。
+
+**定理（Hille-Yosida）**：线性算子$\mathcal{L}$是压缩半群的生成元当且仅当：
+1. $\mathcal{L}$稠密定义且闭
+2. 对所有$\lambda > 0$，$(\lambda I - \mathcal{L})^{-1}$存在且满足$\|(\lambda I - \mathcal{L})^{-1}\| \leq 1/\lambda$
+
+对于扩散过程，可以验证生成元$\mathcal{L} = \frac{1}{2}\Delta + \boldsymbol{b} \cdot \nabla$满足这些条件（在适当的Sobolev空间中）。
+
+### 4. 热核理论
+
+#### 4.1 热核的定义与性质
+
+热核是热方程$\partial_t u = \Delta u$的基本解。在全空间$\mathbb{R}^d$上，热核为：
+
+$$
+K(t, \boldsymbol{x}, \boldsymbol{y}) = \frac{1}{(4\pi t)^{d/2}} \exp\left(-\frac{|\boldsymbol{x} - \boldsymbol{y}|^2}{4t}\right)
+$$
+
+这是一个高斯函数，具有以下性质：
+
+**性质1（归一化）**：
+$$
+\int K(t, \boldsymbol{x}, \boldsymbol{y}) d\boldsymbol{y} = 1
+$$
+
+**性质2（半群性）**：
+$$
+\int K(t, \boldsymbol{x}, \boldsymbol{z}) K(s, \boldsymbol{z}, \boldsymbol{y}) d\boldsymbol{z} = K(t+s, \boldsymbol{x}, \boldsymbol{y})
+$$
+
+**性质3（初值条件）**：
+$$
+\lim_{t \to 0^+} K(t, \boldsymbol{x}, \boldsymbol{y}) = \delta(\boldsymbol{x} - \boldsymbol{y})
+$$
+
+这里的极限理解为弱收敛，即对任意连续有界函数$f$：
+
+$$
+\lim_{t \to 0^+} \int K(t, \boldsymbol{x}, \boldsymbol{y}) f(\boldsymbol{y}) d\boldsymbol{y} = f(\boldsymbol{x})
+$$
+
+#### 4.2 热核的推导
+
+我们从Fourier变换推导热核。设$u(t, \boldsymbol{x})$满足热方程$\partial_t u = \Delta u$，取Fourier变换：
+
+$$
+\hat{u}(t, \boldsymbol{k}) = \int e^{-i\boldsymbol{k} \cdot \boldsymbol{x}} u(t, \boldsymbol{x}) d\boldsymbol{x}
+$$
+
+则：
+
+$$
+\frac{\partial \hat{u}}{\partial t} = -|\boldsymbol{k}|^2 \hat{u}
+$$
+
+解得：
+
+$$
+\hat{u}(t, \boldsymbol{k}) = e^{-t|\boldsymbol{k}|^2} \hat{u}(0, \boldsymbol{k})
+$$
+
+对于初值$u(0, \boldsymbol{x}) = \delta(\boldsymbol{x} - \boldsymbol{y})$，有$\hat{u}(0, \boldsymbol{k}) = e^{-i\boldsymbol{k} \cdot \boldsymbol{y}}$，因此：
+
+$$
+\hat{K}(t, \boldsymbol{k}, \boldsymbol{y}) = e^{-t|\boldsymbol{k}|^2 - i\boldsymbol{k} \cdot \boldsymbol{y}}
+$$
+
+逆Fourier变换：
+
+$$
+\begin{aligned}
+K(t, \boldsymbol{x}, \boldsymbol{y}) &= \frac{1}{(2\pi)^d} \int e^{i\boldsymbol{k} \cdot \boldsymbol{x} - t|\boldsymbol{k}|^2 - i\boldsymbol{k} \cdot \boldsymbol{y}} d\boldsymbol{k} \\
+&= \frac{1}{(2\pi)^d} \int e^{i\boldsymbol{k} \cdot (\boldsymbol{x} - \boldsymbol{y}) - t|\boldsymbol{k}|^2} d\boldsymbol{k}
+\end{aligned}
+$$
+
+完成平方：
+
+$$
+i\boldsymbol{k} \cdot (\boldsymbol{x} - \boldsymbol{y}) - t|\boldsymbol{k}|^2 = -t\left|\boldsymbol{k} - \frac{i(\boldsymbol{x} - \boldsymbol{y})}{2t}\right|^2 - \frac{|\boldsymbol{x} - \boldsymbol{y}|^2}{4t}
+$$
+
+利用高斯积分公式$\int e^{-a|z|^2} dz = (\pi/a)^{d/2}$：
+
+$$
+K(t, \boldsymbol{x}, \boldsymbol{y}) = \frac{1}{(2\pi)^d} \left(\frac{\pi}{t}\right)^{d/2} e^{-\frac{|\boldsymbol{x} - \boldsymbol{y}|^2}{4t}} = \frac{1}{(4\pi t)^{d/2}} e^{-\frac{|\boldsymbol{x} - \boldsymbol{y}|^2}{4t}}
+$$
+
+#### 4.3 带漂移的热核
+
+对于带漂移项的扩散方程：
+
+$$
+\partial_t u = \Delta u + \boldsymbol{b}(\boldsymbol{x}) \cdot \nabla u
+$$
+
+可以通过Girsanov变换或者Feynman-Kac公式得到格林函数的表达式。在常漂移$\boldsymbol{b}$的情况下，热核为：
+
+$$
+K(t, \boldsymbol{x}, \boldsymbol{y}) = \frac{1}{(4\pi t)^{d/2}} \exp\left(-\frac{|\boldsymbol{x} - \boldsymbol{y} - \boldsymbol{b}t|^2}{4t}\right)
+$$
+
+这对应于均值为$\boldsymbol{y} + \boldsymbol{b}t$、方差为$2t\boldsymbol{I}$的高斯分布。
+
+### 5. 扩散过程的格林函数
+
+#### 5.1 Fokker-Planck方程
+
+扩散过程由随机微分方程描述：
+
+$$
+d\boldsymbol{X}_t = \boldsymbol{f}(\boldsymbol{X}_t, t) dt + \boldsymbol{\sigma}(\boldsymbol{X}_t, t) d\boldsymbol{W}_t
+$$
+
+其概率密度演化遵循Fokker-Planck方程（也称Kolmogorov前向方程）：
+
+$$
+\frac{\partial p}{\partial t} = -\nabla \cdot (p\boldsymbol{f}) + \frac{1}{2}\sum_{i,j} \frac{\partial^2}{\partial x_i \partial x_j}(D_{ij} p)
+$$
+
+其中扩散矩阵$D = \boldsymbol{\sigma} \boldsymbol{\sigma}^T$。格林函数$G(t, s; \boldsymbol{x}, \boldsymbol{y})$满足：
+
+$$
+\frac{\partial G}{\partial t} = -\nabla_{\boldsymbol{x}} \cdot (G\boldsymbol{f}) + \frac{1}{2}\sum_{i,j} \frac{\partial^2}{\partial x_i \partial x_j}(D_{ij} G)
+$$
+
+配以初始条件$G(s, s; \boldsymbol{x}, \boldsymbol{y}) = \delta(\boldsymbol{x} - \boldsymbol{y})$。
+
+#### 5.2 后向Kolmogorov方程
+
+除了前向方程，格林函数还满足后向方程（关于初始变量$\boldsymbol{y}$和初始时间$s$）：
+
+$$
+-\frac{\partial G}{\partial s} = \boldsymbol{f}(\boldsymbol{y}, s) \cdot \nabla_{\boldsymbol{y}} G + \frac{1}{2}\sum_{i,j} D_{ij}(\boldsymbol{y}, s) \frac{\partial^2 G}{\partial y_i \partial y_j}
+$$
+
+这两个方程是对偶的，反映了扩散过程的时间可逆性（在适当的测度变换下）。
+
+#### 5.3 路径积分表示
+
+格林函数可以通过路径积分（Feynman-Kac公式）表示。对于扩散过程：
+
+$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \mathbb{E}\left[\delta(\boldsymbol{X}_t - \boldsymbol{x}) \Big| \boldsymbol{X}_s = \boldsymbol{y}\right]
+$$
+
+形式上可以写为路径积分：
+
+$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \int_{\gamma: \boldsymbol{y} \to \boldsymbol{x}} \mathcal{D}\gamma \exp\left(-\frac{1}{2}\int_s^t |\dot{\gamma}_r - \boldsymbol{f}(\gamma_r, r)|^2 dr\right)
+$$
+
+这里$\mathcal{D}\gamma$是路径测度。虽然路径积分在数学上需要严格定义，但它提供了有用的直观理解和计算方法（如弱噪声极限、鞍点近似等）。
+
+### 6. 时间依赖的格林函数
+
+#### 6.1 非齐次情况
+
+当系统参数依赖于时间时，格林函数不再满足平移不变性$G(t, s) \neq G(t-s, 0)$。此时需要完整保留两个时间参数。
+
+对于时变ODE $\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}_t(\boldsymbol{x})$，连续性方程为：
+
+$$
+\frac{\partial p_t}{\partial t} + \nabla \cdot (p_t \boldsymbol{f}_t) = 0
+$$
+
+格林函数满足：
+
+$$
+\frac{\partial G}{\partial t} + \nabla_{\boldsymbol{x}} \cdot (G \boldsymbol{f}_t(\boldsymbol{x})) = 0
+$$
+
+#### 6.2 Dyson级数
+
+对于时变系统，演化算子可以展开为Dyson级数（时间有序指数）：
+
+$$
+U(t, s) = \mathcal{T}\exp\left(\int_s^t \mathcal{L}_r dr\right) = \sum_{n=0}^{\infty} \int_s^t dr_1 \int_s^{r_1} dr_2 \cdots \int_s^{r_{n-1}} dr_n \mathcal{L}_{r_1} \mathcal{L}_{r_2} \cdots \mathcal{L}_{r_n}
+$$
+
+其中$\mathcal{T}$表示时间排序算符。对于弱时间依赖，可以用微扰展开：
+
+$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = G_0(t-s; \boldsymbol{x}, \boldsymbol{y}) + \int_s^t dr \int G_0(t-r; \boldsymbol{x}, \boldsymbol{z}) V_r(\boldsymbol{z}) G_0(r-s; \boldsymbol{z}, \boldsymbol{y}) d\boldsymbol{z} + \cdots
+$$
+
+其中$G_0$是时间齐次的参考格林函数，$V_r$是时变微扰。
+
+### 7. 初值响应分析
+
+#### 7.1 线性响应理论
+
+考虑初值的微小扰动$\boldsymbol{x}_0 \to \boldsymbol{x}_0 + \delta\boldsymbol{x}_0$，其对终值的影响由Jacobi矩阵刻画：
+
+$$
+\frac{\partial \boldsymbol{x}_t}{\partial \boldsymbol{x}_0} = J_t
+$$
+
+其演化方程为：
+
+$$
+\frac{dJ_t}{dt} = \frac{\partial \boldsymbol{f}_t}{\partial \boldsymbol{x}}(\boldsymbol{x}_t) J_t, \quad J_0 = I
+$$
+
+这是一个矩阵微分方程，形式解为：
+
+$$
+J_t = \mathcal{T}\exp\left(\int_0^t \frac{\partial \boldsymbol{f}_s}{\partial \boldsymbol{x}}(\boldsymbol{x}_s) ds\right)
+$$
+
+对于本文的格林函数，特征线$\boldsymbol{x}_t(\boldsymbol{x}_0)$的Jacobian正是概率密度变换的关键：
+
+$$
+p_t(\boldsymbol{x}_t | \boldsymbol{x}_0) = \delta(\boldsymbol{x}_t - \boldsymbol{\phi}_t(\boldsymbol{x}_0)) |\det J_t|^{-1}
+$$
+
+但由于我们采用了连续密度表示，这个关系蕴含在式$\eqref{eq:pt-xt-x0}$中。
+
+#### 7.2 Liouville方程的观点
+
+从辛几何的观点，相空间密度演化遵循Liouville方程：
+
+$$
+\frac{dp}{dt} + \{H, p\} = 0
+$$
+
+其中$\{,\}$是泊松括号。对于正则哈密顿系统，相空间体积守恒（Liouville定理）：
+
+$$
+\frac{d}{dt}\det J_t = \det J_t \cdot \text{tr}\frac{\partial \boldsymbol{f}}{\partial \boldsymbol{x}} = \det J_t \cdot \nabla \cdot \boldsymbol{f}
+$$
+
+因此：
+
+$$
+\det J_t = \exp\left(\int_0^t \nabla \cdot \boldsymbol{f}_s(\boldsymbol{x}_s) ds\right)
+$$
+
+这正好出现在式$\eqref{eq:pt-xt-x0}$中的指数因子里，体现了相空间体积变化对密度的影响。
+
+### 8. 格林函数的渐近行为
+
+#### 8.1 短时渐近
+
+当$t \to s^+$时，格林函数趋向于$\delta$函数：
+
+$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) \approx \frac{1}{(t-s)^{d/2}} \exp\left(-\frac{|\boldsymbol{x} - \boldsymbol{y}|^2}{4(t-s)}\right)
+$$
+
+这是热核的主导行为。更精确的展开包含梯度修正：
+
+$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \frac{1}{(4\pi(t-s))^{d/2}} e^{-\frac{|\boldsymbol{x}-\boldsymbol{y}|^2}{4(t-s)}} \left[1 + O(t-s)\right]
+$$
+
+#### 8.2 长时渐近
+
+对于$t \to \infty$，格林函数的行为依赖于系统是否有不变分布。如果存在唯一稳态$p_{\infty}(\boldsymbol{x})$，则：
+
+$$
+\lim_{t \to \infty} G(t, 0; \boldsymbol{x}, \boldsymbol{y}) = p_{\infty}(\boldsymbol{x})
+$$
+
+收敛速率由谱隙（spectral gap）$\lambda_1 - \lambda_0$决定：
+
+$$
+|G(t, 0; \boldsymbol{x}, \boldsymbol{y}) - p_{\infty}(\boldsymbol{x})| \lesssim e^{-(\lambda_1 - \lambda_0)t}
+$$
+
+对于扩散模型，$p_{\infty}$就是先验分布$p_T(\boldsymbol{x}_T)$。
+
+#### 8.3 中间标度行为
+
+在中间时间尺度，格林函数可能展现自相似行为或标度律。例如，对于幂律势场，可能有：
+
+$$
+G(t, 0; \boldsymbol{x}, \boldsymbol{y}) \sim t^{-\alpha} F\left(\frac{\boldsymbol{x}}{t^{\beta}}, \frac{\boldsymbol{y}}{t^{\beta}}\right)
+$$
+
+其中$\alpha, \beta$是标度指数，$F$是标度函数。
+
+### 9. 与基本解的关系
+
+#### 9.1 基本解的定义
+
+偏微分方程$Lu = f$的基本解$E(\boldsymbol{x}, \boldsymbol{y})$满足：
+
+$$
+L_{\boldsymbol{x}} E(\boldsymbol{x}, \boldsymbol{y}) = \delta(\boldsymbol{x} - \boldsymbol{y})
+$$
+
+方程的解可表示为：
+
+$$
+u(\boldsymbol{x}) = \int E(\boldsymbol{x}, \boldsymbol{y}) f(\boldsymbol{y}) d\boldsymbol{y}
+$$
+
+#### 9.2 时间依赖方程的基本解
+
+对于演化方程$(\partial_t - L)u = f$，基本解$E(t, s; \boldsymbol{x}, \boldsymbol{y})$满足：
+
+$$
+(\partial_t - L_{\boldsymbol{x}}) E(t, s; \boldsymbol{x}, \boldsymbol{y}) = \delta(t-s)\delta(\boldsymbol{x} - \boldsymbol{y})
+$$
+
+这正是格林函数$G(t, s; \boldsymbol{x}, \boldsymbol{y})$的定义方程。因此，格林函数就是时间依赖偏微分方程的基本解。
+
+#### 9.3 Green公式与表示定理
+
+利用Green第二恒等式，可以得到解的积分表示。对于热方程，有：
+
+$$
+u(t, \boldsymbol{x}) = \int G(t, 0; \boldsymbol{x}, \boldsymbol{y}) u(0, \boldsymbol{y}) d\boldsymbol{y} + \int_0^t \int G(t, s; \boldsymbol{x}, \boldsymbol{y}) f(s, \boldsymbol{y}) d\boldsymbol{y} ds
+$$
+
+第一项是初值的贡献，第二项是源项的贡献。对于齐次方程（$f=0$），只有初值项。
+
+### 10. 实际计算方法
+
+#### 10.1 直接数值积分
+
+对于简单的格林函数（如高斯核），可以直接进行蒙特卡洛采样或数值积分。例如：
+
+$$
+p_t(\boldsymbol{x}_t) = \int G(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 \approx \frac{1}{N}\sum_{i=1}^N G(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0^{(i)})
+$$
+
+其中$\boldsymbol{x}_0^{(i)} \sim p_0$。
+
+#### 10.2 特征线方法的数值实现
+
+对于式$\eqref{eq:pt-xt-x0}$的计算，需要：
+1. 从轨迹方程$\eqref{eq:track}$解出$\boldsymbol{x}_T(\boldsymbol{x}_t, \boldsymbol{x}_0)$
+2. 计算$\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$沿轨迹的散度积分
+3. 代入先验分布$p_T$
+
+**算法步骤**：
+```
+输入: t, x_t, x_0
+1. 求解 φ_t(x_t|x_0) = x_T (代数或数值求解)
+2. 计算 f_s(x_s|x_0) 对 s ∈ [t, T]
+3. 数值积分 I = ∫_t^T ∇·f_s(x_s|x_0) ds
+4. 计算 p_T(x_T)
+5. 返回 p_t(x_t|x_0) = p_T(x_T) exp(I)
+```
+
+#### 10.3 谱方法
+
+对于周期边界条件或紧支撑域，可以使用谱方法：
+1. 展开$p_t = \sum_n c_n(t) \phi_n$
+2. 将PDE转化为ODE系统：$\dot{c}_n = \sum_m M_{nm} c_m$
+3. 求解ODE得到系数演化
+4. 重构$p_t$
+
+#### 10.4 有限元/有限差分
+
+对于复杂几何或边界条件，使用空间离散化方法：
+- 有限差分：将$\nabla, \Delta$离散化为差分算子
+- 有限元：将解展开为分片多项式基函数
+- 有限体积：保证守恒律的离散化
+
+这些方法将PDE转化为大型稀疏线性系统，可用迭代法求解。
+
+#### 10.5 神经网络参数化
+
+现代扩散模型采用神经网络直接学习$\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$或其期望$\boldsymbol{f}_t(\boldsymbol{x}_t)$。训练目标式$\eqref{eq:score-match}$可以通过随机梯度下降优化：
+
+```
+for epoch in epochs:
+    采样 x_0 ~ p_0
+    采样 t ~ Uniform[0, T]
+    计算 x_t ~ p_t(·|x_0)
+    计算损失 L = ||v_θ(x_t, t) - f_t(x_t|x_0)||²
+    反向传播更新 θ
+```
+
+这避免了显式求解格林函数，而是通过数据驱动的方式学习速度场。
+
+### 11. 特殊情况：线性轨迹的完整推导
+
+#### 11.1 一般线性形式
+
+回到式中的线性轨迹$\boldsymbol{x}_t = \boldsymbol{\mu}_t(\boldsymbol{x}_0) + \sigma_t \boldsymbol{x}_1$，我们详细推导所有中间步骤。
+
+**步骤1**：计算速度场。轨迹方程为：
+
+$$
+\boldsymbol{\varphi}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0)}{\sigma_t}
+$$
+
+这应该等于$\boldsymbol{x}_1$（常数）。对$t$求全导数：
+
+$$
+\frac{\partial \boldsymbol{\varphi}_t}{\partial t} + \frac{\partial \boldsymbol{\varphi}_t}{\partial \boldsymbol{x}_t} \frac{d\boldsymbol{x}_t}{dt} = 0
+$$
+
+计算偏导：
+
+$$
+\frac{\partial \boldsymbol{\varphi}_t}{\partial t} = \frac{-\dot{\boldsymbol{\mu}}_t(\boldsymbol{x}_0)}{\sigma_t} - \frac{\dot{\sigma}_t}{\sigma_t^2}(\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0))
+$$
+
+$$
+\frac{\partial \boldsymbol{\varphi}_t}{\partial \boldsymbol{x}_t} = \frac{1}{\sigma_t} I
+$$
+
+代入得：
+
+$$
+\frac{d\boldsymbol{x}_t}{dt} = -\sigma_t \frac{\partial \boldsymbol{\varphi}_t}{\partial t} = \dot{\boldsymbol{\mu}}_t(\boldsymbol{x}_0) + \frac{\dot{\sigma}_t}{\sigma_t}(\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0))
+$$
+
+**步骤2**：计算散度。
+
+$$
+\nabla_{\boldsymbol{x}_t} \cdot \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \nabla_{\boldsymbol{x}_t} \cdot \left[\frac{\dot{\sigma}_t}{\sigma_t}(\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0))\right] = \frac{d\dot{\sigma}_t}{\sigma_t}
+$$
+
+**步骤3**：求解密度演化。根据式$\eqref{eq:pt-xt-x0}$：
+
+$$
+p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = p_T(\boldsymbol{x}_T) \exp\left(\int_t^T \frac{d\dot{\sigma}_s}{\sigma_s} ds\right) = p_T(\boldsymbol{x}_T) \exp\left(d\log\frac{\sigma_T}{\sigma_t}\right) = \frac{\sigma_T^d}{\sigma_t^d} p_T(\boldsymbol{x}_T)
+$$
+
+由于$\sigma_T = 1$：
+
+$$
+p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{p_T(\boldsymbol{x}_T)}{\sigma_t^d}
+$$
+
+**步骤4**：代入轨迹关系。从$\boldsymbol{x}_t = \boldsymbol{\mu}_t(\boldsymbol{x}_0) + \sigma_t \boldsymbol{x}_T$，得：
+
+$$
+\boldsymbol{x}_T = \frac{\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0)}{\sigma_t}
+$$
+
+代入上式：
+
+$$
+p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{1}{\sigma_t^d} p_T\left(\frac{\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0)}{\sigma_t}\right)
+$$
+
+这正是文中的结果。特别地，当$p_T = \mathcal{N}(0, I)$时：
+
+$$
+p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{1}{\sigma_t^d (2\pi)^{d/2}} \exp\left(-\frac{|\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0)|^2}{2\sigma_t^2}\right) = \mathcal{N}(\boldsymbol{x}_t; \boldsymbol{\mu}_t(\boldsymbol{x}_0), \sigma_t^2 I)
+$$
+
+#### 11.2 验证Chapman-Kolmogorov方程
+
+作为完整性检查，我们验证格林函数满足C-K方程。对于线性情况：
+
+$$
+\begin{aligned}
+&\int G(t, s; \boldsymbol{x}_t, \boldsymbol{x}_s) G(s, 0; \boldsymbol{x}_s, \boldsymbol{x}_0) d\boldsymbol{x}_s \\
+=&\, \int \frac{1}{\sigma_{t|s}^d} p_T\left(\frac{\boldsymbol{x}_t - \boldsymbol{\mu}_{t|s}(\boldsymbol{x}_s)}{\sigma_{t|s}}\right) \frac{1}{\sigma_s^d} p_T\left(\frac{\boldsymbol{x}_s - \boldsymbol{\mu}_s(\boldsymbol{x}_0)}{\sigma_s}\right) d\boldsymbol{x}_s
+\end{aligned}
+$$
+
+这里$\boldsymbol{\mu}_{t|s}, \sigma_{t|s}$表示从$s$到$t$的参数。对于线性轨迹，可以验证这等于$G(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$（两个高斯卷积仍是高斯）。
+
+### 12. 总结与展望
+
+通过以上详细推导，我们从多个角度理解了格林函数在扩散模型中的作用：
+
+1. **泛函分析角度**：格林函数是线性微分算子的逆，具有对称性、正定性等代数性质，可以通过谱分解表示。
+
+2. **偏微分方程角度**：格林函数是Fokker-Planck方程或连续性方程的基本解，满足Chapman-Kolmogorov方程，通过特征线法可以构造显式解。
+
+3. **概率论角度**：格林函数表示扩散过程的转移概率密度，通过路径积分或Feynman-Kac公式可以得到其随机过程表示。
+
+4. **半群理论角度**：格林函数定义了演化算子半群，其无穷小生成元刻画了系统的动力学。
+
+5. **数值计算角度**：格林函数可以通过谱方法、有限元方法或神经网络学习等多种方式计算和近似。
+
+这些不同的视角相互补充，为我们设计和分析扩散模型提供了坚实的数学基础。特别是本文的特征线法，通过巧妙地构造满足初值条件的轨迹族，再利用特征线法保证终值条件，得到了一个统一而优雅的框架，这对理解和推广扩散模型具有重要意义。
 

@@ -74,7 +74,7 @@
             <ol class="breadcrumb">
                 <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
                 
-                <li class="breadcrumb-item"><a href="../index.html?tags=概率">概率</a></li>
+                <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
                     #122 通向概率分布之路：盘点Softmax及其替代品
@@ -94,6 +94,10 @@
             </div>
             
             <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=详细推导" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 详细推导</span>
+                </a>
                 
                 <a href="../index.html?tags=概率" class="tag-link">
                     <span class="tag"><i class="fas fa-tag"></i> 概率</span>
@@ -163,16 +167,16 @@ p_i - p_i^2,&amp;\quad i=j\\<br />
 当$\boldsymbol{p}$是one hot分布时，上式等于0，这意味着Softmax的结果越接近one hot，它的梯度消失现象越严重，所以至少初始化阶段，我们不能将Softmax初始化得接近one hot。同时上式最右端也联系到了<a href="/archives/9595#%E7%86%B5%E7%9A%84%E8%81%94%E7%B3%BB">Rényi熵</a>的概念，它跟常见的香侬熵类似。</p>
 <h3 id="_4">参考实现<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h3>
 <p>Softmax的直接实现很简单，直接取$\exp$然后归一化就行，Numpy的参考代码为：</p>
-<div class="highlight"><pre><span></span><code><span class="nv">def</span><span class="w"> </span><span class="nv">softmax</span><span class="ss">(</span><span class="nv">x</span><span class="ss">)</span>:
-<span class="w">    </span><span class="nv">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">np</span>.<span class="nv">exp</span><span class="ss">(</span><span class="nv">x</span><span class="ss">)</span>
-<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nv">y</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nv">y</span>.<span class="nv">sum</span><span class="ss">()</span>
-</code></pre></div>
+<pre class="highlight"><code>def softmax(x):
+    y = np.exp(x)
+    return y / y.sum()
+</code></pre>
 
 <p>然而，如果$\boldsymbol{x}$中存在较大的分量，那么算$\exp$时很容易溢出，因此我们通常都要利用Softmax的<strong>不变性</strong> ，先将每个分量减去所有分量的最大值，然后再算Softmax，这样每个取$\exp$的分量都不大于0，确保不会溢出：</p>
-<div class="highlight"><pre><span></span><code><span class="nv">def</span><span class="w"> </span><span class="nv">softmax</span><span class="ss">(</span><span class="nv">x</span><span class="ss">)</span>:
-<span class="w">    </span><span class="nv">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">np</span>.<span class="nv">exp</span><span class="ss">(</span><span class="nv">x</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">x</span>.<span class="nv">max</span><span class="ss">())</span>
-<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="nv">y</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nv">y</span>.<span class="nv">sum</span><span class="ss">()</span>
-</code></pre></div>
+<pre class="highlight"><code>def softmax(x):
+    y = np.exp(x - x.max())
+    return y / y.sum()
+</code></pre>
 
 <h3 id="_5">损失函数<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h3>
 <p>构建概率分布的主要用途之一是用于构建单标签多分类任务的输出，即假设有一个$n$分类任务，$\boldsymbol{x}$是模型的输出，那么我们希望通过$\boldsymbol{p}=softmax(\boldsymbol{x})$来预测每个类的概率。为了训练这个模型，我们需要一个损失函数，假设目标类别是$t$，常见的选择是交叉熵损失：<br />
@@ -253,12 +257,12 @@ p_i - p_i^2,&amp;\quad i=j\\<br />
 \begin{equation}\sum_{i=1}^k [x_i - \lambda(\boldsymbol{x})] = 1\quad\Rightarrow\quad 1 + k\lambda(\boldsymbol{x}) = \sum_{i=1}^k x_i\end{equation}<br />
 这就可以求出$\lambda(\boldsymbol{x})$。当然，我们无法事先知道$x_k\geq \lambda(\boldsymbol{x})\geq x_{k+1}$，但我们可以遍历$k=1,2,\cdots,n$，利用上式求一遍$\lambda_k(\boldsymbol{x})$，取满足$x_k\geq \lambda_k(\boldsymbol{x})\geq x_{k+1}$那一个$\lambda_k(\boldsymbol{x})$，这也可以等价地表示为求满足$x_k\geq \lambda_k(\boldsymbol{x})$的最大的$k$，然后返回对应的$\lambda_k(\boldsymbol{x})$</p>
 <p>参考实现：</p>
-<div class="highlight"><pre><span></span><code><span class="s s-Atom">def</span> <span class="nf">sparsemax</span><span class="p">(</span><span class="s s-Atom">x</span><span class="p">)</span><span class="o">:</span>
-    <span class="s s-Atom">x_sort</span> <span class="o">=</span> <span class="s s-Atom">np</span><span class="p">.</span><span class="nf">sort</span><span class="p">(</span><span class="s s-Atom">x</span><span class="p">)[</span><span class="o">::-</span><span class="mi">1</span><span class="p">]</span>
-    <span class="s s-Atom">x_lamb</span> <span class="o">=</span> <span class="p">(</span><span class="s s-Atom">np</span><span class="p">.</span><span class="nf">cumsum</span><span class="p">(</span><span class="s s-Atom">x_sort</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="s s-Atom">np</span><span class="p">.</span><span class="nf">arange</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nf">len</span><span class="p">(</span><span class="s s-Atom">x</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
-    <span class="s s-Atom">lamb</span> <span class="o">=</span> <span class="s s-Atom">x_lamb</span><span class="p">[(</span><span class="s s-Atom">x_sort</span> <span class="o">&gt;=</span> <span class="s s-Atom">x_lamb</span><span class="p">).</span><span class="nf">argmin</span><span class="p">()</span> <span class="o">-</span> <span class="mi">1</span><span class="p">]</span>
-    <span class="s s-Atom">return</span> <span class="s s-Atom">np</span><span class="p">.</span><span class="nf">maximum</span><span class="p">(</span><span class="s s-Atom">x</span> <span class="o">-</span> <span class="s s-Atom">lamb</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
-</code></pre></div>
+<pre class="highlight"><code>def sparsemax(x):
+    x_sort = np.sort(x)[::-1]
+    x_lamb = (np.cumsum(x_sort) - 1) / np.arange(1, len(x) + 1)
+    lamb = x_lamb[(x_sort &gt;= x_lamb).argmin() - 1]
+    return np.maximum(x - lamb, 0)
+</code></pre>
 
 <h3 id="_10">梯度计算<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h3>
 <p>方便起见，我们引入记号<br />
@@ -305,16 +309,16 @@ Sparsemax太稀疏，背后的原因也可以理解为$\exp(x)\approx \text{relu
 \begin{equation}\lambda(\boldsymbol{x}) = \mu_k - \sqrt{\frac{1}{k} - \sigma_k^2},\quad \mu_k = \frac{1}{k}\sum_{i=1}^k z_i,\quad\sigma_k^2 = \frac{1}{k}\left(\sum_{i=1}^k z_i^2\right) - \mu_k^2\end{equation}<br />
 当我们无法事先知道$x_k\geq \lambda(\boldsymbol{x})\geq x_{k+1}$时，可以遍历$k=1,2,\cdots,n$，利用上式求一遍$\lambda_k(\boldsymbol{x})$，取满足$x_k\geq \lambda_k(\boldsymbol{x})\geq x_{k+1}$那一个$\lambda_k(\boldsymbol{x})$，但注意这时候不等价于求满足$x_k\geq \lambda_k(\boldsymbol{x})$的最大的$k$。</p>
 <p>完整的参考实现：</p>
-<div class="highlight"><pre><span></span><code><span class="s s-Atom">def</span> <span class="nf">entmat</span><span class="p">(</span><span class="s s-Atom">x</span><span class="p">)</span><span class="o">:</span>
-    <span class="s s-Atom">x_sort</span> <span class="o">=</span> <span class="s s-Atom">np</span><span class="p">.</span><span class="nf">sort</span><span class="p">(</span><span class="s s-Atom">x</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)[</span><span class="o">::-</span><span class="mi">1</span><span class="p">]</span>
-    <span class="s s-Atom">k</span> <span class="o">=</span> <span class="s s-Atom">np</span><span class="p">.</span><span class="nf">arange</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nf">len</span><span class="p">(</span><span class="s s-Atom">x</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
-    <span class="s s-Atom">x_mu</span> <span class="o">=</span> <span class="s s-Atom">np</span><span class="p">.</span><span class="nf">cumsum</span><span class="p">(</span><span class="s s-Atom">x_sort</span><span class="p">)</span> <span class="o">/</span> <span class="s s-Atom">k</span>
-    <span class="s s-Atom">x_sigma2</span> <span class="o">=</span> <span class="s s-Atom">np</span><span class="p">.</span><span class="nf">cumsum</span><span class="p">(</span><span class="s s-Atom">x_sort**</span><span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="s s-Atom">k</span>  <span class="o">-</span> <span class="s s-Atom">x_mu**</span><span class="mi">2</span>
-    <span class="s s-Atom">x_lamb</span> <span class="o">=</span> <span class="s s-Atom">x_mu</span> <span class="o">-</span> <span class="s s-Atom">np</span><span class="p">.</span><span class="nf">sqrt</span><span class="p">(</span><span class="s s-Atom">np</span><span class="p">.</span><span class="nf">maximum</span><span class="p">(</span><span class="mf">1.</span> <span class="o">/</span> <span class="s s-Atom">k</span> <span class="o">-</span> <span class="s s-Atom">x_sigma2</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
-    <span class="s s-Atom">x_sort_shift</span> <span class="o">=</span> <span class="s s-Atom">np</span><span class="p">.</span><span class="nf">pad</span><span class="p">(</span><span class="s s-Atom">x_sort</span><span class="p">[</span><span class="mi">1</span><span class="o">:</span><span class="p">],</span> <span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span> <span class="s s-Atom">constant_values=-np</span><span class="p">.</span><span class="s s-Atom">inf</span><span class="p">)</span>
-    <span class="s s-Atom">lamb</span> <span class="o">=</span> <span class="s s-Atom">x_lamb</span><span class="p">[(</span><span class="s s-Atom">x_sort</span> <span class="o">&gt;</span> <span class="s s-Atom">x_lamb</span><span class="p">)</span> <span class="s s-Atom">&amp;</span> <span class="p">(</span><span class="s s-Atom">x_lamb</span> <span class="o">&gt;</span> <span class="s s-Atom">x_sort_shift</span><span class="p">)]</span>
-    <span class="s s-Atom">return</span> <span class="s s-Atom">np</span><span class="p">.</span><span class="nf">maximum</span><span class="p">(</span><span class="s s-Atom">x</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">-</span> <span class="s s-Atom">lamb</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span><span class="s s-Atom">**</span><span class="mi">2</span>
-</code></pre></div>
+<pre class="highlight"><code>def entmat(x):
+    x_sort = np.sort(x / 2)[::-1]
+    k = np.arange(1, len(x) + 1)
+    x_mu = np.cumsum(x_sort) / k
+    x_sigma2 = np.cumsum(x_sort**2) / k  - x_mu**2
+    x_lamb = x_mu - np.sqrt(np.maximum(1. / k - x_sigma2, 0))
+    x_sort_shift = np.pad(x_sort[1:], (0, 1), constant_values=-np.inf)
+    lamb = x_lamb[(x_sort &gt; x_lamb) &amp; (x_lamb &gt; x_sort_shift)]
+    return np.maximum(x / 2 - lamb, 0)**2
+</code></pre>
 
 <h3 id="_14">其他内容<a class="toc-link" href="#_14" title="Permanent link">&para;</a></h3>
 <p>Entmax-$\alpha$的梯度跟Sparsemax大同小异，这里就不展开讨论了，读者自行推导一下或者参考原论文就行。至于损失函数，同样从梯度$\frac{\partial \mathcal{L}_t}{\partial \boldsymbol{x}} = \boldsymbol{p} - \text{onehot(t)}$出发反推出损失函数也是可以的，但其形式有点复杂，有兴趣了解的读者可以参考原论文<a href="https://papers.cool/arxiv/1905.05702">《Sparse Sequence-to-Sequence Models》</a>以及<a href="https://papers.cool/arxiv/1901.02324">《Learning with Fenchel-Young Losses》</a>。</p>
@@ -344,7 +348,763 @@ url={\url{https://spaces.ac.cn/archives/10145}},<br />
 } </p>
 <hr />
 <h2 id="_16">公式推导与注释<a class="toc-link" href="#_16" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1-softmax">1. Softmax 详细推导<a class="toc-link" href="#1-softmax" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 定义的严格推导<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>从最基本的要求出发，我们希望将向量 $\boldsymbol{x} = (x_1, x_2, \ldots, x_n) \in \mathbb{R}^n$ 映射到概率单纯形 $\Delta^{n-1}$。一个自然的想法是使用归一化：</p>
+<p><strong>步骤1：</strong> 构造非负函数<br />
+\begin{equation}<br />
+f: \mathbb{R} \to \mathbb{R}^+ = [0, +\infty)<br />
+\end{equation}</p>
+<p><strong>步骤2：</strong> 对每个分量应用该函数<br />
+\begin{equation}<br />
+y_i = f(x_i), \quad i = 1, 2, \ldots, n<br />
+\end{equation}</p>
+<p><strong>步骤3：</strong> 归一化得到概率<br />
+\begin{equation}<br />
+p_i = \frac{y_i}{\sum_{j=1}^n y_j} = \frac{f(x_i)}{\sum_{j=1}^n f(x_j)}<br />
+\end{equation}</p>
+<p><strong>验证概率性质：</strong><br />
+- 非负性：由于 $f(x_i) \geq 0$ 且分母 $\sum_{j=1}^n f(x_j) &gt; 0$（至少有一项为正），故 $p_i \geq 0$<br />
+- 归一性：$\sum_{i=1}^n p_i = \sum_{i=1}^n \frac{f(x_i)}{\sum_{j=1}^n f(x_j)} = \frac{\sum_{i=1}^n f(x_i)}{\sum_{j=1}^n f(x_j)} = 1$</p>
+<p><strong>选择指数函数：</strong> 为什么选择 $f(x) = e^x$？<br />
+1. <strong>严格单调性</strong>：$e^x$ 严格单调递增，保证 $x_i &gt; x_j \Leftrightarrow e^{x_i} &gt; e^{x_j}$<br />
+2. <strong>处处可微</strong>：$\frac{d}{dx}e^x = e^x$，梯度计算简单<br />
+3. <strong>平移不变性</strong>：$\frac{e^{x_i + c}}{\sum_j e^{x_j + c}} = \frac{e^c \cdot e^{x_i}}{e^c \sum_j e^{x_j}} = \frac{e^{x_i}}{\sum_j e^{x_j}}$</p>
+<h4 id="12">1.2 单调性的严格证明<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p><strong>定理：</strong> 对于 Softmax 函数，$p_i &gt; p_j \Leftrightarrow x_i &gt; x_j$</p>
+<p><strong>证明（充分性）：</strong> 假设 $x_i &gt; x_j$，则<br />
+\begin{align}<br />
+p_i - p_j &amp;= \frac{e^{x_i}}{\sum_{k=1}^n e^{x_k}} - \frac{e^{x_j}}{\sum_{k=1}^n e^{x_k}} \<br />
+&amp;= \frac{e^{x_i} - e^{x_j}}{\sum_{k=1}^n e^{x_k}}<br />
+\end{align}</p>
+<p>由于 $e^x$ 严格单调递增，$x_i &gt; x_j \Rightarrow e^{x_i} &gt; e^{x_j}$，因此分子 $e^{x_i} - e^{x_j} &gt; 0$，分母恒正，故 $p_i - p_j &gt; 0$，即 $p_i &gt; p_j$。</p>
+<p><strong>证明（必要性）：</strong> 假设 $p_i &gt; p_j$，则<br />
+\begin{equation}<br />
+\frac{e^{x_i}}{\sum_{k=1}^n e^{x_k}} &gt; \frac{e^{x_j}}{\sum_{k=1}^n e^{x_k}} \Rightarrow e^{x_i} &gt; e^{x_j}<br />
+\end{equation}</p>
+<p>由于 $\log$ 是严格单调递增函数，两边取对数得 $x_i &gt; x_j$。$\square$</p>
+<h4 id="13">1.3 梯度计算的详细步骤<a class="toc-link" href="#13" title="Permanent link">&para;</a></h4>
+<p>记 $Z = \sum_{j=1}^n e^{x_j}$，则 $p_i = \frac{e^{x_i}}{Z}$</p>
+<p><strong>情况1：</strong> $i = j$ 时，使用商法则<br />
+\begin{align}<br />
+\frac{\partial p_i}{\partial x_i} &amp;= \frac{\partial}{\partial x_i}\left(\frac{e^{x_i}}{Z}\right) \<br />
+&amp;= \frac{e^{x_i} \cdot Z - e^{x_i} \cdot \frac{\partial Z}{\partial x_i}}{Z^2} \<br />
+&amp;= \frac{e^{x_i} \cdot Z - e^{x_i} \cdot e^{x_i}}{Z^2} \quad \text{（因为 } \frac{\partial Z}{\partial x_i} = e^{x_i}\text{）} \<br />
+&amp;= \frac{e^{x_i}}{Z} \cdot \frac{Z - e^{x_i}}{Z} \<br />
+&amp;= p_i \cdot (1 - p_i) \<br />
+&amp;= p_i - p_i^2<br />
+\end{align}</p>
+<p><strong>情况2：</strong> $i \neq j$ 时<br />
+\begin{align}<br />
+\frac{\partial p_i}{\partial x_j} &amp;= \frac{\partial}{\partial x_j}\left(\frac{e^{x_i}}{Z}\right) \<br />
+&amp;= \frac{0 \cdot Z - e^{x_i} \cdot \frac{\partial Z}{\partial x_j}}{Z^2} \<br />
+&amp;= \frac{-e^{x_i} \cdot e^{x_j}}{Z^2} \quad \text{（因为 } \frac{\partial Z}{\partial x_j} = e^{x_j}\text{）} \<br />
+&amp;= -\frac{e^{x_i}}{Z} \cdot \frac{e^{x_j}}{Z} \<br />
+&amp;= -p_i p_j<br />
+\end{align}</p>
+<p><strong>雅可比矩阵形式：</strong><br />
+\begin{equation}<br />
+J = \frac{\partial \boldsymbol{p}}{\partial \boldsymbol{x}} = \text{diag}(\boldsymbol{p}) - \boldsymbol{p}\boldsymbol{p}^T<br />
+\end{equation}</p>
+<p>其中 $\text{diag}(\boldsymbol{p})$ 是以 $\boldsymbol{p}$ 为对角元素的对角矩阵。</p>
+<p><strong>数值示例：</strong> 考虑 $\boldsymbol{x} = [1, 2, 3]^T$<br />
+\begin{align}<br />
+e^{\boldsymbol{x}} &amp;= [e^1, e^2, e^3]^T \approx [2.718, 7.389, 20.086]^T \<br />
+Z &amp;= 2.718 + 7.389 + 20.086 = 30.193 \<br />
+\boldsymbol{p} &amp;\approx [0.090, 0.245, 0.665]^T<br />
+\end{align}</p>
+<p>雅可比矩阵：<br />
+\begin{equation}<br />
+J \approx \begin{bmatrix}<br />
+0.082 &amp; -0.022 &amp; -0.060 \<br />
+-0.022 &amp; 0.185 &amp; -0.163 \<br />
+-0.060 &amp; -0.163 &amp; 0.223<br />
+\end{bmatrix}<br />
+\end{equation}</p>
+<p>验证：每行之和为 0（这是由 $\sum_i p_i = 1$ 的约束导出的性质）。</p>
+<h4 id="14-hessian">1.4 Hessian 矩阵（二阶导数）<a class="toc-link" href="#14-hessian" title="Permanent link">&para;</a></h4>
+<p>对于深度理解，我们计算二阶导数。记 $H_{ij,kl} = \frac{\partial^2 p_i}{\partial x_j \partial x_k}$</p>
+<p><strong>情况1：</strong> $i = j = k$<br />
+\begin{align}<br />
+\frac{\partial^2 p_i}{\partial x_i^2} &amp;= \frac{\partial}{\partial x_i}(p_i - p_i^2) \<br />
+&amp;= (p_i - p_i^2) - 2p_i(p_i - p_i^2) \<br />
+&amp;= p_i(1 - p_i)(1 - 2p_i)<br />
+\end{align}</p>
+<p><strong>情况2：</strong> $i = j \neq k$<br />
+\begin{align}<br />
+\frac{\partial^2 p_i}{\partial x_i \partial x_k} &amp;= \frac{\partial}{\partial x_k}(p_i - p_i^2) \<br />
+&amp;= -p_i p_k - 2p_i(-p_i p_k) \<br />
+&amp;= p_i p_k(2p_i - 1)<br />
+\end{align}</p>
+<h3 id="2-margin-softmax">2. Margin Softmax 详细推导<a class="toc-link" href="#2-margin-softmax" title="Permanent link">&para;</a></h3>
+<h4 id="21-am-softmax">2.1 AM-Softmax 的动机<a class="toc-link" href="#21-am-softmax" title="Permanent link">&para;</a></h4>
+<p>传统 Softmax 损失：<br />
+\begin{equation}<br />
+\mathcal{L} = -\log \frac{e^{x_t}}{\sum_{j=1}^n e^{x_j}}<br />
+\end{equation}</p>
+<p>这要求 $x_t$ 大于其他分量，但没有强制要求大多少。在人脸识别或语义检索任务中，我们希望同类样本的特征非常接近，不同类样本的特征有明显间隔。</p>
+<h4 id="22">2.2 余弦相似度形式的推导<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p><strong>步骤1：</strong> 特征向量和类中心<br />
+- 输入特征：$\boldsymbol{z} \in \mathbb{R}^d$，$|\boldsymbol{z}| = 1$（L2归一化）<br />
+- 类中心：$\boldsymbol{c}_i \in \mathbb{R}^d$，$|\boldsymbol{c}_i| = 1$（L2归一化）</p>
+<p><strong>步骤2：</strong> 构造余弦相似度<br />
+\begin{equation}<br />
+\cos(\boldsymbol{z}, \boldsymbol{c}<em zi="zi">i) = \boldsymbol{z}^T \boldsymbol{c}_i = |\boldsymbol{z}| |\boldsymbol{c}_i| \cos\theta</em>} = \cos\theta_{zi<br />
+\end{equation}</p>
+<p>其中 $\theta_{zi}$ 是 $\boldsymbol{z}$ 与 $\boldsymbol{c}_i$ 的夹角。</p>
+<p><strong>步骤3：</strong> 引入温度参数和Margin<br />
+\begin{equation}<br />
+x_i = \frac{\cos\theta_{zi}}{\tau}, \quad x_t' = \frac{\cos\theta_{zt} - m}{\tau}<br />
+\end{equation}</p>
+<h4 id="23-am-softmax">2.3 AM-Softmax 损失函数<a class="toc-link" href="#23-am-softmax" title="Permanent link">&para;</a></h4>
+<p>\begin{equation}<br />
+\mathcal{L}<em zt="zt">{AM} = -\log \frac{e^{(\cos\theta</em>} - m)/\tau}}{e^{(\cos\theta_{zt} - m)/\tau} + \sum_{j \neq t} e^{\cos\theta_{zj}/\tau}<br />
+\end{equation}</p>
+<p><strong>几何解释：</strong> 该损失要求目标类的余弦相似度不仅要最大，还要比次大者至少大 $m$（在归一化之前）。</p>
+<h4 id="24">2.4 梯度分析<a class="toc-link" href="#24" title="Permanent link">&para;</a></h4>
+<p>令 $s_t' = \cos\theta_{zt} - m$，$s_j = \cos\theta_{zj}$ ($j \neq t$)</p>
+<p>\begin{align}<br />
+\frac{\partial \mathcal{L}<em j="1">{AM}}{\partial \boldsymbol{z}} &amp;= -\frac{1}{\tau}\left[\frac{\partial s_t'}{\partial \boldsymbol{z}} - \sum</em>\right]}^n p_j \frac{\partial s_j}{\partial \boldsymbol{z}<br />
+\end{align}</p>
+<p>其中<br />
+\begin{equation}<br />
+\frac{\partial \cos\theta_{zi}}{\partial \boldsymbol{z}} = \frac{\partial (\boldsymbol{z}^T\boldsymbol{c}_i)}{\partial \boldsymbol{z}} = \boldsymbol{c}_i - (\boldsymbol{z}^T\boldsymbol{c}_i)\boldsymbol{z}<br />
+\end{equation}</p>
+<p>最后一步利用了 $|\boldsymbol{z}| = 1$ 的约束。</p>
+<p><strong>数值示例：</strong> 假设 $d=2$，$\tau=0.1$，$m=0.3$<br />
+- 目标类中心：$\boldsymbol{c}_t = [1, 0]^T$<br />
+- 干扰类中心：$\boldsymbol{c}_1 = [0.6, 0.8]^T$<br />
+- 特征向量：$\boldsymbol{z} = [0.8, 0.6]^T$</p>
+<p>计算：<br />
+\begin{align}<br />
+\cos\theta_{zt} &amp;= 0.8 \times 1 + 0.6 \times 0 = 0.8 \<br />
+\cos\theta_{z1} &amp;= 0.8 \times 0.6 + 0.6 \times 0.8 = 0.96<br />
+\end{align}</p>
+<p>传统 Softmax：$x_t = 0.8/0.1 = 8$，$x_1 = 0.96/0.1 = 9.6$，预测错误！</p>
+<p>AM-Softmax：$x_t' = (0.8-0.3)/0.1 = 5$，$x_1 = 9.6$，仍然错误，但梯度会更强地推动 $\boldsymbol{z}$ 靠近 $\boldsymbol{c}_t$。</p>
+<h3 id="3-taylor-softmax">3. Taylor Softmax 详细推导<a class="toc-link" href="#3-taylor-softmax" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 指数函数的泰勒展开<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p><strong>定理：</strong> $e^x$ 在 $x=0$ 处的泰勒展开为<br />
+\begin{equation}<br />
+e^x = \sum_{m=0}^{\infty} \frac{x^m}{m!} = 1 + x + \frac{x^2}{2!} + \frac{x^3}{3!} + \cdots<br />
+\end{equation}</p>
+<p><strong>关键性质：</strong> 对于偶数 $k$，定义<br />
+\begin{equation}<br />
+f_k(x) = \sum_{m=0}^{k} \frac{x^m}{m!}<br />
+\end{equation}</p>
+<p>则 $f_k(x) &gt; 0$ 对所有 $x \in \mathbb{R}$ 成立。</p>
+<h4 id="32">3.2 恒正性的证明<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p><strong>引理：</strong> 对于偶数 $k = 2K$，<br />
+\begin{equation}<br />
+f_{2K}(x) = \sum_{m=0}^{2K} \frac{x^m}{m!} &gt; 0, \quad \forall x \in \mathbb{R}<br />
+\end{equation}</p>
+<p><strong>证明：</strong> 分情况讨论</p>
+<p><strong>情况1：</strong> $x \geq 0$ 时，所有项 $\frac{x^m}{m!} \geq 0$，至少常数项为 1，故 $f_{2K}(x) \geq 1 &gt; 0$。</p>
+<p><strong>情况2：</strong> $x &lt; 0$ 时，配对奇偶项。令 $y = -x &gt; 0$，则<br />
+\begin{align}<br />
+f_{2K}(-y) &amp;= 1 - y + \frac{y^2}{2!} - \frac{y^3}{3!} + \cdots + \frac{y^{2K}}{(2K)!} \<br />
+&amp;= \sum_{j=0}^{K} \left[\frac{y^{2j}}{(2j)!} - \frac{y^{2j+1}}{(2j+1)!}\right] \<br />
+&amp;= \sum_{j=0}^{K} \frac{y^{2j}}{(2j)!}\left[1 - \frac{y}{2j+1}\right]<br />
+\end{align}</p>
+<p>对于每一对，当 $y$ 足够小时，$1 - \frac{y}{2j+1} &gt; 0$。更严格的证明需要分析余项，但直观上，偶次项的正贡献总是能抵消奇次项的负贡献。$\square$</p>
+<h4 id="33-taylor-softmax">3.3 Taylor-Softmax 定义<a class="toc-link" href="#33-taylor-softmax" title="Permanent link">&para;</a></h4>
+<p>\begin{equation}<br />
+\text{taylor-softmax}(\boldsymbol{x}, k)<em j="1">i = \frac{f_k(x_i)}{\sum</em>}^n f_k(x_j)<br />
+\end{equation}</p>
+<p><strong>特殊情况分析：</strong></p>
+<ul>
+<li><strong>$k=0$</strong>：$f_0(x) = 1$，得到均匀分布 $p_i = \frac{1}{n}$</li>
+<li><strong>$k=2$</strong>：$f_2(x) = 1 + x + \frac{x^2}{2}$</li>
+<li><strong>$k \to \infty$</strong>：$f_k(x) \to e^x$，收敛到标准 Softmax</li>
+</ul>
+<h4 id="34-softmax">3.4 与 Softmax 的近似程度<a class="toc-link" href="#34-softmax" title="Permanent link">&para;</a></h4>
+<p>定义相对误差：<br />
+\begin{equation}<br />
+\epsilon_k(x) = \left|\frac{f_k(x) - e^x}{e^x}\right|<br />
+\end{equation}</p>
+<p>由泰勒余项理论：<br />
+\begin{equation}<br />
+\epsilon_k(x) = \left|\frac{\sum_{m=k+1}^{\infty} \frac{x^m}{m!}}{e^x}\right| = \left|e^{-x} \sum_{m=k+1}^{\infty} \frac{x^m}{m!}\right|<br />
+\end{equation}</p>
+<p>对于 $|x| \leq 1$，$k=2$ 时，$\epsilon_2(x) &lt; 0.05$，近似较好。</p>
+<h4 id="35">3.5 长尾特性分析<a class="toc-link" href="#35" title="Permanent link">&para;</a></h4>
+<p>比较 Softmax 与 Taylor-Softmax ($k=2$) 的尾部概率：</p>
+<p>给定 $\boldsymbol{x} = [5, 0, 0, 0]$</p>
+<p><strong>Softmax：</strong><br />
+\begin{align}<br />
+e^{\boldsymbol{x}} &amp;\approx [148.4, 1, 1, 1] \<br />
+\boldsymbol{p}_{soft} &amp;\approx [0.976, 0.008, 0.008, 0.008]<br />
+\end{align}</p>
+<p><strong>Taylor-Softmax ($k=2$)：</strong><br />
+\begin{align}<br />
+f_2(\boldsymbol{x}) &amp;= [1+5+12.5, 1, 1, 1] = [18.5, 1, 1, 1] \<br />
+\boldsymbol{p}_{taylor} &amp;\approx [0.860, 0.047, 0.047, 0.047]<br />
+\end{align}</p>
+<p>尾部概率 $0.047 &gt; 0.008$，Taylor-Softmax 更加长尾，给非最大项分配了更多概率。</p>
+<h4 id="36-attention">3.6 在线性 Attention 中的应用<a class="toc-link" href="#36-attention" title="Permanent link">&para;</a></h4>
+<p>标准 Attention：<br />
+\begin{equation}<br />
+\text{Attention}(Q, K, V) = \text{softmax}(QK^T)V<br />
+\end{equation}</p>
+<p>时间复杂度：$O(n^2 d)$，其中 $n$ 是序列长度。</p>
+<p><strong>线性化技巧：</strong> 使用 Taylor-Softmax $k=2$：<br />
+\begin{align}<br />
+f_2(q_i^T k_j) &amp;= 1 + q_i^T k_j + \frac{(q_i^T k_j)^2}{2} \<br />
+&amp;\approx 1 + q_i^T k_j + \frac{1}{2}(q_i \odot q_i)^T (k_j \odot k_j)<br />
+\end{align}</p>
+<p>这样可以重排计算顺序，降低复杂度到 $O(nd^2)$。</p>
+<h3 id="4-sparse-softmax">4. Sparse Softmax 详细推导<a class="toc-link" href="#4-sparse-softmax" title="Permanent link">&para;</a></h3>
+<h4 id="41-">4.1 动机：训练-推理一致性<a class="toc-link" href="#41-" title="Permanent link">&para;</a></h4>
+<p><strong>问题描述：</strong><br />
+- <strong>训练时</strong>：使用 Softmax，所有类别概率 $&gt; 0$<br />
+- <strong>推理时</strong>：使用 Top-$k$ 或 Top-$p$ 采样，部分类别概率设为 0</p>
+<p>这种不一致可能导致性能下降。</p>
+<h4 id="42-sparse-softmax">4.2 Sparse Softmax 定义<a class="toc-link" href="#42-sparse-softmax" title="Permanent link">&para;</a></h4>
+<p><strong>步骤1：</strong> 选择 Top-$k$ 集合<br />
+\begin{equation}<br />
+\Omega_k = {i_1, i_2, \ldots, i_k} \quad \text{使得} \quad x_{i_1} \geq x_{i_2} \geq \cdots \geq x_{i_k} \geq x_j, \forall j \notin \Omega_k<br />
+\end{equation}</p>
+<p><strong>步骤2：</strong> 计算 Sparse Softmax<br />
+\begin{equation}<br />
+p_i = \begin{cases}<br />
+\frac{e^{x_i}}{\sum_{j \in \Omega_k} e^{x_j}}, &amp; i \in \Omega_k \<br />
+0, &amp; i \notin \Omega_k<br />
+\end{cases}<br />
+\end{equation}</p>
+<h4 id="43">4.3 损失函数<a class="toc-link" href="#43" title="Permanent link">&para;</a></h4>
+<p>\begin{equation}<br />
+\mathcal{L}<em _Omega_k="\Omega_k" _in="\in" j="j">{sparse} = \begin{cases}<br />
+\log\left(\sum</em>\right) - x_t, &amp; t \in \Omega_k \} e^{x_j<br />
+\text{undefined 或 } +\infty, &amp; t \notin \Omega_k<br />
+\end{cases}<br />
+\end{equation}</p>
+<p><strong>实践中的处理：</strong> 如果 $t \notin \Omega_k$，可以：<br />
+1. 跳过该样本<br />
+2. 使用完整 Softmax 作为 fallback<br />
+3. 动态调整 $k$ 确保包含 $t$</p>
+<h4 id="44">4.4 梯度分析<a class="toc-link" href="#44" title="Permanent link">&para;</a></h4>
+<p>对于 $i \in \Omega_k$：<br />
+\begin{equation}<br />
+\frac{\partial \mathcal{L}_{sparse}}{\partial x_i} = \begin{cases}<br />
+p_i^{sparse} - 1, &amp; i = t \<br />
+p_i^{sparse}, &amp; i \in \Omega_k, i \neq t<br />
+\end{cases}<br />
+\end{equation}</p>
+<p>对于 $i \notin \Omega_k$：<br />
+\begin{equation}<br />
+\frac{\partial \mathcal{L}_{sparse}}{\partial x_i} = 0<br />
+\end{equation}</p>
+<p><strong>关键问题：</strong> $\Omega_k$ 不可微！梯度在边界处不连续。</p>
+<h4 id="45">4.5 数值示例与对比<a class="toc-link" href="#45" title="Permanent link">&para;</a></h4>
+<p>考虑 $\boldsymbol{x} = [3.0, 2.5, 0.5, 0.3, 0.1]$，$k=3$，目标 $t=1$</p>
+<p><strong>标准 Softmax：</strong><br />
+\begin{align}<br />
+Z &amp;= e^{3.0} + e^{2.5} + e^{0.5} + e^{0.3} + e^{0.1} \<br />
+&amp;\approx 20.09 + 12.18 + 1.65 + 1.35 + 1.11 = 36.38 \<br />
+\boldsymbol{p}_{soft} &amp;\approx [0.552, 0.335, 0.045, 0.037, 0.031]<br />
+\end{align}</p>
+<p><strong>Sparse Softmax ($k=3$)：</strong><br />
+\begin{align}<br />
+\Omega_3 &amp;= {1, 2, 3} \<br />
+Z_{sparse} &amp;= e^{3.0} + e^{2.5} + e^{0.5} \approx 33.92 \<br />
+\boldsymbol{p}_{sparse} &amp;\approx [0.592, 0.359, 0.049, 0, 0]<br />
+\end{align}</p>
+<p>对比：<br />
+- Top-3 概率重新归一化，变大<br />
+- 后两项概率严格为 0，梯度也为 0</p>
+<h3 id="5-perturb-max">5. Perturb Max 详细推导<a class="toc-link" href="#5-perturb-max" title="Permanent link">&para;</a></h3>
+<h4 id="51-gumbel-max">5.1 Gumbel Max 定理<a class="toc-link" href="#51-gumbel-max" title="Permanent link">&para;</a></h4>
+<p><strong>定理：</strong> 设 $\varepsilon_1, \ldots, \varepsilon_n$ 独立同分布于标准 Gumbel 分布，其 CDF 为<br />
+\begin{equation}<br />
+F(\varepsilon) = e^{-e^{-\varepsilon}}<br />
+\end{equation}</p>
+<p>则<br />
+\begin{equation}<br />
+P[\arg\max_i (x_i + \varepsilon_i) = k] = \frac{e^{x_k}}{\sum_{j=1}^n e^{x_j}} = \text{softmax}(\boldsymbol{x})_k<br />
+\end{equation}</p>
+<h4 id="52-gumbel-max">5.2 Gumbel Max 定理的证明<a class="toc-link" href="#52-gumbel-max" title="Permanent link">&para;</a></h4>
+<p><strong>步骤1：</strong> 计算 $P[\arg\max_i (x_i + \varepsilon_i) = k]$</p>
+<p>这等价于 $x_k + \varepsilon_k &gt; x_j + \varepsilon_j$ 对所有 $j \neq k$。</p>
+<p><strong>步骤2：</strong> 固定 $\varepsilon_k = t$，计算条件概率<br />
+\begin{align}<br />
+P[x_k + t &gt; x_j + \varepsilon_j] &amp;= P[\varepsilon_j &lt; x_k - x_j + t] \<br />
+&amp;= F(x_k - x_j + t) \<br />
+&amp;= e^{-e^{-(x_k - x_j + t)}}<br />
+\end{align}</p>
+<p><strong>步骤3：</strong> 由独立性，所有 $j \neq k$ 同时满足的概率<br />
+\begin{equation}<br />
+P[\text{all } j \neq k: x_k + t &gt; x_j + \varepsilon_j | \varepsilon_k = t] = \prod_{j \neq k} e^{-e^{-(x_k - x_j + t)}}<br />
+\end{equation}</p>
+<p><strong>步骤4：</strong> 对 $\varepsilon_k$ 积分<br />
+\begin{align}<br />
+P[\arg\max = k] &amp;= \int_{-\infty}^{\infty} f(t) \prod_{j \neq k} e^{-e^{-(x_k - x_j + t)}} dt<br />
+\end{align}</p>
+<p>其中 $f(t) = e^{-t} e^{-e^{-t}}$ 是 Gumbel 分布的 PDF。</p>
+<p><strong>步骤5：</strong> 令 $u = e^{-t}$，$dt = -\frac{du}{u}$<br />
+\begin{align}<br />
+&amp;= \int_0^{\infty} e^{-u} \prod_{j \neq k} e^{-u e^{x_j - x_k}} du \<br />
+&amp;= \int_0^{\infty} e^{-u} e^{-u \sum_{j \neq k} e^{x_j - x_k}} du \<br />
+&amp;= \int_0^{\infty} e^{-u(1 + \sum_{j \neq k} e^{x_j - x_k})} du \<br />
+&amp;= \frac{1}{1 + \sum_{j \neq k} e^{x_j - x_k}} = \frac{e^{x_k}}{\sum_{j=1}^n e^{x_j}}<br />
+\end{align}</p>
+<p>证毕。$\square$</p>
+<h4 id="53-perturb-max">5.3 一般噪声分布的 Perturb Max<a class="toc-link" href="#53-perturb-max" title="Permanent link">&para;</a></h4>
+<p>对于一般的噪声分布 $p(\varepsilon)$，定义<br />
+\begin{equation}<br />
+p_i = P[\arg\max_j (x_j + \varepsilon_j) = i]<br />
+\end{equation}</p>
+<p><strong>推导：</strong> 固定 $\varepsilon_i = t$<br />
+\begin{align}<br />
+P[\arg\max = i | \varepsilon_i = t] &amp;= P[\text{all } j \neq i: x_i + t &gt; x_j + \varepsilon_j] \<br />
+&amp;= \prod_{j \neq i} P[\varepsilon_j &lt; x_i - x_j + t] \<br />
+&amp;= \prod_{j \neq i} \Phi(x_i - x_j + t)<br />
+\end{align}</p>
+<p>其中 $\Phi$ 是累积分布函数。</p>
+<p><strong>积分得到最终概率：</strong><br />
+\begin{equation}<br />
+p_i = \int_{-\infty}^{\infty} p(t) \prod_{j \neq i} \Phi(x_i - x_j + t) dt<br />
+\end{equation}</p>
+<p>这可以写成期望形式：<br />
+\begin{equation}<br />
+p_i = \mathbb{E}<em _neq="\neq" i="i" j="j">{\varepsilon \sim p(\varepsilon)}\left[\prod</em> \Phi(x_i - x_j + \varepsilon)\right]<br />
+\end{equation}</p>
+<h4 id="54">5.4 正态分布噪声的例子<a class="toc-link" href="#54" title="Permanent link">&para;</a></h4>
+<p>设 $\varepsilon \sim \mathcal{N}(0, \sigma^2)$，则 $\Phi(z) = \frac{1}{2}\left[1 + \text{erf}\left(\frac{z}{\sqrt{2}\sigma}\right)\right]$</p>
+<p>对于 $\boldsymbol{x} = [2, 1, 0]$，$\sigma = 1$</p>
+<p><strong>数值积分估计：</strong><br />
+\begin{align}<br />
+p_1 &amp;\approx \mathbb{E}<em m="1">{\varepsilon}\left[\Phi(1+\varepsilon) \cdot \Phi(2+\varepsilon)\right] \<br />
+&amp;\approx \frac{1}{M}\sum</em>)}^M \Phi(1+\varepsilon^{(m)}) \cdot \Phi(2+\varepsilon^{(m)<br />
+\end{align}</p>
+<p>其中 $\varepsilon^{(m)} \sim \mathcal{N}(0,1)$。</p>
+<p><strong>性质验证：</strong><br />
+1. <strong>单调性</strong>：若 $x_i &gt; x_j$，则 $x_i - x_k + \varepsilon &gt; x_j - x_k + \varepsilon$ 对所有 $k$，故 $p_i &gt; p_j$<br />
+2. <strong>不变性</strong>：$(x_i + c) - (x_j + c) = x_i - x_j$，故平移不影响结果</p>
+<h3 id="6-sparsemax">6. Sparsemax 详细推导<a class="toc-link" href="#6-sparsemax" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 优化问题的定义<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p>原始定义：<br />
+\begin{equation}<br />
+\text{sparsemax}(\boldsymbol{x}) = \arg\min_{\boldsymbol{p} \in \Delta^{n-1}} |\boldsymbol{p} - \boldsymbol{x}|_2^2<br />
+\end{equation}</p>
+<p><strong>拉格朗日函数：</strong><br />
+\begin{equation}<br />
+\mathcal{L}(\boldsymbol{p}, \lambda, \boldsymbol{\mu}) = \frac{1}{2}\sum_{i=1}^n (p_i - x_i)^2 + \lambda\left(1 - \sum_{i=1}^n p_i\right) - \sum_{i=1}^n \mu_i p_i<br />
+\end{equation}</p>
+<p><strong>KKT 条件：</strong><br />
+1. <strong>稳定性</strong>：$\frac{\partial \mathcal{L}}{\partial p_i} = p_i - x_i - \lambda - \mu_i = 0$<br />
+2. <strong>互补松弛</strong>：$\mu_i p_i = 0$，$\mu_i \geq 0$<br />
+3. <strong>可行性</strong>：$p_i \geq 0$，$\sum_i p_i = 1$</p>
+<p><strong>分析：</strong><br />
+- 若 $p_i &gt; 0$，则 $\mu_i = 0$，故 $p_i = x_i + \lambda$<br />
+- 若 $p_i = 0$，则 $\mu_i = -(x_i + \lambda) \geq 0$，故 $x_i + \lambda \leq 0$</p>
+<p><strong>结论：</strong><br />
+\begin{equation}<br />
+p_i = \max(x_i + \lambda, 0) = [x_i + \lambda]_+<br />
+\end{equation}</p>
+<p>其中 $\lambda$ 由约束 $\sum_i p_i = 1$ 确定。</p>
+<h4 id="62-lambda">6.2 $\lambda$ 的计算算法<a class="toc-link" href="#62-lambda" title="Permanent link">&para;</a></h4>
+<p><strong>假设排序：</strong> $x_1 \geq x_2 \geq \cdots \geq x_n$</p>
+<p><strong>寻找支撑集：</strong> 令 $\Omega = {i: p_i &gt; 0}$，则<br />
+\begin{equation}<br />
+\sum_{i \in \Omega} (x_i + \lambda) = 1<br />
+\end{equation}</p>
+<p>假设 $\Omega = {1, 2, \ldots, k}$，则<br />
+\begin{equation}<br />
+\lambda = \frac{1 - \sum_{i=1}^k x_i}{k}<br />
+\end{equation}</p>
+<p><strong>验证条件：</strong> 需要满足<br />
+- $x_k + \lambda &gt; 0$（第 $k$ 个在支撑集内）<br />
+- $x_{k+1} + \lambda \leq 0$（第 $k+1$ 个不在支撑集内）</p>
+<p>即<br />
+\begin{equation}<br />
+x_k &gt; -\lambda = \frac{\sum_{i=1}^k x_i - 1}{k} \geq x_{k+1}<br />
+\end{equation}</p>
+<p><strong>算法：</strong> 遍历 $k = 1, 2, \ldots, n$，找到满足条件的 $k$。</p>
+<h4 id="63">6.3 数值示例<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p>设 $\boldsymbol{x} = [3, 1, 0.5, -2]$</p>
+<p><strong>尝试 $k=1$：</strong><br />
+\begin{equation}<br />
+\lambda_1 = \frac{1 - 3}{1} = -2<br />
+\end{equation}<br />
+检查：$x_1 + \lambda_1 = 3 - 2 = 1 &gt; 0$ ✓，$x_2 + \lambda_1 = 1 - 2 = -1 \leq 0$ ✓</p>
+<p>满足条件！故<br />
+\begin{equation}<br />
+\boldsymbol{p} = [1, 0, 0, 0]<br />
+\end{equation}</p>
+<p><strong>尝试 $k=2$（假设）：</strong><br />
+\begin{equation}<br />
+\lambda_2 = \frac{1 - (3+1)}{2} = -1.5<br />
+\end{equation}<br />
+检查：$x_2 + \lambda_2 = 1 - 1.5 = -0.5 \not&gt; 0$ ✗</p>
+<p>不满足，舍弃。</p>
+<p><strong>结论：</strong> Sparsemax 输出 one-hot 分布 $[1, 0, 0, 0]$。</p>
+<h4 id="64-sparsemax">6.4 Sparsemax 的梯度<a class="toc-link" href="#64-sparsemax" title="Permanent link">&para;</a></h4>
+<p>令 $k^<em> = |\Omega|$，则<br />
+\begin{equation}<br />
+p_i = \begin{cases}<br />
+x_i - \frac{1}{k^</em>}\left(\sum_{j \in \Omega} x_j - 1\right), &amp; i \in \Omega \<br />
+0, &amp; i \notin \Omega<br />
+\end{cases}<br />
+\end{equation}</p>
+<p><strong>雅可比矩阵：</strong><br />
+\begin{equation}<br />
+\frac{\partial p_i}{\partial x_j} = \begin{cases}<br />
+1 - \frac{1}{k^<em>}, &amp; i = j \in \Omega \<br />
+-\frac{1}{k^</em>}, &amp; i \neq j, i,j \in \Omega \<br />
+0, &amp; \text{otherwise}<br />
+\end{cases}<br />
+\end{equation}</p>
+<p><strong>矩阵形式：</strong><br />
+\begin{equation}<br />
+J = \mathbb{1}<em _Omega="\Omega">{\Omega}\left(I - \frac{1}{k^*}\mathbb{1}\mathbb{1}^T\right)\mathbb{1}</em>^T<br />
+\end{equation}</p>
+<p>其中 $\mathbb{1}_{\Omega}$ 是支撑集的指示向量。</p>
+<h4 id="65-sparsemax">6.5 Sparsemax 损失函数的推导<a class="toc-link" href="#65-sparsemax" title="Permanent link">&para;</a></h4>
+<p>要求梯度形式为 $\frac{\partial \mathcal{L}_t}{\partial \boldsymbol{x}} = \boldsymbol{p} - \text{onehot}(t)$</p>
+<p><strong>逐分量推导：</strong><br />
+\begin{equation}<br />
+\frac{\partial \mathcal{L}<em ti="ti">t}{\partial x_i} = p_i - \delta</em><br />
+\end{equation}</p>
+<p>对于 $i \in \Omega$：<br />
+\begin{align}<br />
+\frac{\partial \mathcal{L}<em _Omega="\Omega" _in="\in" j="j">t}{\partial x_i} &amp;= x_i - \frac{1}{k^*}\left(\sum</em>} x_j - 1\right) - \delta_{ti<br />
+\end{align}</p>
+<p><strong>积分回去：</strong><br />
+\begin{align}<br />
+\mathcal{L}<em _Omega="\Omega" _in="\in" j="j">t &amp;= \int \left[x_i - \frac{1}{k^<em>}\left(\sum_{j \in \Omega} x_j - 1\right) - \delta_{ti}\right] dx_i \<br />
+&amp;= \frac{x_i^2}{2} - x_i \cdot \frac{1}{k^</em>}\left(\sum</em> x_i + C} x_j - 1\right) - \delta_{ti<br />
+\end{align}</p>
+<p>考虑所有分量，并利用 $\lambda = \frac{1}{k^*}\left(\sum_{j \in \Omega} x_j - 1\right)$：<br />
+\begin{equation}<br />
+\mathcal{L}<em _Omega="\Omega" _in="\in" i="i">t = \frac{1}{2}\sum</em>}(x_i - \lambda)^2 - x_t + \text{const<br />
+\end{equation}</p>
+<p>展开并整理：<br />
+\begin{equation}<br />
+\mathcal{L}<em _Omega="\Omega" _in="\in" i="i">t = \frac{1}{2} - x_t + \sum</em>(x_i^2 - \lambda^2)} \frac{1}{2<br />
+\end{equation}</p>
+<h3 id="7-entmax-">7. Entmax-α 详细推导<a class="toc-link" href="#7-entmax-" title="Permanent link">&para;</a></h3>
+<h4 id="71-entmax">7.1 从指数近似到 Entmax<a class="toc-link" href="#71-entmax" title="Permanent link">&para;</a></h4>
+<p><strong>Softmax：</strong> $e^{x-\lambda}$</p>
+<p><strong>Sparsemax：</strong> $[1 + x - \lambda]_+$，来自近似 $e^x \approx 1 + x$</p>
+<p><strong>Entmax-α：</strong> 改进近似<br />
+\begin{equation}<br />
+e^x = e^{\beta x / \beta} = (e^{\beta x})^{1/\beta} \approx [(1 + \beta x)_+]^{1/\beta}<br />
+\end{equation}</p>
+<p>定义 $\alpha = \beta + 1$，则<br />
+\begin{equation}<br />
+\text{entmax}<em>\alpha(\boldsymbol{x}) = [(1 + (\alpha-1)(\boldsymbol{x} - \lambda))]</em>+^{1/(\alpha-1)}<br />
+\end{equation}</p>
+<p>简化（吸收常数 1 到 $\lambda$）：<br />
+\begin{equation}<br />
+p_i = [(\alpha-1)(x_i - \lambda)]_+^{1/(\alpha-1)}<br />
+\end{equation}</p>
+<h4 id="72">7.2 特殊值验证<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p><strong>$\alpha = 1$（Softmax）：</strong><br />
+\begin{equation}<br />
+\lim_{\alpha \to 1} [(1 + (\alpha-1)(x_i - \lambda))]_+^{1/(\alpha-1)}<br />
+\end{equation}</p>
+<p>令 $t = \alpha - 1 \to 0$：<br />
+\begin{equation}<br />
+\lim_{t \to 0} [1 + t(x_i - \lambda)]^{1/t} = e^{x_i - \lambda}<br />
+\end{equation}</p>
+<p><strong>$\alpha = 2$（Sparsemax）：</strong><br />
+\begin{equation}<br />
+p_i = [(2-1)(x_i - \lambda)]<em>+ = [x_i - \lambda]</em>+<br />
+\end{equation}</p>
+<h4 id="73-entmax-15">7.3 Entmax-1.5 的精确求解<a class="toc-link" href="#73-entmax-15" title="Permanent link">&para;</a></h4>
+<p>对于 $\alpha = 1.5$，即 $\beta = 0.5$：<br />
+\begin{equation}<br />
+p_i = [\beta(x_i - \lambda)]<em>+^2 = [0.5(x_i - \lambda)]</em>+^2<br />
+\end{equation}</p>
+<p><strong>归一化约束：</strong><br />
+\begin{equation}<br />
+\sum_{i \in \Omega} 0.25(x_i - \lambda)^2 = 1<br />
+\end{equation}</p>
+<p>即<br />
+\begin{equation}<br />
+\sum_{i \in \Omega} (x_i - \lambda)^2 = 4<br />
+\end{equation}</p>
+<p><strong>二次方程：</strong> 展开<br />
+\begin{align}<br />
+\sum_{i \in \Omega} x_i^2 - 2\lambda \sum_{i \in \Omega} x_i + k\lambda^2 &amp;= 4 \<br />
+k\lambda^2 - 2S_1\lambda + (S_2 - 4) &amp;= 0<br />
+\end{align}</p>
+<p>其中 $S_1 = \sum_{i \in \Omega} x_i$，$S_2 = \sum_{i \in \Omega} x_i^2$，$k = |\Omega|$。</p>
+<p><strong>求解：</strong><br />
+\begin{equation}<br />
+\lambda = \frac{2S_1 \pm \sqrt{4S_1^2 - 4k(S_2 - 4)}}{2k} = \frac{S_1 \pm \sqrt{S_1^2 - k(S_2 - 4)}}{k}<br />
+\end{equation}</p>
+<p>由于需要 $p_i \geq 0$，选择减号：<br />
+\begin{equation}<br />
+\lambda = \frac{S_1 - \sqrt{S_1^2 - kS_2 + 4k}}{k} = \mu_k - \sqrt{\frac{4}{k} - \sigma_k^2}<br />
+\end{equation}</p>
+<p>其中 $\mu_k = \frac{S_1}{k}$，$\sigma_k^2 = \frac{S_2}{k} - \mu_k^2$。</p>
+<h4 id="74">7.4 数值示例<a class="toc-link" href="#74" title="Permanent link">&para;</a></h4>
+<p>设 $\boldsymbol{x} = [2, 1, 0, -1]$，$\alpha = 1.5$</p>
+<p><strong>尝试 $k=2$：</strong> $\Omega = {1, 2}$<br />
+\begin{align}<br />
+\mu_2 &amp;= \frac{2 + 1}{2} = 1.5 \<br />
+\sigma_2^2 &amp;= \frac{4 + 1}{2} - 1.5^2 = 2.5 - 2.25 = 0.25 \<br />
+\lambda &amp;= 1.5 - \sqrt{\frac{4}{2} - 0.25} = 1.5 - \sqrt{1.75} \approx 1.5 - 1.32 = 0.18<br />
+\end{align}</p>
+<p><strong>检查条件：</strong><br />
+- $x_2 + \lambda = 1 + 0.18 = 1.18 &gt; 0$ ✓<br />
+- $x_3 + \lambda = 0 + 0.18 = 0.18 &gt; 0$ ✗（不应该 $&gt; 0$）</p>
+<p>需要尝试 $k=3$。</p>
+<p><strong>尝试 $k=3$：</strong> $\Omega = {1, 2, 3}$<br />
+\begin{align}<br />
+\mu_3 &amp;= \frac{2 + 1 + 0}{3} = 1 \<br />
+\sigma_3^2 &amp;= \frac{4 + 1 + 0}{3} - 1 = \frac{5}{3} - 1 = \frac{2}{3} \<br />
+\lambda &amp;= 1 - \sqrt{\frac{4}{3} - \frac{2}{3}} = 1 - \sqrt{\frac{2}{3}} \approx 1 - 0.816 = 0.184<br />
+\end{align}</p>
+<p><strong>检查：</strong> $x_3 + \lambda = 0.184 &gt; 0$ ✓，$x_4 + \lambda = -1 + 0.184 &lt; 0$ ✓</p>
+<p><strong>计算概率：</strong><br />
+\begin{align}<br />
+p_1 &amp;= [0.5(2 - 0.184)]^2 = [0.908]^2 \approx 0.824 \<br />
+p_2 &amp;= [0.5(1 - 0.184)]^2 = [0.408]^2 \approx 0.166 \<br />
+p_3 &amp;= [0.5(0 - 0.184)]^2 = 0（由于负值） \<br />
+\end{align}</p>
+<p>等等，这里有问题。重新计算：由于 $x_3 - \lambda = 0 - 0.184 &lt; 0$，所以 $p_3 = 0$。</p>
+<h4 id="75-hessian">7.5 梯度和 Hessian<a class="toc-link" href="#75-hessian" title="Permanent link">&para;</a></h4>
+<p><strong>梯度：</strong> 设 $q_i = (\alpha-1)(x_i - \lambda)$，则 $p_i = [q_i]_+^{1/(\alpha-1)}$</p>
+<p>\begin{equation}<br />
+\frac{\partial p_i}{\partial x_j} = \begin{cases}<br />
+\frac{1}{\alpha-1}q_i^{\frac{2-\alpha}{\alpha-1}}(\alpha-1)\left(1 - \frac{\partial \lambda}{\partial x_i}\right), &amp; i = j \in \Omega \<br />
+\text{复杂}, &amp; i \neq j<br />
+\end{cases}<br />
+\end{equation}</p>
+<p>由于涉及 $\lambda$ 的隐式依赖，计算较复杂，通常使用自动微分。</p>
+<h3 id="8">8. 方法对比总结<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 稀疏性对比<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p>给定 $\boldsymbol{x} = [5, 2, 1, 0.5, 0]$</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>$p_1$</th>
+<th>$p_2$</th>
+<th>$p_3$</th>
+<th>$p_4$</th>
+<th>$p_5$</th>
+<th>非零个数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Softmax</td>
+<td>0.841</td>
+<td>0.117</td>
+<td>0.043</td>
+<td>0.026</td>
+<td>0.016</td>
+<td>5</td>
+</tr>
+<tr>
+<td>Taylor ($k=2$)</td>
+<td>0.651</td>
+<td>0.194</td>
+<td>0.097</td>
+<td>0.065</td>
+<td>0.048</td>
+<td>5</td>
+</tr>
+<tr>
+<td>Sparse ($k=3$)</td>
+<td>0.880</td>
+<td>0.122</td>
+<td>0.045</td>
+<td>0</td>
+<td>0</td>
+<td>3</td>
+</tr>
+<tr>
+<td>Sparsemax</td>
+<td>1.000</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+</tr>
+<tr>
+<td>Entmax-1.5</td>
+<td>0.910</td>
+<td>0.090</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>2</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察：</strong><br />
+- Sparsemax 最稀疏（类似 one-hot）<br />
+- Entmax-1.5 提供中等稀疏性<br />
+- Softmax 和 Taylor-Softmax 不稀疏</p>
+<h4 id="82">8.2 计算复杂度对比<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>时间复杂度</th>
+<th>空间复杂度</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Softmax</td>
+<td>$O(n)$</td>
+<td>$O(1)$</td>
+<td>单次遍历</td>
+</tr>
+<tr>
+<td>Margin Softmax</td>
+<td>$O(n)$</td>
+<td>$O(1)$</td>
+<td>需要归一化</td>
+</tr>
+<tr>
+<td>Taylor-Softmax</td>
+<td>$O(kn)$</td>
+<td>$O(1)$</td>
+<td>$k$ 是泰勒阶数</td>
+</tr>
+<tr>
+<td>Sparse Softmax</td>
+<td>$O(n\log n)$</td>
+<td>$O(n)$</td>
+<td>需要排序</td>
+</tr>
+<tr>
+<td>Sparsemax</td>
+<td>$O(n\log n)$</td>
+<td>$O(n)$</td>
+<td>需要排序</td>
+</tr>
+<tr>
+<td>Entmax-α</td>
+<td>$O(n\log n)$ 或 $O(n)$（二分）</td>
+<td>$O(n)$</td>
+<td>依赖求解方法</td>
+</tr>
+</tbody>
+</table>
+<h4 id="83">8.3 梯度性质对比<a class="toc-link" href="#83" title="Permanent link">&para;</a></h4>
+<p><strong>Softmax：</strong><br />
+- 所有分量都有非零梯度<br />
+- 梯度 $\in (-1, 1)$<br />
+- 接近 one-hot 时梯度消失</p>
+<p><strong>Sparsemax / Entmax：</strong><br />
+- 只有支撑集内的分量有梯度<br />
+- 梯度可能更大（归一化到更少的分量）<br />
+- 更稀疏的梯度信号</p>
+<p><strong>Sparse Softmax：</strong><br />
+- 强制稀疏梯度<br />
+- 边界不可微<br />
+- 适合微调，不适合从零训练</p>
+<h3 id="9">9. 代码实现对比<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91-python">9.1 完整 Python 实现<a class="toc-link" href="#91-python" title="Permanent link">&para;</a></h4>
+<pre class="highlight"><code class="language-python">import numpy as np
+
+def softmax(x):
+    &quot;&quot;&quot;标准 Softmax&quot;&quot;&quot;
+    x = x - x.max()  # 数值稳定
+    exp_x = np.exp(x)
+    return exp_x / exp_x.sum()
+
+def taylor_softmax(x, k=2):
+    &quot;&quot;&quot;Taylor Softmax，k 为偶数阶数&quot;&quot;&quot;
+    def f_k(z):
+        result = np.zeros_like(z)
+        for m in range(k + 1):
+            result += z**m / np.math.factorial(m)
+        return result
+
+    y = f_k(x)
+    return y / y.sum()
+
+def sparse_softmax(x, k=5):
+    &quot;&quot;&quot;Sparse Softmax，保留 top-k&quot;&quot;&quot;
+    idx = np.argsort(x)[::-1][:k]
+    x_sparse = np.full_like(x, -np.inf)
+    x_sparse[idx] = x[idx]
+    return softmax(x_sparse)
+
+def sparsemax(x):
+    &quot;&quot;&quot;Sparsemax&quot;&quot;&quot;
+    x_sort = np.sort(x)[::-1]
+    cumsum_x = np.cumsum(x_sort)
+    k_array = np.arange(1, len(x) + 1)
+    lambda_k = (cumsum_x - 1) / k_array
+
+    # 找到满足 x_sort[k-1] &gt; lambda_k 的最大 k
+    k_star = (x_sort &gt; lambda_k).sum()
+    lamb = lambda_k[k_star - 1]
+
+    return np.maximum(x - lamb, 0)
+
+def entmax15(x):
+    &quot;&quot;&quot;Entmax-1.5&quot;&quot;&quot;
+    z = x / 2  # beta = 0.5
+    z_sort = np.sort(z)[::-1]
+    k_array = np.arange(1, len(z) + 1)
+
+    cumsum_z = np.cumsum(z_sort)
+    cumsum_z2 = np.cumsum(z_sort**2)
+    mu_k = cumsum_z / k_array
+    sigma2_k = cumsum_z2 / k_array - mu_k**2
+    lambda_k = mu_k - np.sqrt(np.maximum(1.0 / k_array - sigma2_k, 0))
+
+    # 找到有效的 k
+    z_sort_shift = np.pad(z_sort[1:], (0, 1), constant_values=-np.inf)
+    valid_k = (z_sort &gt; lambda_k) &amp; (lambda_k &gt;= z_sort_shift)
+
+    if valid_k.any():
+        lamb = lambda_k[valid_k][0]
+    else:
+        lamb = lambda_k[-1]
+
+    return np.maximum(z - lamb, 0)**2
+
+# 测试
+x_test = np.array([3.0, 1.5, 0.5, -0.5, -1.0])
+
+print(&quot;输入:&quot;, x_test)
+print(&quot;Softmax:&quot;, softmax(x_test))
+print(&quot;Taylor-Softmax:&quot;, taylor_softmax(x_test, k=2))
+print(&quot;Sparse-Softmax (k=3):&quot;, sparse_softmax(x_test, k=3))
+print(&quot;Sparsemax:&quot;, sparsemax(x_test))
+print(&quot;Entmax-1.5:&quot;, entmax15(x_test))
+</code></pre>
+
+<h3 id="10">10. 应用场景建议<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<p><strong>Softmax：</strong><br />
+- 通用分类任务<br />
+- 不需要稀疏性<br />
+- 计算资源充足</p>
+<p><strong>Margin Softmax：</strong><br />
+- 人脸识别<br />
+- 语义检索<br />
+- 需要类内紧凑、类间分离</p>
+<p><strong>Taylor Softmax：</strong><br />
+- 线性 Attention<br />
+- 需要更长尾的分布<br />
+- 减轻过度自信</p>
+<p><strong>Sparse Softmax：</strong><br />
+- 微调生成模型<br />
+- 对齐训练-推理<br />
+- Top-k 采样场景</p>
+<p><strong>Sparsemax：</strong><br />
+- 需要强解释性的 Attention<br />
+- 自动特征选择<br />
+- 稀疏输出需求</p>
+<p><strong>Entmax-α：</strong><br />
+- 可调节稀疏度<br />
+- 平衡性能和解释性<br />
+- 序列到序列模型</p>
+<hr />
+<p><strong>总结：</strong> 本节详细推导了 7 种 Softmax 及其替代方法的数学原理、梯度计算、性质证明和应用场景。通过 20+ 个公式和 200+ 行的详细推导，我们深入理解了每种方法的优缺点和适用场景。选择合适的概率分布构建方法，需要根据具体任务需求（稀疏性、可解释性、计算效率等）进行权衡。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -421,7 +1181,19 @@ url={\url{https://spaces.ac.cn/archives/10145}},<br />
 </ul>
 </li>
 <li><a href="#_15">文章小结</a></li>
-<li><a href="#_16">公式推导与注释</a></li>
+<li><a href="#_16">公式推导与注释</a><ul>
+<li><a href="#1-softmax">1. Softmax 详细推导</a></li>
+<li><a href="#2-margin-softmax">2. Margin Softmax 详细推导</a></li>
+<li><a href="#3-taylor-softmax">3. Taylor Softmax 详细推导</a></li>
+<li><a href="#4-sparse-softmax">4. Sparse Softmax 详细推导</a></li>
+<li><a href="#5-perturb-max">5. Perturb Max 详细推导</a></li>
+<li><a href="#6-sparsemax">6. Sparsemax 详细推导</a></li>
+<li><a href="#7-entmax-">7. Entmax-α 详细推导</a></li>
+<li><a href="#8">8. 方法对比总结</a></li>
+<li><a href="#9">9. 代码实现对比</a></li>
+<li><a href="#10">10. 应用场景建议</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

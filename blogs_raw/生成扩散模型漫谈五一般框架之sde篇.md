@@ -2,10 +2,9 @@
 title: 生成扩散模型漫谈（五）：一般框架之SDE篇
 slug: 生成扩散模型漫谈五一般框架之sde篇
 date: 2022-08-03
-tags: 微分方程, 生成模型, DDPM, 扩散, 生成模型
+tags: 详细推导, 微分方程, 生成模型, DDPM, 扩散, 生成模型
 status: pending
 ---
-
 # 生成扩散模型漫谈（五）：一般框架之SDE篇
 
 **原文链接**: [https://spaces.ac.cn/archives/9209](https://spaces.ac.cn/archives/9209)
@@ -185,5 +184,732 @@ url={\url{https://spaces.ac.cn/archives/9209}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节提供文章中涉及的随机微分方程（SDE）框架的极详细数学推导，包括Itô积分、Itô引理、前向SDE、逆向SDE、Anderson定理、Fokker-Planck方程、概率流ODE等核心内容。
+
+### 1. 随机微分方程基础理论
+
+#### 1.1 Brown运动与随机过程
+
+**定义（标准Brown运动）**：随机过程 $\{\boldsymbol{w}_t\}_{t\geq 0}$ 称为标准Brown运动（或Wiener过程），如果满足：
+
+1. $\boldsymbol{w}_0 = \boldsymbol{0}$（几乎处处）
+2. 对于任意 $0 \leq s < t$，增量 $\boldsymbol{w}_t - \boldsymbol{w}_s \sim \mathcal{N}(\boldsymbol{0}, (t-s)\boldsymbol{I})$
+3. 对于任意不相交的时间区间，增量相互独立
+4. $\boldsymbol{w}_t$ 关于 $t$ 几乎处处连续
+
+**性质1（二次变差）**：Brown运动的重要性质是其二次变差。对于分割 $0 = t_0 < t_1 < \cdots < t_n = t$，当 $\max_i(t_{i+1} - t_i) \to 0$ 时，我们有：
+
+$$
+\sum_{i=0}^{n-1} (\boldsymbol{w}_{t_{i+1}} - \boldsymbol{w}_{t_i})(\boldsymbol{w}_{t_{i+1}} - \boldsymbol{w}_{t_i})^T \to t\boldsymbol{I} \quad \text{（依概率）}
+$$
+
+这意味着在形式上，我们可以写 $(d\boldsymbol{w})^2 = dt \cdot \boldsymbol{I}$，这是Itô积分的核心性质。
+
+**性质2（无处可微）**：虽然Brown运动轨道连续，但它几乎处处不可微。这可以从二次变差看出：如果 $\boldsymbol{w}_t$ 可微，那么二次变差应该趋于0，但实际上它趋于 $t$。
+
+#### 1.2 Itô积分的定义
+
+对于Brown运动 $\boldsymbol{w}_t$，我们希望定义形如 $\int_0^t \boldsymbol{h}_s d\boldsymbol{w}_s$ 的积分。由于 $\boldsymbol{w}_t$ 不可微，这不能用常规的Riemann-Stieltjes积分定义。
+
+**构造（Itô积分）**：对于简单过程 $\boldsymbol{h}_t = \sum_{i=0}^{n-1} \boldsymbol{\xi}_i \mathbb{1}_{[t_i, t_{i+1})}(t)$，其中 $\boldsymbol{\xi}_i$ 是关于 $\mathcal{F}_{t_i}$ 可测的（$\mathcal{F}_t$ 是由 $\{\boldsymbol{w}_s\}_{s\leq t}$ 生成的 $\sigma$-代数），定义：
+
+$$
+\int_0^t \boldsymbol{h}_s d\boldsymbol{w}_s := \sum_{i=0}^{n-1} \boldsymbol{\xi}_i (\boldsymbol{w}_{t_{i+1}\wedge t} - \boldsymbol{w}_{t_i \wedge t})
+$$
+
+其中 $a \wedge b = \min(a,b)$。
+
+然后通过 $L^2$ 极限将定义扩展到所有满足 $\mathbb{E}[\int_0^T \|\boldsymbol{h}_s\|^2 ds] < \infty$ 的适应过程。
+
+**Itô等距性质**：对于满足条件的适应过程 $\boldsymbol{h}_t$，有：
+
+$$
+\mathbb{E}\left[\left\|\int_0^t \boldsymbol{h}_s d\boldsymbol{w}_s\right\|^2\right] = \mathbb{E}\left[\int_0^t \|\boldsymbol{h}_s\|^2 ds\right]
+$$
+
+这是Itô积分的核心性质，说明Itô积分是一个鞅（martingale）。
+
+#### 1.3 Itô引理（Itô公式）
+
+**定理（一维Itô引理）**：设 $x_t$ 满足SDE：
+
+$$
+dx_t = \mu_t dt + \sigma_t dw_t
+$$
+
+且 $f(x,t)$ 是 $C^{1,2}$ 函数（对 $t$ 一阶连续可微，对 $x$ 二阶连续可微），则 $y_t = f(x_t, t)$ 满足：
+
+$$
+dy_t = \left(\frac{\partial f}{\partial t} + \mu_t \frac{\partial f}{\partial x} + \frac{1}{2}\sigma_t^2 \frac{\partial^2 f}{\partial x^2}\right)dt + \sigma_t \frac{\partial f}{\partial x} dw_t
+$$
+
+**详细推导**：
+
+1. 对 $f(x_t, t)$ 做Taylor展开（到二阶）：
+
+$$
+\begin{aligned}
+df &= f(x_{t+dt}, t+dt) - f(x_t, t) \\
+&= \frac{\partial f}{\partial t}dt + \frac{\partial f}{\partial x}dx + \frac{1}{2}\frac{\partial^2 f}{\partial x^2}(dx)^2 + \frac{\partial^2 f}{\partial x \partial t}dx\,dt + \frac{1}{2}\frac{\partial^2 f}{\partial t^2}(dt)^2 + O(dt^{3/2})
+\end{aligned}
+$$
+
+2. 计算 $(dx)^2$：
+
+$$
+\begin{aligned}
+(dx)^2 &= (\mu_t dt + \sigma_t dw_t)^2 \\
+&= \mu_t^2 (dt)^2 + 2\mu_t \sigma_t dt\,dw_t + \sigma_t^2 (dw_t)^2
+\end{aligned}
+$$
+
+3. 应用随机微积分规则：
+   - $(dt)^2 = 0$（高阶无穷小）
+   - $dt \cdot dw_t = 0$（高阶无穷小）
+   - $(dw_t)^2 = dt$（Brown运动的二次变差性质）
+
+4. 因此：
+
+$$
+(dx)^2 = \sigma_t^2 dt
+$$
+
+5. 代入得：
+
+$$
+df = \left(\frac{\partial f}{\partial t} + \mu_t \frac{\partial f}{\partial x} + \frac{1}{2}\sigma_t^2 \frac{\partial^2 f}{\partial x^2}\right)dt + \sigma_t \frac{\partial f}{\partial x} dw_t
+$$
+
+**多维Itô引理**：对于 $d$-维过程 $\boldsymbol{x}_t$ 满足：
+
+$$
+d\boldsymbol{x}_t = \boldsymbol{\mu}_t dt + \boldsymbol{\Sigma}_t d\boldsymbol{w}_t
+$$
+
+其中 $\boldsymbol{\mu}_t \in \mathbb{R}^d$，$\boldsymbol{\Sigma}_t \in \mathbb{R}^{d \times d}$，$\boldsymbol{w}_t$ 是 $d$-维Brown运动。若 $f: \mathbb{R}^d \times \mathbb{R} \to \mathbb{R}$ 是 $C^{1,2}$ 函数，则：
+
+$$
+df(\boldsymbol{x}_t, t) = \left(\frac{\partial f}{\partial t} + \sum_{i=1}^d \mu_{t,i} \frac{\partial f}{\partial x_i} + \frac{1}{2}\sum_{i,j=1}^d (\boldsymbol{\Sigma}_t \boldsymbol{\Sigma}_t^T)_{ij} \frac{\partial^2 f}{\partial x_i \partial x_j}\right)dt + \sum_{i=1}^d \sum_{k=1}^d (\boldsymbol{\Sigma}_t)_{ik} \frac{\partial f}{\partial x_i} dw_{t,k}
+$$
+
+### 2. 前向SDE的详细分析
+
+#### 2.1 前向扩散过程
+
+文章中定义的前向SDE为：
+
+$$
+d\boldsymbol{x} = \boldsymbol{f}_t(\boldsymbol{x}) dt + g_t d\boldsymbol{w}
+$$
+
+这里：
+- $\boldsymbol{f}_t(\boldsymbol{x})$：漂移系数（drift coefficient），描述确定性变化
+- $g_t$：扩散系数（diffusion coefficient），描述随机性强度
+- $\boldsymbol{w}_t$：标准Brown运动
+
+**离散化（Euler-Maruyama方法）**：最简单的数值方法是Euler-Maruyama离散化：
+
+$$
+\boldsymbol{x}_{t+\Delta t} = \boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t + g_t \sqrt{\Delta t} \boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})
+$$
+
+注意 $\sqrt{\Delta t}$ 来自于Brown运动增量的方差：$\boldsymbol{w}_{t+\Delta t} - \boldsymbol{w}_t \sim \mathcal{N}(\boldsymbol{0}, \Delta t \boldsymbol{I})$。
+
+#### 2.2 转移概率密度
+
+给定初始条件 $\boldsymbol{x}_t = \boldsymbol{x}$，在 $\Delta t$ 时间后的条件分布为：
+
+$$
+p(\boldsymbol{x}_{t+\Delta t}|\boldsymbol{x}_t = \boldsymbol{x}) \approx \mathcal{N}(\boldsymbol{x} + \boldsymbol{f}_t(\boldsymbol{x})\Delta t, g_t^2 \Delta t \boldsymbol{I})
+$$
+
+概率密度函数：
+
+$$
+p(\boldsymbol{x}_{t+\Delta t}|\boldsymbol{x}_t) = \frac{1}{(2\pi g_t^2 \Delta t)^{d/2}} \exp\left(-\frac{\|\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t - \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t\|^2}{2g_t^2 \Delta t}\right)
+$$
+
+其中 $d$ 是向量维度。
+
+### 3. 逆向SDE的详细推导
+
+#### 3.1 时间反转问题
+
+给定前向SDE：
+
+$$
+d\boldsymbol{x} = \boldsymbol{f}_t(\boldsymbol{x}) dt + g_t d\boldsymbol{w}
+$$
+
+我们希望找到逆向过程的SDE，即从 $t=T$ 到 $t=0$ 的演化。
+
+#### 3.2 Anderson定理
+
+**定理（Anderson, 1982）**：如果前向过程满足：
+
+$$
+d\boldsymbol{x} = \boldsymbol{f}_t(\boldsymbol{x}) dt + g_t d\boldsymbol{w}
+$$
+
+那么逆向过程（从 $t=T$ 反向到 $t=0$）满足：
+
+$$
+d\boldsymbol{x} = \left[\boldsymbol{f}_t(\boldsymbol{x}) - g_t^2 \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})\right] dt + g_t d\bar{\boldsymbol{w}}
+$$
+
+其中 $\bar{\boldsymbol{w}}_t$ 是逆向时间的Brown运动，$p_t(\boldsymbol{x})$ 是边缘分布密度。
+
+**详细推导**：
+
+**步骤1**：建立贝叶斯关系
+
+前向转移概率：
+
+$$
+p(\boldsymbol{x}_{t+\Delta t}|\boldsymbol{x}_t) \propto \exp\left(-\frac{\|\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t - \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t\|^2}{2g_t^2\Delta t}\right)
+$$
+
+逆向转移概率（贝叶斯定理）：
+
+$$
+p(\boldsymbol{x}_t|\boldsymbol{x}_{t+\Delta t}) = \frac{p(\boldsymbol{x}_{t+\Delta t}|\boldsymbol{x}_t) p(\boldsymbol{x}_t)}{p(\boldsymbol{x}_{t+\Delta t})}
+$$
+
+取对数：
+
+$$
+\log p(\boldsymbol{x}_t|\boldsymbol{x}_{t+\Delta t}) = \log p(\boldsymbol{x}_{t+\Delta t}|\boldsymbol{x}_t) + \log p(\boldsymbol{x}_t) - \log p(\boldsymbol{x}_{t+\Delta t})
+$$
+
+**步骤2**：Taylor展开
+
+对 $\log p(\boldsymbol{x}_{t+\Delta t})$ 在 $\boldsymbol{x}_t$ 附近展开：
+
+$$
+\begin{aligned}
+\log p(\boldsymbol{x}_{t+\Delta t}) &\approx \log p(\boldsymbol{x}_t) + (\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t)^T \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t) \\
+&\quad + \frac{1}{2}(\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t)^T \nabla_{\boldsymbol{x}_t}^2 \log p(\boldsymbol{x}_t) (\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t) \\
+&\quad + \Delta t \frac{\partial}{\partial t}\log p(\boldsymbol{x}_t)
+\end{aligned}
+$$
+
+注意这里包含时间导数项，因为 $p(\boldsymbol{x}_{t+\Delta t})$ 实际上是 $p_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t})$。
+
+**步骤3**：简化（仅保留一阶项）
+
+当 $\Delta t \to 0$ 时，$\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t = O(\sqrt{\Delta t})$（因为随机项），因此：
+
+- 线性项：$O(\sqrt{\Delta t})$
+- 二次项：$O(\Delta t)$（与 $\Delta t$ 项同阶，但系数较小）
+- 时间导数项：$O(\Delta t)$
+
+主要的一阶近似：
+
+$$
+\log p(\boldsymbol{x}_{t+\Delta t}) \approx \log p(\boldsymbol{x}_t) + (\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t)^T \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t) + \Delta t \frac{\partial}{\partial t}\log p(\boldsymbol{x}_t)
+$$
+
+**步骤4**：代入前向转移概率
+
+$$
+\begin{aligned}
+&\log p(\boldsymbol{x}_t|\boldsymbol{x}_{t+\Delta t}) \\
+&= -\frac{\|\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t - \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t\|^2}{2g_t^2\Delta t} + \log p(\boldsymbol{x}_t) - \log p(\boldsymbol{x}_{t+\Delta t}) + C \\
+&\approx -\frac{\|\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t - \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t\|^2}{2g_t^2\Delta t} - (\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t)^T \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t) + C'
+\end{aligned}
+$$
+
+**步骤5**：配方
+
+展开二次项：
+
+$$
+\begin{aligned}
+&-\frac{\|\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t - \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t\|^2}{2g_t^2\Delta t} - (\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t)^T \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t) \\
+&= -\frac{1}{2g_t^2\Delta t}\left[\|\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t\|^2 - 2(\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t)^T \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t + \|\boldsymbol{f}_t(\boldsymbol{x}_t)\|^2 (\Delta t)^2\right] \\
+&\quad - (\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t)^T \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t) \\
+&= -\frac{1}{2g_t^2\Delta t}\left[\|\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t\|^2 - 2(\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t)^T (\boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t + g_t^2 \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t))\right] + O(\Delta t)
+\end{aligned}
+$$
+
+配方得：
+
+$$
+= -\frac{\|\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t - (\boldsymbol{f}_t(\boldsymbol{x}_t) - g_t^2 \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t))\Delta t\|^2}{2g_t^2\Delta t} + O(\Delta t)
+$$
+
+**步骤6**：得到逆向SDE
+
+因此，$p(\boldsymbol{x}_t|\boldsymbol{x}_{t+\Delta t})$ 近似为正态分布：
+
+$$
+p(\boldsymbol{x}_t|\boldsymbol{x}_{t+\Delta t}) \approx \mathcal{N}\left(\boldsymbol{x}_{t+\Delta t} - [\boldsymbol{f}_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t}) - g_{t+\Delta t}^2 \nabla_{\boldsymbol{x}} \log p_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t})]\Delta t, g_{t+\Delta t}^2 \Delta t \boldsymbol{I}\right)
+$$
+
+对应的逆向SDE（时间反向）：
+
+$$
+d\boldsymbol{x} = [\boldsymbol{f}_t(\boldsymbol{x}) - g_t^2 \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})] dt + g_t d\bar{\boldsymbol{w}}
+$$
+
+### 4. Score函数的定义和性质
+
+#### 4.1 Score函数定义
+
+**定义**：给定概率分布 $p(\boldsymbol{x})$，其score函数定义为：
+
+$$
+\boldsymbol{s}(\boldsymbol{x}) := \nabla_{\boldsymbol{x}} \log p(\boldsymbol{x})
+$$
+
+Score函数指向概率密度增长最快的方向。
+
+**性质1（零均值）**：对于任意概率分布，其score函数的期望为零：
+
+$$
+\mathbb{E}_{\boldsymbol{x} \sim p}[\boldsymbol{s}(\boldsymbol{x})] = \int \nabla_{\boldsymbol{x}} \log p(\boldsymbol{x}) \cdot p(\boldsymbol{x}) d\boldsymbol{x} = \int \nabla_{\boldsymbol{x}} p(\boldsymbol{x}) d\boldsymbol{x} = \nabla_{\boldsymbol{x}} \int p(\boldsymbol{x}) d\boldsymbol{x} = \nabla_{\boldsymbol{x}} 1 = \boldsymbol{0}
+$$
+
+（假设可以交换积分和微分的顺序）
+
+**性质2（条件score）**：对于条件分布 $p(\boldsymbol{x}_t|\boldsymbol{x}_0)$，条件score为：
+
+$$
+\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)
+$$
+
+对于高斯分布 $p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{\mu}_t(\boldsymbol{x}_0), \boldsymbol{\Sigma}_t)$：
+
+$$
+\log p(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\frac{1}{2}(\boldsymbol{x}_t - \boldsymbol{\mu}_t)^T \boldsymbol{\Sigma}_t^{-1} (\boldsymbol{x}_t - \boldsymbol{\mu}_t) + C
+$$
+
+因此：
+
+$$
+\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\boldsymbol{\Sigma}_t^{-1}(\boldsymbol{x}_t - \boldsymbol{\mu}_t)
+$$
+
+对于DDPM中的 $p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\bar{\alpha}_t \boldsymbol{x}_0, \bar{\beta}_t^2 \boldsymbol{I})$：
+
+$$
+\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\frac{\boldsymbol{x}_t - \bar{\alpha}_t \boldsymbol{x}_0}{\bar{\beta}_t^2} = -\frac{\boldsymbol{\varepsilon}}{\bar{\beta}_t}
+$$
+
+其中 $\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$，$\boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。
+
+#### 4.2 边缘score
+
+边缘分布的score：
+
+$$
+\nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t) = \nabla_{\boldsymbol{x}_t} \log \int p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0) d\boldsymbol{x}_0
+$$
+
+利用 $\nabla \log f = \frac{\nabla f}{f}$：
+
+$$
+\begin{aligned}
+\nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t) &= \frac{\int \nabla_{\boldsymbol{x}_t} p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0) d\boldsymbol{x}_0}{\int p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0) d\boldsymbol{x}_0} \\
+&= \frac{\int p(\boldsymbol{x}_t|\boldsymbol{x}_0) \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0) d\boldsymbol{x}_0}{\int p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0) d\boldsymbol{x}_0} \\
+&= \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)]
+\end{aligned}
+$$
+
+这表明边缘score是条件score关于后验 $p(\boldsymbol{x}_0|\boldsymbol{x}_t)$ 的期望。
+
+### 5. Fokker-Planck方程
+
+#### 5.1 前向Fokker-Planck方程
+
+**定理**：如果 $\boldsymbol{x}_t$ 满足SDE：
+
+$$
+d\boldsymbol{x}_t = \boldsymbol{f}_t(\boldsymbol{x}_t) dt + g_t d\boldsymbol{w}_t
+$$
+
+那么其概率密度 $p_t(\boldsymbol{x})$ 满足Fokker-Planck方程（也称为Kolmogorov前向方程）：
+
+$$
+\frac{\partial p_t(\boldsymbol{x})}{\partial t} = -\nabla \cdot (\boldsymbol{f}_t(\boldsymbol{x}) p_t(\boldsymbol{x})) + \frac{g_t^2}{2} \Delta p_t(\boldsymbol{x})
+$$
+
+其中 $\nabla \cdot$ 是散度算子，$\Delta = \nabla^2$ 是拉普拉斯算子。
+
+**详细推导**：
+
+**步骤1**：Master方程
+
+从Chapman-Kolmogorov方程出发：
+
+$$
+p_t(\boldsymbol{x}) = \int p(\boldsymbol{x}|\boldsymbol{y}) p_{t-\Delta t}(\boldsymbol{y}) d\boldsymbol{y}
+$$
+
+其中 $p(\boldsymbol{x}|\boldsymbol{y})$ 是从 $\boldsymbol{y}$ 在时间 $\Delta t$ 内转移到 $\boldsymbol{x}$ 的概率密度。
+
+**步骤2**：Kramers-Moyal展开
+
+对于SDE，转移概率在 $\Delta t \to 0$ 时可以展开：
+
+$$
+p(\boldsymbol{x}|\boldsymbol{y}) = \delta(\boldsymbol{x} - \boldsymbol{y} - \boldsymbol{f}_t(\boldsymbol{y})\Delta t) * \mathcal{N}(\boldsymbol{0}, g_t^2 \Delta t \boldsymbol{I})
+$$
+
+其中 $*$ 表示卷积。
+
+**步骤3**：对 $p_t$ 做时间差分
+
+$$
+\frac{p_t(\boldsymbol{x}) - p_{t-\Delta t}(\boldsymbol{x})}{\Delta t} = \frac{1}{\Delta t}\int [p(\boldsymbol{x}|\boldsymbol{y}) - \delta(\boldsymbol{x} - \boldsymbol{y})] p_{t-\Delta t}(\boldsymbol{y}) d\boldsymbol{y}
+$$
+
+**步骤4**：Taylor展开
+
+对 $p_{t-\Delta t}(\boldsymbol{y})$ 在 $\boldsymbol{y} = \boldsymbol{x}$ 附近展开：
+
+$$
+p_{t-\Delta t}(\boldsymbol{y}) = p_{t-\Delta t}(\boldsymbol{x}) - (\boldsymbol{y} - \boldsymbol{x})^T \nabla p_{t-\Delta t}(\boldsymbol{x}) + \frac{1}{2}(\boldsymbol{y} - \boldsymbol{x})^T \nabla^2 p_{t-\Delta t}(\boldsymbol{x}) (\boldsymbol{y} - \boldsymbol{x}) + \cdots
+$$
+
+**步骤5**：计算矩
+
+对于转移概率，我们需要计算：
+
+$$
+\begin{aligned}
+\text{一阶矩：} &\quad \mathbb{E}[\boldsymbol{x} - \boldsymbol{y}|\boldsymbol{y}] = \boldsymbol{f}_t(\boldsymbol{y}) \Delta t \\
+\text{二阶矩：} &\quad \mathbb{E}[(\boldsymbol{x} - \boldsymbol{y})(\boldsymbol{x} - \boldsymbol{y})^T|\boldsymbol{y}] = g_t^2 \Delta t \boldsymbol{I} + O((\Delta t)^2)
+\end{aligned}
+$$
+
+**步骤6**：代入并取极限
+
+$$
+\begin{aligned}
+\frac{\partial p_t}{\partial t} &= -\nabla \cdot (\boldsymbol{f}_t p_t) + \frac{1}{2} \text{Tr}(g_t^2 \boldsymbol{I} \nabla^2 p_t) \\
+&= -\nabla \cdot (\boldsymbol{f}_t p_t) + \frac{g_t^2}{2} \Delta p_t
+\end{aligned}
+$$
+
+#### 5.2 逆向Fokker-Planck方程
+
+对于逆向SDE：
+
+$$
+d\boldsymbol{x} = [\boldsymbol{f}_t(\boldsymbol{x}) - g_t^2 \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})] dt + g_t d\bar{\boldsymbol{w}}
+$$
+
+其漂移项为 $\tilde{\boldsymbol{f}}_t(\boldsymbol{x}) = \boldsymbol{f}_t(\boldsymbol{x}) - g_t^2 \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})$，因此时间反向的Fokker-Planck方程为：
+
+$$
+-\frac{\partial p_t(\boldsymbol{x})}{\partial t} = -\nabla \cdot ([\boldsymbol{f}_t(\boldsymbol{x}) - g_t^2 \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})] p_t(\boldsymbol{x})) + \frac{g_t^2}{2} \Delta p_t(\boldsymbol{x})
+$$
+
+展开右边：
+
+$$
+\begin{aligned}
+&-\nabla \cdot (\boldsymbol{f}_t p_t) + \nabla \cdot (g_t^2 (\nabla p_t)) + \frac{g_t^2}{2} \Delta p_t \\
+&= -\nabla \cdot (\boldsymbol{f}_t p_t) + g_t^2 \Delta p_t + \frac{g_t^2}{2} \Delta p_t \\
+&= -\nabla \cdot (\boldsymbol{f}_t p_t) + \frac{g_t^2}{2} \Delta p_t
+\end{aligned}
+$$
+
+这恰好抵消，说明逆向SDE确实使 $p_t$ 沿时间反向演化回初始分布。
+
+### 6. 概率流ODE
+
+#### 6.1 从SDE到ODE
+
+**定理**：对于前向SDE：
+
+$$
+d\boldsymbol{x} = \boldsymbol{f}_t(\boldsymbol{x}) dt + g_t d\boldsymbol{w}
+$$
+
+存在一个确定性的ODE（常微分方程），称为概率流ODE：
+
+$$
+d\boldsymbol{x} = \left[\boldsymbol{f}_t(\boldsymbol{x}) - \frac{1}{2}g_t^2 \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})\right] dt
+$$
+
+它具有与原SDE相同的边缘分布 $p_t(\boldsymbol{x})$。
+
+**推导思路**：两个过程有相同边缘分布，意味着它们满足相同的Fokker-Planck方程。对于ODE：
+
+$$
+d\boldsymbol{x} = \boldsymbol{u}_t(\boldsymbol{x}) dt
+$$
+
+其Fokker-Planck方程为（无扩散项）：
+
+$$
+\frac{\partial p_t}{\partial t} = -\nabla \cdot (\boldsymbol{u}_t p_t)
+$$
+
+要与原SDE的Fokker-Planck方程相同：
+
+$$
+-\nabla \cdot (\boldsymbol{u}_t p_t) = -\nabla \cdot (\boldsymbol{f}_t p_t) + \frac{g_t^2}{2} \Delta p_t
+$$
+
+展开右边的拉普拉斯项：
+
+$$
+\Delta p_t = \nabla \cdot (\nabla p_t) = \nabla \cdot (p_t \nabla \log p_t)
+$$
+
+因此：
+
+$$
+-\nabla \cdot (\boldsymbol{u}_t p_t) = -\nabla \cdot (\boldsymbol{f}_t p_t) + \frac{g_t^2}{2} \nabla \cdot (p_t \nabla \log p_t)
+$$
+
+消去散度算子（在适当条件下）：
+
+$$
+\boldsymbol{u}_t = \boldsymbol{f}_t - \frac{g_t^2}{2} \nabla \log p_t
+$$
+
+#### 6.2 逆向概率流ODE
+
+类似地，逆向过程也可以写成ODE形式：
+
+$$
+d\boldsymbol{x} = \left[\boldsymbol{f}_t(\boldsymbol{x}) - g_t^2 \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x}) + \frac{g_t^2}{2} \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})\right] dt = \left[\boldsymbol{f}_t(\boldsymbol{x}) - \frac{g_t^2}{2} \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})\right] dt
+$$
+
+这与前向概率流ODE（时间反向）是一致的。
+
+**优势**：ODE采样的优势在于：
+1. 确定性：给定初始噪声，生成结果唯一
+2. 精确重构：可以从数据编码到潜空间再解码回来
+3. 插值：可以在潜空间进行有意义的插值
+
+### 7. 与离散DDPM的连续极限关系
+
+#### 7.1 DDPM的离散形式
+
+DDPM定义：
+
+$$
+\boldsymbol{x}_t = \sqrt{\alpha_t} \boldsymbol{x}_{t-1} + \sqrt{1 - \alpha_t} \boldsymbol{\varepsilon}_t
+$$
+
+累积形式：
+
+$$
+\boldsymbol{x}_t = \sqrt{\bar{\alpha}_t} \boldsymbol{x}_0 + \sqrt{1 - \bar{\alpha}_t} \boldsymbol{\varepsilon}
+$$
+
+其中 $\bar{\alpha}_t = \prod_{s=1}^t \alpha_s$。
+
+#### 7.2 连续极限
+
+设总时长为1，步数为 $N$，则 $\Delta t = 1/N$，$t_k = k\Delta t$。
+
+定义连续函数 $\bar{\alpha}(t)$ 使得 $\bar{\alpha}(t_k) = \bar{\alpha}_k$。
+
+对数微分：
+
+$$
+\frac{d \log \bar{\alpha}(t)}{dt} = \lim_{\Delta t \to 0} \frac{\log \bar{\alpha}_{t+\Delta t} - \log \bar{\alpha}_t}{\Delta t} = \lim_{\Delta t \to 0} \frac{\log \alpha_{t+\Delta t}}{\Delta t}
+$$
+
+对于DDPM，$\alpha_t = 1 - \beta_t$，$\beta_t$ 很小，因此：
+
+$$
+\log \alpha_t = \log(1 - \beta_t) \approx -\beta_t
+$$
+
+定义 $\beta(t)$ 使得 $\beta(t_k) = \beta_k$，则：
+
+$$
+\frac{d \log \bar{\alpha}(t)}{dt} \approx -\frac{\beta(t)}{\Delta t} \cdot \Delta t = -\beta(t)
+$$
+
+因此：
+
+$$
+\bar{\alpha}(t) = \exp\left(-\int_0^t \beta(s) ds\right)
+$$
+
+#### 7.3 从离散到连续SDE
+
+离散步骤：
+
+$$
+\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t = (\sqrt{\alpha_{t+\Delta t}} - 1)\boldsymbol{x}_t + \sqrt{1 - \alpha_{t+\Delta t}} \boldsymbol{\varepsilon}
+$$
+
+连续极限：
+
+$$
+\sqrt{\alpha_{t+\Delta t}} = \sqrt{1 - \beta_{t+\Delta t}} \approx 1 - \frac{\beta_{t+\Delta t}}{2}
+$$
+
+因此：
+
+$$
+\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t \approx -\frac{\beta_t}{2}\boldsymbol{x}_t \Delta t + \sqrt{\beta_t \Delta t} \boldsymbol{\varepsilon}
+$$
+
+对应SDE：
+
+$$
+d\boldsymbol{x} = -\frac{1}{2}\beta_t \boldsymbol{x} dt + \sqrt{\beta_t} d\boldsymbol{w}
+$$
+
+这正是VP-SDE（Variance Preserving SDE）的形式，其中：
+- $\boldsymbol{f}_t(\boldsymbol{x}) = -\frac{1}{2}\beta_t \boldsymbol{x}$
+- $g_t = \sqrt{\beta_t}$
+
+### 8. 采样算法
+
+#### 8.1 Euler-Maruyama方法
+
+对于逆向SDE：
+
+$$
+d\boldsymbol{x} = [\boldsymbol{f}_t(\boldsymbol{x}) - g_t^2 \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})] dt + g_t d\bar{\boldsymbol{w}}
+$$
+
+Euler-Maruyama离散化：
+
+$$
+\boldsymbol{x}_{t-\Delta t} = \boldsymbol{x}_t - [\boldsymbol{f}_t(\boldsymbol{x}_t) - g_t^2 \boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)] \Delta t + g_t \sqrt{\Delta t} \boldsymbol{z}_t
+$$
+
+其中 $\boldsymbol{z}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$，$\boldsymbol{s}_{\boldsymbol{\theta}}$ 是训练好的score网络。
+
+**算法（逆向采样）**：
+
+```
+输入：score网络 s_θ, 初始噪声 x_T ~ N(0, I), 时间步长 Δt
+输出：生成样本 x_0
+
+for t = T, T-Δt, ..., Δt:
+    z ~ N(0, I)  # 当 t > Δt 时
+    如果 t = Δt: z = 0  # 最后一步不加噪声
+
+    # 计算漂移和扩散
+    drift = f_t(x_t) - g_t^2 * s_θ(x_t, t)
+    diffusion = g_t * sqrt(Δt) * z
+
+    # 更新
+    x_{t-Δt} = x_t - drift * Δt + diffusion
+
+返回 x_0
+```
+
+#### 8.2 预测器-校正器采样（Predictor-Corrector）
+
+为了提高采样质量，可以结合预测步骤和Langevin动力学校正步骤：
+
+**预测步骤（Euler-Maruyama）**：
+
+$$
+\tilde{\boldsymbol{x}}_{t-\Delta t} = \boldsymbol{x}_t - [\boldsymbol{f}_t(\boldsymbol{x}_t) - g_t^2 \boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)] \Delta t + g_t \sqrt{\Delta t} \boldsymbol{z}_t
+$$
+
+**校正步骤（Langevin MCMC）**：对于 $M$ 步：
+
+$$
+\boldsymbol{x}^{(m+1)} = \boldsymbol{x}^{(m)} + \epsilon \boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}^{(m)}, t) + \sqrt{2\epsilon} \boldsymbol{z}^{(m)}
+$$
+
+其中 $\boldsymbol{x}^{(0)} = \tilde{\boldsymbol{x}}_{t-\Delta t}$，最终 $\boldsymbol{x}_{t-\Delta t} = \boldsymbol{x}^{(M)}$。
+
+#### 8.3 ODE求解器
+
+对于概率流ODE：
+
+$$
+d\boldsymbol{x} = \left[\boldsymbol{f}_t(\boldsymbol{x}) - \frac{1}{2}g_t^2 \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})\right] dt
+$$
+
+可以使用高阶ODE求解器，如Runge-Kutta方法：
+
+**RK4（四阶Runge-Kutta）**：
+
+$$
+\begin{aligned}
+\boldsymbol{k}_1 &= \boldsymbol{f}_t(\boldsymbol{x}_t) - \frac{1}{2}g_t^2 \boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) \\
+\boldsymbol{k}_2 &= \boldsymbol{f}_{t-\Delta t/2}(\boldsymbol{x}_t - \frac{\Delta t}{2}\boldsymbol{k}_1) - \frac{1}{2}g_{t-\Delta t/2}^2 \boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t - \frac{\Delta t}{2}\boldsymbol{k}_1, t-\frac{\Delta t}{2}) \\
+\boldsymbol{k}_3 &= \boldsymbol{f}_{t-\Delta t/2}(\boldsymbol{x}_t - \frac{\Delta t}{2}\boldsymbol{k}_2) - \frac{1}{2}g_{t-\Delta t/2}^2 \boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t - \frac{\Delta t}{2}\boldsymbol{k}_2, t-\frac{\Delta t}{2}) \\
+\boldsymbol{k}_4 &= \boldsymbol{f}_{t-\Delta t}(\boldsymbol{x}_t - \Delta t \boldsymbol{k}_3) - \frac{1}{2}g_{t-\Delta t}^2 \boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t - \Delta t \boldsymbol{k}_3, t-\Delta t) \\
+\boldsymbol{x}_{t-\Delta t} &= \boldsymbol{x}_t - \frac{\Delta t}{6}(\boldsymbol{k}_1 + 2\boldsymbol{k}_2 + 2\boldsymbol{k}_3 + \boldsymbol{k}_4)
+\end{aligned}
+$$
+
+ODE求解通常比SDE采样需要更少的步数即可获得高质量样本。
+
+### 9. 训练过程的完整推导
+
+#### 9.1 Score匹配目标
+
+目标是学习 $\boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) \approx \nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t)$。
+
+完整的denoising score matching损失：
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = \mathbb{E}_{t \sim \mathcal{U}[0,T]} \mathbb{E}_{\boldsymbol{x}_0 \sim p_0} \mathbb{E}_{\boldsymbol{x}_t \sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)} \left[\lambda(t) \|\boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) - \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)\|^2\right]
+$$
+
+其中 $\lambda(t)$ 是权重函数。
+
+#### 9.2 对于线性SDE的简化
+
+对于 $p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\bar{\alpha}_t \boldsymbol{x}_0, \bar{\beta}_t^2 \boldsymbol{I})$，采样 $\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$，$\boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。
+
+条件score：
+
+$$
+\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\frac{\boldsymbol{x}_t - \bar{\alpha}_t \boldsymbol{x}_0}{\bar{\beta}_t^2} = -\frac{\boldsymbol{\varepsilon}}{\bar{\beta}_t}
+$$
+
+如果参数化为 $\boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = -\frac{\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)}{\bar{\beta}_t}$，则损失变为：
+
+$$
+\mathcal{L}(\boldsymbol{\theta}) = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}} \left[\frac{\lambda(t)}{\bar{\beta}_t^2} \|\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, t) - \boldsymbol{\varepsilon}\|^2\right]
+$$
+
+选择 $\lambda(t) = \bar{\beta}_t^2$ 得到DDPM损失：
+
+$$
+\mathcal{L}_{\text{simple}}(\boldsymbol{\theta}) = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}} \left[\|\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) - \boldsymbol{\varepsilon}\|^2\right]
+$$
+
+### 10. 总结与统一视角
+
+#### 10.1 三种等价表示
+
+对于扩散模型，有三种等价的表示方式：
+
+1. **噪声预测**：$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) \approx \boldsymbol{\varepsilon}$
+2. **Score预测**：$\boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) \approx \nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t)$
+3. **数据预测**：$\hat{\boldsymbol{x}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) \approx \mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t]$
+
+它们之间的关系：
+
+$$
+\boldsymbol{s}_{\boldsymbol{\theta}} = -\frac{\boldsymbol{\epsilon}_{\boldsymbol{\theta}}}{\bar{\beta}_t} = -\frac{\boldsymbol{x}_t - \bar{\alpha}_t \hat{\boldsymbol{x}}_{\boldsymbol{\theta}}}{\bar{\beta}_t^2}
+$$
+
+$$
+\hat{\boldsymbol{x}}_{\boldsymbol{\theta}} = \frac{\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}_{\boldsymbol{\theta}}}{\bar{\alpha}_t}
+$$
+
+#### 10.2 连续时间框架的优势
+
+SDE框架的主要优势：
+
+1. **理论统一**：将DDPM、score matching、去噪等统一在同一框架下
+2. **灵活采样**：可以选择任意步数，不受训练时步数限制
+3. **多种求解器**：可以使用SDE求解器或ODE求解器
+4. **精确似然计算**：通过ODE可以精确计算似然（使用连续归一化流）
+5. **条件生成**：容易扩展到条件生成和引导生成
+
+这个统一的SDE视角为扩散模型提供了坚实的数学基础，使得我们能够更深入地理解和改进这类生成模型。
 

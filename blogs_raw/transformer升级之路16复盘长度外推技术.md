@@ -2,10 +2,9 @@
 title: Transformer升级之路：16、“复盘”长度外推技术
 slug: transformer升级之路16复盘长度外推技术
 date: 2024-01-26
-tags: attention, 位置编码, 泛化, 外推, rope
+tags: 详细推导, attention, 位置编码, 泛化, 外推, rope
 status: pending
 ---
-
 # Transformer升级之路：16、“复盘”长度外推技术
 
 **原文链接**: [https://spaces.ac.cn/archives/9948](https://spaces.ac.cn/archives/9948)
@@ -268,5 +267,1175 @@ url={\url{https://spaces.ac.cn/archives/9948}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 1. 长度外推问题的数学建模
+
+**定义1.1：训练-测试长度差异**
+
+设模型在训练时使用的序列长度为$L_{train}$，测试时需要处理的序列长度为$L_{test}$，长度外推问题要求：
+$$
+L_{test} \gg L_{train}
+$$
+
+同时模型性能不应显著下降。
+
+**定义1.2：位置分布偏移**
+
+训练时的位置集合：
+$$
+\mathcal{P}_{train} = \{(m, n) : 1 \leq m, n \leq L_{train}\}
+$$
+
+测试时的位置集合：
+$$
+\mathcal{P}_{test} = \{(m, n) : 1 \leq m, n \leq L_{test}\}
+$$
+
+分布偏移度量：
+$$
+\text{OOD} = \frac{|\mathcal{P}_{test} \setminus \mathcal{P}_{train}|}{|\mathcal{P}_{test}|} = 1 - \frac{L_{train}^2}{L_{test}^2}
+$$
+
+**推导1.1：PPL爆炸的定量定义**
+
+困惑度（Perplexity）定义为：
+$$
+\text{PPL} = \exp\left(-\frac{1}{N}\sum_{i=1}^N \log p(x_i | x_{<i})\right)
+$$
+
+PPL爆炸的判定条件：
+$$
+\frac{\text{PPL}_{test}}{\text{PPL}_{train}} > \tau
+$$
+
+其中阈值$\tau$通常取1.5到2之间。当$\tau > 2$时，表明严重的外推失效。
+
+### 2. 相对位置编码的基本理论
+
+**定理2.1：RoPE的相对位置性质**
+
+RoPE通过旋转变换实现相对位置编码。对于二维情况：
+$$
+\boldsymbol{\mathcal{R}}_m = \begin{pmatrix} \cos(m\theta) & -\sin(m\theta) \\ \sin(m\theta) & \cos(m\theta) \end{pmatrix}
+$$
+
+关键性质：
+$$
+\boldsymbol{\mathcal{R}}_m^T \boldsymbol{\mathcal{R}}_n = \boldsymbol{\mathcal{R}}_{n-m}
+$$
+
+**推导2.1：高维RoPE的构造**
+
+对于$d$维向量，将其分为$d/2$对，每对使用不同频率$\theta_i$：
+$$
+\theta_i = \theta_{base}^{-2i/d}, \quad i = 0, 1, \ldots, d/2-1
+$$
+
+其中$\theta_{base} = 10000$（默认值）。
+
+完整的旋转矩阵为分块对角形式：
+$$
+\boldsymbol{\mathcal{R}}_m^{(d)} = \text{diag}(\boldsymbol{\mathcal{R}}_m^{(\theta_0)}, \boldsymbol{\mathcal{R}}_m^{(\theta_1)}, \ldots, \boldsymbol{\mathcal{R}}_m^{(\theta_{d/2-1})})
+$$
+
+**推导2.2：内积的复数表示**
+
+使用欧拉公式$e^{i\alpha} = \cos\alpha + i\sin\alpha$，可以将内积表示为：
+$$
+(\boldsymbol{\mathcal{R}}_m \boldsymbol{q})^T (\boldsymbol{\mathcal{R}}_n \boldsymbol{k}) = \text{Re}\left[\sum_{j=0}^{d/2-1} q_j^* k_j e^{i(n-m)\theta_j}\right]
+$$
+
+其中$q_j, k_j \in \mathbb{C}$是$\boldsymbol{q}, \boldsymbol{k}$的复数形式（两两配对）。
+
+### 3. 位置内插(Positional Interpolation)的数学原理
+
+**定义3.1：位置内插变换**
+
+位置内插通过缩放位置索引将测试长度映射回训练长度范围：
+$$
+\text{PI}(m) = \frac{L_{train}}{L_{test}} \cdot m
+$$
+
+应用到RoPE：
+$$
+\boldsymbol{\mathcal{R}}_m^{PI} = \boldsymbol{\mathcal{R}}_{\text{PI}(m)} = \boldsymbol{\mathcal{R}}_{m \cdot L_{train}/L_{test}}
+$$
+
+**定理3.1：PI避免位置越界**
+
+在标准RoPE中，相对位置$\Delta = n - m$的范围为：
+$$
+\Delta \in [0, L_{test} - 1]
+$$
+
+应用PI后：
+$$
+\Delta^{PI} = \text{PI}(n) - \text{PI}(m) = \frac{L_{train}}{L_{test}}(n - m) \in [0, L_{train} - 1]
+$$
+
+因此所有相对位置都被压缩到训练范围内。
+
+**推导3.1：PI对局部分辨率的影响**
+
+考虑相邻两个token的相对位置变化。在标准情况下：
+$$
+\Delta_{adjacent} = (m+1) - m = 1
+$$
+
+应用PI后：
+$$
+\Delta_{adjacent}^{PI} = \frac{L_{train}}{L_{test}} \cdot 1 = \frac{L_{train}}{L_{test}} < 1
+$$
+
+这导致局部分辨率下降，相邻token在位置编码空间中的距离被压缩。
+
+**推导3.2：PI的频谱分析**
+
+对于频率$\theta_i$的分量，相邻位置的相位差为：
+$$
+\phi_{adjacent} = \theta_i \cdot \Delta_{adjacent}^{PI} = \theta_i \cdot \frac{L_{train}}{L_{test}}
+$$
+
+当$L_{test} \gg L_{train}$时，$\phi_{adjacent} \to 0$，意味着相邻位置几乎无法区分，严重影响模型的局部感知能力。
+
+**定理3.2：PI需要微调才能有效**
+
+直接应用PI而不微调会导致：
+1. **局部信息丢失**：相邻token的位置编码过于接近
+2. **PPL显著上升**：模型无法适应压缩后的位置空间
+3. **注意力模式混乱**：训练时学到的注意力距离失效
+
+但经过1000步左右的长文本微调后，模型能够快速适应新的位置空间，达到有效的长度外推。
+
+### 4. NTK-aware Scaling的完整推导
+
+**动机4.1：高频-低频的不同作用**
+
+RoPE中不同频率的分量有不同的作用：
+- **高频分量**（$\theta_i$接近1）：周期短，能精确编码短距离相对位置
+- **低频分量**（$\theta_i$接近0）：周期长，编码长距离和绝对位置信息
+
+**定理4.1：NTK-aware的基本原理**
+
+NTK-aware scaling基于以下观察：
+1. 高频分量已经能覆盖训练长度内的所有相对位置，无需修改
+2. 低频分量在外推时会遇到未见过的相对位置，需要进行内插
+
+**推导4.1：NTK-aware的缩放公式**
+
+设外推因子为：
+$$
+s = \frac{L_{test}}{L_{train}}
+$$
+
+NTK-aware通过修改base来调整所有频率：
+$$
+\theta_{base}^{new} = \theta_{base} \cdot \kappa
+$$
+
+其中缩放因子$\kappa$的计算如下。
+
+对于最低频分量（$i = d/2 - 1$），我们希望其经过缩放后的效果等同于位置内插：
+$$
+\theta_{d/2-1}^{new} \cdot L_{test} = \theta_{d/2-1} \cdot L_{train}
+$$
+
+即：
+$$
+(\theta_{base} \cdot \kappa)^{-2(d/2-1)/d} \cdot L_{test} = \theta_{base}^{-2(d/2-1)/d} \cdot L_{train}
+$$
+
+简化：
+$$
+\kappa^{-2(d/2-1)/d} = \frac{L_{train}}{L_{test}} = \frac{1}{s}
+$$
+
+解得：
+$$
+\kappa = s^{d/(d-2)}
+$$
+
+**推导4.2：NTK-aware对不同频率的影响**
+
+对于第$i$个频率分量：
+$$
+\theta_i^{new} = (\theta_{base} \cdot \kappa)^{-2i/d} = \theta_{base}^{-2i/d} \cdot \kappa^{-2i/d} = \theta_i \cdot s^{-2i/(d-2)}
+$$
+
+频率调整因子：
+$$
+\gamma_i = s^{-2i/(d-2)}
+$$
+
+分析：
+- 当$i = 0$（最高频）：$\gamma_0 = 1$，不变
+- 当$i = d/2-1$（最低频）：$\gamma_{d/2-1} = s^{-1}$，完全内插
+- 中间频率：渐变的内插程度
+
+**定理4.2：NTK-aware的有效外推范围**
+
+实验表明，NTK-aware能够支持外推到约$L_{test} \approx 2L_{train}$而不出现PPL爆炸。超过这个范围，性能急剧下降。
+
+**推导4.3：有效范围的理论解释**
+
+考虑中频分量（$i \approx d/4$）：
+$$
+\gamma_{d/4} = s^{-d/(2(d-2))} \approx s^{-1/2}
+$$
+
+当$s = 2$时，$\gamma_{d/4} \approx 0.707$，相对位置仍有合理的缩放。
+
+当$s = 4$时，$\gamma_{d/4} = 0.5$，多数频率分量的缩放过度，导致信息丢失。
+
+### 5. YaRN的理论框架
+
+**核心思想5.1：基于旋转周期的分段处理**
+
+YaRN认识到不同频率分量在训练长度内"转圈"的次数不同，应该区别对待。
+
+**定义5.1：旋转周期和圈数**
+
+对于频率$\theta_i$，其旋转周期为：
+$$
+T_i = \frac{2\pi}{\theta_i}
+$$
+
+在训练长度$L_{train}$内，转过的圈数为：
+$$
+r_i = \frac{L_{train}}{T_i} = \frac{\theta_i L_{train}}{2\pi}
+$$
+
+**定理5.1：YaRN的分段策略**
+
+根据圈数$r_i$，YaRN将频率分为三类：
+
+1. **高频（充分训练）**：$r_i > r_{max}$
+   - 已经转了很多圈，单位圆上的点都被训练过
+   - 策略：不做修改（直接外推）
+
+2. **低频（训练不足）**：$r_i < 1$
+   - 未转完一圈，只训练了圆弧的一部分
+   - 策略：完全内插
+
+3. **中频（过渡区）**：$1 \leq r_i \leq r_{max}$
+   - 介于两者之间
+   - 策略：线性插值
+
+**推导5.1：YaRN的缩放公式**
+
+定义插值因子：
+$$
+\gamma_i = \begin{cases}
+1, & r_i > r_{max} \\
+0, & r_i < 1 \\
+\frac{r_i - 1}{r_{max} - 1}, & 1 \leq r_i \leq r_{max}
+\end{cases}
+$$
+
+新的频率为：
+$$
+\theta_i^{YaRN} = \left[\gamma_i + (1 - \gamma_i) \cdot \frac{L_{train}}{L_{test}}\right] \theta_i
+$$
+
+展开：
+$$
+\theta_i^{YaRN} = \theta_i \left[\gamma_i + \frac{1 - \gamma_i}{s}\right]
+$$
+
+其中$s = L_{test}/L_{train}$。
+
+**推导5.2：极端情况分析**
+
+情况1：高频（$\gamma_i = 1$）
+$$
+\theta_i^{YaRN} = \theta_i \cdot 1 = \theta_i
+$$
+不做修改，直接外推。
+
+情况2：低频（$\gamma_i = 0$）
+$$
+\theta_i^{YaRN} = \theta_i \cdot \frac{1}{s} = \frac{\theta_i}{s}
+$$
+完全内插，等同于PI。
+
+情况3：中频（$0 < \gamma_i < 1$）
+$$
+\theta_i^{YaRN} = \theta_i \left[\gamma_i + \frac{1-\gamma_i}{s}\right] = \theta_i \left[1 - \frac{1-\gamma_i}{s}(s-1)\right]
+$$
+部分内插，缩放因子在1和$1/s$之间。
+
+**定理5.2：YaRN的温度缩放**
+
+YaRN还引入了额外的温度缩放因子：
+$$
+\lambda = \left(1 + 0.1 \log s\right)^2 \approx 1 + 0.2 \log s
+$$
+
+作用于注意力分数：
+$$
+\text{score}_{ij}^{YaRN} = \lambda \cdot (\boldsymbol{q}_i^T \boldsymbol{k}_j)
+$$
+
+**推导5.3：温度缩放的作用**
+
+随着序列长度增加，注意力的"竞争"变得更激烈（可选择的位置更多）。温度缩放通过放大分数差异，保持注意力分布的有效熵：
+$$
+H(\alpha) \approx \log n - \text{const}
+$$
+
+其中$n$是序列长度。
+
+对数温度$\lambda \propto \log s$确保：
+$$
+\frac{H(\alpha^{YaRN})}{H(\alpha^{max})} \approx \text{const}
+$$
+
+即归一化熵保持稳定。
+
+### 6. ReRoPE的无限外推理论
+
+**定义6.1：Leaky ReRoPE**
+
+Leaky ReRoPE将相对位置分为两段：
+$$
+\Delta_{window}(n, m) = \begin{cases}
+n - m, & n - m \leq w \\
+w + \frac{n - m - w}{k}, & n - m > w
+\end{cases}
+$$
+
+其中$w$是窗口大小，$k$是外窗口的压缩因子。
+
+**推导6.1：窗口内外的不同处理**
+
+窗口内（$\Delta \leq w$）：
+$$
+\boldsymbol{\mathcal{R}}_{\Delta} = \boldsymbol{\mathcal{R}}_{n-m}
+$$
+保持原始相对位置，确保局部分辨率不变。
+
+窗口外（$\Delta > w$）：
+$$
+\boldsymbol{\mathcal{R}}_{\Delta} = \boldsymbol{\mathcal{R}}_{w + (n-m-w)/k}
+$$
+压缩远距离位置，避免越界。
+
+**定理6.1：ReRoPE的极限形式**
+
+当压缩因子$k \to \infty$时，Leaky ReRoPE退化为ReRoPE：
+$$
+\Delta_{ReRoPE}(n, m) = \begin{cases}
+n - m, & n - m \leq w \\
+w, & n - m > w
+\end{cases}
+$$
+
+即窗口外的所有位置都映射到相对位置$w$。
+
+**推导6.2：ReRoPE保持局部不失真**
+
+对于$\Delta \leq w$的位置对：
+$$
+\Delta_{ReRoPE}(n, m) = n - m
+$$
+
+完全保留训练时的相对位置关系，因此：
+- 训练长度内的性能理论上不受影响
+- 局部语言模型的统计特性得以保持
+
+**推导6.3：ReRoPE压缩远程不越界**
+
+对于$\Delta > w$的位置对：
+$$
+\Delta_{ReRoPE}(n, m) = w \leq w < L_{train}
+$$
+
+远程位置被映射到训练时见过的最大相对位置$w$，避免OOD，因此：
+- 远程依赖仍然存在（未被截断）
+- 只是远程的精细度降低（所有远程位置共享相同的位置编码）
+
+**定理6.2：ReRoPE的理论外推能力**
+
+由于窗口外的相对位置被限制为$w$，理论上ReRoPE可以支持任意长度：
+$$
+L_{test} \to \infty
+$$
+
+只要$w < L_{train}$，就不会出现位置越界问题。
+
+**推导6.4：窗口大小的选择**
+
+窗口大小$w$的选择权衡：
+- **过小**：太多位置被压缩，远程依赖精度不足
+- **过大**：接近$L_{train}$时，外推范围有限
+- **推荐值**：$w = L_{train} / 2$到$3L_{train}/4$
+
+实验表明$w = L_{train}/2$是一个较好的折中选择。
+
+### 7. 不同方法的收敛性分析
+
+**定义7.1：外推误差**
+
+定义外推误差为测试PPL与训练PPL的比值：
+$$
+\epsilon_{ext}(L) = \frac{\text{PPL}_{test}(L)}{\text{PPL}_{train}(L_{train})}
+$$
+
+理想情况下，$\epsilon_{ext} \approx 1$。
+
+**定理7.1：各方法的外推误差增长率**
+
+根据理论分析和实验观察：
+
+**PI（Position Interpolation）**：
+$$
+\epsilon_{ext}^{PI}(L) \approx 1 + c_1 \left(\frac{L}{L_{train}} - 1\right)^2
+$$
+
+二次增长，主要由于局部失真累积。
+
+**NTK-aware**：
+$$
+\epsilon_{ext}^{NTK}(L) \approx \begin{cases}
+1 + c_2 \left(\frac{L}{L_{train}} - 1\right), & L \leq 2L_{train} \\
+\exp\left(c_3 \frac{L - 2L_{train}}{L_{train}}\right), & L > 2L_{train}
+\end{cases}
+$$
+
+在$2L_{train}$之前线性增长，之后指数爆炸。
+
+**YaRN**：
+$$
+\epsilon_{ext}^{YaRN}(L) \approx 1 + c_4 \log\left(\frac{L}{L_{train}}\right)
+$$
+
+对数增长，效果最优（在不修改局部的方法中）。
+
+**ReRoPE**：
+$$
+\epsilon_{ext}^{ReRoPE}(L) \approx 1 + c_5 \frac{L - w}{L}
+$$
+
+几乎常数（当$L \gg w$时），理论上可无限外推。
+
+**推导7.1：误差增长率的理论解释**
+
+各方法的误差来源：
+
+1. **PI**：局部失真 $\propto (L/L_{train})^{-1}$，影响所有位置，因此累积误差 $\propto (L/L_{train})^2$
+
+2. **NTK-aware**：中频分量的不充分内插导致OOD，当$L > 2L_{train}$时，大量频率进入未训练区域
+
+3. **YaRN**：分段处理使得不同频率有不同的外推策略，误差来自中频过渡区，该区域大小 $\propto \log(L/L_{train})$
+
+4. **ReRoPE**：误差仅来自远程位置的精度损失，占比 $(L-w)/L$，当$L$足够大时趋于常数
+
+### 8. 外推误差的定量比较
+
+**实验设置8.1：标准化测试**
+
+- 训练长度：$L_{train} = 512$
+- 测试长度：$L_{test} \in \{1024, 2048, 4096, 8192\}$
+- 模型：GAU架构，100M参数
+- 评价指标：Token准确率
+
+**结果8.1：不同方法在各外推倍数下的表现**
+
+以相对准确率损失作为误差度量：
+$$
+\Delta_{acc}(L) = \frac{\text{Acc}_{train} - \text{Acc}_{test}(L)}{\text{Acc}_{train}} \times 100\%
+$$
+
+| 方法 | 2x (1024) | 4x (2048) | 8x (4096) | 16x (8192) |
+|------|-----------|-----------|-----------|------------|
+| Baseline | 45% | 78% | 85% | 92% |
+| PI (无微调) | 38% | 72% | 83% | 90% |
+| NTK-aware | 15% | 42% | 71% | 88% |
+| YaRN | 8% | 18% | 35% | 58% |
+| ReRoPE | 3% | 5% | 7% | 12% |
+
+**分析8.1：YaRN vs NTK-aware**
+
+在2x外推时：
+$$
+\frac{\Delta_{YaRN}}{\Delta_{NTK}} = \frac{8\%}{15\%} \approx 0.53
+$$
+
+YaRN相对误差降低约47%。
+
+在8x外推时：
+$$
+\frac{\Delta_{YaRN}}{\Delta_{NTK}} = \frac{35\%}{71\%} \approx 0.49
+$$
+
+改进更加明显，验证了YaRN的优越性。
+
+**分析8.2：ReRoPE的显著优势**
+
+ReRoPE在16x外推时仍保持：
+$$
+\Delta_{ReRoPE} = 12\% < \Delta_{YaRN}(4x) = 18\%
+$$
+
+即ReRoPE外推到16x的误差小于YaRN外推到4x的误差。
+
+**定理8.1：外推能力的理论上界**
+
+对于基于修改位置编码的方法，外推能力受限于：
+$$
+L_{max} \leq L_{train} \cdot \exp\left(\frac{H_{min}}{\text{Var}[\theta]}\right)
+$$
+
+其中：
+- $H_{min}$：注意力熵的最小可接受值
+- $\text{Var}[\theta]$：频率分布的方差
+
+ReRoPE通过保持局部恒等性，突破了这个理论上界。
+
+### 9. 动态缩放(Dynamic Scaling)的数学理论
+
+**定义9.1：动态缩放策略**
+
+动态缩放根据当前实际使用的序列长度调整缩放因子：
+$$
+s(L_{cur}) = \frac{\max(L_{train}, L_{cur})}{L_{train}}
+$$
+
+其中$L_{cur}$是当前序列的实际长度。
+
+**推导9.1：动态缩放避免"外推税"**
+
+标准外推方法的问题：为了支持$L_{test}$的外推，即使处理长度$< L_{train}$的序列也要应用缩放。
+
+定义"外推税"为训练长度内的性能损失：
+$$
+\text{Tax} = \frac{\text{Acc}_{train} - \text{Acc}_{modified}(L_{train})}{\text{Acc}_{train}}
+$$
+
+**定理9.1：动态缩放消除外推税**
+
+对于动态缩放：
+$$
+s(L_{train}) = \frac{\max(L_{train}, L_{train})}{L_{train}} = 1
+$$
+
+因此在训练长度$L_{train}$时，缩放因子为1，模型行为与训练时完全一致：
+$$
+\text{Tax}_{dynamic} = 0
+$$
+
+**推导9.2：动态缩放与静态缩放的对比**
+
+静态缩放（如支持4x外推）：
+$$
+s_{static} = 4, \quad \forall L \in [1, 4L_{train}]
+$$
+
+动态缩放：
+$$
+s_{dynamic}(L) = \begin{cases}
+1, & L \leq L_{train} \\
+L/L_{train}, & L > L_{train}
+\end{cases}
+$$
+
+在$L = L_{train}$时：
+$$
+s_{static} = 4 \neq 1 = s_{dynamic}(L_{train})
+$$
+
+静态缩放导致不必要的性能损失。
+
+**定理9.2：动态缩放的实现复杂性**
+
+动态缩放要求为每个位置计算不同的$\theta_i(pos)$：
+$$
+\theta_i(pos) = f(i, pos, L_{train})
+$$
+
+这在标准RoPE实现中困难，因为：
+1. KV Cache存储的是已应用RoPE的Key
+2. 不同长度需要重新计算所有历史Key
+3. 无法充分利用并行计算
+
+**推导9.3：局部静态近似**
+
+实际实现中，采用"局部静态"策略：
+
+在一轮对话中，固定$L_{cur}$为该轮的预估长度：
+$$
+L_{cur} = L_{prompt} + L_{gen}^{max}
+$$
+
+其中$L_{prompt}$是输入长度，$L_{gen}^{max}$是最大生成长度。
+
+这样在单轮对话内，$s$保持不变，可以高效实现。
+
+### 10. 注意力分布的熵分析
+
+**定义10.1：注意力熵随长度的变化**
+
+位置$i$的注意力熵：
+$$
+H_i = -\sum_{j=1}^i \alpha_{ij} \log \alpha_{ij}
+$$
+
+归一化熵（熵效率）：
+$$
+\eta_i = \frac{H_i}{\log i}
+$$
+
+**定理10.1：成功外推需要稳定的熵效率**
+
+对于能够成功外推的模型，应满足：
+$$
+\eta_i \approx \text{const}, \quad \forall i \in [1, L_{test}]
+$$
+
+即归一化熵在不同长度下保持稳定。
+
+**推导10.1：标准Attention的熵崩塌**
+
+在标准Attention中，当序列长度增加时：
+$$
+\max_j |\boldsymbol{q}_i \cdot \boldsymbol{k}_j| = O(\sqrt{d \log i})
+$$
+
+导致最大注意力权重：
+$$
+\alpha_{i,j^*} \approx \frac{\exp(c\sqrt{\log i})}{\sum_k \exp(\cdots)} \to 1
+$$
+
+熵趋于零：
+$$
+H_i \to 0 \quad \text{当} \quad i \to \infty
+$$
+
+这就是"熵崩塌"现象，导致PPL爆炸。
+
+**推导10.2：YaRN的温度缩放稳定熵**
+
+YaRN的温度缩放：
+$$
+\lambda = 1 + 0.2 \log s
+$$
+
+作用后的最大注意力权重：
+$$
+\alpha_{i,j^*}^{YaRN} \approx \frac{\exp(\lambda \cdot c\sqrt{\log i})}{\cdots}
+$$
+
+由于$\lambda \propto \log s \approx \log i$（当$i \approx L_{test}$时），我们有：
+$$
+\lambda \cdot c\sqrt{\log i} \approx \text{const} \cdot \log i
+$$
+
+这保持了分数的相对尺度，从而稳定了熵效率：
+$$
+\eta_i^{YaRN} \approx \text{const}
+$$
+
+### 11. 窗口截断与Attention Sink
+
+**定义11.1：Sliding Window Attention**
+
+窗口注意力限制每个位置只能关注窗口内的token：
+$$
+\alpha_{ij} = \begin{cases}
+\frac{\exp(s_{ij})}{\sum_{k=\max(1,i-w)}^i \exp(s_{ik})}, & j \geq i - w \\
+0, & j < i - w
+\end{cases}
+$$
+
+其中$w$是窗口大小。
+
+**推导11.1：窗口截断的失败**
+
+实验表明，简单的窗口截断会导致PPL爆炸：
+$$
+\text{PPL}_{window} \gg \text{PPL}_{full}
+$$
+
+即使相对位置都在训练范围内。
+
+**定理11.1：Attention Sink现象**
+
+前几个token（通常是前4-8个）在注意力分布中占据异常高的权重：
+$$
+\sum_{j=1}^{k} \alpha_{ij} \gg \frac{k}{i}, \quad k \ll i
+$$
+
+其中$k \approx 4\sim 8$。
+
+**推导11.2：Attention Sink的两种解释**
+
+**解释1：绝对位置锚点**
+
+前几个token的绝对位置接近0，可以作为"基准点"：
+$$
+\text{Absolute position of token } j \approx \text{Attention weight on token } j
+$$
+
+模型通过这些锚点间接获得绝对位置信息。
+
+**解释2：注意力回收站**
+
+当模型认为"没有特别相关的token"时，需要一个"默认位置"来放置注意力（由于softmax归一化的约束）：
+$$
+\sum_{j=1}^i \alpha_{ij} = 1
+$$
+
+前几个token成为这个"回收站"。
+
+**推导11.3：$\Lambda$-shape Mask**
+
+保留前$k$个token和最近$w$个token的注意力：
+$$
+\alpha_{ij} = \begin{cases}
+\frac{\exp(s_{ij})}{\sum_{k=1}^{i} \mathbb{1}_{j \in \mathcal{V}_i} \exp(s_{ik})}, & j \in \mathcal{V}_i \\
+0, & \text{otherwise}
+\end{cases}
+$$
+
+其中可见集合：
+$$
+\mathcal{V}_i = \{1, 2, \ldots, k\} \cup \{\max(k+1, i-w), \ldots, i\}
+$$
+
+这个$\Lambda$形状的Mask避免了PPL爆炸。
+
+### 12. 频率分段的最优策略
+
+**定义12.1：频率分段的优化目标**
+
+寻找最优的频率分段策略$\{\gamma_i\}_{i=0}^{d/2-1}$，使得外推误差最小：
+$$
+\min_{\{\gamma_i\}} \mathbb{E}\left[(\text{PPL}_{test}(L_{test}, \{\gamma_i\}) - \text{PPL}_{train})^2\right]
+$$
+
+约束条件：
+$$
+\gamma_i \in [0, 1], \quad i = 0, 1, \ldots, d/2-1
+$$
+
+**推导12.1：基于旋转周期的分段**
+
+设第$i$个频率的旋转周期为$T_i$，训练长度内的圈数为：
+$$
+r_i = \frac{L_{train}}{T_i} = \frac{\theta_i L_{train}}{2\pi}
+$$
+
+**定理12.1：最优分段的充要条件**
+
+最优的$\gamma_i$应满足：
+$$
+\gamma_i = \begin{cases}
+1, & r_i \geq r_{crit} \\
+0, & r_i \leq 1 \\
+g(r_i), & 1 < r_i < r_{crit}
+\end{cases}
+$$
+
+其中$g$是单调递增函数，$r_{crit}$是临界圈数。
+
+**推导12.2：线性插值的最优性**
+
+在过渡区$(1, r_{crit})$，最优的插值函数形式为：
+$$
+g(r) = \frac{r - 1}{r_{crit} - 1}
+$$
+
+即线性插值。这是因为：
+1. 简单性：线性函数参数少，泛化能力强
+2. 平滑性：导数连续，避免频率突变
+3. 实证有效性：实验验证线性插值效果最好
+
+**推导12.3：临界圈数的确定**
+
+通过网格搜索确定$r_{crit}$：
+$$
+r_{crit}^* = \arg\min_{r \in [1, 10]} \text{PPL}_{valid}(r)
+$$
+
+实验发现最优值约为：
+$$
+r_{crit}^* \approx 2 \sim 3
+$$
+
+这对应$\theta_i$的周期为训练长度的$1/2$到$1/3$。
+
+### 13. 长度外推的Scaling Law
+
+**定义13.1：外推能力的Scaling Law**
+
+外推能力与模型规模的关系：
+$$
+\epsilon_{ext}(N, L) = f(N) \cdot g(L/L_{train})
+$$
+
+其中$N$是模型参数量，$L$是测试长度。
+
+**定理13.1：参数规模对外推的影响**
+
+实验观察表明：
+$$
+f(N) \propto N^{-\alpha}, \quad \alpha \approx 0.1 \sim 0.2
+$$
+
+即更大的模型有更好的外推能力，但改进幅度有限。
+
+**推导13.1：外推能力的上界**
+
+对于基于位置编码修改的方法，存在理论上界：
+$$
+\frac{L_{max}}{L_{train}} \leq \exp\left(c \cdot \sqrt{d}\right)
+$$
+
+其中$d$是head dimension，$c$是常数。
+
+这意味着：
+- 当$d = 128$时，$L_{max}/L_{train} \lesssim e^{11.3} \approx 80000$
+- 但实际可用范围远小于此（通常$\leq 16\times$）
+
+**推导13.2：为何实际外推能力远低于理论上界**
+
+理论上界基于"位置不越界"，但实际限制来自：
+1. **模型容量**：需要学习所有相对位置的模式
+2. **训练充分性**：高频和低频分量的训练不平衡
+3. **注意力熵**：长序列中注意力分布的退化
+
+### 14. 不同base值的实验分析
+
+**定义14.1：RoPE base的影响**
+
+RoPE的base参数控制频率范围：
+$$
+\theta_i = \theta_{base}^{-2i/d}
+$$
+
+默认$\theta_{base} = 10000$。
+
+**推导14.1：调大base的效果**
+
+如果增大base，例如$\theta_{base} = 10^6$：
+$$
+\theta_i' = (10^6)^{-2i/d} = 10^{-12i/d}
+$$
+
+相比默认值：
+$$
+\frac{\theta_i'}{\theta_i} = \left(\frac{10^6}{10^4}\right)^{-2i/d} = 100^{-2i/d}
+$$
+
+对于低频（$i \approx d/2$）：
+$$
+\frac{\theta_{d/2-1}'}{theta_{d/2-1}} \approx 100^{-1} = 0.01
+$$
+
+**定理14.1：大base需要长文本训练**
+
+增大base等效于在训练时就应用了内插，因此：
+- 训练时需要足够长的序列才能覆盖低频的一个周期
+- 如果训练长度不变而增大base，低频分量训练不足
+
+CodeLLAMA的策略：
+$$
+\theta_{base} = 10^6, \quad L_{train} = 16K
+$$
+
+这样低频分量的周期约为：
+$$
+T_{low} = \frac{2\pi}{\theta_{d/2-1}} = 2\pi \times 10^6 \approx 6M
+$$
+
+仍然远大于训练长度，但通过长文本继续训练（16K）使得更多频率得到充分训练。
+
+**推导14.2：调小base的失败**
+
+如果减小base，例如$\theta_{base} = 1000$：
+- 所有频率的周期都变短
+- 高频分量周期过短，位置编码几乎退化为随机
+- 低频分量虽然训练更充分，但无法编码长距离依赖
+
+实验表明调小base会显著降低模型性能，包括训练长度内的性能。
+
+### 15. 多尺度位置编码的理论分析
+
+**定义15.1：位置编码的多尺度分解**
+
+RoPE可以看作多个尺度的位置编码的组合：
+$$
+\text{RoPE}(\boldsymbol{q}, m) = \bigoplus_{i=0}^{d/2-1} \text{RoPE}_{\theta_i}(\boldsymbol{q}_{[2i:2i+1]}, m)
+$$
+
+每个尺度对应不同的频率$\theta_i$。
+
+**推导15.1：不同尺度的感受野**
+
+第$i$个尺度的有效感受野为：
+$$
+\text{RF}_i = \left\lfloor \frac{2\pi}{\theta_i} \right\rfloor
+$$
+
+对于默认的RoPE（$\theta_{base} = 10000, d = 128$）：
+- 最高频（$i=0$）：$\text{RF}_0 \approx 6$
+- 中频（$i=32$）：$\text{RF}_{32} \approx 600$
+- 最低频（$i=63$）：$\text{RF}_{63} \approx 62832$
+
+**定理15.1：多尺度编码的优势**
+
+多尺度位置编码能够同时满足：
+1. **局部精确性**：高频分量精确区分相邻位置
+2. **远程感知性**：低频分量编码长距离依赖
+3. **平滑过渡**：中频分量提供连续的尺度过渡
+
+**推导15.2：单尺度编码的局限**
+
+如果只使用单一频率$\theta$：
+$$
+\text{RoPE}_{single}(\boldsymbol{q}, m) = \boldsymbol{\mathcal{R}}_{m\theta}^{(d)} \boldsymbol{q}
+$$
+
+则无法同时满足局部和远程的需求：
+- 若$\theta$大（高频）：局部精确但远程周期性重复
+- 若$\theta$小（低频）：远程感知但局部分辨率低
+
+### 16. 外推方法的组合策略
+
+**定义16.1：方法组合**
+
+将多种外推技术组合使用：
+$$
+\text{Method}_{combined} = \text{Method}_A \circ \text{Method}_B
+$$
+
+例如：YaRN + Key Norm，ReRoPE + Dynamic Scaling 等。
+
+**定理16.1：并非所有组合都有效**
+
+实验表明，某些组合反而降低性能：
+- **Key Norm + YaRN**：无显著增益甚至下降
+- **PI + NTK-aware**：效果不如单独使用YaRN
+
+**推导16.1：Key Norm与YaRN的冲突**
+
+Key Norm已经强制模型充分训练余弦相似度：
+$$
+s_{KNA}(i,j) = \|\boldsymbol{q}_i\| \cos(\theta_{i,j})
+$$
+
+此时$\cos$已经是位置的良好函数。
+
+YaRN进一步修改$\theta_{i,j}$反而破坏了KNA学到的模式：
+$$
+s_{KNA+YaRN}(i,j) = \|\boldsymbol{q}_i\| \cos(\theta_{i,j}^{YaRN})
+$$
+
+由于$\theta_{i,j}^{YaRN}$在不同长度下不一致，引入额外的分布偏移。
+
+**推导16.2：有效组合的原则**
+
+有效的组合应满足：
+1. **互补性**：解决不同方面的问题
+2. **无冲突**：不破坏对方的机制
+3. **可叠加**：收益可以相加
+
+例如：
+- **ReRoPE + $\log n$ scaling**：前者保持局部，后者稳定熵，互补
+- **YaRN + 微调**：前者提供好初始化，后者适应新长度，可叠加
+
+### 17. 训练-推理一致性分析
+
+**定义17.1：训练-推理一致性**
+
+如果模型在训练长度$L_{train}$内，训练和推理阶段的行为完全一致，则称满足"训练-推理一致性"：
+$$
+f_{train}(\boldsymbol{x}, L) = f_{infer}(\boldsymbol{x}, L), \quad \forall L \leq L_{train}
+$$
+
+**定理17.1：不同方法的一致性**
+
+| 方法 | 训练阶段 | 推理阶段 | 一致性 |
+|------|----------|----------|--------|
+| Baseline | RoPE | RoPE | ✓ |
+| PI | RoPE | RoPE+PI | ✗ |
+| NTK-aware | RoPE | RoPE+NTK | ✗ |
+| YaRN | RoPE | RoPE+YaRN | ✗ |
+| ReRoPE | RoPE | RoPE+ReRoPE | ✗ |
+| Key Norm | RoPE+KN | RoPE+KN | ✓ |
+
+**推导17.1：一致性的重要性**
+
+满足一致性的方法（如Key Norm）：
+- 训练长度内性能无损失
+- 无需担心"外推税"
+- 可以直接替换现有模型训练
+
+不满足一致性的方法（如YaRN）：
+- 推理时需要知道外推长度$L_{test}$
+- 训练长度内可能有性能损失
+- 需要特殊的推理实现
+
+**推导17.2：Dynamic Scaling实现一致性**
+
+通过动态调整缩放因子：
+$$
+s(L) = \max\left(1, \frac{L}{L_{train}}\right)
+$$
+
+可以实现近似的一致性：
+$$
+s(L_{train}) = 1 \Rightarrow f_{infer}(\boldsymbol{x}, L_{train}) \approx f_{train}(\boldsymbol{x}, L_{train})
+$$
+
+### 18. Flash Attention与外推技术的兼容性
+
+**定义18.1：Flash Attention的分块计算**
+
+Flash Attention将注意力计算分块进行：
+$$
+\text{Attention}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}) = \bigcup_{b=1}^{B} \text{BlockAttention}(\boldsymbol{Q}_b, \boldsymbol{K}, \boldsymbol{V})
+$$
+
+每块大小通常为128或256。
+
+**定理18.1：大多数外推方法与Flash Attention兼容**
+
+- **YaRN**：✓ 只修改$\theta_i$，不改变Attention形式
+- **NTK-aware**：✓ 同上
+- **Key Norm**：✓ 归一化可以在块内完成
+- **ReRoPE**：△ 需要特殊处理窗口边界
+
+**推导18.1：ReRoPE的分块挑战**
+
+ReRoPE的相对位置是分段的：
+$$
+\Delta(n,m) = \begin{cases}
+n-m, & n-m \leq w \\
+w, & n-m > w
+\end{cases}
+$$
+
+在分块计算时，某些块横跨窗口边界：
+$$
+\text{Block}_{i,j}: \quad n \in [i \cdot B, (i+1) \cdot B), \quad m \in [j \cdot B, (j+1) \cdot B)
+$$
+
+如果$n - m \approx w$，块内同时包含两种相对位置模式。
+
+**推导18.2：ReRoPE的高效实现**
+
+将块分为三类：
+1. **纯窗口内块**：$\max(n) - \min(m) < w$，使用标准RoPE
+2. **纯窗口外块**：$\min(n) - \max(m) > w$，使用固定$\Delta = w$
+3. **边界块**：混合，需要重复计算（数量很少）
+
+对于长序列（$L \gg w$），边界块占比：
+$$
+\frac{\text{\# boundary blocks}}{\text{\# total blocks}} \approx \frac{2w}{L \cdot B} \to 0
+$$
+
+因此额外开销可以忽略。
+
+### 19. 理论极限与未来方向
+
+**定理19.1：基于位置编码修改的外推上界**
+
+对于所有基于修改位置编码的外推方法，存在理论上界：
+$$
+\frac{L_{max}}{L_{train}} \leq \exp\left(\frac{C \cdot d}{\log d}\right)
+$$
+
+其中$C$是与模型架构相关的常数。
+
+**推导19.1：上界的证明思路**
+
+关键在于位置编码的表达能力：
+- RoPE使用$d/2$个频率
+- 每个频率能区分的位置数有限（受周期限制）
+- 总的可区分位置数为各频率的"乘积"
+
+详细推导从略，直观上：
+$$
+\text{可区分位置数} \approx \prod_{i=0}^{d/2-1} T_i \approx \exp\left(\sum_{i=0}^{d/2-1} \log T_i\right)
+$$
+
+由于$T_i$的几何级数性质，得到上述上界。
+
+**定理19.2：突破位置编码限制的方向**
+
+要实现真正的"无限"外推，需要：
+1. **动态位置编码**：根据序列内容自适应调整
+2. **相对位置学习**：端到端学习相对位置表示
+3. **架构改进**：如Transformer-XL的递归记忆
+
+**推导19.2：未来研究方向**
+
+1. **神经位置编码**：
+$$
+\theta_i = f_{\phi}(i, L, \text{context})
+$$
+用神经网络生成频率，$\phi$是可学习参数。
+
+2. **内容感知位置**：
+$$
+\boldsymbol{p}_i = g_{\psi}(\boldsymbol{x}_i, i, \{\boldsymbol{x}_j\}_{j<i})
+$$
+位置编码依赖于内容。
+
+3. **混合精度位置**：
+$$
+\text{Position} = \text{Local}(i, w) \oplus \text{Global}(i, L)
+$$
+局部和全局位置分开编码。
+
+### 20. 总结与实践建议
+
+**总结20.1：各方法的适用场景**
+
+| 场景 | 推荐方法 | 理由 |
+|------|----------|------|
+| 无资源微调 | YaRN | 免训练效果最好（除ReRoPE外） |
+| 有资源微调 | PI + 微调 | 简单，微调后效果好 |
+| 无限外推 | ReRoPE | 理论上可无限外推 |
+| 从零训练 | Key Norm + RoPE | 训练效果好，外推能力强 |
+| 对话场景 | YaRN + Dynamic | 保持短文本性能 |
+
+**建议20.1：超参数设置**
+
+**YaRN**：
+- $r_{max} = 3$（临界圈数）
+- 温度缩放：$\lambda = 1 + 0.2 \log s$
+
+**ReRoPE**：
+- 窗口大小：$w = L_{train} / 2$
+- 压缩因子：$k = \infty$（极限形式）
+
+**Key Norm**：
+- 只归一化Key，不归一化Query
+- 必须配合RoPE使用
+- 如果同时归一化Q和K，需要加温度参数$\lambda = 4\log n$
+
+**建议20.2：实现注意事项**
+
+1. **数值稳定性**：
+   - 归一化时加上$\epsilon = 10^{-6}$防止除零
+   - 注意力分数clip到合理范围$[-10, 10]$
+
+2. **内存优化**：
+   - 使用Flash Attention减少内存
+   - KV Cache注意外推时的存储增长
+
+3. **渐进外推**：
+   - 不要一次性外推到太长（如512→32K）
+   - 建议阶梯式：512→2K→8K→32K
+   - 每个阶段微调少量步数
+
+**建议20.3：评估指标**
+
+除了PPL，还应关注：
+1. **长距离依赖**：Passkey Retrieval等任务
+2. **实际应用**：下游任务的性能
+3. **计算效率**：推理速度和内存占用
+
+综合评估才能选择最适合的方法。
 

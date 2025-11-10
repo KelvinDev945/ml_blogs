@@ -148,7 +148,579 @@ url={\url{https://spaces.ac.cn/archives/10427}},
 
 ---
 
-## 公式推导与注释
+## 推导
 
-TODO: 添加详细的数学公式推导和注释
+### 1. CR分解的形式化定义
+
+CR分解（Column-Row decomposition）是一种特殊的矩阵分解方法，它通过选择原矩阵的部分列和对应行来构造低秩近似。对于矩阵$\boldsymbol{M}\in\mathbb{R}^{n\times m}$，我们可以将其写成$\boldsymbol{M}=\boldsymbol{X}\boldsymbol{Y}$的形式，其中$\boldsymbol{X}\in\mathbb{R}^{n\times l}$，$\boldsymbol{Y}\in\mathbb{R}^{l\times m}$。
+
+**定义1**（CR分解）：给定矩阵$\boldsymbol{M}=\boldsymbol{X}\boldsymbol{Y}$和秩参数$r < l$，CR分解寻找索引集$S\subset\{1,2,\cdots,l\}$满足$|S|=r$，使得
+$$\boldsymbol{M}\approx \boldsymbol{C}\boldsymbol{R} = \boldsymbol{X}_{[:,S]}\boldsymbol{Y}_{[S,:]}$$
+其中$\boldsymbol{C}\in\mathbb{R}^{n\times r}$由$\boldsymbol{X}$的$r$列组成，$\boldsymbol{R}\in\mathbb{R}^{r\times m}$由$\boldsymbol{Y}$的对应$r$行组成。
+
+更一般地，我们可以引入权重矩阵$\boldsymbol{\Lambda}\in\mathbb{R}^{r\times r}$，得到加权CR分解：
+$$\boldsymbol{M}\approx \boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R}$$
+
+**命题1**（选择矩阵表示）：令$\boldsymbol{S}\in\{0,1\}^{l\times r}$为选择矩阵，其中$S_{i,j}=1$当且仅当$i=s_j$（第$j$个被选中的索引），则有
+$$\boldsymbol{C} = \boldsymbol{X}\boldsymbol{S},\quad \boldsymbol{R} = \boldsymbol{S}^{\top}\boldsymbol{Y}$$
+
+证明：选择矩阵$\boldsymbol{S}$的第$j$列是一个单位向量，其第$s_j$个位置为1，其余为0。因此$\boldsymbol{X}\boldsymbol{S}$选择了$\boldsymbol{X}$的第$s_1,s_2,\cdots,s_r$列，$\boldsymbol{S}^{\top}\boldsymbol{Y}$选择了$\boldsymbol{Y}$的对应行。
+
+### 2. 列子集选择问题（Column Subset Selection Problem）
+
+**定义2**（CSSP）：列子集选择问题（Column Subset Selection Problem, CSSP）定义为：给定$\boldsymbol{A}\in\mathbb{R}^{n\times m}$和整数$r$，寻找$r$个列的索引集$S$，使得
+$$\min_{S:|S|=r}\min_{\boldsymbol{Z}\in\mathbb{R}^{r\times m}}\|\boldsymbol{A} - \boldsymbol{A}_{[:,S]}\boldsymbol{Z}\|_F$$
+
+这个问题在CR分解中有直接应用。当我们固定了列选择$\boldsymbol{C}$后，最优的$\boldsymbol{Z}$可以通过伪逆得到：
+$$\boldsymbol{Z}^* = \boldsymbol{C}^{\dagger}\boldsymbol{A} = (\boldsymbol{C}^{\top}\boldsymbol{C})^{-1}\boldsymbol{C}^{\top}\boldsymbol{A}$$
+
+**定理1**（CSSP的复杂度）：CSSP问题是NP-hard的。
+
+证明思路：可以归约到组合优化问题。从$l$个列中选择$r$个的组合数为$\binom{l}{r}$，穷举搜索的复杂度为指数级。即使贪婪算法也无法保证常数近似比。
+
+因此，我们需要随机化算法和近似算法来处理CSSP。
+
+### 3. Leverage Score采样理论
+
+leverage score是一种重要的列重要性度量，它源于统计回归和数值线性代数。
+
+**定义3**（Leverage Scores）：给定矩阵$\boldsymbol{A}\in\mathbb{R}^{n\times m}$，设其秩-$r$ SVD为$\boldsymbol{A}\approx\boldsymbol{U}_r\boldsymbol{\Sigma}_r\boldsymbol{V}_r^{\top}$，则第$i$列的leverage score定义为：
+$$\tau_i = \|\boldsymbol{U}_r^{\top}\boldsymbol{a}_i\|^2 = \sum_{j=1}^r U_{j,i}^2$$
+其中$\boldsymbol{a}_i$是$\boldsymbol{A}$的第$i$列，$\boldsymbol{U}_r$是左奇异向量矩阵的前$r$列。
+
+**性质**：leverage scores满足：
+$$\sum_{i=1}^m \tau_i = \text{Tr}(\boldsymbol{U}_r^{\top}\boldsymbol{U}_r) = r$$
+
+**几何解释**：$\tau_i$度量了第$i$列在前$r$个左奇异向量张成的子空间中的"影响力"。leverage score大的列对子空间贡献更多。
+
+对于CR分解，我们可以定义联合leverage score。设$\boldsymbol{M}=\boldsymbol{X}\boldsymbol{Y}$，令
+$$\boldsymbol{v}_i = \text{vec}(\boldsymbol{x}_i\boldsymbol{y}_i^{\top})\in\mathbb{R}^{nm}$$
+堆叠所有$\boldsymbol{v}_i$得到矩阵$\boldsymbol{V}=(\boldsymbol{v}_1,\cdots,\boldsymbol{v}_l)\in\mathbb{R}^{nm\times l}$。
+
+**定义4**（CR的Leverage Scores）：对于CR分解，第$i$个列-行对的leverage score定义为：
+$$\ell_i = \|\boldsymbol{P}_r\boldsymbol{v}_i\|^2 / \|\boldsymbol{v}_i\|^2$$
+其中$\boldsymbol{P}_r$是$\boldsymbol{V}$的前$r$个主成分子空间的投影矩阵。
+
+然而，直接计算leverage scores需要SVD，代价为$\mathcal{O}(\min(nm^2l, n^2ml))$，这太昂贵。因此我们使用更简单的采样分布。
+
+### 4. 基于模长的采样策略
+
+回顾正文中的结果，最优采样分布为：
+$$p_i = \frac{\|\boldsymbol{v}_i\|}{\sum_{j=1}^l\|\boldsymbol{v}_j\|} = \frac{\|\boldsymbol{x}_i\|\cdot\|\boldsymbol{y}_i\|}{\sum_{j=1}^l\|\boldsymbol{x}_j\|\cdot\|\boldsymbol{y}_j\|}$$
+
+现在我们严格推导这个结果并给出误差界。
+
+**定理2**（无偏估计）：定义采样估计
+$$\hat{\boldsymbol{M}} = \frac{1}{r}\sum_{j=1}^r \frac{\boldsymbol{x}_{s_j}\boldsymbol{y}_{s_j}^{\top}}{p_{s_j}}$$
+其中$s_1,\cdots,s_r$独立同分布地从分布$\boldsymbol{p}=(p_1,\cdots,p_l)$中采样，则
+$$\mathbb{E}[\hat{\boldsymbol{M}}] = \boldsymbol{M}$$
+
+证明：
+\begin{align}
+\mathbb{E}[\hat{\boldsymbol{M}}] &= \frac{1}{r}\sum_{j=1}^r \mathbb{E}\left[\frac{\boldsymbol{x}_{s_j}\boldsymbol{y}_{s_j}^{\top}}{p_{s_j}}\right] \\
+&= \frac{1}{r}\sum_{j=1}^r \sum_{i=1}^l p_i \cdot \frac{\boldsymbol{x}_i\boldsymbol{y}_i^{\top}}{p_i} \\
+&= \frac{1}{r}\sum_{j=1}^r \sum_{i=1}^l \boldsymbol{x}_i\boldsymbol{y}_i^{\top} \\
+&= \sum_{i=1}^l \boldsymbol{x}_i\boldsymbol{y}_i^{\top} = \boldsymbol{M}
+\end{align}
+
+**定理3**（方差界）：采样估计的方差为：
+$$\mathbb{E}\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F^2 = \frac{1}{r}\left(\sum_{i=1}^l \frac{\|\boldsymbol{v}_i\|^2}{p_i} - \|\boldsymbol{M}\|_F^2\right)$$
+
+证明：由于$s_1,\cdots,s_r$独立同分布，
+\begin{align}
+\mathbb{E}\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F^2 &= \mathbb{E}\left\|\frac{1}{r}\sum_{j=1}^r\left(\frac{\boldsymbol{v}_{s_j}}{p_{s_j}} - \boldsymbol{M}\right)\right\|^2 \\
+&= \frac{1}{r^2}\sum_{j=1}^r \mathbb{E}\left\|\frac{\boldsymbol{v}_{s_j}}{p_{s_j}} - \boldsymbol{M}\right\|^2 \\
+&= \frac{1}{r}\mathbb{E}\left\|\frac{\boldsymbol{v}_{s_1}}{p_{s_1}} - \boldsymbol{M}\right\|^2
+\end{align}
+其中第二行利用了独立性（交叉项期望为0），第三行利用了同分布性。
+
+继续计算：
+\begin{align}
+\mathbb{E}\left\|\frac{\boldsymbol{v}_{s_1}}{p_{s_1}} - \boldsymbol{M}\right\|^2 &= \mathbb{E}\left\|\frac{\boldsymbol{v}_{s_1}}{p_{s_1}}\right\|^2 - \|\boldsymbol{M}\|^2 \\
+&= \sum_{i=1}^l p_i \cdot \frac{\|\boldsymbol{v}_i\|^2}{p_i^2} - \|\boldsymbol{M}\|^2 \\
+&= \sum_{i=1}^l \frac{\|\boldsymbol{v}_i\|^2}{p_i} - \|\boldsymbol{M}\|_F^2
+\end{align}
+
+**推论1**（最优分布）：使方差最小的分布为
+$$p_i^* = \frac{\|\boldsymbol{v}_i\|}{\sum_{j=1}^l\|\boldsymbol{v}_j\|}$$
+对应的最小方差为：
+$$\mathbb{E}\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F^2 = \frac{1}{r}\left[\left(\sum_{i=1}^l\|\boldsymbol{v}_i\|\right)^2 - \|\boldsymbol{M}\|_F^2\right]$$
+
+证明：这是带约束$\sum_i p_i=1$的凸优化问题。构造拉格朗日函数：
+$$\mathcal{L} = \sum_{i=1}^l \frac{\|\boldsymbol{v}_i\|^2}{p_i} + \lambda\left(\sum_{i=1}^l p_i - 1\right)$$
+
+求导并令其为零：
+$$\frac{\partial\mathcal{L}}{\partial p_i} = -\frac{\|\boldsymbol{v}_i\|^2}{p_i^2} + \lambda = 0$$
+
+得到$p_i = \|\boldsymbol{v}_i\|/\sqrt{\lambda}$。代入约束$\sum_i p_i=1$得到$\sqrt{\lambda}=\sum_j\|\boldsymbol{v}_j\|$，因此
+$$p_i^* = \frac{\|\boldsymbol{v}_i\|}{\sum_{j=1}^l\|\boldsymbol{v}_j\|}$$
+
+### 5. 概率误差界的推导
+
+现在我们推导更精细的概率界，而不仅仅是期望误差。
+
+**定理4**（Frobenius范数的概率界）：设$\hat{\boldsymbol{M}}$是按$p_i^*$采样$r$次得到的估计，则对任意$\delta\in(0,1)$，以至少$1-\delta$的概率有：
+$$\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F \leq \frac{1}{\sqrt{r}}\left(\sum_{i=1}^l\|\boldsymbol{v}_i\|\right)\sqrt{\frac{2\ln(2/\delta)}{1}}$$
+
+证明：定义独立随机变量
+$$\boldsymbol{Z}_j = \frac{\boldsymbol{v}_{s_j}}{p_{s_j}} - \boldsymbol{M}$$
+
+则$\mathbb{E}[\boldsymbol{Z}_j]=0$且$\|\boldsymbol{Z}_j\|$有界。我们有
+$$\hat{\boldsymbol{M}} - \boldsymbol{M} = \frac{1}{r}\sum_{j=1}^r \boldsymbol{Z}_j$$
+
+注意到
+$$\|\boldsymbol{Z}_j\| \leq \frac{\|\boldsymbol{v}_{s_j}\|}{p_{s_j}} + \|\boldsymbol{M}\| \leq \frac{\sum_i\|\boldsymbol{v}_i\|}{\min_i p_i} + \|\boldsymbol{M}\|$$
+
+由于$p_i^* = \|\boldsymbol{v}_i\|/Z$（其中$Z=\sum_i\|\boldsymbol{v}_i\|$），我们有$\min_i p_i \geq \|\boldsymbol{v}_{\min}\|/Z$。
+
+应用矩阵Bernstein不等式（见参考文献[Tropp, 2012]），可得上述概率界。具体细节涉及复杂的集中不等式理论。
+
+**定理5**（谱范数界）：以高概率，采样估计还满足谱范数界：
+$$\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_2 \leq \mathcal{O}\left(\frac{\sigma_{\max}(\boldsymbol{M})\sqrt{l\log l}}{\sqrt{r}}\right)$$
+其中$\sigma_{\max}(\boldsymbol{M})$是$\boldsymbol{M}$的最大奇异值。
+
+这个界说明：随着采样数$r$增加，误差以$1/\sqrt{r}$的速度下降。
+
+### 6. 与截断SVD的误差对比
+
+回顾截断SVD给出的最优秩-$r$近似：
+$$\boldsymbol{M}_r^{\text{SVD}} = \boldsymbol{U}_r\boldsymbol{\Sigma}_r\boldsymbol{V}_r^{\top}$$
+
+其误差为：
+$$\|\boldsymbol{M} - \boldsymbol{M}_r^{\text{SVD}}\|_F = \sqrt{\sum_{i=r+1}^{\min(n,m)}\sigma_i^2}$$
+
+这是所有秩-$r$矩阵中的最优误差（Eckart-Young定理）。
+
+**定理6**（CR vs SVD误差比较）：对于CR采样估计$\hat{\boldsymbol{M}}$，期望误差满足
+$$\mathbb{E}\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F^2 \geq \|\boldsymbol{M} - \boldsymbol{M}_r^{\text{SVD}}\|_F^2$$
+
+这是因为SVD提供了全局最优解，而CR受到列选择的约束。
+
+**定量比较**：设$\boldsymbol{M}$的奇异值为$\sigma_1\geq\sigma_2\geq\cdots$，则
+- SVD误差：$\|\boldsymbol{M} - \boldsymbol{M}_r^{\text{SVD}}\|_F^2 = \sum_{i>r}\sigma_i^2$
+- CR期望误差：$\mathbb{E}\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F^2 = \frac{1}{r}\left[(\sum_i\|\boldsymbol{v}_i\|)^2 - \|\boldsymbol{M}\|_F^2\right]$
+
+**例子**：假设$\boldsymbol{M}$的奇异值呈快速衰减，即$\sigma_i \approx \sigma_1 e^{-\alpha i}$，则：
+- SVD能捕获主要能量，误差小
+- CR的性能依赖于列之间的相关性：如果$\boldsymbol{v}_i$之间正交性强，CR表现接近SVD；如果相关性强，CR误差可能显著大于SVD
+
+**近似比**：在最坏情况下，可以证明存在常数$c$使得
+$$\mathbb{E}\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F^2 \leq c\cdot r\cdot \|\boldsymbol{M} - \boldsymbol{M}_r^{\text{SVD}}\|_F^2$$
+
+但在实际应用中，通过leverage score采样可以获得更好的常数$c$。
+
+### 7. Determinantal Point Process (DPP) 采样
+
+DPP是一种优雅的采样方法，它能自然地捕获多样性，在CR分解中表现出色。
+
+**定义5**（DPP）：一个离散DPP由核矩阵$\boldsymbol{L}\in\mathbb{R}^{l\times l}$（半正定）定义。子集$S\subseteq\{1,\cdots,l\}$的采样概率为：
+$$\mathbb{P}(S) \propto \det(\boldsymbol{L}_{S,S})$$
+其中$\boldsymbol{L}_{S,S}$是$\boldsymbol{L}$的子矩阵，索引为$S$。
+
+归一化常数为：
+$$\sum_{S\subseteq\{1,\cdots,l\}}\det(\boldsymbol{L}_{S,S}) = \det(\boldsymbol{I} + \boldsymbol{L})$$
+
+**DPP用于CR分解**：定义核矩阵
+$$\boldsymbol{L}_{ij} = \langle \boldsymbol{v}_i, \boldsymbol{v}_j\rangle = \text{Tr}(\boldsymbol{y}_i\boldsymbol{x}_i^{\top}\boldsymbol{x}_j\boldsymbol{y}_j^{\top})$$
+
+即$\boldsymbol{L} = \boldsymbol{V}^{\top}\boldsymbol{V}$，其中$\boldsymbol{V}=(\boldsymbol{v}_1,\cdots,\boldsymbol{v}_l)$。
+
+**k-DPP**：为了精确采样大小为$r$的子集，我们使用$k$-DPP，它条件化在$|S|=r$：
+$$\mathbb{P}(S \mid |S|=r) \propto \det(\boldsymbol{L}_{S,S})$$
+
+**定理7**（DPP的期望投影）：如果$S$从$k$-DPP采样（$k=r$），定义投影
+$$\boldsymbol{P}_S = \boldsymbol{V}_S(\boldsymbol{V}_S^{\top}\boldsymbol{V}_S)^{-1}\boldsymbol{V}_S^{\top}$$
+其中$\boldsymbol{V}_S = (\boldsymbol{v}_{s_1},\cdots,\boldsymbol{v}_{s_r})$，则
+$$\mathbb{E}[\boldsymbol{P}_S] = \boldsymbol{U}_r\boldsymbol{U}_r^{\top}$$
+其中$\boldsymbol{U}_r$是$\boldsymbol{V}$的前$r$个左奇异向量。
+
+这表明DPP自动"瞄准"主要子空间！
+
+**DPP采样算法**：
+1. 计算$\boldsymbol{L} = \boldsymbol{V}^{\top}\boldsymbol{V}$的特征分解：$\boldsymbol{L} = \boldsymbol{Q}\boldsymbol{\Lambda}\boldsymbol{Q}^{\top}$
+2. 对每个特征值$\lambda_i$，以概率$\lambda_i/(\lambda_i+1)$选入集合$J$
+3. 从$J$中采样基向量，构造子集$S$
+
+复杂度为$\mathcal{O}(l^3)$（特征分解）$+$ $\mathcal{O}(lr^2)$（采样）。
+
+**定理8**（DPP的误差界）：使用DPP采样的CR近似满足：
+$$\mathbb{E}\|\boldsymbol{M} - \boldsymbol{C}\boldsymbol{C}^{\dagger}\boldsymbol{M}\|_F^2 \leq \frac{r}{r-k+1}\|\boldsymbol{M} - \boldsymbol{M}_k^{\text{SVD}}\|_F^2$$
+对于$k\leq r$。
+
+这给出了与最优SVD近似的相对误差保证。
+
+**DPP的优势**：
+1. 多样性：自动选择"分散"的列，避免冗余
+2. 理论保证：有严格的误差界
+3. 无需调参：不需要手工设计采样分布
+
+**DPP的劣势**：
+1. 计算代价：需要$\mathcal{O}(l^3)$时间
+2. 对于超大规模问题，仍需近似DPP方法
+
+### 8. QR分解的列主元策略
+
+列主元QR（Column-Pivoted QR, CPQR）是一种经典的确定性列选择方法。
+
+**定义6**（列主元QR）：给定$\boldsymbol{A}\in\mathbb{R}^{n\times m}$，CPQR寻找置换矩阵$\boldsymbol{\Pi}$和正交矩阵$\boldsymbol{Q}$、上三角矩阵$\boldsymbol{R}$使得
+$$\boldsymbol{A}\boldsymbol{\Pi} = \boldsymbol{Q}\boldsymbol{R}$$
+其中$\boldsymbol{\Pi}$的选择使得$\boldsymbol{R}$的对角元素递减：$|R_{11}|\geq |R_{22}|\geq\cdots\geq |R_{mm}|$。
+
+**贪婪列主元算法**：
+```
+初始化：剩余矩阵 A_res = A
+for k = 1 to r:
+    选择列 j = argmax_i ||A_res[:,i]||
+    交换 A[:, k] 和 A[:, j]
+    Householder变换消去 A[k:, k] 下方元素
+    更新 A_res
+```
+
+复杂度：$\mathcal{O}(nmr)$。
+
+**定理9**（CPQR的误差界）：设$\boldsymbol{R}_{11}\in\mathbb{R}^{r\times r}$是前$r$步的子矩阵，则
+$$\sigma_{\min}(\boldsymbol{R}_{11}) \geq \sigma_r(\boldsymbol{A})/\sqrt{1 + r(m-r)}$$
+
+这保证了选出的列具有良好的数值性质。
+
+**秩揭示性质**：CPQR能有效识别矩阵的数值秩。如果$\sigma_{r+1}(\boldsymbol{A}) \ll \sigma_r(\boldsymbol{A})$，则$|R_{r+1,r+1}|$会显著小于$|R_{rr}|$。
+
+### 9. 强秩揭示QR分解（RRQR）
+
+标准CPQR的秩揭示能力有限。强秩揭示QR（Rank-Revealing QR, RRQR）通过后处理改进。
+
+**定义7**（RRQR条件）：QR分解$\boldsymbol{A}\boldsymbol{\Pi}=\boldsymbol{Q}\boldsymbol{R}$是$(f,g)$-RRQR，如果存在常数$f,g$使得
+$$\sigma_i(\boldsymbol{R}_{11}) \leq f\sigma_i(\boldsymbol{A}), \quad i=1,\cdots,r$$
+$$\sigma_i(\boldsymbol{R}_{22}) \geq g\sigma_{r+i}(\boldsymbol{A}), \quad i=1,\cdots,m-r$$
+其中$\boldsymbol{R} = \begin{pmatrix}\boldsymbol{R}_{11} & \boldsymbol{R}_{12} \\ 0 & \boldsymbol{R}_{22}\end{pmatrix}$。
+
+**Gu-Eisenstat RRQR算法**：
+1. 执行标准CPQR得到初始$\boldsymbol{Q},\boldsymbol{R},\boldsymbol{\Pi}$
+2. while 未收敛:
+   - 检查$\boldsymbol{R}_{12}$中的大元素
+   - 如果存在$(i,j)$使得$|R_{ij}| > \tau\cdot|R_{ii}|$（$\tau$是阈值），交换列$i$和$r+j$
+   - 更新QR分解
+3. 返回$\boldsymbol{Q},\boldsymbol{R},\boldsymbol{\Pi}$
+
+**定理10**（RRQR的近似性能）：使用RRQR选出的前$r$列构造的近似满足
+$$\|\boldsymbol{A} - \boldsymbol{A}_{[:,S]}\boldsymbol{A}_{[:,S]}^{\dagger}\boldsymbol{A}\|_F^2 \leq (1+f^2r(m-r))\|\boldsymbol{A} - \boldsymbol{A}_r^{\text{SVD}}\|_F^2$$
+
+对于$f=2$，这给出了可控的近似比。
+
+**复杂度**：RRQR的复杂度为$\mathcal{O}(nmr)$ + 迭代次数$\times$ $\mathcal{O}(nmr)$。实际中迭代次数很少（通常<5）。
+
+### 10. 计算复杂度优势分析
+
+现在我们系统地比较不同方法的计算复杂度。
+
+**方法对比表**：
+
+| 方法 | 列选择复杂度 | 近似构造复杂度 | 总复杂度 | 误差保证 |
+|------|------------|--------------|---------|---------|
+| 截断SVD | $\mathcal{O}(\min(nm^2,n^2m))$ | $\mathcal{O}(nmr)$ | $\mathcal{O}(\min(nm^2,n^2m))$ | 最优 |
+| 模长排序 | $\mathcal{O}(l)$ | $\mathcal{O}(rmn)$ | $\mathcal{O}(l+rmn)$ | 无保证 |
+| 随机采样 | $\mathcal{O}(l)$ | $\mathcal{O}(rmn)$ | $\mathcal{O}(l+rmn)$ | 期望界 |
+| DPP采样 | $\mathcal{O}(l^3)$ | $\mathcal{O}(rmn)$ | $\mathcal{O}(l^3+rmn)$ | 相对误差 |
+| CPQR | $\mathcal{O}(lmn)$ | 已包含 | $\mathcal{O}(lmn)$ | 弱保证 |
+| RRQR | $\mathcal{O}(lmn)$ | 已包含 | $\mathcal{O}(lmn)$ | 强保证 |
+
+**详细分析**：
+
+1. **截断SVD**：
+   - 对于矩阵$\boldsymbol{M}\in\mathbb{R}^{n\times m}$（$n\geq m$），标准SVD复杂度为$\mathcal{O}(nm^2)$
+   - 如果只需前$r$个奇异值/向量，可用Lanczos或随机化SVD降到$\mathcal{O}(nmr)$
+   - 优点：最优误差
+   - 缺点：无CR结构、不可解释、对非线性映射不友好
+
+2. **模长排序/采样**：
+   - 计算$\|\boldsymbol{x}_i\|\|\boldsymbol{y}_i\|$需要$\mathcal{O}(n+m)$每列，总计$\mathcal{O}(l(n+m))$
+   - 排序/采样$\mathcal{O}(l\log l)$或$\mathcal{O}(l)$
+   - 构造$\boldsymbol{C}\boldsymbol{R}$：$\mathcal{O}(rmn)$（矩阵乘法）
+   - 优点：极快、易实现
+   - 缺点：误差无理论保证、可能选到冗余列
+
+3. **DPP采样**：
+   - 计算核$\boldsymbol{L}$：需要$\boldsymbol{V}^{\top}\boldsymbol{V}$，若直接做是$\mathcal{O}(l^2nm)$
+   - 可以通过$\boldsymbol{L}_{ij} = \boldsymbol{x}_i^{\top}\boldsymbol{x}_j\cdot\boldsymbol{y}_i^{\top}\boldsymbol{y}_j$降到$\mathcal{O}(l^2(n+m))$
+   - 特征分解$\boldsymbol{L}$：$\mathcal{O}(l^3)$
+   - DPP采样：$\mathcal{O}(lr^2)$
+   - 优点：理论保证强、自动多样性
+   - 缺点：$l$很大时$\mathcal{O}(l^3)$不可承受
+
+4. **CPQR/RRQR**：
+   - 对$\boldsymbol{X}\boldsymbol{Y}$做QR：需要先形成乘积，$\mathcal{O}(lmn)$
+   - QR分解：$\mathcal{O}(m^2n)$或$\mathcal{O}(n^2m)$（取决于形状）
+   - 对于CR分解，可以在不显式形成$\boldsymbol{X}\boldsymbol{Y}$的情况下做CPQR，这需要隐式矩阵-向量乘法
+   - 优点：确定性、数值稳定
+   - 缺点：比简单采样慢
+
+**大规模场景（$l,m,n$都很大）**：
+- 如果$l$不太大（$l<10^4$）：优先DPP或RRQR
+- 如果$l$很大（$l>10^6$）：只能用简单采样
+- 如果需要在线更新：随机采样是唯一选择
+- 如果$r\ll l$且需要高精度：随机化SVD + RRQR后处理
+
+### 11. 在大规模矩阵中的应用
+
+**应用1：加速矩阵乘法**
+给定$\boldsymbol{X}\in\mathbb{R}^{n\times l}$，$\boldsymbol{Y}\in\mathbb{R}^{l\times m}$，直接计算$\boldsymbol{X}\boldsymbol{Y}$需要$\mathcal{O}(lmn)$。
+
+使用CR近似：
+$$\boldsymbol{X}\boldsymbol{Y} \approx \boldsymbol{X}_{[:,S]}\boldsymbol{\Lambda}\boldsymbol{Y}_{[S,:]}$$
+
+计算步骤：
+1. 采样列/行（$\mathcal{O}(l)$）
+2. 计算$\boldsymbol{C}=\boldsymbol{X}_{[:,S]}$（已有）
+3. 计算$\boldsymbol{R}=\boldsymbol{Y}_{[S,:]}$（已有）
+4. 计算$\boldsymbol{\Lambda}$（$\mathcal{O}(r^2(n+m))$）
+5. 计算$\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R}$（$\mathcal{O}(rmn + r^2n + r^2m)$）
+
+总复杂度：$\mathcal{O}(rmn)$，当$r\ll l$时显著加速。
+
+**误差分析**：设真实乘积为$\boldsymbol{M}=\boldsymbol{X}\boldsymbol{Y}$，近似为$\hat{\boldsymbol{M}}$，则相对误差
+$$\epsilon = \frac{\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F}{\|\boldsymbol{M}\|_F}$$
+
+根据定理4，期望相对误差满足
+$$\mathbb{E}[\epsilon^2] = \frac{1}{r}\left[\frac{(\sum_i\|\boldsymbol{v}_i\|)^2}{\|\boldsymbol{M}\|_F^2} - 1\right]$$
+
+定义"相干性"指标
+$$\mu = \frac{(\sum_i\|\boldsymbol{v}_i\|)^2}{l\|\boldsymbol{M}\|_F^2}$$
+
+则$\mathbb{E}[\epsilon^2] = \frac{\mu l - 1}{r}$。
+
+当$\mu\approx 1$（列-行对近似正交）时，只需$r=\mathcal{O}(l/\epsilon^2)$即可达到误差$\epsilon$。
+
+**应用2：推荐系统中的矩阵补全**
+用户-物品评分矩阵$\boldsymbol{R}\in\mathbb{R}^{n\times m}$（$n$个用户，$m$个物品），通常是低秩的。
+
+使用CR分解$\boldsymbol{R}\approx\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R}_{\text{rows}}$：
+- $\boldsymbol{C}$：选出的代表性用户组
+- $\boldsymbol{R}_{\text{rows}}$：选出的代表性物品组
+- $\boldsymbol{\Lambda}$：用户组-物品组的交互矩阵
+
+优点：
+1. 可解释性：可以识别"原型用户"和"原型物品"
+2. 冷启动：新用户只需与代表性物品比较
+3. 实时推荐：只需计算$r$维向量内积
+
+**应用3：神经网络压缩**
+全连接层的权重矩阵$\boldsymbol{W}\in\mathbb{R}^{d_{\text{out}}\times d_{\text{in}}}$可以用CR近似：
+$$\boldsymbol{W} \approx \boldsymbol{W}_{[:,S]}\boldsymbol{\Lambda}\boldsymbol{W}_{[S,:]}$$
+
+这相当于在输入-输出之间插入一个$r$维的"瓶颈层"，且瓶颈层的基是从原始权重中选出的。
+
+前向传播：
+$$\boldsymbol{y} = \boldsymbol{W}\boldsymbol{x} \approx \boldsymbol{W}_{[:,S]}(\boldsymbol{\Lambda}(\boldsymbol{W}_{[S,:]}\boldsymbol{x}))$$
+
+计算量从$\mathcal{O}(d_{\text{in}}d_{\text{out}})$降到$\mathcal{O}(r(d_{\text{in}}+d_{\text{out}}))$。
+
+与Tucker分解等方法相比，CR的优势是保留了原始神经元的语义。
+
+**应用4：大规模核方法**
+核矩阵$\boldsymbol{K}\in\mathbb{R}^{n\times n}$，$K_{ij}=k(\boldsymbol{x}_i,\boldsymbol{x}_j)$，通常$n$很大（$>10^6$）。
+
+Nyström方法：选择$r$个"地标点"$S$，近似
+$$\boldsymbol{K} \approx \boldsymbol{K}_{[:,S]}\boldsymbol{K}_{S,S}^{-1}\boldsymbol{K}_{[S,:]}$$
+
+这正是CR分解的一个特例（$\boldsymbol{\Lambda}=\boldsymbol{K}_{S,S}^{-1}$）。
+
+使用leverage score采样选择地标点可以保证
+$$\|\boldsymbol{K} - \boldsymbol{K}_{[:,S]}\boldsymbol{K}_{S,S}^{-1}\boldsymbol{K}_{[S,:]} \|_F \leq \epsilon\|\boldsymbol{K}\|_F$$
+只需$r=\mathcal{O}(k/\epsilon^2)$个地标点（$k$是有效秩）。
+
+复杂度：
+- 构造近似：$\mathcal{O}(nr^2 + r^3)$
+- 矩阵向量乘法：从$\mathcal{O}(n^2)$降到$\mathcal{O}(nr)$
+
+**应用5：张量分解的初始化**
+高阶张量$\mathcal{T}\in\mathbb{R}^{n_1\times n_2\times n_3}$的CP分解需要良好初始化。
+
+将张量展开为矩阵$\boldsymbol{T}^{(1)}\in\mathbb{R}^{n_1\times n_2n_3}$，应用CR分解选择代表性"纤维"，然后在低维空间中初始化CP分解。
+
+这比随机初始化收敛更快，且避免局部极小值。
+
+### 12. 加权CR分解的最优权重
+
+回到加权CR分解$\boldsymbol{M}\approx\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R}$，我们已经知道当$\boldsymbol{C},\boldsymbol{R}$固定时，
+$$\boldsymbol{\Lambda}^* = \boldsymbol{C}^{\dagger}\boldsymbol{M}\boldsymbol{R}^{\dagger}$$
+
+现在推导对角$\boldsymbol{\Lambda}$的情况。
+
+**定理11**（对角权重的最优解）：设$\boldsymbol{C},\boldsymbol{R}$已固定，求解
+$$\min_{\boldsymbol{\Lambda}=\text{diag}(\lambda_1,\cdots,\lambda_r)}\|\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R} - \boldsymbol{M}\|_F^2$$
+
+令$\boldsymbol{c}_i$为$\boldsymbol{C}$的第$i$列，$\boldsymbol{r}_i$为$\boldsymbol{R}$的第$i$行，则最优解满足：
+$$\lambda_i^* = \frac{\langle\boldsymbol{c}_i\boldsymbol{r}_i, \boldsymbol{M}\rangle_F}{\|\boldsymbol{c}_i\|^2\|\boldsymbol{r}_i\|^2}$$
+
+证明：目标函数可以写成
+\begin{align}
+\|\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R} - \boldsymbol{M}\|_F^2 &= \left\|\sum_{i=1}^r \lambda_i\boldsymbol{c}_i\boldsymbol{r}_i - \boldsymbol{M}\right\|_F^2 \\
+&= \sum_{i=1}^r\lambda_i^2\|\boldsymbol{c}_i\|^2\|\boldsymbol{r}_i\|^2 - 2\sum_{i=1}^r\lambda_i\langle\boldsymbol{c}_i\boldsymbol{r}_i,\boldsymbol{M}\rangle_F + \|\boldsymbol{M}\|_F^2
+\end{align}
+
+这是关于$\lambda_i$的二次函数（假设$\boldsymbol{c}_i\boldsymbol{r}_i$相互正交，否则需要联合优化）。对$\lambda_i$求导：
+$$\frac{\partial}{\partial\lambda_i}\|\cdots\|_F^2 = 2\lambda_i\|\boldsymbol{c}_i\|^2\|\boldsymbol{r}_i\|^2 - 2\langle\boldsymbol{c}_i\boldsymbol{r}_i,\boldsymbol{M}\rangle_F$$
+
+令其为零得到$\lambda_i^*$。
+
+**推论2**：对于采样方法，$\lambda_i=(rp_i)^{-1}$对应的权重正是使得估计无偏的选择。
+
+### 13. 实用算法总结
+
+基于以上理论，我们总结实用的CR分解算法：
+
+**算法1：快速CR近似（基于模长）**
+```
+输入：X ∈ R^{n×l}, Y ∈ R^{l×m}, 秩 r
+输出：C, Λ, R
+
+1. 计算 w_i = ||x_i|| · ||y_i|| for i=1,...,l
+2. 选择 S = top-r indices by w
+3. C = X[:, S], R = Y[S, :]
+4. 计算 Λ = diag(λ_1,...,λ_r) 其中
+   λ_i = <c_i r_i, XY>_F / (||c_i||^2 ||r_i||^2)
+5. 返回 C, Λ, R
+```
+复杂度：$\mathcal{O}(l(n+m) + lmn + r(nm))$
+
+**算法2：随机CR近似（leverage score采样）**
+```
+输入：X, Y, r, 采样数 s > r
+输出：C, Λ, R
+
+1. 计算 p_i = ||x_i|| · ||y_i|| / Σ_j ||x_j|| · ||y_j||
+2. 采样 S = {s_1,...,s_s} ~ p (有放回)
+3. C = X[:, S] · diag(1/√(s·p_{s_i}))
+4. R = diag(1/√(s·p_{s_i})) · Y[S, :]
+5. (可选) 正交化: C ← orth(C)
+6. 计算 Λ = C^† · XY · R^†
+7. 返回 C, Λ, R
+```
+复杂度：$\mathcal{O}(l(n+m) + s(nm))$
+
+**算法3：RRQR-based CR近似**
+```
+输入：X, Y, r
+输出：C, R, Π
+
+1. M = XY  (或使用隐式矩阵-向量乘法)
+2. [Q, R, Π] = rrqr(M, r)  (RRQR分解)
+3. C = M[:, Π[:r]]
+4. R = C^† · M
+5. 返回 C, R
+```
+复杂度：$\mathcal{O}(lmn + nmr)$
+
+这三个算法代表了速度-精度的权衡：
+- 算法1最快但精度最低
+- 算法2中等速度、有理论保证
+- 算法3较慢但精度最高、数值最稳定
+
+### 14. 数值稳定性考虑
+
+在实际实现中，数值稳定性至关重要。
+
+**问题1：伪逆计算**
+计算$\boldsymbol{C}^{\dagger}$时，如果$\boldsymbol{C}$接近秩亏，直接用$(\boldsymbol{C}^{\top}\boldsymbol{C})^{-1}\boldsymbol{C}^{\top}$会数值不稳定。
+
+**解决方案**：使用SVD计算伪逆：
+$$\boldsymbol{C} = \boldsymbol{U}_C\boldsymbol{\Sigma}_C\boldsymbol{V}_C^{\top}$$
+$$\boldsymbol{C}^{\dagger} = \boldsymbol{V}_C\boldsymbol{\Sigma}_C^{-1}\boldsymbol{U}_C^{\top}$$
+其中$\boldsymbol{\Sigma}_C^{-1}$中对于$\sigma_i < \epsilon$的奇异值，设$1/\sigma_i=0$。
+
+**问题2：重复采样**
+独立重复采样可能选到同一列多次，导致$\boldsymbol{C}$秩亏。
+
+**解决方案1**：使用无放回采样（但理论分析变复杂）
+**解决方案2**：过采样，即采样$s=\omega(r)$个列，然后用RRQR选出其中最好的$r$个
+**解决方案3**：采样后正交化
+
+**问题3：权重尺度**
+当采样概率$p_i$很小时，权重$1/p_i$很大，导致数值不稳定。
+
+**解决方案**：归一化权重，或使用对数空间计算。
+
+**推荐实现**：
+```python
+import numpy as np
+from scipy.linalg import qr, svd
+
+def stable_pinv(C, tol=1e-10):
+    U, s, Vt = svd(C, full_matrices=False)
+    s_inv = np.where(s > tol, 1/s, 0)
+    return Vt.T @ np.diag(s_inv) @ U.T
+
+def cr_decomp_stable(X, Y, r):
+    # 计算采样概率
+    w = np.linalg.norm(X, axis=0) * np.linalg.norm(Y, axis=1)
+    p = w / w.sum()
+
+    # 过采样
+    s = min(3 * r, len(p))
+    S = np.random.choice(len(p), s, replace=False, p=p)
+
+    # 构造加权矩阵
+    C = X[:, S] / np.sqrt(s * p[S])
+    R = Y[S, :] / np.sqrt(s * p[S])[:, None]
+
+    # 正交化并降秩
+    Q, _ = qr(C)
+    C = Q[:, :r]
+
+    # 稳定计算权重
+    M = X @ Y
+    Lambda = stable_pinv(C) @ M @ stable_pinv(R.T).T
+
+    return C, Lambda, R[:r, :]
+```
+
+### 15. 理论与实践的差距
+
+最后，我们讨论理论结果与实际性能的差距。
+
+**理论假设 vs 实际情况**：
+
+1. **独立采样 vs 无放回采样**
+   - 理论：独立重复采样便于分析
+   - 实际：无放回采样性能更好（无重复、更多样性）
+   - 差距：实际误差通常小于理论上界
+
+2. **最坏情况 vs 平均情况**
+   - 理论界：针对最坏情况矩阵
+   - 实际矩阵：通常有更好的结构（如快速衰减的奇异值）
+   - 差距：实际中$r$远小于理论要求
+
+3. **Frobenius范数 vs 谱范数**
+   - 理论：Frobenius范数界更紧
+   - 实际：有时更关心谱范数或元素级误差
+   - 差距：不同范数下的性能可能差异很大
+
+4. **固定秩 vs 自适应秩**
+   - 理论：假设$r$已知
+   - 实际：需要自适应选择$r$（如通过交叉验证）
+   - 方法：绘制误差-秩曲线，选择拐点
+
+**改进方向**：
+
+1. **混合方法**：结合多种采样策略（如先leverage score粗选，再DPP精选）
+2. **迭代refinement**：初始CR分解后，迭代更新$\boldsymbol{C},\boldsymbol{R},\boldsymbol{\Lambda}$
+3. **自适应采样**：根据当前残差调整采样分布
+4. **分层采样**：对不同奇异值区间使用不同策略
+
+**实验建议**：
+
+对于新应用，建议按以下顺序尝试：
+1. 模长排序（baseline，最快）
+2. 随机leverage score采样（理论保证，较快）
+3. RRQR（确定性，高精度）
+4. DPP采样（如果$l$不太大且需要多样性）
+5. 混合/迭代方法（如果上述方法不够好）
+
+同时跟踪多个指标：
+- 计算时间
+- 近似误差（Frobenius范数、谱范数、相对误差）
+- 列的多样性（如条件数、最小奇异值）
+- 任务性能（如果用于下游任务）
+
+通过这些详细推导，我们建立了CR分解从理论到实践的完整图景，涵盖了算法设计、误差分析、复杂度优化和数值稳定性等多个方面。CR分解作为一种兼顾效率与可解释性的低秩近似方法，在大规模数据处理中有广阔的应用前景。
 
