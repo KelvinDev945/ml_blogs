@@ -232,5 +232,630 @@ url={\url{https://spaces.ac.cn/archives/10407}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节提供低秩近似和SVD相关定理的极详细数学推导，从多个角度（矩阵分析、最优化理论、数值线性代数）深入理解这些核心结果。
+
+### 一、Eckart-Young-Mirsky定理的完整证明
+
+#### 1.1 定理陈述
+
+**定理（Eckart-Young-Mirsky, 1936）**：设$\boldsymbol{M}\in\mathbb{R}^{n\times m}$的奇异值分解为
+\begin{equation}
+\boldsymbol{M} = \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top} = \sum_{i=1}^{\rho}\sigma_i\boldsymbol{u}_i\boldsymbol{v}_i^{\top}
+\end{equation}
+其中$\rho=\text{rank}(\boldsymbol{M})$，$\sigma_1\geq\sigma_2\geq\cdots\geq\sigma_\rho > 0$是奇异值。定义截断SVD
+\begin{equation}
+\boldsymbol{M}_r = \sum_{i=1}^r\sigma_i\boldsymbol{u}_i\boldsymbol{v}_i^{\top} = \boldsymbol{U}_{[:n,:r]}\boldsymbol{\Sigma}_{[:r,:r]}\boldsymbol{V}_{[:m,:r]}^{\top}
+\end{equation}
+则对于任意秩不超过$r$的矩阵$\boldsymbol{X}\in\mathbb{R}^{n\times m}$，有
+\begin{equation}
+\Vert\boldsymbol{M} - \boldsymbol{M}_r\Vert_F \leq \Vert\boldsymbol{M} - \boldsymbol{X}\Vert_F
+\end{equation}
+且
+\begin{equation}
+\Vert\boldsymbol{M} - \boldsymbol{M}_r\Vert_2 \leq \Vert\boldsymbol{M} - \boldsymbol{X}\Vert_2
+\end{equation}
+当且仅当$\boldsymbol{X} = \boldsymbol{M}_r$时等号成立（在$F$范数意义下，如果$\sigma_r > \sigma_{r+1}$）。
+
+#### 1.2 Frobenius范数下的证明
+
+**证明思路**：利用SVD的正交不变性和变分原理。
+
+**步骤1：正交不变性化简**
+
+设$\boldsymbol{X}$是任意秩不超过$r$的矩阵。由于$\boldsymbol{U}$和$\boldsymbol{V}$是正交矩阵，我们有
+\begin{equation}
+\begin{aligned}
+\Vert\boldsymbol{M} - \boldsymbol{X}\Vert_F^2 &= \Vert\boldsymbol{U}^{\top}(\boldsymbol{M} - \boldsymbol{X})\boldsymbol{V}\Vert_F^2 \\
+&= \Vert\boldsymbol{U}^{\top}\boldsymbol{M}\boldsymbol{V} - \boldsymbol{U}^{\top}\boldsymbol{X}\boldsymbol{V}\Vert_F^2 \\
+&= \Vert\boldsymbol{\Sigma} - \boldsymbol{U}^{\top}\boldsymbol{X}\boldsymbol{V}\Vert_F^2
+\end{aligned}
+\end{equation}
+
+注意到$\boldsymbol{Y} = \boldsymbol{U}^{\top}\boldsymbol{X}\boldsymbol{V}$仍然是秩不超过$r$的矩阵（正交变换不改变秩）。因此问题简化为：
+\begin{equation}
+\min_{\text{rank}(\boldsymbol{X})\leq r}\Vert\boldsymbol{M} - \boldsymbol{X}\Vert_F^2 = \min_{\text{rank}(\boldsymbol{Y})\leq r}\Vert\boldsymbol{\Sigma} - \boldsymbol{Y}\Vert_F^2
+\end{equation}
+
+**步骤2：对角矩阵的最优近似**
+
+现在考虑对角矩阵$\boldsymbol{\Sigma}$的最优秩$r$近似。设$\boldsymbol{\Sigma}$的大小为$n\times m$，我们将其分解为
+\begin{equation}
+\boldsymbol{\Sigma} = \begin{pmatrix}
+\sigma_1 & 0 & \cdots & 0 & \cdots & 0 \\
+0 & \sigma_2 & \cdots & 0 & \cdots & 0 \\
+\vdots & \vdots & \ddots & \vdots & \ddots & \vdots \\
+0 & 0 & \cdots & \sigma_{\min(n,m)} & \cdots & 0
+\end{pmatrix}
+\end{equation}
+
+对于任意秩不超过$r$的矩阵$\boldsymbol{Y}$，我们有SVD分解$\boldsymbol{Y} = \boldsymbol{P}\boldsymbol{D}\boldsymbol{Q}^{\top}$，其中$\boldsymbol{D}$至多有$r$个非零对角元。
+
+**步骤3：Von Neumann迹不等式应用**
+
+利用Von Neumann迹不等式（后文详细证明），对于任意矩阵$\boldsymbol{A},\boldsymbol{B}\in\mathbb{R}^{n\times m}$，有
+\begin{equation}
+\text{tr}(\boldsymbol{A}^{\top}\boldsymbol{B}) \leq \sum_{i=1}^{\min(n,m)}\sigma_i(\boldsymbol{A})\sigma_i(\boldsymbol{B})
+\end{equation}
+其中$\sigma_i(\boldsymbol{A})$表示$\boldsymbol{A}$的第$i$大奇异值（降序排列）。
+
+对于误差矩阵$\boldsymbol{E} = \boldsymbol{\Sigma} - \boldsymbol{Y}$，我们有
+\begin{equation}
+\begin{aligned}
+\Vert\boldsymbol{E}\Vert_F^2 &= \text{tr}(\boldsymbol{E}^{\top}\boldsymbol{E}) \\
+&= \text{tr}[(\boldsymbol{\Sigma} - \boldsymbol{Y})^{\top}(\boldsymbol{\Sigma} - \boldsymbol{Y})] \\
+&= \text{tr}(\boldsymbol{\Sigma}^{\top}\boldsymbol{\Sigma}) - 2\text{tr}(\boldsymbol{\Sigma}^{\top}\boldsymbol{Y}) + \text{tr}(\boldsymbol{Y}^{\top}\boldsymbol{Y}) \\
+&= \sum_{i=1}^{\rho}\sigma_i^2 - 2\text{tr}(\boldsymbol{\Sigma}^{\top}\boldsymbol{Y}) + \sum_{i=1}^r d_i^2
+\end{aligned}
+\end{equation}
+其中$d_i$是$\boldsymbol{Y}$的奇异值。
+
+**步骤4：最小化误差**
+
+要最小化$\Vert\boldsymbol{E}\Vert_F^2$，需要最大化$\text{tr}(\boldsymbol{\Sigma}^{\top}\boldsymbol{Y}) - \frac{1}{2}\sum_{i=1}^r d_i^2$。
+
+由Von Neumann不等式，
+\begin{equation}
+\text{tr}(\boldsymbol{\Sigma}^{\top}\boldsymbol{Y}) \leq \sum_{i=1}^r \sigma_i \cdot d_i
+\end{equation}
+其中我们注意到$\boldsymbol{Y}$至多有$r$个非零奇异值。
+
+进一步，由Cauchy-Schwarz不等式的加权形式，在约束$\sum_{i=1}^r d_i^2 = c$（常数）下，
+\begin{equation}
+\sum_{i=1}^r \sigma_i d_i \leq \sqrt{\sum_{i=1}^r \sigma_i^2} \cdot \sqrt{\sum_{i=1}^r d_i^2}
+\end{equation}
+
+但更直接的方法是考虑$\boldsymbol{Y}$的最优选择。当$\boldsymbol{Y} = \boldsymbol{\Sigma}_r$（即只保留$\boldsymbol{\Sigma}$的前$r$个对角元素）时，
+\begin{equation}
+\text{tr}(\boldsymbol{\Sigma}^{\top}\boldsymbol{\Sigma}_r) = \sum_{i=1}^r \sigma_i^2
+\end{equation}
+此时误差为
+\begin{equation}
+\Vert\boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r\Vert_F^2 = \sum_{i=1}^{\rho}\sigma_i^2 - 2\sum_{i=1}^r\sigma_i^2 + \sum_{i=1}^r\sigma_i^2 = \sum_{i=r+1}^{\rho}\sigma_i^2
+\end{equation}
+
+**步骤5：证明这是全局最优**
+
+现在我们证明任何其他秩不超过$r$的矩阵$\boldsymbol{Y}$都不会产生更小的误差。考虑分解
+\begin{equation}
+\boldsymbol{\Sigma} - \boldsymbol{Y} = \boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r + \boldsymbol{\Sigma}_r - \boldsymbol{Y}
+\end{equation}
+
+关键观察：$\boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r$和$\boldsymbol{\Sigma}_r - \boldsymbol{Y}$在适当意义下是"正交"的。具体地，我们可以将矩阵空间分解为两个正交子空间：
+
+- 子空间$\mathcal{S}_1$：由前$r$个奇异向量张成
+- 子空间$\mathcal{S}_2$：由后$\rho-r$个奇异向量张成
+
+则$\boldsymbol{\Sigma}_r\in\mathcal{S}_1$，而$\boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r\in\mathcal{S}_2$。
+
+对于任意秩不超过$r$的$\boldsymbol{Y}$，可以将其分解为$\boldsymbol{Y} = \boldsymbol{Y}_1 + \boldsymbol{Y}_2$，其中$\boldsymbol{Y}_1\in\mathcal{S}_1$，$\boldsymbol{Y}_2\in\mathcal{S}_2$。由于$\boldsymbol{Y}$的秩不超过$r$，且$\mathcal{S}_2$的维数为$\rho - r$，根据维数定理，$\boldsymbol{Y}_2$的秩至多为$\min(r, \rho-r)$。
+
+由Pythagorean定理（在Frobenius内积下），
+\begin{equation}
+\begin{aligned}
+\Vert\boldsymbol{\Sigma} - \boldsymbol{Y}\Vert_F^2 &= \Vert(\boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r) + (\boldsymbol{\Sigma}_r - \boldsymbol{Y})\Vert_F^2 \\
+&= \Vert\boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r - \boldsymbol{Y}_2\Vert_F^2 + \Vert\boldsymbol{\Sigma}_r - \boldsymbol{Y}_1\Vert_F^2 \\
+&\geq \Vert\boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r\Vert_F^2 = \sum_{i=r+1}^{\rho}\sigma_i^2
+\end{aligned}
+\end{equation}
+
+等号成立当且仅当$\boldsymbol{Y}_2 = \boldsymbol{0}$且$\boldsymbol{Y}_1 = \boldsymbol{\Sigma}_r$，即$\boldsymbol{Y} = \boldsymbol{\Sigma}_r$。
+
+回到原问题，这表明$\boldsymbol{M}_r = \boldsymbol{U}\boldsymbol{\Sigma}_r\boldsymbol{V}^{\top}$是$\boldsymbol{M}$的最优秩$r$近似，且误差为
+\begin{equation}
+\Vert\boldsymbol{M} - \boldsymbol{M}_r\Vert_F = \sqrt{\sum_{i=r+1}^{\rho}\sigma_i^2}
+\end{equation}
+
+#### 1.3 谱范数下的证明
+
+**定理**：在谱范数（2-范数）意义下，$\boldsymbol{M}_r$也是最优秩$r$近似，且
+\begin{equation}
+\Vert\boldsymbol{M} - \boldsymbol{M}_r\Vert_2 = \sigma_{r+1}
+\end{equation}
+
+**证明**：
+
+**步骤1：谱范数的性质**
+
+回顾谱范数的定义：
+\begin{equation}
+\Vert\boldsymbol{A}\Vert_2 = \max_{\Vert\boldsymbol{x}\Vert_2=1}\Vert\boldsymbol{A}\boldsymbol{x}\Vert_2 = \sigma_{\max}(\boldsymbol{A})
+\end{equation}
+
+对于误差矩阵$\boldsymbol{E}_r = \boldsymbol{M} - \boldsymbol{M}_r$，我们有
+\begin{equation}
+\boldsymbol{E}_r = \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top} - \boldsymbol{U}\boldsymbol{\Sigma}_r\boldsymbol{V}^{\top} = \boldsymbol{U}(\boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r)\boldsymbol{V}^{\top}
+\end{equation}
+
+由于正交变换不改变谱范数，
+\begin{equation}
+\Vert\boldsymbol{E}_r\Vert_2 = \Vert\boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r\Vert_2
+\end{equation}
+
+而$\boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r$是对角矩阵，对角元素为$(0,\ldots,0,\sigma_{r+1},\sigma_{r+2},\ldots,\sigma_{\rho},0,\ldots)$，因此
+\begin{equation}
+\Vert\boldsymbol{\Sigma} - \boldsymbol{\Sigma}_r\Vert_2 = \sigma_{r+1}
+\end{equation}
+
+**步骤2：证明最优性**
+
+对于任意秩不超过$r$的矩阵$\boldsymbol{X}$，我们需要证明$\Vert\boldsymbol{M} - \boldsymbol{X}\Vert_2 \geq \sigma_{r+1}$。
+
+利用Weyl不等式（奇异值的扰动理论），对于矩阵$\boldsymbol{A},\boldsymbol{B}$，有
+\begin{equation}
+\sigma_i(\boldsymbol{A} + \boldsymbol{B}) \leq \sigma_j(\boldsymbol{A}) + \sigma_{i-j}(\boldsymbol{B}), \quad \forall i,j
+\end{equation}
+
+应用到$\boldsymbol{M} = \boldsymbol{X} + (\boldsymbol{M} - \boldsymbol{X})$，取$i = r+1$，$j = 1$：
+\begin{equation}
+\sigma_{r+1}(\boldsymbol{M}) \leq \sigma_1(\boldsymbol{X}) + \sigma_r(\boldsymbol{M} - \boldsymbol{X})
+\end{equation}
+
+但由于$\text{rank}(\boldsymbol{X}) \leq r$，我们有$\sigma_{r+1}(\boldsymbol{X}) = 0$。
+
+更直接的方法是使用**Ky Fan范数**的性质。定义Ky Fan $k$-范数为
+\begin{equation}
+\Vert\boldsymbol{A}\Vert_{(k)} = \sum_{i=1}^k \sigma_i(\boldsymbol{A})
+\end{equation}
+
+特别地，$\Vert\boldsymbol{A}\Vert_{(1)} = \Vert\boldsymbol{A}\Vert_2$。
+
+**引理（Mirsky, 1960）**：对于任意矩阵$\boldsymbol{A},\boldsymbol{B}$和$1\leq k\leq \min(n,m)$，
+\begin{equation}
+|\Vert\boldsymbol{A}\Vert_{(k)} - \Vert\boldsymbol{B}\Vert_{(k)}| \leq \Vert\boldsymbol{A} - \boldsymbol{B}\Vert_{(k)}
+\end{equation}
+
+对于$k=1$（谱范数），这给出
+\begin{equation}
+|\sigma_1(\boldsymbol{M}) - \sigma_1(\boldsymbol{X})| \leq \Vert\boldsymbol{M} - \boldsymbol{X}\Vert_2
+\end{equation}
+
+现在考虑子空间的角度。设$\mathcal{V}_1$是$\boldsymbol{M}$的前$r+1$个右奇异向量张成的子空间，$\mathcal{V}_2$是$\boldsymbol{X}$的所有右奇异向量（至多$r$个）张成的子空间。由维数定理，
+\begin{equation}
+\dim(\mathcal{V}_1 \cap \mathcal{V}_2^{\perp}) \geq (r+1) - r = 1
+\end{equation}
+
+因此存在单位向量$\boldsymbol{v}\in\mathcal{V}_1$使得$\boldsymbol{v}\perp\mathcal{V}_2$，即$\boldsymbol{X}\boldsymbol{v} = \boldsymbol{0}$。此时
+\begin{equation}
+\Vert(\boldsymbol{M} - \boldsymbol{X})\boldsymbol{v}\Vert_2 = \Vert\boldsymbol{M}\boldsymbol{v}\Vert_2
+\end{equation}
+
+由于$\boldsymbol{v}$可以表示为前$r+1$个右奇异向量的线性组合，设$\boldsymbol{v} = \sum_{i=1}^{r+1}c_i\boldsymbol{v}_i$，$\sum_{i=1}^{r+1}c_i^2 = 1$，则
+\begin{equation}
+\Vert\boldsymbol{M}\boldsymbol{v}\Vert_2^2 = \left\Vert\sum_{i=1}^{r+1}\sigma_i c_i\boldsymbol{u}_i\right\Vert_2^2 = \sum_{i=1}^{r+1}\sigma_i^2 c_i^2 \geq \sigma_{r+1}^2\sum_{i=1}^{r+1}c_i^2 = \sigma_{r+1}^2
+\end{equation}
+
+因此
+\begin{equation}
+\Vert\boldsymbol{M} - \boldsymbol{X}\Vert_2 \geq \Vert(\boldsymbol{M} - \boldsymbol{X})\boldsymbol{v}\Vert_2 = \Vert\boldsymbol{M}\boldsymbol{v}\Vert_2 \geq \sigma_{r+1}
+\end{equation}
+
+这证明了$\boldsymbol{M}_r$在谱范数意义下也是最优的。□
+
+### 二、Schmidt-Mirsky定理与扰动分析
+
+#### 2.1 Schmidt-Mirsky定理
+
+**定理（Schmidt-Mirsky）**：设$\boldsymbol{A},\boldsymbol{B}\in\mathbb{R}^{n\times m}$的奇异值分别为$\sigma_1(\boldsymbol{A})\geq\cdots\geq\sigma_p(\boldsymbol{A})$和$\sigma_1(\boldsymbol{B})\geq\cdots\geq\sigma_p(\boldsymbol{B})$，其中$p=\min(n,m)$。则
+\begin{equation}
+\sum_{i=1}^k |\sigma_i(\boldsymbol{A}) - \sigma_i(\boldsymbol{B})| \leq \Vert\boldsymbol{A} - \boldsymbol{B}\Vert_{(k)}, \quad k=1,2,\ldots,p
+\end{equation}
+特别地，当$k=p$时，
+\begin{equation}
+\sum_{i=1}^p |\sigma_i(\boldsymbol{A}) - \sigma_i(\boldsymbol{B})| \leq \Vert\boldsymbol{A} - \boldsymbol{B}\Vert_F
+\end{equation}
+
+**证明思路**：利用Von Neumann迹定理和变分原理。
+
+**步骤1：Von Neumann迹定理**
+
+首先陈述Von Neumann迹定理，这是证明的核心工具。
+
+**定理（Von Neumann, 1937）**：对于任意$\boldsymbol{A},\boldsymbol{B}\in\mathbb{R}^{n\times m}$，
+\begin{equation}
+\text{tr}(\boldsymbol{A}^{\top}\boldsymbol{B}) \leq \sum_{i=1}^p \sigma_i(\boldsymbol{A})\sigma_i(\boldsymbol{B})
+\end{equation}
+等号成立当且仅当$\boldsymbol{A}$和$\boldsymbol{B}$有相同的奇异向量。
+
+**Von Neumann定理的证明**：
+
+设$\boldsymbol{A} = \boldsymbol{U}_A\boldsymbol{\Sigma}_A\boldsymbol{V}_A^{\top}$，$\boldsymbol{B} = \boldsymbol{U}_B\boldsymbol{\Sigma}_B\boldsymbol{V}_B^{\top}$，则
+\begin{equation}
+\text{tr}(\boldsymbol{A}^{\top}\boldsymbol{B}) = \text{tr}(\boldsymbol{V}_A\boldsymbol{\Sigma}_A\boldsymbol{U}_A^{\top}\boldsymbol{U}_B\boldsymbol{\Sigma}_B\boldsymbol{V}_B^{\top})
+\end{equation}
+
+定义$\boldsymbol{P} = \boldsymbol{U}_A^{\top}\boldsymbol{U}_B$，$\boldsymbol{Q} = \boldsymbol{V}_A^{\top}\boldsymbol{V}_B$，它们都是正交矩阵（或半正交矩阵）。则
+\begin{equation}
+\text{tr}(\boldsymbol{A}^{\top}\boldsymbol{B}) = \text{tr}(\boldsymbol{Q}\boldsymbol{\Sigma}_A\boldsymbol{P}\boldsymbol{\Sigma}_B) = \text{tr}(\boldsymbol{\Sigma}_A\boldsymbol{P}\boldsymbol{\Sigma}_B\boldsymbol{Q})
+\end{equation}
+
+展开为
+\begin{equation}
+\text{tr}(\boldsymbol{A}^{\top}\boldsymbol{B}) = \sum_{i,j,k}\sigma_i(\boldsymbol{A})p_{ij}\sigma_j(\boldsymbol{B})q_{jk}\delta_{ik} = \sum_{i,j}\sigma_i(\boldsymbol{A})\sigma_j(\boldsymbol{B})p_{ij}q_{ji}
+\end{equation}
+
+定义$\boldsymbol{C} = \boldsymbol{P}\odot\boldsymbol{Q}^{\top}$（Hadamard积的某种变形），其中$c_{ij} = p_{ij}q_{ji}$。注意到
+\begin{equation}
+\sum_j |c_{ij}| \leq \sum_j |p_{ij}| \cdot |q_{ji}| \leq 1, \quad \sum_i |c_{ij}| \leq 1
+\end{equation}
+
+即$\boldsymbol{C}$的行和列的绝对值之和都不超过1（双随机矩阵的推广）。
+
+根据**Hardy-Littlewood-Pólya不等式**，对于降序排列的序列$a_1\geq\cdots\geq a_p$和$b_1\geq\cdots\geq b_p$，以及满足上述条件的矩阵$\boldsymbol{C}$，有
+\begin{equation}
+\sum_{i,j}a_i c_{ij} b_j \leq \sum_{i=1}^p a_i b_i
+\end{equation}
+
+应用到我们的情形，得到
+\begin{equation}
+\text{tr}(\boldsymbol{A}^{\top}\boldsymbol{B}) = \sum_{i,j}\sigma_i(\boldsymbol{A})c_{ij}\sigma_j(\boldsymbol{B}) \leq \sum_{i=1}^p\sigma_i(\boldsymbol{A})\sigma_i(\boldsymbol{B})
+\end{equation}
+
+等号成立需要$\boldsymbol{C}$是单位矩阵，即$\boldsymbol{P}$和$\boldsymbol{Q}$都是单位矩阵，这意味着$\boldsymbol{A}$和$\boldsymbol{B}$有相同的左右奇异向量。□
+
+**步骤2：应用Von Neumann定理证明Schmidt-Mirsky定理**
+
+定义$\boldsymbol{E} = \boldsymbol{A} - \boldsymbol{B}$。考虑$\boldsymbol{A}$的前$k$个主奇异向量$\boldsymbol{u}_1,\ldots,\boldsymbol{u}_k$和$\boldsymbol{v}_1,\ldots,\boldsymbol{v}_k$，定义投影矩阵
+\begin{equation}
+\boldsymbol{P}_k = \sum_{i=1}^k \boldsymbol{u}_i\boldsymbol{u}_i^{\top}, \quad \boldsymbol{Q}_k = \sum_{i=1}^k \boldsymbol{v}_i\boldsymbol{v}_i^{\top}
+\end{equation}
+
+则
+\begin{equation}
+\boldsymbol{A}_k = \boldsymbol{P}_k\boldsymbol{A}\boldsymbol{Q}_k = \sum_{i=1}^k\sigma_i(\boldsymbol{A})\boldsymbol{u}_i\boldsymbol{v}_i^{\top}
+\end{equation}
+
+类似地定义$\boldsymbol{B}_k$。则
+\begin{equation}
+\begin{aligned}
+\sum_{i=1}^k\sigma_i(\boldsymbol{A}) &= \text{tr}(\boldsymbol{A}_k) = \text{tr}(\boldsymbol{P}_k\boldsymbol{A}\boldsymbol{Q}_k) \\
+&= \text{tr}(\boldsymbol{P}_k\boldsymbol{B}\boldsymbol{Q}_k) + \text{tr}(\boldsymbol{P}_k\boldsymbol{E}\boldsymbol{Q}_k) \\
+&\leq \sum_{i=1}^k\sigma_i(\boldsymbol{B}) + \Vert\boldsymbol{P}_k\boldsymbol{E}\boldsymbol{Q}_k\Vert_{(k)}
+\end{aligned}
+\end{equation}
+
+最后一步应用了Von Neumann不等式。进一步，由于$\boldsymbol{P}_k$和$\boldsymbol{Q}_k$是投影，
+\begin{equation}
+\Vert\boldsymbol{P}_k\boldsymbol{E}\boldsymbol{Q}_k\Vert_{(k)} \leq \Vert\boldsymbol{E}\Vert_{(k)}
+\end{equation}
+
+类似地，交换$\boldsymbol{A}$和$\boldsymbol{B}$的角色，得到
+\begin{equation}
+\sum_{i=1}^k\sigma_i(\boldsymbol{B}) \leq \sum_{i=1}^k\sigma_i(\boldsymbol{A}) + \Vert\boldsymbol{E}\Vert_{(k)}
+\end{equation}
+
+结合两个不等式，得到
+\begin{equation}
+\sum_{i=1}^k|\sigma_i(\boldsymbol{A}) - \sigma_i(\boldsymbol{B})| \leq \Vert\boldsymbol{A} - \boldsymbol{B}\Vert_{(k)}
+\end{equation}
+
+特别地，当$k=p$时，$\Vert\boldsymbol{A} - \boldsymbol{B}\Vert_{(p)} = \Vert\boldsymbol{A} - \boldsymbol{B}\Vert_F$。□
+
+#### 2.2 相对误差和绝对误差界
+
+对于低秩近似，我们关心两类误差界：
+
+**绝对误差界**：
+\begin{equation}
+\Vert\boldsymbol{M} - \boldsymbol{M}_r\Vert_F = \sqrt{\sum_{i=r+1}^{\rho}\sigma_i^2}, \quad \Vert\boldsymbol{M} - \boldsymbol{M}_r\Vert_2 = \sigma_{r+1}
+\end{equation}
+
+**相对误差界**：定义相对误差为
+\begin{equation}
+\varepsilon_F = \frac{\Vert\boldsymbol{M} - \boldsymbol{M}_r\Vert_F}{\Vert\boldsymbol{M}\Vert_F} = \sqrt{\frac{\sum_{i=r+1}^{\rho}\sigma_i^2}{\sum_{i=1}^{\rho}\sigma_i^2}}
+\end{equation}
+\begin{equation}
+\varepsilon_2 = \frac{\Vert\boldsymbol{M} - \boldsymbol{M}_r\Vert_2}{\Vert\boldsymbol{M}\Vert_2} = \frac{\sigma_{r+1}}{\sigma_1}
+\end{equation}
+
+**能量保留率**：截断SVD保留的"能量"（奇异值平方和）比例为
+\begin{equation}
+\eta_r = \frac{\sum_{i=1}^r\sigma_i^2}{\sum_{i=1}^{\rho}\sigma_i^2} = 1 - \varepsilon_F^2
+\end{equation}
+
+在实际应用中，通常选择$r$使得$\eta_r \geq 0.9$或$0.95$，即保留90%或95%的能量。
+
+### 三、变分法推导最优低秩逼近
+
+#### 3.1 拉格朗日乘数法
+
+考虑优化问题
+\begin{equation}
+\min_{\boldsymbol{X}}\Vert\boldsymbol{M} - \boldsymbol{X}\Vert_F^2 \quad\text{s.t.}\quad\text{rank}(\boldsymbol{X}) \leq r
+\end{equation}
+
+将$\boldsymbol{X}$分解为$\boldsymbol{X} = \boldsymbol{A}\boldsymbol{B}$，其中$\boldsymbol{A}\in\mathbb{R}^{n\times r}$，$\boldsymbol{B}\in\mathbb{R}^{r\times m}$。问题变为
+\begin{equation}
+\min_{\boldsymbol{A},\boldsymbol{B}}\Vert\boldsymbol{M} - \boldsymbol{A}\boldsymbol{B}\Vert_F^2
+\end{equation}
+
+**步骤1：对$\boldsymbol{B}$求偏导**
+
+固定$\boldsymbol{A}$，对$\boldsymbol{B}$求导。定义损失函数
+\begin{equation}
+L(\boldsymbol{B}) = \text{tr}[(\boldsymbol{M} - \boldsymbol{A}\boldsymbol{B})^{\top}(\boldsymbol{M} - \boldsymbol{A}\boldsymbol{B})]
+\end{equation}
+
+展开：
+\begin{equation}
+L(\boldsymbol{B}) = \text{tr}(\boldsymbol{M}^{\top}\boldsymbol{M}) - 2\text{tr}(\boldsymbol{M}^{\top}\boldsymbol{A}\boldsymbol{B}) + \text{tr}(\boldsymbol{B}^{\top}\boldsymbol{A}^{\top}\boldsymbol{A}\boldsymbol{B})
+\end{equation}
+
+对$\boldsymbol{B}$求导（利用矩阵求导公式$\frac{\partial}{\partial\boldsymbol{B}}\text{tr}(\boldsymbol{B}^{\top}\boldsymbol{C}\boldsymbol{B}) = (\boldsymbol{C} + \boldsymbol{C}^{\top})\boldsymbol{B}$）：
+\begin{equation}
+\frac{\partial L}{\partial\boldsymbol{B}} = -2\boldsymbol{A}^{\top}\boldsymbol{M} + 2\boldsymbol{A}^{\top}\boldsymbol{A}\boldsymbol{B} = 0
+\end{equation}
+
+得到
+\begin{equation}
+\boldsymbol{B}^* = (\boldsymbol{A}^{\top}\boldsymbol{A})^{-1}\boldsymbol{A}^{\top}\boldsymbol{M} = \boldsymbol{A}^{\dagger}\boldsymbol{M}
+\end{equation}
+
+（假设$\boldsymbol{A}$列满秩）
+
+**步骤2：对$\boldsymbol{A}$求偏导**
+
+类似地，固定$\boldsymbol{B}$，得到
+\begin{equation}
+\boldsymbol{A}^* = \boldsymbol{M}\boldsymbol{B}^{\dagger}
+\end{equation}
+
+**步骤3：交替优化与SVD的关系**
+
+交替优化$\boldsymbol{A}$和$\boldsymbol{B}$会收敛到局部最优。但SVD给出了全局最优的闭式解：
+\begin{equation}
+\boldsymbol{A}^* = \boldsymbol{U}_{[:,:r]}\sqrt{\boldsymbol{\Sigma}_{[:r,:r]}}, \quad \boldsymbol{B}^* = \sqrt{\boldsymbol{\Sigma}_{[:r,:r]}}\boldsymbol{V}_{[:,:r]}^{\top}
+\end{equation}
+
+或更简单的分解：
+\begin{equation}
+\boldsymbol{A}^* = \boldsymbol{U}_{[:,:r]}, \quad \boldsymbol{B}^* = \boldsymbol{\Sigma}_{[:r,:r]}\boldsymbol{V}_{[:,:r]}^{\top}
+\end{equation}
+
+#### 3.2 梯度流方法
+
+考虑Grassmann流形上的梯度下降。设$\boldsymbol{X}(t)$是时间$t$的函数，满足
+\begin{equation}
+\frac{d\boldsymbol{X}}{dt} = -\nabla_{\boldsymbol{X}}L(\boldsymbol{X}) = 2(\boldsymbol{M} - \boldsymbol{X})\quad\text{with}\quad\text{rank}(\boldsymbol{X}) = r
+\end{equation}
+
+在秩约束下的梯度投影为
+\begin{equation}
+\frac{d\boldsymbol{X}}{dt} = \boldsymbol{P}_{\mathcal{T}_{\boldsymbol{X}}}[2(\boldsymbol{M} - \boldsymbol{X})]
+\end{equation}
+其中$\boldsymbol{P}_{\mathcal{T}_{\boldsymbol{X}}}$是到秩$r$矩阵流形的切空间的投影。
+
+这个流会收敛到$\boldsymbol{X}^* = \boldsymbol{M}_r$，即截断SVD。
+
+### 四、奇异值的几何意义
+
+#### 4.1 超椭球的半轴长度
+
+考虑单位球$\mathcal{S} = \\{\boldsymbol{x}\in\mathbb{R}^m : \Vert\boldsymbol{x}\Vert_2 = 1\\}$在线性变换$\boldsymbol{M}:\mathbb{R}^m\to\mathbb{R}^n$下的像：
+\begin{equation}
+\boldsymbol{M}(\mathcal{S}) = \\{\boldsymbol{M}\boldsymbol{x} : \Vert\boldsymbol{x}\Vert_2 = 1\\}
+\end{equation}
+
+由SVD $\boldsymbol{M} = \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}$，我们有
+\begin{equation}
+\boldsymbol{M}\boldsymbol{x} = \boldsymbol{U}\boldsymbol{\Sigma}(\boldsymbol{V}^{\top}\boldsymbol{x})
+\end{equation}
+
+设$\boldsymbol{y} = \boldsymbol{V}^{\top}\boldsymbol{x}$，由于$\boldsymbol{V}$是正交矩阵，$\Vert\boldsymbol{y}\Vert_2 = \Vert\boldsymbol{x}\Vert_2 = 1$。则
+\begin{equation}
+\boldsymbol{\Sigma}\boldsymbol{y} = (\sigma_1 y_1, \sigma_2 y_2, \ldots, \sigma_p y_p, 0, \ldots, 0)^{\top}
+\end{equation}
+
+在约束$\sum_{i=1}^p y_i^2 = 1$下，$\boldsymbol{\Sigma}\boldsymbol{y}$的轨迹是一个超椭球，其第$i$个半轴长度为$\sigma_i$。最后应用$\boldsymbol{U}$只是旋转这个超椭球。
+
+**结论**：奇异值$\sigma_i$刻画了矩阵$\boldsymbol{M}$将单位球变换为超椭球的各个主轴长度。
+
+#### 4.2 最大拉伸方向
+
+第$i$个奇异值$\sigma_i$和对应的奇异向量$(\boldsymbol{u}_i,\boldsymbol{v}_i)$满足：
+\begin{equation}
+\sigma_i = \max_{\substack{\boldsymbol{x}\perp\boldsymbol{v}_1,\ldots,\boldsymbol{v}_{i-1} \\ \Vert\boldsymbol{x}\Vert_2=1}}\Vert\boldsymbol{M}\boldsymbol{x}\Vert_2
+\end{equation}
+
+即$\sigma_i$是在与前$i-1$个右奇异向量正交的子空间中，矩阵$\boldsymbol{M}$的最大拉伸比。
+
+**变分刻画（Courant-Fischer定理的矩阵版本）**：
+\begin{equation}
+\sigma_i = \max_{\dim(\mathcal{V})=i}\min_{\boldsymbol{x}\in\mathcal{V},\Vert\boldsymbol{x}\Vert=1}\Vert\boldsymbol{M}\boldsymbol{x}\Vert_2 = \min_{\dim(\mathcal{W})=m-i+1}\max_{\boldsymbol{x}\in\mathcal{W},\Vert\boldsymbol{x}\Vert=1}\Vert\boldsymbol{M}\boldsymbol{x}\Vert_2
+\end{equation}
+
+### 五、计算复杂度分析
+
+#### 5.1 完整SVD的计算复杂度
+
+对于$\boldsymbol{M}\in\mathbb{R}^{n\times m}$，假设$n\geq m$。
+
+**方法1：通过$\boldsymbol{M}^{\top}\boldsymbol{M}$的特征值分解**
+
+1. 计算$\boldsymbol{M}^{\top}\boldsymbol{M}$：$O(nm^2)$
+2. 对$m\times m$矩阵进行特征值分解：$O(m^3)$
+3. 计算左奇异向量$\boldsymbol{U}$：$O(nm^2)$
+
+总复杂度：$O(nm^2 + m^3) \approx O(nm^2)$（当$n\gg m$时）
+
+**方法2：Golub-Kahan双对角化**
+
+1. 双对角化：$O(nm^2)$
+2. 对双对角矩阵进行SVD：$O(m^2)$
+
+总复杂度：$O(nm^2)$
+
+**方法3：分治法（Divide-and-Conquer）**
+
+利用分块结构递归计算，复杂度仍为$O(nm^2)$，但常数更小。
+
+#### 5.2 截断SVD的计算复杂度
+
+当我们只需要前$r$个奇异值和奇异向量，且$r\ll\min(n,m)$时，可以使用迭代方法。
+
+**Lanczos迭代**（针对对称矩阵$\boldsymbol{M}^{\top}\boldsymbol{M}$或$\boldsymbol{M}\boldsymbol{M}^{\top}$）：
+
+每次迭代的复杂度：$O(nm)$（矩阵-向量乘法）
+迭代次数：通常$O(r)$到$O(r\log(1/\epsilon))$，其中$\epsilon$是精度
+
+总复杂度：$O(nmr)$到$O(nmr\log(1/\epsilon))$
+
+**随机化SVD**（下一节详述）：
+
+复杂度：$O(nm\log r + (n+m)r^2)$
+
+相比完整SVD的$O(nm\min(n,m))$，当$r\ll\min(n,m)$时有显著加速。
+
+### 六、随机化SVD算法
+
+#### 6.1 算法思想
+
+随机化SVD（Halko, Martinsson, Tropp, 2011）的核心思想是：
+
+1. **随机采样**：构造随机矩阵$\boldsymbol{\Omega}\in\mathbb{R}^{m\times (r+p)}$（$p$是过采样参数，通常取$5\sim 10$）
+2. **范围查找**：计算$\boldsymbol{Y} = \boldsymbol{M}\boldsymbol{\Omega}$，则$\boldsymbol{Y}$的列空间近似$\boldsymbol{M}$的前$r$个左奇异向量张成的空间
+3. **QR分解**：对$\boldsymbol{Y}$进行QR分解得到$\boldsymbol{Q}$，使得$\boldsymbol{Q}^{\top}\boldsymbol{Q} = \boldsymbol{I}_{r+p}$
+4. **投影**：计算$\boldsymbol{B} = \boldsymbol{Q}^{\top}\boldsymbol{M}$
+5. **小规模SVD**：对$\boldsymbol{B}\in\mathbb{R}^{(r+p)\times m}$进行SVD：$\boldsymbol{B} = \tilde{\boldsymbol{U}}\tilde{\boldsymbol{\Sigma}}\tilde{\boldsymbol{V}}^{\top}$
+6. **恢复**：左奇异向量$\boldsymbol{U} = \boldsymbol{Q}\tilde{\boldsymbol{U}}$
+
+#### 6.2 算法伪代码
+
+```
+输入：矩阵 M ∈ ℝ^(n×m)，目标秩 r，过采样参数 p
+输出：近似 SVD：U, Σ, V
+
+1. 生成随机高斯矩阵 Ω ∈ ℝ^(m×(r+p))
+2. Y = M·Ω                          // O(nm(r+p))
+3. [Q, ~] = qr(Y)                   // O(n(r+p)^2)
+4. B = Q^T·M                        // O(nm(r+p))
+5. [Ũ, Σ, V] = svd(B)              // O((r+p)^2·m)
+6. U = Q·Ũ                          // O(n(r+p)^2)
+7. 返回 U[:, 1:r], Σ[1:r, 1:r], V[:, 1:r]
+```
+
+**总复杂度**：$O(nm(r+p) + n(r+p)^2 + (r+p)^2 m) \approx O(nm(r+p))$
+
+当$r+p\ll\min(n,m)$时，相比完整SVD的$O(nm\min(n,m))$有数量级的加速。
+
+#### 6.3 误差分析
+
+**定理（Halko et al., 2011）**：设$\boldsymbol{M}$的秩为$\rho$，$\boldsymbol{M}_r$是真实的秩$r$截断SVD，$\hat{\boldsymbol{M}}_r$是随机化SVD的输出。则以概率至少$1 - 10^{-p}$，有
+\begin{equation}
+\Vert\boldsymbol{M} - \hat{\boldsymbol{M}}_r\Vert_F \leq \left[1 + \frac{4\sqrt{2r\log(r+p)}}{p}\right]\sqrt{\sum_{i=r+1}^{\rho}\sigma_i^2}
+\end{equation}
+
+**误差来源**：
+1. 随机采样误差：由过采样参数$p$控制
+2. 数值稳定性：通过幂迭代改进（见下文）
+
+#### 6.4 幂迭代改进
+
+对于奇异值衰减缓慢的矩阵，可以使用**幂迭代**来增强奇异值的分离：
+
+修改步骤2为：
+\begin{equation}
+\boldsymbol{Y} = (\boldsymbol{M}\boldsymbol{M}^{\top})^q\boldsymbol{M}\boldsymbol{\Omega}
+\end{equation}
+其中$q\geq 1$是幂迭代次数。
+
+**效果**：奇异值比例从$\sigma_r/\sigma_{r+1}$放大到$(\sigma_r/\sigma_{r+1})^{2q+1}$，从而提高数值精度。
+
+**代价**：额外$2q$次矩阵-矩阵乘法，复杂度变为$O(nmq(r+p))$。
+
+#### 6.5 实际应用建议
+
+- **小问题**（$n,m < 10^4$）：直接用完整SVD（LAPACK实现）
+- **中等问题**（$10^4 < n,m < 10^6$，$r < 100$）：随机化SVD
+- **大规模稀疏问题**：结合稀疏矩阵技术和随机化SVD
+- **流式数据/在线更新**：增量SVD或频繁方向算法（Frequent Directions）
+
+### 七、高级主题：谱范数下的Weyl型不等式
+
+#### 7.1 Weyl不等式
+
+**定理（Weyl）**：对于$\boldsymbol{A},\boldsymbol{B}\in\mathbb{R}^{n\times m}$，奇异值满足
+\begin{equation}
+\sigma_{i+j-1}(\boldsymbol{A} + \boldsymbol{B}) \leq \sigma_i(\boldsymbol{A}) + \sigma_j(\boldsymbol{B}), \quad i+j-1\leq\min(n,m)
+\end{equation}
+和
+\begin{equation}
+\sigma_{i+j-1}(\boldsymbol{A} + \boldsymbol{B}) \geq |\sigma_i(\boldsymbol{A}) - \sigma_j(\boldsymbol{B})|
+\end{equation}
+
+特别地，取$i=j=1$：
+\begin{equation}
+\sigma_1(\boldsymbol{A} + \boldsymbol{B}) \leq \sigma_1(\boldsymbol{A}) + \sigma_1(\boldsymbol{B})
+\end{equation}
+即$\Vert\boldsymbol{A} + \boldsymbol{B}\Vert_2 \leq \Vert\boldsymbol{A}\Vert_2 + \Vert\boldsymbol{B}\Vert_2$（三角不等式）。
+
+#### 7.2 相对扰动界
+
+**定理**：设$\boldsymbol{M}$和$\boldsymbol{M} + \boldsymbol{E}$的奇异值分别为$\sigma_i$和$\tilde{\sigma}_i$。如果$\Vert\boldsymbol{E}\Vert_2 < \sigma_r - \sigma_{r+1}$（奇异值间隔），则
+\begin{equation}
+\frac{|\sigma_i - \tilde{\sigma}_i|}{\sigma_i} \leq \frac{\Vert\boldsymbol{E}\Vert_2}{\sigma_r - \sigma_{r+1}}, \quad i\leq r
+\end{equation}
+
+这表明当奇异值有较大间隔时，截断SVD对扰动更鲁棒。
+
+### 八、数值稳定性与条件数
+
+#### 8.1 条件数
+
+矩阵$\boldsymbol{M}$的条件数定义为
+\begin{equation}
+\kappa(\boldsymbol{M}) = \frac{\sigma_1}{\sigma_r} = \frac{\Vert\boldsymbol{M}\Vert_2}{\Vert\boldsymbol{M}^{-1}\Vert_2^{-1}}
+\end{equation}
+（假设$\boldsymbol{M}$可逆且秩为$r=\min(n,m)$）
+
+**物理意义**：条件数衡量了矩阵对输入扰动的敏感度。$\kappa(\boldsymbol{M})$越大，数值计算越不稳定。
+
+#### 8.2 低秩近似的条件数
+
+对于截断SVD $\boldsymbol{M}_r$，条件数为
+\begin{equation}
+\kappa(\boldsymbol{M}_r) = \frac{\sigma_1}{\sigma_r}
+\end{equation}
+
+**结论**：截断SVD通过去除小奇异值，可以显著改善条件数，从而提高后续数值计算的稳定性。例如，在求解线性系统$\boldsymbol{M}\boldsymbol{x} = \boldsymbol{b}$时，用$\boldsymbol{M}_r$替代$\boldsymbol{M}$可以得到更稳定的近似解。
+
+### 九、总结与展望
+
+本节提供的详细推导涵盖了SVD低秩近似的核心理论：
+
+1. **Eckart-Young-Mirsky定理**：从Frobenius范数和谱范数两个角度证明了截断SVD的最优性
+2. **Schmidt-Mirsky定理**：建立了奇异值扰动的精细界
+3. **Von Neumann迹定理**：作为许多矩阵不等式的基础工具
+4. **变分法**：从优化角度理解低秩近似
+5. **几何解释**：奇异值刻画线性变换的拉伸特性
+6. **计算复杂度**：完整SVD与截断SVD的权衡
+7. **随机化算法**：现代大规模计算的利器
+
+这些工具和理论构成了现代数据科学和机器学习中低秩建模的数学基础，从主成分分析（PCA）到推荐系统，从图像压缩到自然语言处理，都离不开SVD及其变体的支持。
+
+**进一步阅读方向**：
+- 张量分解与高阶SVD
+- 非负矩阵分解（NMF）
+- 稀疏PCA
+- 鲁棒PCA（Robust PCA）
+- 动态低秩逼近（在线算法）
 
