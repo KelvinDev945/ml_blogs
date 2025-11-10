@@ -1,8 +1,7 @@
 ---
 title: 流形上的最速下降：3. Muon + Stiefel
 slug: 流形上的最速下降3-muon-stiefel
-date: 
-source: https://spaces.ac.cn/archives/11221
+date: 2025-08-08
 tags: 矩阵, 优化器, muon, 约束, 最速下降
 status: pending
 ---

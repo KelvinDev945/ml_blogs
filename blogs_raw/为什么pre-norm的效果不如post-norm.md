@@ -1,8 +1,7 @@
 ---
 title: 为什么Pre Norm的效果不如Post Norm？
 slug: 为什么pre-norm的效果不如post-norm
-date: 
-source: https://spaces.ac.cn/archives/9009
+date: 2022-03-29
 tags: 优化, 梯度, attention, 生成模型, attention
 status: pending
 ---

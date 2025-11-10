@@ -1,8 +1,7 @@
 ---
 title: Transformer升级之路：7、长度外推性与局部注意力
 slug: transformer升级之路7长度外推性与局部注意力
-date: 
-source: https://spaces.ac.cn/archives/9431
+date: 2023-01-12
 tags: 语言模型, attention, 位置编码, 外推, 生成模型
 status: pending
 ---

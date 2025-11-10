@@ -1,8 +1,7 @@
 ---
 title: logsumexp运算的几个不等式
 slug: logsumexp运算的几个不等式
-date: 
-source: https://spaces.ac.cn/archives/9070
+date: 2022-05-10
 tags: 不等式, 函数, 生成模型, attention, 优化
 status: pending
 ---

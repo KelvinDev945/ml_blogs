@@ -1,8 +1,7 @@
 ---
 title: VQ的旋转技巧：梯度直通估计的一般推广
 slug: vq的旋转技巧梯度直通估计的一般推广
-date: 
-source: https://spaces.ac.cn/archives/10489
+date: 2024-10-24
 tags: 生成模型, 编码, 梯度, 离散化, 生成模型
 status: pending
 ---

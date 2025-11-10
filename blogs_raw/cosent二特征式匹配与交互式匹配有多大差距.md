@@ -1,8 +1,7 @@
 ---
 title: CoSENT（二）：特征式匹配与交互式匹配有多大差距？
 slug: cosent二特征式匹配与交互式匹配有多大差距
-date: 
-source: https://spaces.ac.cn/archives/8860
+date: 2022-01-12
 tags: 语义, 语义相似度, 对比学习, 生成模型, attention
 status: pending
 ---

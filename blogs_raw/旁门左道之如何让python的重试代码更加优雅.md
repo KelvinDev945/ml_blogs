@@ -1,8 +1,7 @@
 ---
 title: 旁门左道之如何让Python的重试代码更加优雅
 slug: 旁门左道之如何让python的重试代码更加优雅
-date: 
-source: https://spaces.ac.cn/archives/9938
+date: 2024-01-14
 tags: 编程, 代码, python, 优化, 生成模型
 status: pending
 ---

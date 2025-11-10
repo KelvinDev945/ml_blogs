@@ -1,8 +1,7 @@
 ---
 title: Ladder Side-Tuning：预训练模型的“过墙梯”
 slug: ladder-side-tuning预训练模型的过墙梯
-date: 
-source: https://spaces.ac.cn/archives/9138
+date: 2022-06-20
 tags: 语言模型, 预训练, 生成模型, attention, 优化
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: 生成扩散模型漫谈（二十九）：用DDPM来离散编码
 slug: 生成扩散模型漫谈二十九用ddpm来离散编码
-date: 
-source: https://spaces.ac.cn/archives/10711
+date: 2025-02-14
 tags: 生成模型, 编码, DDPM, 扩散, 离散化
 status: pending
 ---

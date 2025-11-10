@@ -1,8 +1,7 @@
 ---
 title: Efficient GlobalPointer：少点参数，多点效果
 slug: efficient-globalpointer少点参数多点效果
-date: 
-source: https://spaces.ac.cn/archives/8877
+date: 2022-01-25
 tags: 模型, NLP, NER, 生成模型, attention
 status: pending
 ---

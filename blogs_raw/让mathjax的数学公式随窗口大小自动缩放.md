@@ -1,8 +1,7 @@
 ---
 title: 让MathJax的数学公式随窗口大小自动缩放
 slug: 让mathjax的数学公式随窗口大小自动缩放
-date: 
-source: https://spaces.ac.cn/archives/10474
+date: 2024-10-15
 tags: 网站, latex, 生成模型, attention, 优化
 status: pending
 ---

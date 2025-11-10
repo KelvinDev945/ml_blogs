@@ -1,8 +1,7 @@
 ---
 title: Transformer升级之路：20、MLA好在哪里?（上）
 slug: transformer升级之路20mla好在哪里上
-date: 
-source: https://spaces.ac.cn/archives/10907
+date: 2025-05-04
 tags: 优化, 语言模型, 生成模型, attention, 生成模型
 status: pending
 ---

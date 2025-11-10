@@ -1,8 +1,7 @@
 ---
 title: 梯度视角下的LoRA：简介、分析、猜测及推广
 slug: 梯度视角下的lora简介分析猜测及推广
-date: 
-source: https://spaces.ac.cn/archives/9590
+date: 2023-04-17
 tags: 梯度, 优化器, 低秩, lora, 生成模型
 status: pending
 ---

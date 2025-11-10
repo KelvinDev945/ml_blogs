@@ -1,8 +1,7 @@
 ---
 title: 让MathJax更好地兼容谷歌翻译和延时加载
 slug: 让mathjax更好地兼容谷歌翻译和延时加载
-date: 
-source: https://spaces.ac.cn/archives/10320
+date: 2024-08-15
 tags: 网站, latex, 论文, 酷论文, 生成模型
 status: pending
 ---

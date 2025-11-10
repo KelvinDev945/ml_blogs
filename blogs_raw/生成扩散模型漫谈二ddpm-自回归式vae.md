@@ -1,8 +1,7 @@
 ---
 title: 生成扩散模型漫谈（二）：DDPM = 自回归式VAE
 slug: 生成扩散模型漫谈二ddpm-自回归式vae
-date: 
-source: https://spaces.ac.cn/archives/9152
+date: 2022-07-06
 tags: vae, 生成模型, DDPM, 扩散, 生成模型
 status: pending
 ---

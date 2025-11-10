@@ -1,8 +1,7 @@
 ---
 title: ReLU/GeLU/Swish的一个恒等式
 slug: relugeluswish的一个恒等式
-date: 
-source: https://spaces.ac.cn/archives/11233
+date: 2025-08-16
 tags: 分析, 神经网络, 恒等式, 生成模型, attention
 status: pending
 ---

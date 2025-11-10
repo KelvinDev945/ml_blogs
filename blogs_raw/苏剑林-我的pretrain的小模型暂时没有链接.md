@@ -1,8 +1,7 @@
 ---
 title: 苏剑林: 我的pretrain的小模型，暂时没有链接。
 slug: 苏剑林-我的pretrain的小模型暂时没有链接
-date: 
-source: https://spaces.ac.cn/archives/10862
+date: 2025-04-18
 tags: 语言模型, attention, 位置编码, rope, 生成模型
 status: pending
 ---

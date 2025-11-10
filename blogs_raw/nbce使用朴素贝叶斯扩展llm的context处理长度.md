@@ -1,8 +1,7 @@
 ---
 title: NBCE：使用朴素贝叶斯扩展LLM的Context处理长度
 slug: nbce使用朴素贝叶斯扩展llm的context处理长度
-date: 
-source: https://spaces.ac.cn/archives/9617
+date: 2023-05-23
 tags: 语言模型, 外推, LLM, 贝叶斯, 生成模型
 status: pending
 ---

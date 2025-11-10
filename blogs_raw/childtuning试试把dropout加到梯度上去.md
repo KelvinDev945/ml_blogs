@@ -1,8 +1,7 @@
 ---
 title: ChildTuning：试试把Dropout加到梯度上去？
 slug: childtuning试试把dropout加到梯度上去
-date: 
-source: https://spaces.ac.cn/archives/8764
+date: 2021-11-22
 tags: 模型, 优化, 梯度, 生成模型, attention
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: Seq2Seq+前缀树：检索任务新范式（以KgCLUE为例）
 slug: seq2seq前缀树检索任务新范式以kgclue为例
-date: 
-source: https://spaces.ac.cn/archives/8802
+date: 2021-12-17
 tags: 代码, 语义, keras, 相似度, 生成模型
 status: pending
 ---

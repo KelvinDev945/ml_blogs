@@ -1,8 +1,7 @@
 ---
 title: 基于量子化假设推导模型的尺度定律（Scaling Law）
 slug: 基于量子化假设推导模型的尺度定律scaling-law
-date: 
-source: https://spaces.ac.cn/archives/9607
+date: 2023-05-18
 tags: 模型, 分析, 量子, 尺度定律, 生成模型
 status: pending
 ---

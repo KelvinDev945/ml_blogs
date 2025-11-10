@@ -1,8 +1,7 @@
 ---
 title: QK-Clip：让Muon在Scaleup之路上更进一步
 slug: qk-clip让muon在scaleup之路上更进一步
-date: 
-source: https://spaces.ac.cn/archives/11126
+date: 2025-07-12
 tags: 优化, attention, 优化器, muon, 生成模型
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: 预训练一下，Transformer的长序列成绩还能涨不少！
 slug: 预训练一下transformer的长序列成绩还能涨不少
-date: 
-source: https://spaces.ac.cn/archives/9787
+date: 2023-10-08
 tags: 语言模型, attention, 生成模型, attention, 优化
 status: pending
 ---

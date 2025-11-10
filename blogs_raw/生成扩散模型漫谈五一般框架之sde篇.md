@@ -1,8 +1,7 @@
 ---
 title: 生成扩散模型漫谈（五）：一般框架之SDE篇
 slug: 生成扩散模型漫谈五一般框架之sde篇
-date: 
-source: https://spaces.ac.cn/archives/9209
+date: 2022-08-03
 tags: 微分方程, 生成模型, DDPM, 扩散, 生成模型
 status: pending
 ---

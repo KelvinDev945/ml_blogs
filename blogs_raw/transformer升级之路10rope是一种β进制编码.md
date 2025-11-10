@@ -1,8 +1,7 @@
 ---
 title: Transformer升级之路：10、RoPE是一种β进制编码
 slug: transformer升级之路10rope是一种β进制编码
-date: 
-source: https://spaces.ac.cn/archives/9675
+date: 2023-07-06
 tags: attention, 位置编码, 泛化, 外推, rope
 status: pending
 ---

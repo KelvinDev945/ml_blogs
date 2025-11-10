@@ -1,8 +1,7 @@
 ---
 title: Bias项的神奇作用：RoPE + Bias = 更好的长度外推性
 slug: bias项的神奇作用rope-bias-更好的长度外推性
-date: 
-source: https://spaces.ac.cn/archives/9577
+date: 2023-04-03
 tags: 语言模型, attention, 位置编码, 外推, rope
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: 不成功的尝试：将多标签交叉熵推广到“n个m分类”上去
 slug: 不成功的尝试将多标签交叉熵推广到n个m分类上去
-date: 
-source: https://spaces.ac.cn/archives/9158
+date: 2022-07-15
 tags: 优化, 损失函数, 生成模型, attention, 优化
 status: pending
 ---

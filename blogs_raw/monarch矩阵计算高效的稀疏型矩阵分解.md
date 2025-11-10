@@ -1,8 +1,7 @@
 ---
 title: Monarch矩阵：计算高效的稀疏型矩阵分解
 slug: monarch矩阵计算高效的稀疏型矩阵分解
-date: 
-source: https://spaces.ac.cn/archives/10249
+date: 2024-07-24
 tags: 矩阵, 语言模型, 稀疏, 低秩, 生成模型
 status: pending
 ---

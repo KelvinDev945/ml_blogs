@@ -1,8 +1,7 @@
 ---
 title: 为什么需要残差？一个来自DeepNet的视角
 slug: 为什么需要残差一个来自deepnet的视角
-date: 
-source: https://spaces.ac.cn/archives/8994
+date: 2022-03-19
 tags: 模型, 优化, 深度学习, 梯度, 生成模型
 status: pending
 ---

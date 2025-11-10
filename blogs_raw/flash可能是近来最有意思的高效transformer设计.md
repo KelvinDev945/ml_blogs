@@ -1,8 +1,7 @@
 ---
 title: FLASH：可能是近来最有意思的高效Transformer设计
 slug: flash可能是近来最有意思的高效transformer设计
-date: 
-source: https://spaces.ac.cn/archives/8934
+date: 2022-02-25
 tags: 语言模型, 生成模型, attention, 生成模型, attention
 status: pending
 ---

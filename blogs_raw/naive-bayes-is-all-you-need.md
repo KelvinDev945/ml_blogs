@@ -1,8 +1,7 @@
 ---
 title: Naive Bayes is all you need ?
 slug: naive-bayes-is-all-you-need
-date: 
-source: https://spaces.ac.cn/archives/9648
+date: 2023-06-08
 tags: 语言模型, attention, LLM, 贝叶斯, 生成模型
 status: pending
 ---

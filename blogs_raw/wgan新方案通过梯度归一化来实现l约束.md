@@ -1,8 +1,7 @@
 ---
 title: WGAN新方案：通过梯度归一化来实现L约束
 slug: wgan新方案通过梯度归一化来实现l约束
-date: 
-source: https://spaces.ac.cn/archives/8757
+date: 2021-11-15
 tags: 无监督, GAN, 生成模型, 生成模型, attention
 status: pending
 ---

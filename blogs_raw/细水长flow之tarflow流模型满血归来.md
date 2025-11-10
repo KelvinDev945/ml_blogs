@@ -1,8 +1,7 @@
 ---
 title: 细水长flow之TARFLOW：流模型满血归来？
 slug: 细水长flow之tarflow流模型满血归来
-date: 
-source: https://spaces.ac.cn/archives/10667
+date: 2025-01-17
 tags: 流模型, flow, 生成模型, attention, 生成模型
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: 流形上的最速下降：2. Muon + 正交
 slug: 流形上的最速下降2-muon-正交
-date: 
-source: https://spaces.ac.cn/archives/11215
+date: 2025-08-06
 tags: 矩阵, 优化器, muon, 约束, 最速下降
 status: pending
 ---

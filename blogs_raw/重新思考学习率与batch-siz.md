@@ -1,8 +1,7 @@
 ---
 title: 重新思考学习率与Batch Siz...
 slug: 重新思考学习率与batch-siz
-date: 
-source: https://spaces.ac.cn/archives/11301
+date: 2025-09-22
 tags: 学习率, 优化器, 尺度定律, 平均场, 生成模型
 status: pending
 ---

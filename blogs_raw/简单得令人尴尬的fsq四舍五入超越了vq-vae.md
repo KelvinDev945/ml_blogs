@@ -1,8 +1,7 @@
 ---
 title: 简单得令人尴尬的FSQ：“四舍五入”超越了VQ-VAE
 slug: 简单得令人尴尬的fsq四舍五入超越了vq-vae
-date: 
-source: https://spaces.ac.cn/archives/9826
+date: 2023-10-31
 tags: 生成模型, 编码, 梯度, 离散化, 生成模型
 status: pending
 ---

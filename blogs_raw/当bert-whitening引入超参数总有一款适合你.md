@@ -1,8 +1,7 @@
 ---
 title: 当BERT-whitening引入超参数：总有一款适合你
 slug: 当bert-whitening引入超参数总有一款适合你
-date: 
-source: https://spaces.ac.cn/archives/9079
+date: 2022-05-18
 tags: 语言模型, 语义, 语义相似度, 生成模型, attention
 status: pending
 ---

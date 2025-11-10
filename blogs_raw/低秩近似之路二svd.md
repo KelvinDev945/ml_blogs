@@ -1,8 +1,7 @@
 ---
 title: 低秩近似之路（二）：SVD
 slug: 低秩近似之路二svd
-date: 
-source: https://spaces.ac.cn/archives/10407
+date: 2024-10-01
 tags: 近似, 最优, 矩阵, SVD, 低秩
 status: pending
 ---

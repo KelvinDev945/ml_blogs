@@ -1,8 +1,7 @@
 ---
 title: 矩阵的有效秩（Effective Rank）
 slug: 矩阵的有效秩effective-rank
-date: 
-source: https://spaces.ac.cn/archives/10847
+date: 2025-04-10
 tags: 矩阵, 熵, 稀疏, 低秩, 生成模型
 status: pending
 ---

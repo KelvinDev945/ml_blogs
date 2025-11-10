@@ -1,8 +1,7 @@
 ---
 title: 模型优化漫谈：BERT的初始标准差为什么是0.02？
 slug: 模型优化漫谈bert的初始标准差为什么是002
-date: 
-source: https://spaces.ac.cn/archives/8747
+date: 2021-11-08
 tags: 模型, 分析, 优化, 梯度, 生成模型
 status: pending
 ---

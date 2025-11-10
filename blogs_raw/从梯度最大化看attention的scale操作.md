@@ -1,8 +1,7 @@
 ---
 title: 从梯度最大化看Attention的Scale操作
 slug: 从梯度最大化看attention的scale操作
-date: 
-source: https://spaces.ac.cn/archives/9812
+date: 2023-10-22
 tags: 优化, 梯度, attention, 生成模型, attention
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: 高阶MuP：更简明但更高明的谱条件缩放
 slug: 高阶mup更简明但更高明的谱条件缩放
-date: 
-source: https://spaces.ac.cn/archives/10795
+date: 2025-03-24
 tags: LoRA, 梯度, 优化器, 尺度定律, 谱范数
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: GAU-α：尝鲜体验快好省的下一代Attention
 slug: gau-α尝鲜体验快好省的下一代attention
-date: 
-source: https://spaces.ac.cn/archives/9052
+date: 2022-04-22
 tags: 语言模型, attention, 预训练, 生成模型, attention
 status: pending
 ---

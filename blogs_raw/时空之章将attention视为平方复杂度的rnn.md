@@ -1,8 +1,7 @@
 ---
 title: 时空之章：将Attention视为平方复杂度的RNN
 slug: 时空之章将attention视为平方复杂度的rnn
-date: 
-source: https://spaces.ac.cn/archives/10017
+date: 2024-03-18
 tags: 语言模型, RNN, attention, 复杂度, 生成模型
 status: pending
 ---

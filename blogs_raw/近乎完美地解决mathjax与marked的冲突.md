@@ -1,8 +1,7 @@
 ---
 title: 近乎完美地解决MathJax与Marked的冲突
 slug: 近乎完美地解决mathjax与marked的冲突
-date: 
-source: https://spaces.ac.cn/archives/10332
+date: 2024-08-26
 tags: 网站, latex, 论文, 酷论文, 生成模型
 status: pending
 ---

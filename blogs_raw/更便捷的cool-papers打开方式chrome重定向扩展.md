@@ -1,8 +1,7 @@
 ---
 title: 更便捷的Cool Papers打开方式：Chrome重定向扩展
 slug: 更便捷的cool-papers打开方式chrome重定向扩展
-date: 
-source: https://spaces.ac.cn/archives/9978
+date: 2024-02-02
 tags: 网站, 论文, 酷论文, 生成模型, attention
 status: pending
 ---

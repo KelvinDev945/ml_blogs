@@ -1,8 +1,7 @@
 ---
 title: 写了个刷论文的辅助网站：Cool Papers
 slug: 写了个刷论文的辅助网站cool-papers
-date: 
-source: https://spaces.ac.cn/archives/9907
+date: 2023-12-25
 tags: 网站, 论文, 酷论文, 生成模型, attention
 status: pending
 ---

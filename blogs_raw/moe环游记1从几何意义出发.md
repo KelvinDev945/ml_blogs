@@ -1,8 +1,7 @@
 ---
 title: MoE环游记：1、从几何意义出发
 slug: moe环游记1从几何意义出发
-date: 
-source: https://spaces.ac.cn/archives/10699
+date: 2025-02-08
 tags: 模型, 几何, 稀疏, moe, 生成模型
 status: pending
 ---

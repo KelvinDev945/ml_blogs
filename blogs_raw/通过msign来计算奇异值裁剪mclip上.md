@@ -1,8 +1,7 @@
 ---
 title: 通过msign来计算奇异值裁剪mclip（上）
 slug: 通过msign来计算奇异值裁剪mclip上
-date: 
-source: https://spaces.ac.cn/archives/11006
+date: 2025-06-07
 tags: 迭代, 近似, 矩阵, SVD, muon
 status: pending
 ---

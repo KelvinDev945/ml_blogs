@@ -1,8 +1,7 @@
 ---
 title: 低秩近似之路（四）：ID
 slug: 低秩近似之路四id
-date: 
-source: https://spaces.ac.cn/archives/10501
+date: 2024-10-30
 tags: 近似, 最优, 矩阵, 低秩, 生成模型
 status: pending
 ---

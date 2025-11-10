@@ -1,8 +1,7 @@
 ---
 title: 多标签“Softmax+交叉熵”的软标签版本
 slug: 多标签softmax交叉熵的软标签版本
-date: 
-source: https://spaces.ac.cn/archives/9064
+date: 2022-05-07
 tags: 优化, 损失函数, 光滑, 生成模型, attention
 status: pending
 ---

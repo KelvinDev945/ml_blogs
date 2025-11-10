@@ -1,8 +1,7 @@
 ---
 title: GPLinker：基于GlobalPointer的实体关系联合抽取
 slug: gplinker基于globalpointer的实体关系联合抽取
-date: 
-source: https://spaces.ac.cn/archives/8888
+date: 2022-01-30
 tags: NLP, 信息抽取, NER, 生成模型, attention
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: GPLinker：基于GlobalPointer的事件联合抽取
 slug: gplinker基于globalpointer的事件联合抽取
-date: 
-source: https://spaces.ac.cn/archives/8926
+date: 2022-02-21
 tags: NLP, 信息抽取, NER, 生成模型, attention
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: Transformer升级之路：18、RoPE的底数选择原则
 slug: transformer升级之路18rope的底数选择原则
-date: 
-source: https://spaces.ac.cn/archives/10122
+date: 2024-05-29
 tags: 不等式, attention, 位置编码, rope, 生成模型
 status: pending
 ---

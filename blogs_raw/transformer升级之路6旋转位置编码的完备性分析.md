@@ -1,8 +1,7 @@
 ---
 title: Transformer升级之路：6、旋转位置编码的完备性分析
 slug: transformer升级之路6旋转位置编码的完备性分析
-date: 
-source: https://spaces.ac.cn/archives/9403
+date: 2022-12-28
 tags: 矩阵, attention, 位置编码, rope, 生成模型
 status: pending
 ---

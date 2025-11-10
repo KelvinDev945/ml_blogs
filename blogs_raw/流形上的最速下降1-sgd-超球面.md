@@ -1,8 +1,7 @@
 ---
 title: 流形上的最速下降：1.  SGD + 超球面
 slug: 流形上的最速下降1-sgd-超球面
-date: 
-source: https://spaces.ac.cn/archives/11196
+date: 2025-08-01
 tags: 不等式, 优化器, 约束, 最速下降, 生成模型
 status: pending
 ---

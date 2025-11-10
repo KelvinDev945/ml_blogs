@@ -1,8 +1,7 @@
 ---
 title: 重温SSM（四）：有理生成函数的新视角
 slug: 重温ssm四有理生成函数的新视角
-date: 
-source: https://spaces.ac.cn/archives/10180
+date: 2024-06-27
 tags: 生成函数, 线性, RNN, ssm, 生成模型
 status: pending
 ---

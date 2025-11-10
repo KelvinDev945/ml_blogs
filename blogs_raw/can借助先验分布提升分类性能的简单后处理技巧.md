@@ -1,8 +1,7 @@
 ---
 title: CAN：借助先验分布提升分类性能的简单后处理技巧
 slug: can借助先验分布提升分类性能的简单后处理技巧
-date: 
-source: https://spaces.ac.cn/archives/8728
+date: 2021-10-22
 tags: 模型, 概率, 分析, 技巧, 生成模型
 status: pending
 ---

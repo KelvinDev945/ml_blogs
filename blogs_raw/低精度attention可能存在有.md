@@ -1,8 +1,7 @@
 ---
 title: 低精度Attention可能存在有...
 slug: 低精度attention可能存在有
-date: 
-source: https://spaces.ac.cn/archives/11371
+date: 2025-10-27
 tags: 近似, 分析, 优化, attention, 生成模型
 status: pending
 ---

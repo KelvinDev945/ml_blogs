@@ -1,8 +1,7 @@
 ---
 title: 生成扩散模型漫谈（一）：DDPM = 拆楼 + 建楼
 slug: 生成扩散模型漫谈一ddpm-拆楼-建楼
-date: 
-source: https://spaces.ac.cn/archives/9119
+date: 2022-06-13
 tags: VAE, GAN, flow模型, 概率, 生成模型
 status: pending
 ---

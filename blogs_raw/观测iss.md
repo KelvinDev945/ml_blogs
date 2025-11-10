@@ -1,8 +1,7 @@
 ---
 title: 观测ISS
 slug: 观测iss
-date: 
-source: https://spaces.ac.cn/archives/41
+date: 2009-07-29
 tags: 国际空间站, ISS, 观测, 生成模型, attention
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: Google新搜出的优化器Lion：效率与效果兼得的“训练狮”
 slug: google新搜出的优化器lion效率与效果兼得的训练狮
-date: 
-source: https://spaces.ac.cn/archives/9473
+date: 2023-02-16
 tags: 分析, 优化, 优化器, 生成模型, attention
 status: pending
 ---

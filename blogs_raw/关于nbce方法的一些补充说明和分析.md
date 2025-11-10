@@ -1,8 +1,7 @@
 ---
 title: 关于NBCE方法的一些补充说明和分析
 slug: 关于nbce方法的一些补充说明和分析
-date: 
-source: https://spaces.ac.cn/archives/9632
+date: 2023-05-31
 tags: 语言模型, 外推, LLM, 贝叶斯, 生成模型
 status: pending
 ---

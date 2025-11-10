@@ -1,8 +1,7 @@
 ---
 title: MoE环游记：5、均匀分布的反思
 slug: moe环游记5均匀分布的反思
-date: 
-source: https://spaces.ac.cn/archives/10945
+date: 2025-05-16
 tags: 优化, 稀疏, moe, 生成模型, attention
 status: pending
 ---

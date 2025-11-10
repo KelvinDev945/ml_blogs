@@ -1,8 +1,7 @@
 ---
 title: VQ一下Key，Transformer的复杂度就变成线性了
 slug: vq一下keytransformer的复杂度就变成线性了
-date: 
-source: https://spaces.ac.cn/archives/9844
+date: 2023-11-09
 tags: 量子化, 编码, 梯度, attention, 生成模型
 status: pending
 ---

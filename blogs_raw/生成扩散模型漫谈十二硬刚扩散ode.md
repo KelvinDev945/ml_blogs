@@ -1,8 +1,7 @@
 ---
 title: 生成扩散模型漫谈（十二）：“硬刚”扩散ODE
 slug: 生成扩散模型漫谈十二硬刚扩散ode
-date: 
-source: https://spaces.ac.cn/archives/9280
+date: 2022-09-28
 tags: 微分方程, 生成模型, 扩散, 生成模型, attention
 status: pending
 ---

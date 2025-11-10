@@ -1,8 +1,7 @@
 ---
 title: 自然数集中 N = ab + c 时 a + b + c 的最小值
 slug: 自然数集中-n-ab-c-时-a-b-c-的最小值
-date: 
-source: https://spaces.ac.cn/archives/9775
+date: 2023-09-20
 tags: 最优, 问题, 生成模型, attention, 优化
 status: pending
 ---

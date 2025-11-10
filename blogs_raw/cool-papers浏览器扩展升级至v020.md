@@ -1,8 +1,7 @@
 ---
 title: Cool Papers浏览器扩展升级至v0.2.0
 slug: cool-papers浏览器扩展升级至v020
-date: 
-source: https://spaces.ac.cn/archives/10480
+date: 2024-10-16
 tags: 网站, 论文, 酷论文, 生成模型, attention
 status: pending
 ---

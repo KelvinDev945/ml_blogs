@@ -1,8 +1,7 @@
 ---
 title: bert4keras在手，baseline我有：CLUE基准代码
 slug: bert4keras在手baseline我有clue基准代码
-date: 
-source: https://spaces.ac.cn/archives/8739
+date: 2021-10-31
 tags: 模型, 代码, keras, 生成模型, attention
 status: pending
 ---

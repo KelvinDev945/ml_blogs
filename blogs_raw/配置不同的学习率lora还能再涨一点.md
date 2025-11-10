@@ -1,8 +1,7 @@
 ---
 title: 配置不同的学习率，LoRA还能再涨一点？
 slug: 配置不同的学习率lora还能再涨一点
-date: 
-source: https://spaces.ac.cn/archives/10001
+date: 2024-02-27
 tags: 梯度, 优化器, 低秩, lora, 生成模型
 status: pending
 ---

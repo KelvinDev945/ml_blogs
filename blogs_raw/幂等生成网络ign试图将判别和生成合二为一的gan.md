@@ -1,8 +1,7 @@
 ---
 title: 幂等生成网络IGN：试图将判别和生成合二为一的GAN
 slug: 幂等生成网络ign试图将判别和生成合二为一的gan
-date: 
-source: https://spaces.ac.cn/archives/9969
+date: 2024-01-31
 tags: GAN, GAN, 生成模型, 对抗, 生成模型
 status: pending
 ---

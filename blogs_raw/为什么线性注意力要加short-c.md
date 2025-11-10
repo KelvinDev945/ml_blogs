@@ -1,8 +1,7 @@
 ---
 title: 为什么线性注意力要加Short C...
 slug: 为什么线性注意力要加short-c
-date: 
-source: https://spaces.ac.cn/archives/11320
+date: 2025-10-05
 tags: 线性, RNN, 生成模型, attention, 生成模型
 status: pending
 ---

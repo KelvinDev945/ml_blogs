@@ -1,8 +1,7 @@
 ---
 title: RoFormerV2：自然语言理解的极限探索
 slug: roformerv2自然语言理解的极限探索
-date: 
-source: https://spaces.ac.cn/archives/8998
+date: 2022-03-21
 tags: 语言模型, 预训练, 生成模型, attention, 优化
 status: pending
 ---

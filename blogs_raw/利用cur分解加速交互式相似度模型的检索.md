@@ -1,8 +1,7 @@
 ---
 title: 利用CUR分解加速交互式相似度模型的检索
 slug: 利用cur分解加速交互式相似度模型的检索
-date: 
-source: https://spaces.ac.cn/archives/9336
+date: 2022-11-02
 tags: 矩阵, 语义, 语义相似度, 生成模型, attention
 status: pending
 ---

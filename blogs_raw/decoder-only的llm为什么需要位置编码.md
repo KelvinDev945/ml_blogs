@@ -1,8 +1,7 @@
 ---
 title: Decoder-only的LLM为什么需要位置编码？
 slug: decoder-only的llm为什么需要位置编码
-date: 
-source: https://spaces.ac.cn/archives/10347
+date: 2024-09-01
 tags: 语言模型, attention, 位置编码, 生成模型, attention
 status: pending
 ---

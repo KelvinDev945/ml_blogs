@@ -1,8 +1,7 @@
 ---
 title: 对齐全量微调！这是我看过最精彩的LoRA改进（二）
 slug: 对齐全量微调这是我看过最精彩的lora改进二
-date: 
-source: https://spaces.ac.cn/archives/10266
+date: 2024-07-29
 tags: 梯度, 优化器, 低秩, lora, 生成模型
 status: pending
 ---

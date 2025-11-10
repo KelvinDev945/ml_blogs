@@ -1,8 +1,7 @@
 ---
 title: 新年快乐！记录一下 Cool Papers 的开发体验
 slug: 新年快乐记录一下-cool-papers-的开发体验
-date: 
-source: https://spaces.ac.cn/archives/9920
+date: 2024-01-01
 tags: 网站, 论文, 酷论文, 生成模型, attention
 status: pending
 ---

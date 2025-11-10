@@ -1,8 +1,7 @@
 ---
 title: Transformer升级之路：14、当HWFA遇见ReRoPE
 slug: transformer升级之路14当hwfa遇见rerope
-date: 
-source: https://spaces.ac.cn/archives/9731
+date: 2023-08-24
 tags: attention, 位置编码, 外推, rope, 生成模型
 status: pending
 ---

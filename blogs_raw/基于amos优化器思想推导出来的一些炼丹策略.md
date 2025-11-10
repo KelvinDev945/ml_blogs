@@ -1,8 +1,7 @@
 ---
 title: 基于Amos优化器思想推导出来的一些“炼丹策略”
 slug: 基于amos优化器思想推导出来的一些炼丹策略
-date: 
-source: https://spaces.ac.cn/archives/9344
+date: 2022-11-22
 tags: 分析, 优化, 渐近, 优化器, 生成模型
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: “Cool Papers + 站内搜索”的一些新尝试
 slug: cool-papers-站内搜索的一些新尝试
-date: 
-source: https://spaces.ac.cn/archives/10311
+date: 2024-08-12
 tags: 网站, 论文, 酷论文, 生成模型, attention
 status: pending
 ---

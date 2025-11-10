@@ -1,8 +1,7 @@
 ---
 title: 在bert4keras中使用混合精度和XLA加速训练
 slug: 在bert4keras中使用混合精度和xla加速训练
-date: 
-source: https://spaces.ac.cn/archives/9059
+date: 2022-04-28
 tags: 模型, 优化, 梯度, 生成模型, attention
 status: pending
 ---

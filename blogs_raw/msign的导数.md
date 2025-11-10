@@ -1,8 +1,7 @@
 ---
 title: msign的导数
 slug: msign的导数
-date: 
-source: https://spaces.ac.cn/archives/11025
+date: 2025-06-13
 tags: 微积分, 矩阵, 梯度, muon, 生成模型
 status: pending
 ---

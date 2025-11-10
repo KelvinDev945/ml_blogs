@@ -1,8 +1,7 @@
 ---
 title: 生成扩散模型漫谈（十九）：作为扩散ODE的GAN
 slug: 生成扩散模型漫谈十九作为扩散ode的gan
-date: 
-source: https://spaces.ac.cn/archives/9662
+date: 2023-06-24
 tags: 优化, GAN, 扩散, 生成模型, attention
 status: pending
 ---

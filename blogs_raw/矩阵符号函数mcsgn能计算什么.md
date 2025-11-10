@@ -1,8 +1,7 @@
 ---
 title: 矩阵符号函数mcsgn能计算什么？
 slug: 矩阵符号函数mcsgn能计算什么
-date: 
-source: https://spaces.ac.cn/archives/11056
+date: 2025-06-23
 tags: 代数, 矩阵, 线性, 生成模型, attention
 status: pending
 ---

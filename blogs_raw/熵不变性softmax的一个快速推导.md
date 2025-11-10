@@ -1,8 +1,7 @@
 ---
 title: 熵不变性Softmax的一个快速推导
 slug: 熵不变性softmax的一个快速推导
-date: 
-source: https://spaces.ac.cn/archives/9034
+date: 2022-04-11
 tags: 近似, 熵, attention, 生成模型, attention
 status: pending
 ---

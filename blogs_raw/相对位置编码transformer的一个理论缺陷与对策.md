@@ -1,8 +1,7 @@
 ---
 title: 相对位置编码Transformer的一个理论缺陷与对策
 slug: 相对位置编码transformer的一个理论缺陷与对策
-date: 
-source: https://spaces.ac.cn/archives/9105
+date: 2022-06-07
 tags: 语言模型, attention, 位置编码, 生成模型, attention
 status: pending
 ---

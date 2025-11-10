@@ -1,8 +1,7 @@
 ---
 title: Dropout视角下的MLM和MAE：一些新的启发
 slug: dropout视角下的mlm和mae一些新的启发
-date: 
-source: https://spaces.ac.cn/archives/8770
+date: 2021-11-29
 tags: 模型, 概率, 分析, 优化, 生成模型
 status: pending
 ---

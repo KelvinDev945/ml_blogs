@@ -1,8 +1,7 @@
 ---
 title: 基于树莓派Zero2W搭建一个随身旁路由
 slug: 基于树莓派zero2w搭建一个随身旁路由
-date: 
-source: https://spaces.ac.cn/archives/11206
+date: 2025-08-02
 tags: linux, 网络, 路由器, 智能家居, 生成模型
 status: pending
 ---

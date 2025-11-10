@@ -1,8 +1,7 @@
 ---
 title: BytePiece：更纯粹、更高压缩率的Tokenizer
 slug: bytepiece更纯粹更高压缩率的tokenizer
-date: 
-source: https://spaces.ac.cn/archives/9752
+date: 2023-09-07
 tags: 最小熵, 分词, 无监督, 新词发现, 生成模型
 status: pending
 ---

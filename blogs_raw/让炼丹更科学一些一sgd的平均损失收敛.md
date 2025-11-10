@@ -1,8 +1,7 @@
 ---
 title: 让炼丹更科学一些（一）：SGD的平均损失收敛
 slug: 让炼丹更科学一些一sgd的平均损失收敛
-date: 
-source: https://spaces.ac.cn/archives/9902
+date: 2023-12-19
 tags: 优化器, 不等式, 优化器, sgd, 炼丹
 status: pending
 ---

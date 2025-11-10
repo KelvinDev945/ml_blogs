@@ -1,8 +1,7 @@
 ---
 title: 随机分词再探：从Viterbi Sampling到完美采样算法
 slug: 随机分词再探从viterbi-sampling到完美采样算法
-date: 
-source: https://spaces.ac.cn/archives/9811
+date: 2023-10-16
 tags: 概率, 随机, 优化, 分词, 采样
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: 生成扩散模型漫谈（二十一）：中值定理加速ODE采样
 slug: 生成扩散模型漫谈二十一中值定理加速ode采样
-date: 
-source: https://spaces.ac.cn/archives/9881
+date: 2023-12-07
 tags: 微分方程, 生成模型, 扩散, 生成模型, attention
 status: pending
 ---

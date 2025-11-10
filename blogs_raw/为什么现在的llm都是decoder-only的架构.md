@@ -1,8 +1,7 @@
 ---
 title: 为什么现在的LLM都是Decoder-only的架构？
 slug: 为什么现在的llm都是decoder-only的架构
-date: 
-source: https://spaces.ac.cn/archives/9529
+date: 2023-03-17
 tags: 分析, 语言模型, 文本生成, attention, 生成模型
 status: pending
 ---

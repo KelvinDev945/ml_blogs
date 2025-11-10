@@ -1,8 +1,7 @@
 ---
 title: 门控注意力单元（GAU）还需要Warmup吗？
 slug: 门控注意力单元gau还需要warmup吗
-date: 
-source: https://spaces.ac.cn/archives/8990
+date: 2022-03-11
 tags: 模型, 优化, attention, 生成模型, attention
 status: pending
 ---

@@ -1,8 +1,7 @@
 ---
 title: CoSENT（一）：比Sentence-BERT更有效的句向量方案
 slug: cosent一比sentence-bert更有效的句向量方案
-date: 
-source: https://spaces.ac.cn/archives/8847
+date: 2022-01-06
 tags: 语义, 语义相似度, 对比学习, 生成模型, attention
 status: pending
 ---
