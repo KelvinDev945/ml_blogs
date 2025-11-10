@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Transformer升级之路：8、长度外推性与位置鲁棒性 | ML & Math Blog Posts</title>
-    <meta name="description" content="Transformer升级之路：8、长度外推性与位置鲁棒性
+    <meta name="description" content="Transformer升级之路：8、长度外推性与位置鲁棒性&para;
 原文链接: https://spaces.ac.cn/archives/9444
 发布日期: 
 
-上一篇文章《Transformer升级之路：7、长度外推性与局部注意力》我们讨论了Transformer的长度外推性，得出的结论是长度外推性是一个训练和预测的不一致问题，而解决这个不一致的主要思路是将注意力局部化，很多外推性好的改进某种意义上...">
+上一篇文章《Transformer升级之路：7、长度外推性与局部注意力》我们讨论了Transformer的长度外推性，得出的结论是长度外推性是一个训练和预测的不一致问题，而解决这个不一致的主要思路是将注意力局部化，很多外推性好的改...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -22,6 +22,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -66,40 +69,73 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=语言模型">语言模型</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #48 Transformer升级之路：8、长度外推性与位置鲁棒性
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">Transformer升级之路：8、长度外推性与位置鲁棒性</h1>
+            <h1 class="post-title">
+                <span class="post-number">#48</span>
+                Transformer升级之路：8、长度外推性与位置鲁棒性
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/9444" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/9444" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> 语言模型</span>
-                <span class="tag"><i class="fas fa-tag"></i> attention</span>
-                <span class="tag"><i class="fas fa-tag"></i> 位置编码</span>
-                <span class="tag"><i class="fas fa-tag"></i> 外推</span>
-                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <a href="../index.html?tags=语言模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 语言模型</span>
+                </a>
+                
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+                <a href="../index.html?tags=位置编码" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 位置编码</span>
+                </a>
+                
+                <a href="../index.html?tags=外推" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 外推</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="transformer8">Transformer升级之路：8、长度外推性与位置鲁棒性</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="transformer8">Transformer升级之路：8、长度外推性与位置鲁棒性<a class="toc-link" href="#transformer8" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9444">https://spaces.ac.cn/archives/9444</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>上一篇文章<a href="/archives/9431">《Transformer升级之路：7、长度外推性与局部注意力》</a>我们讨论了Transformer的长度外推性，得出的结论是长度外推性是一个训练和预测的不一致问题，而解决这个不一致的主要思路是将注意力局部化，很多外推性好的改进某种意义上都是局部注意力的变体。诚然，目前语言模型的诸多指标看来局部注意力的思路确实能解决长度外推问题，但这种“强行截断”的做法也许会不符合某些读者的审美，因为人工雕琢痕迹太强，缺乏了自然感，同时也让人质疑它们在非语言模型任务上的有效性。</p>
 <p>本文我们从模型对位置编码的鲁棒性角度来重新审视长度外推性这个问题，此思路可以在基本不对注意力进行修改的前提下改进Transformer的长度外推效果，并且还适用多种位置编码，总体来说方法更为优雅自然，而且还适用于非语言模型任务。</p>
-<h2 id="_1">问题分析</h2>
+<h2 id="_1">问题分析<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>在之前的文章中，我们分析了长度外推性的缘由，给出了“长度外推性是一个训练和预测的长度不一致的问题”的定位，具体不一致的地方则有两点：</p>
 <blockquote>
 <p>1、预测的时候用到了没训练过的位置编码（不管绝对还是相对）；</p>
@@ -111,21 +147,21 @@
 \begin{equation}Attention(Q,K,V) = softmax\left(\frac{\log_{m} n}{\sqrt{d}}QK^{\top}\right)V\end{equation}<br />
 其中$m$是训练长度，$n$是预测长度。经过这样修改（下面简称为“$\log n$缩放注意力”），注意力的熵随着长度的变化更加平稳，缓解了这个不一致问题。个人的实验结果显示，至少在MLM任务上，“$\log n$缩放注意力”的长度外推表现更好。</p>
 <p>所以，我们可以认为第2点不一致性已经得到初步解决，那么接下来应该是先集中精力解决第1点不一致性。</p>
-<h2 id="_2">随机位置</h2>
+<h2 id="_2">随机位置<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>第1点不一致性，即“预测的时候用到了没训练过的位置编码”，那么为了解决它，就应该做到“训练阶段把预测所用的位置编码也训练一下”。一篇ACL22还在匿名评审的论文<a href="https://openreview.net/forum?id=nMYj4argap">《Randomized Positional Encodings Boost Length Generalization of Transformers》</a>首次从这个角度考虑了该问题，并且提出了解决方案。</p>
 <p>论文的思路很简单：</p>
 <blockquote>
 <p><strong>随机位置训练</strong> 设$N$为训练长度（论文$N=40$），$M$为预测长度（论文$M=500$），那么选定一个较大$L &gt; M$（这是一个超参，论文$L=2048$），训练阶段原本长度为$N$的序列对应的位置序列是$[0,1,\cdots,N-2,N-1]$，现在改为从$\{0,1,\cdots,L-2,L-1\}$中随机不重复地选$N$个并从小到大排列，作为当前序列的位置序列。</p>
 </blockquote>
 <p>基于numpy的参考代码为：</p>
-<div class="codehilite"><pre><span></span><code>def random_position_ids(N, L=2048):
+<div class="highlight"><pre><span></span><code>def random_position_ids(N, L=2048):
     &quot;&quot;&quot;从[0, L)中随机不重复挑N个整数，并从小到大排列
     &quot;&quot;&quot;
     return np.sort(np.random.permutation(L)[:N])
 </code></pre></div>
 
 <p>预测阶段，也可以同样的方式随机采样位置序列，也可以直接在区间中均匀取点（个人的实验效果显示均匀取点的效果一般好些），这就解决了预测阶段的位置编码没有被训练过的问题。不难理解，这是一个很朴素的训练技巧（下面称之为“随机位置训练”），目标是希望Transformer能对位置的选择更加鲁棒一些，但后面我们将看到，它能取得长度外推效果的明显提升。笔者也在MLM任务上做了实验，结果显示在MLM上也是有效果的，并且配合“$\log n$缩放注意力”提升幅度更明显（原论文没有“$\log n$缩放注意力”这一步）。</p>
-<h2 id="_3">新的基准</h2>
+<h2 id="_3">新的基准<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>很多相关工作，包括上一篇文章提到的各种Local Attention及其变体的方案，都以语言模型任务构建评测指标，但不管是单向GPT还是双向的MLM，它们都高度依赖局部信息（局域性），所以之前的方案很 <em><strong>可能</strong></em> 只是因为语言模型的局域性才有良好的外推表现，假如换一个非局域性的任务，效果可能就变差了。也许正因为如此，这篇论文的评测并非是常规的语言模型任务，而是Google去年在论文<a href="https://papers.cool/arxiv/2207.02098">《Neural Networks and the Chomsky Hierarchy》</a>专门提出的一个长度外泛化基准（下面简称该测试基准为“CHE基准”，即“Chomsky Hierarchy Evaluation Benchmark”），这给我们提供了理解长度外推的一个新视角。</p>
 <p>这个基准包含多个任务，分为R（Regular）、DCF（Deterministic Context-Free）、CS（Context-Sensitive）三个级别，每个级别的难度依次递增，每个任务的简介如下：</p>
 <blockquote>
@@ -146,7 +182,7 @@
 <p><strong>Bucket Sort</strong> ，难度<strong>CS</strong> ，给定一个$n$元数值序列（数列中的每个数都是给定的$n$个数之一），返回其从小到大排序后的序列，如输入$421302214$应该输出$011222344$。</p>
 </blockquote>
 <p>可以看到，这些任务都具有一个共同特点，就是它们的运算都有固定的简单规则，并且理论上输入都是不限长度的，那么我们可以通过短序列来训练，然后测试在短序列上的训练结果能否推广到长序列中。也就是说，它可以作为长度外推性的一个很强的测试基准。</p>
-<h2 id="_4">实验结果</h2>
+<h2 id="_4">实验结果<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>首先，介绍原始论文<a href="https://papers.cool/arxiv/2207.02098">《Neural Networks and the Chomsky Hierarchy》</a>的实验结果，它对比了若干RNN模型及Transformer模型的效果（评测指标是诸位字符串的平均准确率，而不是整体结果的全对率）：  </p>
 <p><a href="/usr/uploads/2023/01/3218274161.png" title="点击查看原图"><img alt="若干模型在若干长度外推测试任务上的效果对比" src="/usr/uploads/2023/01/3218274161.png" /></a></p>
 <p>若干模型在若干长度外推测试任务上的效果对比</p>
@@ -156,17 +192,17 @@ $$\underbrace{\text{Transformer}}<em _text_R="\text{R">{\text{R}^-} &lt; \underb
 <p><a href="/usr/uploads/2023/01/1506943925.png" title="点击查看原图"><img alt="不同位置编码的Transformer在有无随机位置训练下的长度外推效果对比" src="/usr/uploads/2023/01/1506943925.png" /></a></p>
 <p>不同位置编码的Transformer在有无随机位置训练下的长度外推效果对比</p>
 <p>可以看到，在随机位置训练之下，不管哪种位置编码的Transformer都有明显的提升，这就进一步验证了上一篇文章的结论，即长度外推性跟位置编码本身的设计没太大关系。特别地，随机位置训练还在Bucket Sort这个任务上首次取得了全对的准确率。尽管在总体表现上依然欠佳，但这相比之前的结果已经算是长足进步了（不知道结合“$\log n$缩放注意力”能否有提升？）。值得注意的地方还有，上表显示ALIBI这个在语言模型任务中表现良好的方法，在CHE基准上并无表现出什么优势，尤其是加入随机位置训练后，它的平均指标比RoPE还差，这就初步肯定了前面的猜测，即各种Local Attention变体的方法表现良好，大概率是因为基于语言模型的评测任务本身有严重的局域性，对于非局域性的CHE基准，这些方法并没有优势。</p>
-<h2 id="_5">原理反思</h2>
+<h2 id="_5">原理反思<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>细思之下，“随机位置训练”会很让人困惑。简单起见，我们不妨设$L=2048,N=64,M=512$，这样一来，训练阶段所用的平均位置序列大致为$[0, 32, 64, \cdots, 2016]$，预测阶段所用的平均位置序列是$[0, 4, 8, \cdots, 2044]$，训练阶段和预测阶段的相邻位置差不一样，这也可以说是某种不一致性，但它表现依然良好，这是为什么呢？</p>
 <p>我们可以从“序”的角度去理解它。由于训练阶段的位置id是随机采样的，那么相邻位置差也是随机的，所以不管是相对位置还是绝对位置，模型不大可能通过精确的位置id来获取位置信息，取而代之是一个模糊的位置信号，更准确地说，是通过位置序列的“序”来编码位置而不是通过位置id本身来编码位置。比如，位置序列[1,3,5]跟[2,4,8]是等价的，因为它们都是从小到大排列的一个序列，随机位置训练“迫使”模型学会了一个等价类，即所有从小到大排列的位置序列都是等价的，都可以相互替换，这是位置鲁棒性的真正含义。</p>
 <p>然而，笔者自己在MLM上做的实验结果显示，这个“等价类”的学习对模型还是有一定的困难的，更理想的方法是训练阶段依然使用随机位置，使得预测阶段的位置编码也被训练过，但是预测阶段的位置序列前面部分应该跟随机位置的平均结果一致。还是刚才的例子，如果预测阶段所用的位置序列是$[0, 4, 8, \cdots, 2044]$，那么我们希望训练阶段的随机位置平均结果是$[0, 4, 8, \cdots, 252]$（即序列$[0, 4, 8, \cdots, 2044]$的前$N$个），而不是$[0, 32, 64, \cdots, 2016]$，这样训练和预测的一致性就更加紧凑了。</p>
-<h2 id="_6">延伸推广</h2>
+<h2 id="_6">延伸推广<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
 <p>于是，笔者考虑了如下思路：</p>
 <blockquote>
 <p><strong>等均值随机位置训练</strong> 设$n$服从一个均值为$N$、采样空间为$[0, \infty)$的分布，那么训练阶段随机采样一个$n$，然后从$[0, n]$中均匀取$N$个点作为位置序列。</p>
 </blockquote>
 <p>参考代码为：</p>
-<div class="codehilite"><pre><span></span><code>def random_position_ids(N):
+<div class="highlight"><pre><span></span><code>def random_position_ids(N):
     &quot;&quot;&quot;先随机采样n，然后从[0, n]均匀取N个点
     &quot;&quot;&quot;
     n = sample_from_xxx()
@@ -176,7 +212,7 @@ $$\underbrace{\text{Transformer}}<em _text_R="\text{R">{\text{R}^-} &lt; \underb
 <p>注意，这样采样出来的位置序列是浮点数，因此不适用于离散的训练式位置编码，只适用于函数式位置编码如<a href="/archives/8231">Sinusoidal</a>或<a href="/archives/8265">RoPE</a>，下面假设只考虑函数式位置编码。</p>
 <p>该思路的最大问题是如何选择适合的采样分布。笔者的第一反应是<a href="https://en.wikipedia.org/wiki/Poisson_distribution">泊松分布</a>，但考虑到泊松分布的均值和方差都是$n$，那么按照“3$\sigma$法则”来估算，它只能外推到$n+3\sqrt{n}$长度，这显然太短了。经过挑选和测试，笔者发现有两个分布比较适合：一个是<a href="https://en.wikipedia.org/wiki/Exponential_distribution">指数分布</a>，它的均值和标准差都是$n$，那么即便按照“3$\sigma$法则”，也能外推到$4n$的长度，是一个比较理想的范围（实际还更长些）；另一个是<a href="https://en.wikipedia.org/wiki/Beta_distribution">beta分布</a>，它定义在$[0,1]$上，我们可以将测试长度作为1，那么训练长度就是$N/M\in(0,1)$，beta分布有两个参数$\alpha,\beta$，其中均值为$\frac{\alpha}{\alpha+\beta}$，那么确保均值等于$N/M$后，我们还有额外的自由度控制$1$附近的概率，适合想要进一步拓展外推范围的场景。</p>
 <p>笔者的实验结果显示，“等均值随机位置训练”结合“$\log n$缩放注意力”，在MLM任务上，能取得最佳的外推效果（训练长度64，测试长度512，采样分布为指数分布）。因为之前没做过CHE基准，所以笔者一时之间也没法测试CHE基准的效果，只能留到后面有机会再尝试了。</p>
-<h2 id="_7">文章小结</h2>
+<h2 id="_7">文章小结<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
 <p>本文从位置鲁棒性的角度思考了Transformer的长度外推性，得到了“随机位置训练”等增强长度外推性的新方案。同时，我们介绍了新的“CHE基准”，相比常规的语言模型任务，它具备更强的非局域性，可以更有效地评估长度外推相关工作。在它之下，之前的注意力局部化相关方法并没有较为突出的表现，相比之下“随机位置训练”效果更佳，这提醒我们应当在更全面的任务上评估相关方法的有效性，而不单单局限于语言模型任务。</p>
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9444">https://spaces.ac.cn/archives/9444</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
@@ -198,15 +234,81 @@ month={Jan},<br />
 url={\url{https://spaces.ac.cn/archives/9444}},<br />
 } </p>
 <hr />
-<h2 id="_8">公式推导与注释</h2>
+<h2 id="_8">公式推导与注释<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="dropout视角下的mlm和mae一些新的启发.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#47 Dropout视角下的MLM和MAE：一些新的启发</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="cool-papers-站内搜索的一些新尝试.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#49 “Cool Papers + 站内搜索”的一些新尝试</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#transformer8">Transformer升级之路：8、长度外推性与位置鲁棒性</a><ul>
+<li><a href="#_1">问题分析</a></li>
+<li><a href="#_2">随机位置</a></li>
+<li><a href="#_3">新的基准</a></li>
+<li><a href="#_4">实验结果</a></li>
+<li><a href="#_5">原理反思</a></li>
+<li><a href="#_6">延伸推广</a></li>
+<li><a href="#_7">文章小结</a></li>
+<li><a href="#_8">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -228,5 +330,41 @@ url={\url{https://spaces.ac.cn/archives/9444}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>

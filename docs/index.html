@@ -40,10 +40,27 @@
                    autocomplete="off">
         </div>
 
+        <!-- Tag Filters -->
+        <div id="tagFilters" class="tag-filters-container">
+            <!-- Tag filter buttons will be dynamically loaded here -->
+        </div>
+
+        <!-- Search Stats -->
+        <div id="searchStats" class="search-stats">
+            <!-- Search statistics will be shown here -->
+        </div>
+
         <!-- Blog List -->
         <ul id="blogList" class="blog-list">
             <!-- Blog items will be dynamically loaded here -->
         </ul>
+
+        <!-- Pagination -->
+        <nav id="paginationNav" aria-label="Blog pagination" style="display: none;">
+            <ul class="pagination justify-content-center" id="paginationList">
+                <!-- Pagination buttons will be dynamically loaded here -->
+            </ul>
+        </nav>
 
         <!-- No Results Message -->
         <div id="noResults" class="no-results">
@@ -74,9 +91,33 @@
 
     <!-- JavaScript -->
     <script>
-        // Blog data will be loaded from JSON file
+        // Blog data and state
         let allBlogs = [];
         let filteredBlogs = [];
+        let currentPage = 1;
+        let selectedTags = new Set();
+        const ITEMS_PER_PAGE = 20;
+
+        // URL parameter management
+        function getURLParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                page: parseInt(params.get('page')) || 1,
+                search: params.get('search') || '',
+                tags: params.get('tags') ? params.get('tags').split(',') : []
+            };
+        }
+
+        function updateURL() {
+            const params = new URLSearchParams();
+            if (currentPage > 1) params.set('page', currentPage);
+            const searchTerm = document.getElementById('searchBox').value.trim();
+            if (searchTerm) params.set('search', searchTerm);
+            if (selectedTags.size > 0) params.set('tags', Array.from(selectedTags).join(','));
+
+            const newURL = params.toString() ? `?${params.toString()}` : window.location.pathname;
+            window.history.pushState({}, '', newURL);
+        }
 
         // Load blog list data
         async function loadBlogs() {
@@ -86,8 +127,23 @@
                     throw new Error('Failed to load blog list');
                 }
                 allBlogs = await response.json();
-                filteredBlogs = [...allBlogs];
-                renderBlogs(filteredBlogs);
+
+                // Initialize from URL parameters
+                const urlParams = getURLParams();
+                if (urlParams.search) {
+                    document.getElementById('searchBox').value = urlParams.search;
+                }
+                if (urlParams.tags.length > 0) {
+                    selectedTags = new Set(urlParams.tags);
+                }
+                currentPage = urlParams.page;
+
+                // Generate tag filters
+                generateTagFilters();
+
+                // Apply filters and render
+                applyFilters();
+
                 document.getElementById('loading').style.display = 'none';
             } catch (error) {
                 console.error('Error loading blogs:', error);
@@ -96,19 +152,130 @@
             }
         }
 
-        // Render blog list
-        function renderBlogs(blogs) {
+        // Extract all unique tags from blogs
+        function getAllTags() {
+            const tagCounts = {};
+            allBlogs.forEach(blog => {
+                if (blog.tags && Array.isArray(blog.tags)) {
+                    blog.tags.forEach(tag => {
+                        tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+                    });
+                }
+            });
+            // Sort by count (descending)
+            return Object.entries(tagCounts)
+                .sort((a, b) => b[1] - a[1])
+                .map(([tag, count]) => ({ tag, count }));
+        }
+
+        // Generate tag filter buttons
+        function generateTagFilters() {
+            const tagFiltersContainer = document.getElementById('tagFilters');
+            const allTags = getAllTags();
+
+            if (allTags.length === 0) {
+                tagFiltersContainer.style.display = 'none';
+                return;
+            }
+
+            const buttonsHTML = `
+                <div class="tag-filters-header">
+                    <span><i class="fas fa-filter"></i> 按标签筛选：</span>
+                    ${selectedTags.size > 0 ?
+                        '<button class="btn-clear-filters" onclick="clearAllFilters()"><i class="fas fa-times"></i> 清除筛选</button>' :
+                        ''}
+                </div>
+                <div class="tag-buttons">
+                    ${allTags.map(({ tag, count }) => `
+                        <button class="tag-filter-btn ${selectedTags.has(tag) ? 'active' : ''}"
+                                onclick="toggleTagFilter('${tag.replace(/'/g, "\\'")}')">
+                            ${tag} <span class="tag-count">(${count})</span>
+                        </button>
+                    `).join('')}
+                </div>
+            `;
+
+            tagFiltersContainer.innerHTML = buttonsHTML;
+            tagFiltersContainer.style.display = 'block';
+        }
+
+        // Toggle tag filter
+        function toggleTagFilter(tag) {
+            if (selectedTags.has(tag)) {
+                selectedTags.delete(tag);
+            } else {
+                selectedTags.add(tag);
+            }
+            currentPage = 1; // Reset to first page
+            generateTagFilters(); // Update buttons
+            applyFilters();
+            updateURL();
+        }
+
+        // Clear all filters
+        function clearAllFilters() {
+            selectedTags.clear();
+            document.getElementById('searchBox').value = '';
+            currentPage = 1;
+            generateTagFilters();
+            applyFilters();
+            updateURL();
+        }
+
+        // Apply all filters (search + tags)
+        function applyFilters() {
+            const searchTerm = document.getElementById('searchBox').value.toLowerCase().trim();
+
+            filteredBlogs = allBlogs.filter(blog => {
+                // Search filter
+                let searchMatch = true;
+                if (searchTerm) {
+                    const titleMatch = blog.title.toLowerCase().includes(searchTerm);
+                    const descMatch = blog.description && blog.description.toLowerCase().includes(searchTerm);
+                    const tagMatch = blog.tags && blog.tags.some(tag =>
+                        tag.toLowerCase().includes(searchTerm)
+                    );
+                    searchMatch = titleMatch || descMatch || tagMatch;
+                }
+
+                // Tag filter
+                let tagMatch = true;
+                if (selectedTags.size > 0) {
+                    tagMatch = blog.tags && blog.tags.some(tag => selectedTags.has(tag));
+                }
+
+                return searchMatch && tagMatch;
+            });
+
+            renderBlogs();
+        }
+
+        // Render blog list with pagination
+        function renderBlogs() {
             const blogList = document.getElementById('blogList');
             const noResults = document.getElementById('noResults');
+            const paginationNav = document.getElementById('paginationNav');
 
-            if (blogs.length === 0) {
+            // Update search stats
+            updateSearchStats();
+
+            if (filteredBlogs.length === 0) {
                 blogList.innerHTML = '';
                 noResults.style.display = 'block';
+                paginationNav.style.display = 'none';
                 return;
             }
 
             noResults.style.display = 'none';
-            blogList.innerHTML = blogs.map(blog => `
+
+            // Calculate pagination
+            const totalPages = Math.ceil(filteredBlogs.length / ITEMS_PER_PAGE);
+            const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+            const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, filteredBlogs.length);
+            const blogsToShow = filteredBlogs.slice(startIndex, endIndex);
+
+            // Render blogs
+            blogList.innerHTML = blogsToShow.map(blog => `
                 <li class="blog-item">
                     <h3>
                         <a href="posts/${blog.slug}.html">${blog.title}</a>
@@ -122,36 +289,155 @@
                     <p class="blog-description">${blog.description || '详细的数学推导与注释...'}</p>
                     ${blog.tags && blog.tags.length > 0 ? `
                         <div class="blog-tags">
-                            ${blog.tags.map(tag => `<span class="tag"><i class="fas fa-tag"></i> ${tag}</span>`).join('')}
+                            ${blog.tags.map(tag => `
+                                <span class="tag clickable-tag" onclick="filterByTag('${tag.replace(/'/g, "\\'")}')">
+                                    <i class="fas fa-tag"></i> ${tag}
+                                </span>
+                            `).join('')}
                         </div>
                     ` : ''}
                 </li>
             `).join('');
+
+            // Render pagination
+            renderPagination(totalPages);
         }
 
-        // Search functionality
-        function searchBlogs(query) {
-            const searchTerm = query.toLowerCase().trim();
+        // Render pagination controls
+        function renderPagination(totalPages) {
+            const paginationNav = document.getElementById('paginationNav');
+            const paginationList = document.getElementById('paginationList');
 
-            if (searchTerm === '') {
-                filteredBlogs = [...allBlogs];
-            } else {
-                filteredBlogs = allBlogs.filter(blog => {
-                    const titleMatch = blog.title.toLowerCase().includes(searchTerm);
-                    const descMatch = blog.description && blog.description.toLowerCase().includes(searchTerm);
-                    const tagMatch = blog.tags && blog.tags.some(tag =>
-                        tag.toLowerCase().includes(searchTerm)
-                    );
-                    return titleMatch || descMatch || tagMatch;
-                });
+            if (totalPages <= 1) {
+                paginationNav.style.display = 'none';
+                return;
             }
 
-            renderBlogs(filteredBlogs);
+            paginationNav.style.display = 'block';
+
+            let paginationHTML = '';
+
+            // Previous button
+            paginationHTML += `
+                <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="goToPage(${currentPage - 1}); return false;">
+                        <i class="fas fa-chevron-left"></i> 上一页
+                    </a>
+                </li>
+            `;
+
+            // Page numbers
+            const maxVisiblePages = 7;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+            if (endPage - startPage < maxVisiblePages - 1) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+
+            if (startPage > 1) {
+                paginationHTML += `
+                    <li class="page-item">
+                        <a class="page-link" href="#" onclick="goToPage(1); return false;">1</a>
+                    </li>
+                `;
+                if (startPage > 2) {
+                    paginationHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                }
+            }
+
+            for (let i = startPage; i <= endPage; i++) {
+                paginationHTML += `
+                    <li class="page-item ${i === currentPage ? 'active' : ''}">
+                        <a class="page-link" href="#" onclick="goToPage(${i}); return false;">${i}</a>
+                    </li>
+                `;
+            }
+
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    paginationHTML += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+                }
+                paginationHTML += `
+                    <li class="page-item">
+                        <a class="page-link" href="#" onclick="goToPage(${totalPages}); return false;">${totalPages}</a>
+                    </li>
+                `;
+            }
+
+            // Next button
+            paginationHTML += `
+                <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="goToPage(${currentPage + 1}); return false;">
+                        下一页 <i class="fas fa-chevron-right"></i>
+                    </a>
+                </li>
+            `;
+
+            paginationList.innerHTML = paginationHTML;
+        }
+
+        // Go to specific page
+        function goToPage(page) {
+            const totalPages = Math.ceil(filteredBlogs.length / ITEMS_PER_PAGE);
+            if (page < 1 || page > totalPages) return;
+
+            currentPage = page;
+            renderBlogs();
+            updateURL();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Update search statistics
+        function updateSearchStats() {
+            const statsDiv = document.getElementById('searchStats');
+            const totalPages = Math.ceil(filteredBlogs.length / ITEMS_PER_PAGE);
+
+            if (filteredBlogs.length === allBlogs.length && selectedTags.size === 0 && !document.getElementById('searchBox').value.trim()) {
+                statsDiv.innerHTML = `
+                    <div class="stats-content">
+                        <i class="fas fa-book"></i> 共 <strong>${allBlogs.length}</strong> 篇文章
+                        ${totalPages > 1 ? `，分为 <strong>${totalPages}</strong> 页` : ''}
+                    </div>
+                `;
+            } else {
+                statsDiv.innerHTML = `
+                    <div class="stats-content">
+                        <i class="fas fa-search"></i> 找到 <strong>${filteredBlogs.length}</strong> 篇文章
+                        ${totalPages > 1 ? `，分为 <strong>${totalPages}</strong> 页` : ''}
+                        ${selectedTags.size > 0 ? ` | <i class="fas fa-filter"></i> ${selectedTags.size} 个标签筛选` : ''}
+                    </div>
+                `;
+            }
+        }
+
+        // Filter by clicking tag in blog item
+        function filterByTag(tag) {
+            if (!selectedTags.has(tag)) {
+                selectedTags.add(tag);
+                currentPage = 1;
+                generateTagFilters();
+                applyFilters();
+                updateURL();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
         }
 
         // Event listeners
         document.getElementById('searchBox').addEventListener('input', (e) => {
-            searchBlogs(e.target.value);
+            currentPage = 1;
+            applyFilters();
+            updateURL();
+        });
+
+        // Handle browser back/forward
+        window.addEventListener('popstate', () => {
+            const urlParams = getURLParams();
+            document.getElementById('searchBox').value = urlParams.search;
+            selectedTags = new Set(urlParams.tags);
+            currentPage = urlParams.page;
+            generateTagFilters();
+            applyFilters();
         });
 
         // Initialize

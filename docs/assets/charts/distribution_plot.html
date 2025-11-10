@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>概率分布可视化</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .controls {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        .control-group {
+            display: inline-block;
+            margin-right: 30px;
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #495057;
+        }
+        input[type="range"] {
+            width: 200px;
+        }
+        input[type="number"] {
+            width: 80px;
+            padding: 5px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+        }
+        select {
+            padding: 5px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            background: white;
+        }
+        .value-display {
+            display: inline-block;
+            margin-left: 10px;
+            font-weight: 600;
+            color: #0056b3;
+        }
+        #plot {
+            width: 100%;
+            height: 500px;
+        }
+        .stats-box {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+            border-left: 4px solid #0056b3;
+        }
+        .stats-box h3 {
+            margin-top: 0;
+            color: #0056b3;
+        }
+        .stat-item {
+            display: inline-block;
+            margin-right: 25px;
+            margin-bottom: 10px;
+        }
+        .stat-label {
+            font-weight: 600;
+            color: #495057;
+        }
+        .stat-value {
+            color: #0056b3;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 概率分布可视化</h1>
+        <p class="subtitle">交互式探索各种概率分布的形状和性质</p>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="distType">分布类型</label>
+                <select id="distType" onchange="updatePlot()">
+                    <option value="normal">正态分布 (Normal)</option>
+                    <option value="t">t分布 (Student's t)</option>
+                    <option value="chi2">卡方分布 (Chi-squared)</option>
+                    <option value="exponential">指数分布 (Exponential)</option>
+                    <option value="uniform">均匀分布 (Uniform)</option>
+                    <option value="beta">Beta分布</option>
+                    <option value="gamma">Gamma分布</option>
+                </select>
+            </div>
+
+            <div class="control-group" id="param1Group">
+                <label for="param1">均值 (μ): <span class="value-display" id="param1Value">0</span></label>
+                <input type="range" id="param1" min="-5" max="5" step="0.1" value="0" oninput="updatePlot()">
+            </div>
+
+            <div class="control-group" id="param2Group">
+                <label for="param2">标准差 (σ): <span class="value-display" id="param2Value">1</span></label>
+                <input type="range" id="param2" min="0.1" max="3" step="0.1" value="1" oninput="updatePlot()">
+            </div>
+
+            <div class="control-group">
+                <label for="sampleSize">采样数量: <span class="value-display" id="sampleSizeValue">1000</span></label>
+                <input type="range" id="sampleSize" min="100" max="10000" step="100" value="1000" oninput="updatePlot()">
+            </div>
+
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="showSamples" onchange="updatePlot()"> 显示采样直方图
+                </label>
+            </div>
+        </div>
+
+        <div id="plot"></div>
+
+        <div class="stats-box">
+            <h3>统计信息</h3>
+            <div id="statsContent"></div>
+        </div>
+    </div>
+
+    <script>
+        // 数学函数辅助
+        function factorial(n) {
+            if (n <= 1) return 1;
+            return n * factorial(n - 1);
+        }
+
+        function gamma(z) {
+            // Stirling's approximation
+            if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
+            z -= 1;
+            const g = 7;
+            const C = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+                      771.32342877765313, -176.61502916214059, 12.507343278686905,
+                      -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+
+            let x = C[0];
+            for (let i = 1; i < g + 2; i++) {
+                x += C[i] / (z + i);
+            }
+
+            const t = z + g + 0.5;
+            return Math.sqrt(2 * Math.PI) * Math.pow(t, z + 0.5) * Math.exp(-t) * x;
+        }
+
+        function beta(a, b) {
+            return gamma(a) * gamma(b) / gamma(a + b);
+        }
+
+        // 概率密度函数
+        function normalPDF(x, mu, sigma) {
+            return (1 / (sigma * Math.sqrt(2 * Math.PI))) *
+                   Math.exp(-0.5 * Math.pow((x - mu) / sigma, 2));
+        }
+
+        function tPDF(x, df) {
+            return gamma((df + 1) / 2) / (Math.sqrt(df * Math.PI) * gamma(df / 2)) *
+                   Math.pow(1 + x * x / df, -(df + 1) / 2);
+        }
+
+        function chi2PDF(x, k) {
+            if (x <= 0) return 0;
+            return (1 / (Math.pow(2, k / 2) * gamma(k / 2))) *
+                   Math.pow(x, k / 2 - 1) * Math.exp(-x / 2);
+        }
+
+        function exponentialPDF(x, lambda) {
+            if (x < 0) return 0;
+            return lambda * Math.exp(-lambda * x);
+        }
+
+        function uniformPDF(x, a, b) {
+            return (x >= a && x <= b) ? 1 / (b - a) : 0;
+        }
+
+        function betaPDF(x, alpha, beta_param) {
+            if (x <= 0 || x >= 1) return 0;
+            return Math.pow(x, alpha - 1) * Math.pow(1 - x, beta_param - 1) / beta(alpha, beta_param);
+        }
+
+        function gammaPDF(x, k, theta) {
+            if (x <= 0) return 0;
+            return Math.pow(x, k - 1) * Math.exp(-x / theta) / (gamma(k) * Math.pow(theta, k));
+        }
+
+        // 随机采样
+        function normalSample(mu, sigma) {
+            const u1 = Math.random();
+            const u2 = Math.random();
+            const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+            return mu + sigma * z0;
+        }
+
+        function exponentialSample(lambda) {
+            return -Math.log(Math.random()) / lambda;
+        }
+
+        function uniformSample(a, b) {
+            return a + (b - a) * Math.random();
+        }
+
+        // 获取当前参数
+        function getParams() {
+            const distType = document.getElementById('distType').value;
+            const param1 = parseFloat(document.getElementById('param1').value);
+            const param2 = parseFloat(document.getElementById('param2').value);
+            const sampleSize = parseInt(document.getElementById('sampleSize').value);
+            const showSamples = document.getElementById('showSamples').checked;
+
+            return { distType, param1, param2, sampleSize, showSamples };
+        }
+
+        // 更新参数标签
+        function updateLabels() {
+            const distType = document.getElementById('distType').value;
+            const param1Group = document.getElementById('param1Group');
+            const param2Group = document.getElementById('param2Group');
+            const param1Input = document.getElementById('param1');
+            const param2Input = document.getElementById('param2');
+            const param1Label = param1Group.querySelector('label');
+            const param2Label = param2Group.querySelector('label');
+
+            switch(distType) {
+                case 'normal':
+                    param1Label.innerHTML = '均值 (μ): <span class="value-display" id="param1Value">' + param1Input.value + '</span>';
+                    param2Label.innerHTML = '标准差 (σ): <span class="value-display" id="param2Value">' + param2Input.value + '</span>';
+                    param1Input.min = -5; param1Input.max = 5; param1Input.step = 0.1;
+                    param2Input.min = 0.1; param2Input.max = 3; param2Input.step = 0.1;
+                    param1Group.style.display = 'inline-block';
+                    param2Group.style.display = 'inline-block';
+                    break;
+                case 't':
+                    param1Label.innerHTML = '自由度 (df): <span class="value-display" id="param1Value">' + param1Input.value + '</span>';
+                    param1Input.min = 1; param1Input.max = 30; param1Input.step = 1;
+                    param1Input.value = Math.max(1, Math.round(param1Input.value));
+                    param1Group.style.display = 'inline-block';
+                    param2Group.style.display = 'none';
+                    break;
+                case 'chi2':
+                    param1Label.innerHTML = '自由度 (k): <span class="value-display" id="param1Value">' + param1Input.value + '</span>';
+                    param1Input.min = 1; param1Input.max = 20; param1Input.step = 1;
+                    param1Input.value = Math.max(1, Math.round(param1Input.value));
+                    param1Group.style.display = 'inline-block';
+                    param2Group.style.display = 'none';
+                    break;
+                case 'exponential':
+                    param1Label.innerHTML = '率参数 (λ): <span class="value-display" id="param1Value">' + param1Input.value + '</span>';
+                    param1Input.min = 0.1; param1Input.max = 3; param1Input.step = 0.1;
+                    param1Input.value = Math.max(0.1, param1Input.value);
+                    param1Group.style.display = 'inline-block';
+                    param2Group.style.display = 'none';
+                    break;
+                case 'uniform':
+                    param1Label.innerHTML = '下界 (a): <span class="value-display" id="param1Value">' + param1Input.value + '</span>';
+                    param2Label.innerHTML = '上界 (b): <span class="value-display" id="param2Value">' + param2Input.value + '</span>';
+                    param1Input.min = -5; param1Input.max = 5; param1Input.step = 0.1;
+                    param2Input.min = -5; param2Input.max = 5; param2Input.step = 0.1;
+                    param1Group.style.display = 'inline-block';
+                    param2Group.style.display = 'inline-block';
+                    break;
+                case 'beta':
+                    param1Label.innerHTML = 'α: <span class="value-display" id="param1Value">' + param1Input.value + '</span>';
+                    param2Label.innerHTML = 'β: <span class="value-display" id="param2Value">' + param2Input.value + '</span>';
+                    param1Input.min = 0.1; param1Input.max = 5; param1Input.step = 0.1;
+                    param2Input.min = 0.1; param2Input.max = 5; param2Input.step = 0.1;
+                    param1Group.style.display = 'inline-block';
+                    param2Group.style.display = 'inline-block';
+                    break;
+                case 'gamma':
+                    param1Label.innerHTML = '形状 (k): <span class="value-display" id="param1Value">' + param1Input.value + '</span>';
+                    param2Label.innerHTML = '尺度 (θ): <span class="value-display" id="param2Value">' + param2Input.value + '</span>';
+                    param1Input.min = 0.1; param1Input.max = 10; param1Input.step = 0.1;
+                    param2Input.min = 0.1; param2Input.max = 3; param2Input.step = 0.1;
+                    param1Group.style.display = 'inline-block';
+                    param2Group.style.display = 'inline-block';
+                    break;
+            }
+
+            document.getElementById('param1Value').textContent = param1Input.value;
+            document.getElementById('param2Value').textContent = param2Input.value;
+            document.getElementById('sampleSizeValue').textContent = document.getElementById('sampleSize').value;
+        }
+
+        // 更新图表
+        function updatePlot() {
+            updateLabels();
+            const { distType, param1, param2, sampleSize, showSamples } = getParams();
+
+            let x, y, samples, xRange;
+            let distName, meanVal, varVal;
+
+            switch(distType) {
+                case 'normal':
+                    xRange = Array.from({length: 200}, (_, i) => param1 - 4*param2 + i * 8*param2 / 199);
+                    y = xRange.map(xi => normalPDF(xi, param1, param2));
+                    samples = Array.from({length: sampleSize}, () => normalSample(param1, param2));
+                    distName = `正态分布 N(${param1}, ${param2}²)`;
+                    meanVal = param1;
+                    varVal = param2 * param2;
+                    break;
+
+                case 't':
+                    const df = Math.round(param1);
+                    xRange = Array.from({length: 200}, (_, i) => -5 + i * 10 / 199);
+                    y = xRange.map(xi => tPDF(xi, df));
+                    samples = Array.from({length: sampleSize}, () => normalSample(0, 1)); // 简化采样
+                    distName = `t分布 (df=${df})`;
+                    meanVal = df > 1 ? 0 : '未定义';
+                    varVal = df > 2 ? df / (df - 2) : '未定义';
+                    break;
+
+                case 'chi2':
+                    const k = Math.round(param1);
+                    xRange = Array.from({length: 200}, (_, i) => 0.01 + i * (4*k) / 199);
+                    y = xRange.map(xi => chi2PDF(xi, k));
+                    samples = Array.from({length: sampleSize}, () => Math.abs(normalSample(0, 1))**2); // 简化
+                    distName = `卡方分布 χ²(${k})`;
+                    meanVal = k;
+                    varVal = 2 * k;
+                    break;
+
+                case 'exponential':
+                    xRange = Array.from({length: 200}, (_, i) => i * 5/param1 / 199);
+                    y = xRange.map(xi => exponentialPDF(xi, param1));
+                    samples = Array.from({length: sampleSize}, () => exponentialSample(param1));
+                    distName = `指数分布 Exp(${param1})`;
+                    meanVal = 1 / param1;
+                    varVal = 1 / (param1 * param1);
+                    break;
+
+                case 'uniform':
+                    const a = param1;
+                    const b = Math.max(param2, a + 0.1);
+                    xRange = Array.from({length: 200}, (_, i) => (a - 1) + i * (b - a + 2) / 199);
+                    y = xRange.map(xi => uniformPDF(xi, a, b));
+                    samples = Array.from({length: sampleSize}, () => uniformSample(a, b));
+                    distName = `均匀分布 U(${a}, ${b})`;
+                    meanVal = (a + b) / 2;
+                    varVal = (b - a) ** 2 / 12;
+                    break;
+
+                case 'beta':
+                    xRange = Array.from({length: 200}, (_, i) => 0.001 + i * 0.998 / 199);
+                    y = xRange.map(xi => betaPDF(xi, param1, param2));
+                    samples = []; // Beta采样较复杂，这里省略
+                    distName = `Beta分布 Beta(${param1}, ${param2})`;
+                    meanVal = param1 / (param1 + param2);
+                    varVal = (param1 * param2) / ((param1 + param2) ** 2 * (param1 + param2 + 1));
+                    break;
+
+                case 'gamma':
+                    xRange = Array.from({length: 200}, (_, i) => 0.01 + i * (param1 * param2 * 4) / 199);
+                    y = xRange.map(xi => gammaPDF(xi, param1, param2));
+                    samples = []; // Gamma采样较复杂，这里省略
+                    distName = `Gamma分布 Γ(${param1}, ${param2})`;
+                    meanVal = param1 * param2;
+                    varVal = param1 * param2 * param2;
+                    break;
+            }
+
+            // 创建图表
+            const traces = [{
+                x: xRange,
+                y: y,
+                type: 'scatter',
+                mode: 'lines',
+                name: '概率密度函数 (PDF)',
+                line: { color: '#0056b3', width: 3 }
+            }];
+
+            // 添加采样直方图
+            if (showSamples && samples.length > 0) {
+                traces.push({
+                    x: samples,
+                    type: 'histogram',
+                    name: '采样直方图',
+                    opacity: 0.6,
+                    marker: { color: '#ff9800' },
+                    histnorm: 'probability density',
+                    nbinsx: 50
+                });
+            }
+
+            const layout = {
+                title: distName,
+                xaxis: { title: 'x' },
+                yaxis: { title: '概率密度' },
+                hovermode: 'closest',
+                showlegend: true,
+                legend: { x: 0.7, y: 1 }
+            };
+
+            Plotly.newPlot('plot', traces, layout, {responsive: true});
+
+            // 更新统计信息
+            const sampleMean = samples.length > 0 ?
+                samples.reduce((a, b) => a + b, 0) / samples.length : 0;
+            const sampleVar = samples.length > 0 ?
+                samples.reduce((sum, x) => sum + (x - sampleMean) ** 2, 0) / samples.length : 0;
+
+            document.getElementById('statsContent').innerHTML = `
+                <div class="stat-item">
+                    <span class="stat-label">理论均值:</span>
+                    <span class="stat-value">${typeof meanVal === 'number' ? meanVal.toFixed(4) : meanVal}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">理论方差:</span>
+                    <span class="stat-value">${typeof varVal === 'number' ? varVal.toFixed(4) : varVal}</span>
+                </div>
+                ${samples.length > 0 ? `
+                <div class="stat-item">
+                    <span class="stat-label">采样均值:</span>
+                    <span class="stat-value">${sampleMean.toFixed(4)}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">采样方差:</span>
+                    <span class="stat-value">${sampleVar.toFixed(4)}</span>
+                </div>
+                ` : ''}
+            `;
+        }
+
+        // 初始化
+        updatePlot();
+    </script>
+</body>
+</html>

@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>从谱范数梯度到新式权重衰减的思考 | ML & Math Blog Posts</title>
-    <meta name="description" content="从谱范数梯度到新式权重衰减的思考
+    <meta name="description" content="从谱范数梯度到新式权重衰减的思考&para;
 原文链接: https://spaces.ac.cn/archives/10648
 发布日期: 
 
-在文章《Muon优化器赏析：从向量到矩阵的本质跨越》中，我们介绍了一个名为“Muon”的新优化器，其中一个理解视角是作为谱范数正则下的最速梯度下降，这似乎揭示了矩阵参数的更本质的优化方向。众所周知，对于矩阵参数我们经常也会加权重衰减（Weight Decay），它可...">
+在文章《Muon优化器赏析：从向量到矩阵的本质跨越》中，我们介绍了一个名为“Muon”的新优化器，其中一个理解视角是作为谱范数正则下的最速梯度下降，这似乎揭示了矩阵参数的更本质的优化方向。众所周知，对于矩阵参数我们经常也会加权重衰减（Weight Dec...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -22,6 +22,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -66,47 +69,80 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=矩阵">矩阵</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #86 从谱范数梯度到新式权重衰减的思考
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">从谱范数梯度到新式权重衰减的思考</h1>
+            <h1 class="post-title">
+                <span class="post-number">#86</span>
+                从谱范数梯度到新式权重衰减的思考
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/10648" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/10648" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> 矩阵</span>
-                <span class="tag"><i class="fas fa-tag"></i> 优化</span>
-                <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
-                <span class="tag"><i class="fas fa-tag"></i> 优化器</span>
-                <span class="tag"><i class="fas fa-tag"></i> 谱范数</span>
+                <a href="../index.html?tags=矩阵" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 矩阵</span>
+                </a>
+                
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+                <a href="../index.html?tags=梯度" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
+                </a>
+                
+                <a href="../index.html?tags=优化器" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化器</span>
+                </a>
+                
+                <a href="../index.html?tags=谱范数" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 谱范数</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="_1">从谱范数梯度到新式权重衰减的思考</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="_1">从谱范数梯度到新式权重衰减的思考<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10648">https://spaces.ac.cn/archives/10648</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>在文章<a href="/archives/10592">《Muon优化器赏析：从向量到矩阵的本质跨越》</a>中，我们介绍了一个名为“Muon”的新优化器，其中一个理解视角是作为谱范数正则下的最速梯度下降，这似乎揭示了矩阵参数的更本质的优化方向。众所周知，对于矩阵参数我们经常也会加权重衰减（Weight Decay），它可以理解为$F$范数平方的梯度，那么从Muon的视角看，通过谱范数平方的梯度来构建新的权重衰减，会不会能起到更好的效果呢？</p>
 <p>那么问题来了，谱范数的梯度或者说导数长啥样呢？用它来设计的新权重衰减又是什么样的？接下来我们围绕这些问题展开。</p>
-<h2 id="_2">基础回顾</h2>
+<h2 id="_2">基础回顾<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>谱范数（Spectral Norm），又称“$2$范数”，是最常用的矩阵范数之一，相比更简单的$F$范数（Frobenius Norm），它往往能揭示一些与矩阵乘法相关的更本质的信号，这是因为它定义上就跟矩阵乘法相关：对于矩阵参数$\boldsymbol{W}\in\mathbb{R}^{n\times m}$，它的谱范数定义为<br />
 \begin{equation}\Vert\boldsymbol{W}\Vert_2 \triangleq \max_{\Vert\boldsymbol{x}\Vert=1} \Vert\boldsymbol{W}\boldsymbol{x}\Vert\end{equation}<br />
 这里$\boldsymbol{x}\in\mathbb{R}^m$是列向量，右端的$\Vert\Vert$是向量的模长（欧氏范数）。换个角度看，谱范数就是使得下面不等式对$\forall \boldsymbol{x}\in\mathbb{R}^m$恒成立的最小常数$C$：<br />
 \begin{equation}\Vert\boldsymbol{W}\boldsymbol{x}\Vert \leq C\Vert\boldsymbol{x}\Vert\end{equation}<br />
 不难证明，当$C$取$F$范数$\Vert W\Vert_F$时，上式也是恒成立的，所以可以写出$\Vert \boldsymbol{W}\Vert_2\leq \Vert \boldsymbol{W}\Vert_F$（因为$\Vert \boldsymbol{W}\Vert_F$只是让上式恒成立的其中一个$C$，而$\Vert \boldsymbol{W}\Vert_2$则是最小的那个$C$）。这个结论也表明，如果我们想要控制输出的幅度，以谱范数作为正则项要比$F$范数更为精准。</p>
 <p>早在6年前的<a href="/archives/6051">《深度学习中的Lipschitz约束：泛化与生成模型》</a>中，我们就讨论过谱范数，当时的应用场景有两个：一是WGAN对判别器明确提出了Lipschitz约束，而实现方式之一就是基于谱范数的归一化；二是有一些工作表明，谱范数作为正则项，相比$F$范数正则有更好的性能。</p>
-<h2 id="_3">梯度推导</h2>
+<h2 id="_3">梯度推导<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>现在让我们进入正题，尝试推导谱范数的梯度$\nabla_{\boldsymbol{W}} \Vert\boldsymbol{W}\Vert_2$。我们知道，谱范数在数值上等于它的最大奇异值，对此我们在<a href="/archives/10407">《低秩近似之路（二）：SVD》</a>的“<a href="/archives/10407#%E7%9F%A9%E9%98%B5%E8%8C%83%E6%95%B0">矩阵范数</a>”一节有过证明。这意味着，如果$\boldsymbol{W}$可以SVD为$\sum\limits_{i=1}^{\min(n,m)}\sigma_i \boldsymbol{u}<em _min_n_m_="\min(n,m)">i\boldsymbol{v}_i^{\top}$，那么<br />
 \begin{equation}\Vert\boldsymbol{W}\Vert_2 = \sigma_1 = \boldsymbol{u}_1^{\top}\boldsymbol{W}\boldsymbol{v}_1\end{equation}<br />
 其中$\sigma_1 \geq \sigma_2 \geq \cdots \geq \sigma</em>$的奇异值。对两边求微分，我们得到} \geq 0$是$\boldsymbol{W<br />
@@ -117,14 +153,14 @@
 \begin{equation}d\Vert\boldsymbol{W}\Vert_2 = \boldsymbol{u}_1^{\top}d\boldsymbol{W}\boldsymbol{v}_1 = \text{Tr}((\boldsymbol{u}_1 \boldsymbol{v}_1^{\top})^{\top} d\boldsymbol{W}) \quad\Rightarrow\quad \nabla</em>}}\Vert\boldsymbol{W}\Vert_2 = \boldsymbol{u}_1 \boldsymbol{v}_1^{\top}\end{equation<br />
 注意，这个证明过程有一个关键条件是$\sigma_1 &gt; \sigma_2$，因为如果$\sigma_1=\sigma_2$的话，$\Vert\boldsymbol{W}\Vert_2$既可以表示成$\boldsymbol{u}_1^{\top}\boldsymbol{W}\boldsymbol{v}_1$又可以表示成$\boldsymbol{u}_2^{\top}\boldsymbol{W}\boldsymbol{v}_2$，用同样方法求出的梯度分别是$\boldsymbol{u}_1 \boldsymbol{v}_1^{\top}$和$\boldsymbol{u}_2 \boldsymbol{v}_2^{\top}$，结果不唯一意味着梯度不存在。当然，从实践角度看，两个数完全相等的概率是很小的，因此可以忽略这一点。</p>
 <p>（注：这里的证明过程参考了Stack Exchange上的<a href="https://math.stackexchange.com/a/3000223">回答</a>，但该回答里面没有证明$d\boldsymbol{u}_1^{\top}\boldsymbol{W}\boldsymbol{v}_1=0$和$\boldsymbol{u}_1^{\top}\boldsymbol{W}d\boldsymbol{v}_1=0$，这部分由笔者补充完整。）</p>
-<h2 id="_4">权重衰减</h2>
+<h2 id="_4">权重衰减<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>根据这个结果以及链式法则，我们有<br />
 \begin{equation}\nabla_{\boldsymbol{W}}\left(\frac{1}{2}\Vert\boldsymbol{W}\Vert_2^2\right) = \Vert\boldsymbol{W}\Vert_2\nabla_{\boldsymbol{W}}\Vert\boldsymbol{W}\Vert_2 = \sigma_1 \boldsymbol{u}<em _boldsymbol_W="\boldsymbol{W">1 \boldsymbol{v}_1^{\top}\label{eq:grad-2-2}\end{equation}<br />
 对比$F$范数下的结果：<br />
 \begin{equation}\nabla</em>}}\left(\frac{1}{2}\Vert\boldsymbol{W}\Vert_F^2\right) = \boldsymbol{W} = \sum_{i=1}^{\min(n,m)}\sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top}\end{equation<br />
 这样对比着看就很清晰了：$F$范数平方作为正则项所得出的权重衰减，同时惩罚全体奇异值；而谱范数平方对应的权重衰减，只惩罚最大奇异值。如果我们目的是压缩输出的大小，那么压缩最大奇异值是“刚刚好”的做法，压缩全体奇异值虽然可能达到相近的目的，但同时也可能压缩参数的表达能力。</p>
 <p>根据“<a href="/archives/10407#%E8%BF%91%E4%BC%BC%E5%AE%9A%E7%90%86">Eckart-Young-Mirsky定理</a>”，式$\eqref{eq:grad-2-2}$最右侧的结果还有一个含义，就是$\boldsymbol{W}$矩阵的“最优1秩近似”。也就是说，谱范数的权重衰减将每一步减去它自身的操作，改为每一步减去它的最优1秩近似，弱化了惩罚力度，当然某种程度上也让惩罚更加“直击本质”。</p>
-<h2 id="_5">数值计算</h2>
+<h2 id="_5">数值计算<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>对于实践来说，最关键的问题来了：怎么计算$\sigma_1 \boldsymbol{u}_1 \boldsymbol{v}_1^{\top}$呢？SVD当然是最简单直接的方案，但计算复杂度无疑也是最高的，我们必须找到更高效的计算途径。</p>
 <p>不失一般性，设$n\geq m$。首先注意到<br />
 \begin{equation}\sigma_1 \boldsymbol{u}<em i="1">1 \boldsymbol{v}_1^{\top} = \sum</em>}^m\sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top} \boldsymbol{v}_1 \boldsymbol{v}_1^{\top} = \boldsymbol{W}\boldsymbol{v}_1 \boldsymbol{v}_1^{\top}\end{equation<br />
@@ -134,7 +170,7 @@
 <p>当$\sigma_1 &gt; \sigma_2$时，迭代 \begin{equation}\boldsymbol{x}_{t+1} = \frac{\boldsymbol{W}^{\top}\boldsymbol{W}\boldsymbol{x}_t}{\Vert\boldsymbol{W}^{\top}\boldsymbol{W}\boldsymbol{x}_t\Vert}\end{equation} 以$(\sigma_2/\sigma_1)^{2t}$的速度收敛至$\boldsymbol{v}_1$。</p>
 </blockquote>
 <p>幂迭代每步只需要算两次“矩阵-向量”乘法，复杂度是$\mathcal{O}(nm)$，$t$步迭代的总复杂度是$\mathcal{O}(tnm)$，非常理想，缺点是$\sigma_1,\sigma_2$接近时收敛会比较慢。但幂迭代的实际表现往往比理论想象更好用，早期很多工作甚至只迭代一次就得到不错的效果，因为$\sigma_1,\sigma_2$接近表明两者及其特征向量一定程度上可替换，而幂迭代即便没完全收敛，得到的也是两者特征向量的一个平均，这也完全够用了。</p>
-<h2 id="_6">迭代证明</h2>
+<h2 id="_6">迭代证明<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
 <p>这一节我们来完成幂迭代的证明。不难看出，幂迭代可以等价地写成<br />
 \begin{equation}\lim_{t\to\infty} \frac{(\boldsymbol{W}^{\top}\boldsymbol{W})^t \boldsymbol{x}<em i="1">0}{\Vert(\boldsymbol{W}^{\top}\boldsymbol{W})^t \boldsymbol{x}_0\Vert} = \boldsymbol{v}_1\end{equation}<br />
 为了证明这个极限，我们从$\boldsymbol{W}=\sum\limits</em>}^m\sigma_i \boldsymbol{u<em i="1">i\boldsymbol{v}_i^{\top}$出发，代入计算可得<br />
@@ -146,12 +182,12 @@
 由于随机初始化的缘故，$c_1=0$的概率是非常小的，所以我们可以认为$c_1\neq 0$，那么<br />
 \begin{equation}\frac{(\boldsymbol{W}^{\top}\boldsymbol{W})^t \boldsymbol{x}<em i="1">0}{\Vert(\boldsymbol{W}^{\top}\boldsymbol{W})^t \boldsymbol{x}_0\Vert} = \frac{\sum\limits</em>}^m c_i\sigma_i^{2t} \boldsymbol{v<em i="1">i}{\sqrt{\sum\limits</em>}^m c_i^2\sigma_i^{4t}}} = \frac{\boldsymbol{v<em i="2">1 + \sum\limits</em>}^m (c_i/c_1)(\sigma_i/\sigma_1)^{2t} \boldsymbol{v<em i="2">i}{\sqrt{1 + \sum\limits</em>}^m (c_i/c_1)^2(\sigma_i/\sigma_1)^{4t}}}\end{equation<br />
 当$\sigma_1 &gt; \sigma_2$时，所有的$\sigma_i/\sigma_1(i\geq 2)$都小于1，因此当$t\to \infty$时对应项都变成了0，最后的极限是$\boldsymbol{v}_1$。</p>
-<h2 id="_7">相关工作</h2>
+<h2 id="_7">相关工作<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
 <p>最早提出谱范数正则的论文，应该是2017年的<a href="https://papers.cool/arxiv/1705.10941">《Spectral Norm Regularization for Improving the Generalizability of Deep Learning》</a>，里边对比了权重衰减、对抗训练、谱范数正则等方法，发现谱范数正则在泛化性能方面表现最好。</p>
 <p>论文当时的做法，并不是像本文一样求出$\nabla_{\boldsymbol{W}}\Vert\boldsymbol{W}\Vert_2^2 = 2\sigma_1\boldsymbol{u}_1 \boldsymbol{v}_1^{\top}$，而是直接通过幂迭代来估计$\Vert\boldsymbol{W}\Vert_2$，然后将$\Vert\boldsymbol{W}\Vert_2^2$加权到损失函数中，让优化器自己去求梯度，这样做效率上稍差一些，并且也不好以权重衰减的形式跟优化器解耦开来。本文的做法相对来说更加灵活一些，允许我们像AdamW一样，将权重衰减独立于主损失函数的优化之外。</p>
 <p>当然，从今天LLM的视角来看，当初的这些实验最大问题就是规模都太小了，很难有足够的说服力，不过鉴于谱范数的Muon优化器“珠玉在前”，笔者认为还是值得重新思考和尝试一下谱范数权重衰减。当然，不管是$F$范数还是谱范数的权重衰减，这些面向“泛化”的技术往往也有一些运气成份在里边，大家平常心期待就好。</p>
 <p>个人在语言模型的初步实验结果显示，Loss层面可能会有微弱的提升（希望不是幻觉，当然再不济也没有出现变差的现象）。实验过程就是用幂迭代求出$\boldsymbol{v}_1$的近似值（初始化为全一向量，迭代10次），然后将原来的权重衰减$-\lambda \boldsymbol{W}$改为$-\lambda \boldsymbol{W}\boldsymbol{v}_1\boldsymbol{v}_1^{\top}$，$\lambda$的取值不做改变。</p>
-<h2 id="_8">文章小结</h2>
+<h2 id="_8">文章小结<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
 <p>本文推导了谱范数的梯度，由此导出了一种新的权重衰减，并分享了笔者对它的思考。</p>
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10648">https://spaces.ac.cn/archives/10648</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
@@ -173,15 +209,81 @@ month={Dec},<br />
 url={\url{https://spaces.ac.cn/archives/10648}},<br />
 } </p>
 <hr />
-<h2 id="_9">公式推导与注释</h2>
+<h2 id="_9">公式推导与注释<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="msign算子的newton-schulz迭代上.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#85 msign算子的Newton-Schulz迭代（上）</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="一道概率不等式盯着它到显然成立为止.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#87 一道概率不等式：盯着它到显然成立为止！</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#_1">从谱范数梯度到新式权重衰减的思考</a><ul>
+<li><a href="#_2">基础回顾</a></li>
+<li><a href="#_3">梯度推导</a></li>
+<li><a href="#_4">权重衰减</a></li>
+<li><a href="#_5">数值计算</a></li>
+<li><a href="#_6">迭代证明</a></li>
+<li><a href="#_7">相关工作</a></li>
+<li><a href="#_8">文章小结</a></li>
+<li><a href="#_9">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -203,5 +305,41 @@ url={\url{https://spaces.ac.cn/archives/10648}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>

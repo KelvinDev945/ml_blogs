@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MoE环游记：3、换个思路来分配 | ML & Math Blog Posts</title>
-    <meta name="description" content="MoE环游记：3、换个思路来分配
+    <meta name="description" content="MoE环游记：3、换个思路来分配&para;
 原文链接: https://spaces.ac.cn/archives/10757
 发布日期: 
 
-这篇文章我们继续探讨MoE的负载均衡问题。在上一篇文章《MoE环游记：2、不患寡而患不均》中，我们主要讨论了通过Aux Loss来促进负载均衡的思路。Aux Loss固然简单直观，但它也有一个明显的缺点——权重不好调——调低了无法促进均衡，调高了容易损害LM Los...">
+这篇文章我们继续探讨MoE的负载均衡问题。在上一篇文章《MoE环游记：2、不患寡而患不均》中，我们主要讨论了通过Aux Loss来促进负载均衡的思路。Aux Loss固然简单直观，但它也有一个明显的缺点——权重不好调——调低了无法促进均衡，调高了容易损害...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -22,6 +22,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -66,46 +69,79 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=最优">最优</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #143 MoE环游记：3、换个思路来分配
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">MoE环游记：3、换个思路来分配</h1>
+            <h1 class="post-title">
+                <span class="post-number">#143</span>
+                MoE环游记：3、换个思路来分配
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/10757" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/10757" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> 最优</span>
-                <span class="tag"><i class="fas fa-tag"></i> 损失函数</span>
-                <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
-                <span class="tag"><i class="fas fa-tag"></i> moe</span>
-                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <a href="../index.html?tags=最优" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 最优</span>
+                </a>
+                
+                <a href="../index.html?tags=损失函数" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 损失函数</span>
+                </a>
+                
+                <a href="../index.html?tags=梯度" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
+                </a>
+                
+                <a href="../index.html?tags=moe" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> moe</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="moe3">MoE环游记：3、换个思路来分配</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="moe3">MoE环游记：3、换个思路来分配<a class="toc-link" href="#moe3" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10757">https://spaces.ac.cn/archives/10757</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>这篇文章我们继续探讨MoE的负载均衡问题。在上一篇文章<a href="/archives/10735">《MoE环游记：2、不患寡而患不均》</a>中，我们主要讨论了通过Aux Loss来促进负载均衡的思路。Aux Loss固然简单直观，但它也有一个明显的缺点——权重不好调——调低了无法促进均衡，调高了容易损害LM Loss，所以业界一直有寻找替代方案的尝试。</p>
 <p>本文要分享的是名为“Loss-Free”的方案，由DeepSeek在<a href="https://papers.cool/arxiv/2408.15664">《Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts》</a>提出。和DeepSeek众多耀眼的开源作品相比，这篇论文也许不算起眼，但在笔者看来，它潜在的学术影响力可能远超其他工作，因为所提方法不仅简单有效，而且极具普适性，堪称经典。</p>
-<h2 id="_1">方法大意</h2>
+<h2 id="_1">方法大意<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>面对负载不均衡，Aux Loss的应对思路是通过额外的损失引导Router给出均衡的打分，而Loss-Free的想法则是换个新的分配思路，即不改变Router现有打分结果，而是改变$\mathop{\text{argtop}}_k \boldsymbol{\rho}$这个分配方式。</p>
 <p>其实这个方向此前也有过一些努力。比如2021年Facebook提出了<a href="https://papers.cool/arxiv/2103.16716">BASE Layer</a>，将Expert的分配视为<a href="https://en.wikipedia.org/wiki/Assignment_problem">线性指派问题</a>，即以负载均衡为约束条件，求在该约束之下Router总打分尽可能高的分配结果，这可以用<a href="https://en.wikipedia.org/wiki/Hungarian_algorithm">匈牙利算法</a>等来解决。但该方案需要知道全体Token的打分，所以对于自回归式LLM来说，它只适用于训练，推理还是只能用$\mathop{\text{argtop}}_k \boldsymbol{\rho}$，训练推理存在不一致性，并且由于目前求解算法的限制，它只适用于$k=1$的场景。</p>
 <p>相比之下，Loss-Free的做法非常简单且有效，它留意到一个事实，即我们总可以引入一个偏置项$\boldsymbol{b}$，使得$\mathop{\text{argtop}}<em _mathop_text_argtop="\mathop{\text{argtop" i_in="i\in">k \boldsymbol{\rho} + \boldsymbol{b}$的分配是均衡的，所以它将MoE的形式改为<br />
 \begin{equation}\boldsymbol{y} = \sum</em>}<em _mathop_text_argtop="\mathop{\text{argtop" i_in="i\in">k \boldsymbol{\rho}} \rho_i \boldsymbol{e}_i\qquad\to\qquad \boldsymbol{y} = \sum</em>}}_k \boldsymbol{\rho} + \boldsymbol{b}} \rho_i \boldsymbol{e}_i\end{equation<br />
 这里的$\boldsymbol{b}$是输入无关的向量，由训练过程确定下来，训练完后它就保持不变，因此推理阶段也可以用，换言之训练和推理具有一致的形式。注意乘以$\boldsymbol{e}_i$的还是$\rho_i$而不是$\rho_i + b_i$，也就是说$\boldsymbol{b}$仅仅参与分配过程而不参与MoE的前向计算，所以我们对$\boldsymbol{b}$或$\boldsymbol{\rho} + \boldsymbol{b}$的正负性都没有特殊要求。</p>
-<h2 id="_2">手搓梯度</h2>
+<h2 id="_2">手搓梯度<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>怎么训练$\boldsymbol{b}$呢？我们知道，$\boldsymbol{b}$的优化方向自然是促进负载均衡，为此按照上一篇的记号，我们先定义$\boldsymbol{f}=[f_1,f_2,\cdots,f_n]$：<br />
 \begin{equation}f_i = \left\{\begin{aligned}1/k, \quad i\in \mathop{\text{argtop}}\nolimits_k \boldsymbol{\rho}+\boldsymbol{b} \\<br />
 0, \quad i\not\in \mathop{\text{argtop}}\nolimits_k \boldsymbol{\rho}+\boldsymbol{b}\end{aligned}\right.\end{equation}<br />
@@ -120,19 +156,19 @@
 这里$\alpha$是$\boldsymbol{b}$的学习率。不过Loss-Free最终选择的更新规则略有不同，它选择的是符号梯度下降（SignSGD）：<br />
 \begin{equation}\boldsymbol{b}\leftarrow \boldsymbol{b} - \alpha \mathop{\text{sign}}(\boldsymbol{F} - \boldsymbol{Q})\label{eq:aux-loss-free}\end{equation}<br />
 这个结果其实也很好理解，就是如果$F_i$比$1/n$大，那么就调小一点$b_i$，否则就增大一点$b_i$。</p>
-<h2 id="_3">改良版本</h2>
+<h2 id="_3">改良版本<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>除了加$\mathop{\text{sign}}$的符号梯度下降外，笔者发现直接对$\boldsymbol{F} - \boldsymbol{Q}$做RMS Norm（即Normalized SGD），在相同的$\alpha$下往往能达到更好的均衡效果：<br />
 \begin{equation}\boldsymbol{b}\leftarrow \boldsymbol{b} - \alpha\frac{\boldsymbol{F} - \boldsymbol{Q}}{\text{RMS}(\boldsymbol{F} - \boldsymbol{Q})}\end{equation}<br />
 这里的$\text{RMS}$是“Root Mean Square”，定义为<br />
 \begin{equation}\text{RMS}(\boldsymbol{F} - \boldsymbol{Q}) = \sqrt{\frac{1}{n}\sum_{i=1}^n (F_i - Q_i)^2}\end{equation}<br />
 不难看出，加$\mathop{\text{sign}}$后的$\mathop{\text{sign}}(\boldsymbol{F} - \boldsymbol{Q})$和加RMS Norm后的$\frac{\boldsymbol{F} - \boldsymbol{Q}}{\text{RMS}(\boldsymbol{F} - \boldsymbol{Q})}$，它们的$\text{RMS}$都是1，因此它们俩尺度上是大致相同的，所以我们可以使用相同的$\alpha$。</p>
 <p>简单来说，$\mathop{\text{sign}}$的问题在于不论$F_i$与目标$Q_i$的远近都使用同样的更新幅度，这导致原本就已经跟$Q_i$比较接近的$F_i$反而容易偏离原本已经达到的均衡，从而产生震荡；而RMS Norm则保留了$F_i-Q_i$之间的相对大小，更新幅度更加自适应一些，理论上更有助于促进均衡，实测效果也多是它更好。</p>
-<h2 id="_4">一脉相承</h2>
+<h2 id="_4">一脉相承<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>原论文在介绍Loss-Free时，并没有上述Aux Loss的推导过程，而是直接给出式$\eqref{eq:aux-loss-free}$的更新规则，给人的感觉是给$\boldsymbol{b}$“手搓”了梯度$\mathop{\text{sign}}(\boldsymbol{F} - \boldsymbol{Q})$，这也是它Loss-Free这个名字的来源。</p>
 <p>然而，从本文给出的推导可以看出，更新规则$\eqref{eq:aux-loss-free}$也完全可以从Aux Loss视角得到，两者是一脉相承的。看起来Loss-Free最直接的好处是不用调Aux Loss权重了，但它实际上也有个学习率参数$\alpha$要调，尽管原论文已经帮我们搜好$\alpha=0.001$这个默认值，但不可否认这个超参数是存在的。</p>
 <p>在笔者看来，Loss-Free的本质创新并不是没有Aux Loss，而是隔离了Aux Loss和LM Loss的优化参数，从而达到了负载均衡和模型能力两不误的效果。其中最关键一步，是留意到“一个偏置项足以达到负载均衡”这一事实，然后就让Aux Loss只优化新引入的偏置$\boldsymbol{b}$，而LM Loss则优化剩余参数，让Aux Loss对LM Loss的负面作用降到最低。</p>
 <p>相比之下，常规的Aux Loss方案需要全体参数来促进负载均衡，而LM Loss优化的也是全体参数，两者的优化方向可能并不完全兼容，因此想找到一个最优的平衡点相对来说就更为困难。所以，Loss-Free基于“一个偏置项足以达到负载均衡”将两个Loss的优化参数隔离开来，是负载均衡问题的一个绝妙的解决办法。</p>
-<h2 id="_5">相关细节</h2>
+<h2 id="_5">相关细节<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>尽管Loss-Free已经足够简单明了，但是在使用的时候还要稍微注意一些细节。</p>
 <p>首先，对于每个Batch的数据，我们应当先根据LM Loss来更新模型参数，然后再根据式$\eqref{eq:aux-loss-free}$来更新$\boldsymbol{b}$。这是因为$\boldsymbol{b}$的更新依赖于全体Token的统计信息$\boldsymbol{F}$，先更新$\boldsymbol{b}$再更新模型其余参数的话，原则上会有泄漏未来信息的风险。虽然直观看来就一个向量$\boldsymbol{b}$泄漏不了多少信息，但这个风险终归是存在的，因此要尽量去规避它。</p>
 <p>其次，刚才我们说原论文已经调好$\alpha=0.001$，但这个结果可能跟原论文用Sigmoid作为Router $\boldsymbol{\rho}$激活函数的选择是绑定的。原因也不难想，经过Sigmoid后，每个$\rho_i$相对比较独立，并且都在$(0,1)$内，$\alpha=0.001$相当于说每一步的更新幅度约为千分之一，如果换Softmax、ReLU或者其他激活函数，那么就可能需要重调$\alpha$了。</p>
@@ -140,7 +176,7 @@
 \begin{equation}\boldsymbol{y} = \sum_{i\in \mathop{\text{argtop}}<em _mathop_text_argtop="\mathop{\text{argtop" i_in="i\in">k \boldsymbol{\rho} + \boldsymbol{b}} \rho_i \boldsymbol{e}_i\qquad\to\qquad \boldsymbol{y} = \sum</em>}}_k \boldsymbol{\rho}^{(\sigma)} + \boldsymbol{b}} \rho_i^{(h)} \boldsymbol{e}_i\end{equation<br />
 其中$\boldsymbol{\rho}^{(\sigma)} = \sigma(\boldsymbol{x}\boldsymbol{W}^{(R)}), \boldsymbol{\rho}^{(h)} = h(\boldsymbol{x}\boldsymbol{W}^{(R)})$，$\sigma(\cdot)$是Sigmoid函数，$h(\cdot)$是任意单调且值域非负的函数，说白了就是加上$\boldsymbol{b}$的是Sigmoid激活的打分，这样我们就可以复用$\alpha=0.001$，至于乘上Expert的Gate，我们可以用其他激活函数，只要它的单调性跟Sigmoid一致就行。</p>
 <p>此外，由于更新规则$\eqref{eq:aux-loss-free}$加了$\text{sign}$函数，因此有可能训出绝对值大于1的$b_i$，整体绝对值还可能越来越大，这些都是正常的，对模型效果不会有影响。实际上$\boldsymbol{b}$有一个冗余的自由度，因为全体$b_i$都加上同一个常数后，$\mathop{\text{argtop}}_k \boldsymbol{\rho} + \boldsymbol{b}$的结果不变。这个额外的自由度我们可以用来做其他好玩的事情（且听下回分解）。</p>
-<h2 id="_6">延伸思考</h2>
+<h2 id="_6">延伸思考<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
 <p>除了MoE的负载均衡之外，Loss-Free的思想还可以应用到很多类似问题，比如VQ-VQE的编码表坍缩（Codebook Collapse），就可以用同样思路解决，而且相比之前介绍的“<a href="/archives/10489">旋转技巧</a>”、“<a href="/archives/10519">线性变换技巧</a>”显得更自然和普适。事实上，本文开篇的评价“Loss-Free潜在的学术影响力可能远超其他工作”，正是基于Loss-Free的普适性考虑的。</p>
 <p>抛开具体的应用背景，从数学上来看，Loss-Free的贡献可以理解为给出了用梯度下降来求解指派问题的方法。一个经典的线性指派问题可以表示为：<br />
 \begin{equation}\min_f \sum_{i=1}^n c_{i, f(i)}\end{equation}<br />
@@ -149,7 +185,7 @@
 这个解在分数上肯定是最优的，但不一定满足双射的条件，这里不满足双射就等价于负载不均衡。于是我们引入偏置<br />
 \begin{equation}f(i) = \mathop{\text{argmin}}<em i_j="i,j">j c</em>} + b_j\end{equation<br />
 $b_j$初始化为零，然后根据式$\eqref{eq:aux-loss-free}$来更新，更新规则说白了就是哪个$j$出现出现次数多，那减少相应的$b_j$，反之增加，直到出现双射为止。</p>
-<h2 id="_7">文章小结</h2>
+<h2 id="_7">文章小结<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
 <p>本文介绍了MoE负载均衡问题的Loss-Free方法，它由DeepSeek提出，其核心在于通过引入一个简单的偏置项来实现负载均衡。本文进一步思考了它与Aux Loss的联系，以及它在类似数学问题上的应用潜力。</p>
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10757">https://spaces.ac.cn/archives/10757</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
@@ -171,15 +207,81 @@ month={Mar},<br />
 url={\url{https://spaces.ac.cn/archives/10757}},<br />
 } </p>
 <hr />
-<h2 id="_8">公式推导与注释</h2>
+<h2 id="_8">公式推导与注释<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="通过梯度近似寻找normalization的替代品.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#142 通过梯度近似寻找Normalization的替代品</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="squareplus可能是运算最简单的relu光滑近似.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#144 SquarePlus：可能是运算最简单的ReLU光滑近似</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#moe3">MoE环游记：3、换个思路来分配</a><ul>
+<li><a href="#_1">方法大意</a></li>
+<li><a href="#_2">手搓梯度</a></li>
+<li><a href="#_3">改良版本</a></li>
+<li><a href="#_4">一脉相承</a></li>
+<li><a href="#_5">相关细节</a></li>
+<li><a href="#_6">延伸思考</a></li>
+<li><a href="#_7">文章小结</a></li>
+<li><a href="#_8">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -201,5 +303,41 @@ url={\url{https://spaces.ac.cn/archives/10757}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>

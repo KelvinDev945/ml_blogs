@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Transformer升级之路：6、旋转位置编码的完备性分析 | ML & Math Blog Posts</title>
-    <meta name="description" content="Transformer升级之路：6、旋转位置编码的完备性分析
+    <meta name="description" content="Transformer升级之路：6、旋转位置编码的完备性分析&para;
 原文链接: https://spaces.ac.cn/archives/9403
 发布日期: 
 
-在去年的文章《Transformer升级之路：2、博采众长的旋转式位置编码》中，笔者提出了旋转位置编码（RoPE），当时的出发点只是觉得用绝对位置来实现相对位置是一件“很好玩的事情”，并没料到其实际效果还相当不错，并为大家所接受，不得不说这...">
+在去年的文章《Transformer升级之路：2、博采众长的旋转式位置编码》中，笔者提出了旋转位置编码（RoPE），当时的出发点只是觉得用绝对位置来实现相对位置是一件“很好玩的事情”，并没料到其实际效果还相当不错，并为大家所接受...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -22,6 +22,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -66,40 +69,73 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=矩阵">矩阵</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #34 Transformer升级之路：6、旋转位置编码的完备性分析
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">Transformer升级之路：6、旋转位置编码的完备性分析</h1>
+            <h1 class="post-title">
+                <span class="post-number">#34</span>
+                Transformer升级之路：6、旋转位置编码的完备性分析
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/9403" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/9403" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> 矩阵</span>
-                <span class="tag"><i class="fas fa-tag"></i> attention</span>
-                <span class="tag"><i class="fas fa-tag"></i> 位置编码</span>
-                <span class="tag"><i class="fas fa-tag"></i> rope</span>
-                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <a href="../index.html?tags=矩阵" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 矩阵</span>
+                </a>
+                
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+                <a href="../index.html?tags=位置编码" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 位置编码</span>
+                </a>
+                
+                <a href="../index.html?tags=rope" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> rope</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="transformer6">Transformer升级之路：6、旋转位置编码的完备性分析</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="transformer6">Transformer升级之路：6、旋转位置编码的完备性分析<a class="toc-link" href="#transformer6" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9403">https://spaces.ac.cn/archives/9403</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>在去年的文章<a href="/archives/8265">《Transformer升级之路：2、博采众长的旋转式位置编码》</a>中，笔者提出了旋转位置编码（RoPE），当时的出发点只是觉得用绝对位置来实现相对位置是一件“很好玩的事情”，并没料到其实际效果还相当不错，并为大家所接受，不得不说这真是一个意外之喜。后来，在<a href="/archives/8397">《Transformer升级之路：4、二维位置的旋转式位置编码》</a>中，笔者讨论了二维形式的RoPE，并研究了用矩阵指数表示的RoPE的一般解。</p>
 <p>既然有了一般解，那么自然就会引出一个问题：我们常用的RoPE，只是一个以二维旋转矩阵为基本单元的分块对角矩阵，如果换成一般解，理论上效果会不会更好呢？本文就来回答这个问题。</p>
-<h2 id="_1">指数通解</h2>
+<h2 id="_1">指数通解<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>在<a href="/archives/8397">《Transformer升级之路：4、二维位置的旋转式位置编码》</a>中，我们将RoPE抽象地定义为任意满足下式的方阵<br />
 \begin{equation}\boldsymbol{\mathcal{R}}<em n-m="n-m">m^{\top}\boldsymbol{\mathcal{R}}_n=\boldsymbol{\mathcal{R}}</em>}\label{eq:re}\end{equation<br />
 然后，我们探讨了如下矩阵指数形式的解<br />
@@ -112,14 +148,14 @@
 这里$\left[\boldsymbol{A}, \boldsymbol{B}\right]=\boldsymbol{A}\boldsymbol{B}-\boldsymbol{B}\boldsymbol{A}$，$\cdots$省略的都是$m,n$的三次或三次以上的项。按照式$\eqref{eq:re}$，那么上式指数部分应该等于$(n-m)\boldsymbol{B}$，这就推出<br />
 \begin{equation}\boldsymbol{B}^{\top} = - \boldsymbol{B}\end{equation}<br />
 即要求$\boldsymbol{B}$是反对称矩阵。</p>
-<h2 id="_2">正交通解</h2>
+<h2 id="_2">正交通解<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>进一步地，我们有$(\exp \boldsymbol{B})^{\top}(\exp \boldsymbol{B})=\exp(\boldsymbol{B}-\boldsymbol{B}) = \boldsymbol{I}$和$\exp n\boldsymbol{B} = \left(\exp\boldsymbol{B}\right)^n$，前者说明$\exp\boldsymbol{B}$是正交矩阵，后者则启示我们这是不是可以推广到任意正交矩阵？不难验证，答案是肯定的，我们有结论：</p>
 <blockquote>
 <p>对于任意正交矩阵$\boldsymbol{O}$，$\boldsymbol{\mathcal{R}}_n=\boldsymbol{O}^n$是满足式$\eqref{eq:re}$的解。</p>
 </blockquote>
 <p>值得指出的是，在实数域内，并非所有正交矩阵能写成$\exp\boldsymbol{B}$的形式，所以$\boldsymbol{O}^n$实际上比矩阵指数形式更宽泛。从<a href="/archives/6377">《恒等式 det(exp(A)) = exp(Tr(A)) 赏析》</a>可知$\det(\exp(\boldsymbol{A})) = \exp(\text{Tr}(\boldsymbol{A})) &gt; 0$，所以能写成矩阵指数形式的正交矩阵行列式必然大于0（即等于1），事实上这个结果反过来也成立，即行列式等于1的正交矩阵，必然可以写成$\exp\boldsymbol{B}$的形式，其中$\boldsymbol{B}$是反对称矩阵。（参考<a href="https://math.stackexchange.com/questions/2467531/why-can-any-orthogonal-matrix-be-written-as-o-ea">《Why can any orthogonal matrix be written as O=e^A》</a>）。</p>
 <p>对于$\det(\boldsymbol{O}) = -1$的正交矩阵，我们有$\boldsymbol{O}=\boldsymbol{O}<em>+ \boldsymbol{I}</em>-$，其中$\boldsymbol{I}<em>-$是对角线有一个-1、剩下都是1的对角阵，$\boldsymbol{O}</em>+$是$\det(\boldsymbol{O}<em>+) = 1$的正交矩阵，它可以写成$\exp\boldsymbol{B}$的形式，此时$\boldsymbol{O}^n = (\boldsymbol{O}</em>+ \boldsymbol{I}<em>-)^n = \boldsymbol{I}</em>-^n\exp n\boldsymbol{B}$。这也就是说，即便对于$\det(\boldsymbol{O}) = -1$的$\boldsymbol{O}^n$，也只是$\exp n\boldsymbol{B}$的简单变换，所以接下来我们主要研究$\exp n\boldsymbol{B}$形式的解。</p>
-<h2 id="_3">完备分析</h2>
+<h2 id="_3">完备分析<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>众所周知，我们平时所用的RoPE位置编码，是如下形式的分块对角矩阵：<br />
 \begin{equation}\scriptsize{\left(\begin{array}{cc:cc:cc:cc}<br />
 \cos n\theta_0 &amp; -\sin n\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; \cdots &amp; 0 &amp; 0 \\<br />
@@ -164,7 +200,7 @@
 <p>所以，对于Self Attention来说，问题的答案是否定的。不过，如果是<a href="线性Attention的探索：Attention必须有个Softmax吗？">线性Attention</a>，答案会有少许区别，因为线性Attention的$\boldsymbol{q},\boldsymbol{k}$加了个激活函数：<br />
 \begin{equation}\phi(\boldsymbol{q})^{\top}\big(\exp (n-m)\boldsymbol{B}\big)\varphi(\boldsymbol{k}) = \big(\boldsymbol{P}^{\top}\phi(\boldsymbol{q})\big)^{\top}\big(\exp (n-m)\boldsymbol{\Lambda}\big)\big(\boldsymbol{P}^{-1}\varphi(\boldsymbol{k})\big)\end{equation}<br />
 这就导致了$\boldsymbol{P}^{\top},\boldsymbol{P}^{-1}$不一定能吸收到线性变换的训练参数中，因此对线性Attention补上两个参数矩阵，是有可能带来提升的。</p>
-<h2 id="_4">文章小结</h2>
+<h2 id="_4">文章小结<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>本文简单分析了RoPE的完备性问题，表明对于Self Attention来说，目前的分块对角型RoPE不会损失一般性。</p>
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9403">https://spaces.ac.cn/archives/9403</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
@@ -186,15 +222,78 @@ month={Dec},<br />
 url={\url{https://spaces.ac.cn/archives/9403}},<br />
 } </p>
 <hr />
-<h2 id="_5">公式推导与注释</h2>
+<h2 id="_5">公式推导与注释<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="生成扩散模型漫谈十三从万有引力到扩散模型.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#33 生成扩散模型漫谈（十三）：从万有引力到扩散模型</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="transformer升级之路15key归一化助力长度外推.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#35 Transformer升级之路：15、Key归一化助力长度外推</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#transformer6">Transformer升级之路：6、旋转位置编码的完备性分析</a><ul>
+<li><a href="#_1">指数通解</a></li>
+<li><a href="#_2">正交通解</a></li>
+<li><a href="#_3">完备分析</a></li>
+<li><a href="#_4">文章小结</a></li>
+<li><a href="#_5">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -216,5 +315,41 @@ url={\url{https://spaces.ac.cn/archives/9403}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>

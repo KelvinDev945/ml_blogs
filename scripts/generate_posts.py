@@ -1,30 +1,59 @@
 #!/usr/bin/env python3
 """
 Generate HTML posts from markdown files in blogs_raw/
+
+Usage:
+    python generate_posts.py                  # Generate all posts
+    python generate_posts.py --incremental    # Only regenerate modified posts
+    python generate_posts.py --dry-run        # Preview what will be generated
+    python generate_posts.py <file.md>        # Generate specific file
 """
 
 import re
 import json
 import markdown
+import argparse
+import hashlib
 from pathlib import Path
-from jinja2 import Template
+from datetime import datetime
+from jinja2 import Template, Environment, FileSystemLoader
 
 # Project directories
 PROJECT_ROOT = Path(__file__).parent.parent
 BLOGS_RAW_DIR = PROJECT_ROOT / "blogs_raw"
 POSTS_DIR = PROJECT_ROOT / "docs" / "posts"
-TEMPLATE_FILE = PROJECT_ROOT / "templates" / "post_template.html"
+TEMPLATE_DIR = PROJECT_ROOT / "templates"
+TEMPLATE_FILE = TEMPLATE_DIR / "post_template.html"
 BLOG_LIST_JSON = PROJECT_ROOT / "docs" / "data" / "blog_list.json"
+CACHE_FILE = PROJECT_ROOT / ".build_cache.json"
 
-# Markdown extensions
+# Markdown extensions with enhanced support
 MD_EXTENSIONS = [
-    'extra',
-    'codehilite',
-    'toc',
-    'tables',
-    'fenced_code',
-    'nl2br'
+    'extra',           # Tables, footnotes, etc.
+    'codehilite',      # Code highlighting
+    'toc',             # Table of contents
+    'tables',          # GFM tables
+    'fenced_code',     # Fenced code blocks
+    'nl2br',           # Newline to <br>
+    'attr_list',       # Add HTML attributes to elements
+    'md_in_html',      # Allow Markdown inside HTML
+    'def_list',        # Definition lists
+    'footnotes',       # Footnotes support
+    'sane_lists',      # Better list handling
 ]
+
+# Extension configs
+MD_EXTENSION_CONFIGS = {
+    'codehilite': {
+        'linenums': False,
+        'css_class': 'highlight',
+    },
+    'toc': {
+        'permalink': True,
+        'permalink_class': 'toc-link',
+        'toc_depth': 3,
+    },
+}
 
 
 def parse_frontmatter(content):
@@ -42,21 +71,67 @@ def parse_frontmatter(content):
         for line in fm_text.split('\n'):
             if ':' in line:
                 key, value = line.split(':', 1)
-                frontmatter[key.strip()] = value.strip()
+                key = key.strip()
+                value = value.strip()
+
+                # Handle boolean values
+                if value.lower() in ('true', 'false'):
+                    frontmatter[key] = value.lower() == 'true'
+                else:
+                    frontmatter[key] = value
 
     return frontmatter, body
 
 
+def get_file_hash(file_path):
+    """Calculate MD5 hash of file content"""
+    with open(file_path, 'rb') as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+
+def load_build_cache():
+    """Load build cache to track file changes"""
+    if CACHE_FILE.exists():
+        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+
+def save_build_cache(cache):
+    """Save build cache"""
+    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
 def convert_md_to_html(md_content):
-    """Convert markdown to HTML"""
-    md = markdown.Markdown(extensions=MD_EXTENSIONS)
+    """Convert markdown to HTML with TOC support"""
+    md = markdown.Markdown(
+        extensions=MD_EXTENSIONS,
+        extension_configs=MD_EXTENSION_CONFIGS
+    )
     html = md.convert(md_content)
-    return html
+
+    # Get TOC if available
+    toc = getattr(md, 'toc', '')
+
+    return html, toc
 
 
-def generate_post_html(md_file):
-    """Generate HTML post from a markdown file"""
-    print(f"Processing: {md_file.name}")
+def generate_post_html(md_file, post_number=None, dry_run=False):
+    """Generate HTML post from a markdown file
+
+    Args:
+        md_file: Path to markdown file
+        post_number: Sequential number for this post (based on date)
+        dry_run: If True, don't write files, just report what would be done
+
+    Returns:
+        dict with post metadata
+    """
+    if not dry_run:
+        print(f"Processing: {md_file.name}")
+    else:
+        print(f"Would process: {md_file.name}")
 
     # Read markdown file
     with open(md_file, 'r', encoding='utf-8') as f:
@@ -65,120 +140,372 @@ def generate_post_html(md_file):
     # Parse frontmatter and body
     frontmatter, body = parse_frontmatter(content)
 
-    # Convert markdown to HTML
-    html_content = convert_md_to_html(body)
-
-    # Read template
-    with open(TEMPLATE_FILE, 'r', encoding='utf-8') as f:
-        template_content = f.read()
-
-    # Simple template replacement (Jinja2-style)
+    # Extract metadata
     title = frontmatter.get('title', md_file.stem)
     slug = frontmatter.get('slug', md_file.stem)
     date = frontmatter.get('date', '')
     source_url = frontmatter.get('source', '')
+    status = frontmatter.get('status', 'pending')
     tags_str = frontmatter.get('tags', '')
     tags = [t.strip() for t in tags_str.split(',')] if tags_str else []
+    tags_reviewed = frontmatter.get('tags_reviewed', False)
+
+    # Convert markdown to HTML
+    html_content, toc = convert_md_to_html(body)
 
     # Generate description from first paragraph
-    description = re.sub(r'<[^>]+>', '', html_content)[:200] + "..."
+    clean_text = re.sub(r'<[^>]+>', '', html_content)
+    description = clean_text[:200].strip()
+    if len(clean_text) > 200:
+        description += "..."
 
-    # Replace template variables
-    html = template_content
-    html = html.replace('{{ title }}', title)
-    html = html.replace('{{ description }}', description)
-    html = html.replace('{{ date }}', date)
-    html = html.replace('{{ content }}', html_content)
+    # Prepare template context
+    context = {
+        'title': title,
+        'description': description,
+        'date': date,
+        'content': html_content,
+        'source_url': source_url,
+        'tags': tags,
+        'toc': toc,
+        'post_number': post_number,
+        'slug': slug,
+    }
 
-    # Handle conditional source_url
-    if source_url:
-        source_html = f'''
-                <span class="ms-3">
-                    <i class="fas fa-link"></i>
-                    <a href="{source_url}" target="_blank">原文链接</a>
-                </span>'''
-        html = html.replace('{% if source_url %}', '')
-        html = html.replace('{{ source_url }}', source_url)
-        html = html.replace('{% endif %}', '')
-    else:
-        # Remove the source_url block
-        html = re.sub(r'\{% if source_url %\}.*?\{% endif %\}', '', html, flags=re.DOTALL)
+    if not dry_run:
+        # Use Jinja2 for proper templating
+        env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
+        template = env.get_template('post_template.html')
 
-    # Handle tags
-    if tags:
-        tags_html = '\n'.join([f'                <span class="tag"><i class="fas fa-tag"></i> {tag}</span>'
-                               for tag in tags])
-        html = html.replace('{% if tags %}', '')
-        html = html.replace('{% for tag in tags %}', '')
-        html = html.replace('                <span class="tag"><i class="fas fa-tag"></i> {{ tag }}</span>',
-                           tags_html)
-        html = html.replace('{% endfor %}', '')
-        html = html.replace('{% endif %}', '', 1)  # First occurrence
-    else:
-        # Remove tags block
-        html = re.sub(r'\{% if tags %\}.*?\{% endif %\}', '', html, flags=re.DOTALL, count=1)
+        try:
+            html = template.render(**context)
+        except Exception as e:
+            print(f"  Warning: Template rendering issue, falling back to simple replacement: {e}")
+            # Fallback to simple replacement
+            with open(TEMPLATE_FILE, 'r', encoding='utf-8') as f:
+                html = f.read()
 
-    # Save HTML file
-    output_file = POSTS_DIR / f"{slug}.html"
-    with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(html)
+            # Simple replacements
+            html = html.replace('{{ title }}', title)
+            html = html.replace('{{ description }}', description)
+            html = html.replace('{{ date }}', date)
+            html = html.replace('{{ content }}', html_content)
+            html = html.replace('{{ source_url }}', source_url)
 
-    print(f"  ✓ Generated: {output_file.name}")
+            # Remove Jinja2 conditionals (simple approach)
+            if not source_url:
+                html = re.sub(r'\{% if source_url %\}.*?\{% endif %\}', '', html, flags=re.DOTALL)
+            if not tags:
+                html = re.sub(r'\{% if tags %\}.*?\{% endif %\}', '', html, flags=re.DOTALL)
 
-    return slug
+        # Save HTML file
+        output_file = POSTS_DIR / f"{slug}.html"
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(html)
 
+        print(f"  ✓ Generated: {output_file.name}")
 
-def update_blog_status(slug, status='completed'):
-    """Update blog status in blog_list.json"""
-    try:
-        with open(BLOG_LIST_JSON, 'r', encoding='utf-8') as f:
-            blogs = json.load(f)
-
-        for blog in blogs:
-            if blog['slug'] == slug:
-                blog['status'] = status
-                break
-
-        with open(BLOG_LIST_JSON, 'w', encoding='utf-8') as f:
-            json.dump(blogs, f, ensure_ascii=False, indent=2)
-
-    except Exception as e:
-        print(f"  Warning: Could not update blog status: {e}")
+    # Return metadata
+    return {
+        'slug': slug,
+        'title': title,
+        'description': description,
+        'date': date,
+        'source': source_url,
+        'tags': tags,
+        'status': status,
+        'tags_reviewed': tags_reviewed,
+        'post_number': post_number,
+    }
 
 
-def generate_all_posts(update_status=True):
-    """Generate HTML for all markdown files in blogs_raw/"""
-    POSTS_DIR.mkdir(exist_ok=True)
+def get_post_files_with_dates():
+    """Get all markdown files and extract their dates for sorting
 
+    Returns:
+        List of (md_file, date_str) tuples sorted by date (oldest first)
+    """
     md_files = list(BLOGS_RAW_DIR.glob("*.md"))
-
-    if not md_files:
-        print("No markdown files found in blogs_raw/")
-        return
-
-    print(f"\nGenerating {len(md_files)} blog posts...\n")
+    files_with_dates = []
 
     for md_file in md_files:
         try:
-            slug = generate_post_html(md_file)
-            if update_status:
-                update_blog_status(slug, 'completed')
+            with open(md_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            frontmatter, _ = parse_frontmatter(content)
+            date_str = frontmatter.get('date', '9999-12-31')  # Unknown dates go last
+            files_with_dates.append((md_file, date_str))
+        except Exception as e:
+            print(f"Warning: Could not read date from {md_file.name}: {e}")
+            files_with_dates.append((md_file, '9999-12-31'))
+
+    # Sort by date (oldest first)
+    files_with_dates.sort(key=lambda x: x[1])
+
+    return files_with_dates
+
+
+def generate_all_posts(incremental=False, dry_run=False):
+    """Generate HTML for all markdown files in blogs_raw/
+
+    Args:
+        incremental: Only regenerate files that have changed
+        dry_run: Preview what would be generated without actually writing files
+    """
+    POSTS_DIR.mkdir(exist_ok=True, parents=True)
+    (PROJECT_ROOT / "docs" / "data").mkdir(exist_ok=True, parents=True)
+
+    # Get files sorted by date
+    files_with_dates = get_post_files_with_dates()
+
+    if not files_with_dates:
+        print("No markdown files found in blogs_raw/")
+        return
+
+    # Load build cache for incremental builds
+    build_cache = load_build_cache() if incremental else {}
+
+    print(f"\n{'[DRY RUN] ' if dry_run else ''}Generating {len(files_with_dates)} blog posts...")
+    print(f"Mode: {'Incremental' if incremental else 'Full rebuild'}\n")
+
+    # First pass: collect all metadata
+    posts_metadata = []
+    for post_number, (md_file, date_str) in enumerate(files_with_dates, start=1):
+        try:
+            with open(md_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            frontmatter, _ = parse_frontmatter(content)
+
+            posts_metadata.append({
+                'md_file': md_file,
+                'post_number': post_number,
+                'slug': frontmatter.get('slug', md_file.stem),
+                'title': frontmatter.get('title', md_file.stem),
+                'date': frontmatter.get('date', ''),
+            })
+        except Exception as e:
+            print(f"Warning: Could not read metadata from {md_file.name}: {e}")
+
+    # Second pass: generate HTML with prev/next info
+    processed_count = 0
+    skipped_count = 0
+    final_metadata = []
+
+    for i, post_meta in enumerate(posts_metadata):
+        md_file = post_meta['md_file']
+        post_number = post_meta['post_number']
+
+        try:
+            # Check if file needs processing (for incremental mode)
+            file_hash = get_file_hash(md_file)
+            cache_key = str(md_file)
+
+            # Get prev/next post info
+            prev_post = posts_metadata[i - 1] if i > 0 else None
+            next_post = posts_metadata[i + 1] if i < len(posts_metadata) - 1 else None
+
+            # Remove md_file from prev/next before passing to template
+            if prev_post:
+                prev_post = {k: v for k, v in prev_post.items() if k != 'md_file'}
+            if next_post:
+                next_post = {k: v for k, v in next_post.items() if k != 'md_file'}
+
+            if incremental and cache_key in build_cache:
+                if build_cache[cache_key] == file_hash:
+                    # File hasn't changed, but regenerate to update prev/next links
+                    if not dry_run:
+                        print(f"Updating navigation: {md_file.name}")
+
+                    metadata = generate_post_html_with_nav(
+                        md_file, post_number, prev_post, next_post, dry_run
+                    )
+                    final_metadata.append(metadata)
+                    skipped_count += 1
+                    continue
+
+            # Generate post
+            metadata = generate_post_html_with_nav(
+                md_file, post_number, prev_post, next_post, dry_run
+            )
+            final_metadata.append(metadata)
+
+            # Update cache
+            if not dry_run:
+                build_cache[cache_key] = file_hash
+
+            processed_count += 1
+
         except Exception as e:
             print(f"  ✗ Error processing {md_file.name}: {e}")
+            import traceback
+            traceback.print_exc()
 
-    print(f"\n✓ Generated {len(md_files)} HTML posts in {POSTS_DIR}")
+    # Save build cache
+    if not dry_run and incremental:
+        save_build_cache(build_cache)
+
+    # Generate blog_list.json
+    if not dry_run:
+        # Sort by date for the JSON (oldest first, matching post numbers)
+        final_metadata.sort(key=lambda x: x.get('date', '9999-12-31'))
+
+        # Ensure all posts have post_number
+        for i, post in enumerate(final_metadata, start=1):
+            if 'post_number' not in post or post['post_number'] is None:
+                post['post_number'] = i
+
+        with open(BLOG_LIST_JSON, 'w', encoding='utf-8') as f:
+            json.dump(final_metadata, f, ensure_ascii=False, indent=2)
+
+        print(f"\n✓ Generated blog_list.json with {len(final_metadata)} posts")
+
+    # Summary
+    print(f"\n{'[DRY RUN] ' if dry_run else ''}Summary:")
+    print(f"  Processed: {processed_count}")
+    if incremental:
+        print(f"  Skipped (unchanged): {skipped_count}")
+    print(f"  Total: {len(files_with_dates)}")
+    if not dry_run:
+        print(f"  Output: {POSTS_DIR}")
+        print(f"  Blog list: {BLOG_LIST_JSON}")
+
+
+def generate_post_html_with_nav(md_file, post_number, prev_post, next_post, dry_run=False):
+    """Wrapper that adds prev/next navigation to generate_post_html"""
+    if not dry_run:
+        print(f"Processing: {md_file.name}")
+    else:
+        print(f"Would process: {md_file.name}")
+
+    # Read markdown file
+    with open(md_file, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # Parse frontmatter and body
+    frontmatter, body = parse_frontmatter(content)
+
+    # Extract metadata
+    title = frontmatter.get('title', md_file.stem)
+    slug = frontmatter.get('slug', md_file.stem)
+    date = frontmatter.get('date', '')
+    source_url = frontmatter.get('source', '')
+    status = frontmatter.get('status', 'pending')
+    tags_str = frontmatter.get('tags', '')
+    tags = [t.strip() for t in tags_str.split(',')] if tags_str else []
+    tags_reviewed = frontmatter.get('tags_reviewed', False)
+
+    # Convert markdown to HTML
+    html_content, toc = convert_md_to_html(body)
+
+    # Generate description from first paragraph
+    clean_text = re.sub(r'<[^>]+>', '', html_content)
+    description = clean_text[:200].strip()
+    if len(clean_text) > 200:
+        description += "..."
+
+    # Prepare template context (including prev/next)
+    context = {
+        'title': title,
+        'description': description,
+        'date': date,
+        'content': html_content,
+        'source_url': source_url,
+        'tags': tags,
+        'toc': toc,
+        'post_number': post_number,
+        'slug': slug,
+        'prev_post': prev_post,
+        'next_post': next_post,
+    }
+
+    if not dry_run:
+        # Use Jinja2 for proper templating
+        env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
+        template = env.get_template('post_template.html')
+
+        try:
+            html = template.render(**context)
+        except Exception as e:
+            print(f"  Warning: Template rendering issue: {e}")
+            # Fallback to simple replacement (won't have prev/next)
+            with open(TEMPLATE_FILE, 'r', encoding='utf-8') as f:
+                html = f.read()
+
+            html = html.replace('{{ title }}', title)
+            html = html.replace('{{ description }}', description)
+            html = html.replace('{{ date }}', date)
+            html = html.replace('{{ content }}', html_content)
+
+        # Save HTML file
+        output_file = POSTS_DIR / f"{slug}.html"
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(html)
+
+        print(f"  ✓ Generated: {output_file.name}")
+
+    # Return metadata
+    return {
+        'slug': slug,
+        'title': title,
+        'description': description,
+        'date': date,
+        'source': source_url,
+        'tags': tags,
+        'status': status,
+        'tags_reviewed': tags_reviewed,
+        'post_number': post_number,
+    }
 
 
 if __name__ == "__main__":
-    import sys
+    parser = argparse.ArgumentParser(
+        description='Generate HTML posts from Markdown files',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python generate_posts.py                      # Full rebuild
+  python generate_posts.py --incremental        # Only rebuild changed files
+  python generate_posts.py --dry-run            # Preview changes
+  python generate_posts.py file.md              # Generate single file
+  python generate_posts.py --incremental --dry-run  # Preview incremental
+        """
+    )
 
-    # Check if specific file provided
-    if len(sys.argv) > 1:
-        md_file = Path(sys.argv[1])
+    parser.add_argument(
+        'file',
+        nargs='?',
+        help='Specific markdown file to process'
+    )
+    parser.add_argument(
+        '--incremental', '-i',
+        action='store_true',
+        help='Only regenerate files that have changed'
+    )
+    parser.add_argument(
+        '--dry-run', '-n',
+        action='store_true',
+        help='Show what would be generated without actually writing files'
+    )
+
+    args = parser.parse_args()
+
+    if args.file:
+        # Generate specific file
+        md_file = Path(args.file)
         if md_file.exists():
-            generate_post_html(md_file)
+            # Get post number for this file
+            files_with_dates = get_post_files_with_dates()
+            post_number = None
+            for i, (f, _) in enumerate(files_with_dates, start=1):
+                if f == md_file:
+                    post_number = i
+                    break
+
+            metadata = generate_post_html(md_file, post_number=post_number, dry_run=args.dry_run)
+            print(f"\nGenerated post #{post_number}: {metadata['title']}")
         else:
-            print(f"File not found: {md_file}")
+            print(f"Error: File not found: {md_file}")
+            exit(1)
     else:
         # Generate all posts
-        generate_all_posts()
+        generate_all_posts(incremental=args.incremental, dry_run=args.dry_run)

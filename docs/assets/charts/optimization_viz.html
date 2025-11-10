@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>优化算法可视化</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .controls {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        .control-group {
+            display: inline-block;
+            margin-right: 30px;
+            margin-bottom: 15px;
+            vertical-align: top;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #495057;
+        }
+        input[type="range"] {
+            width: 150px;
+        }
+        select {
+            padding: 5px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            background: white;
+        }
+        button {
+            padding: 8px 16px;
+            background: #0056b3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover {
+            background: #004494;
+        }
+        .value-display {
+            display: inline-block;
+            margin-left: 10px;
+            font-weight: 600;
+            color: #0056b3;
+        }
+        #plot {
+            width: 100%;
+            height: 600px;
+        }
+        #lossPlot {
+            width: 100%;
+            height: 300px;
+            margin-top: 20px;
+        }
+        .stats-box {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+            border-left: 4px solid #0056b3;
+        }
+        .stats-box h3 {
+            margin-top: 0;
+            color: #0056b3;
+        }
+        .algorithm-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .algorithm-btn {
+            padding: 10px;
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: center;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        .algorithm-btn:hover {
+            border-color: #0056b3;
+            background: #f0f7ff;
+        }
+        .algorithm-btn.active {
+            border-color: #0056b3;
+            background: #0056b3;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 优化算法可视化</h1>
+        <p class="subtitle">对比不同优化算法在损失函数上的轨迹</p>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="lossFunction">损失函数</label>
+                <select id="lossFunction" onchange="resetOptimization()">
+                    <option value="bowl">碗形函数 (Bowl)</option>
+                    <option value="rosenbrock">Rosenbrock函数</option>
+                    <option value="beale">Beale函数</option>
+                    <option value="rastrigin">Rastrigin函数</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="learningRate">学习率: <span class="value-display" id="lrValue">0.1</span></label>
+                <input type="range" id="learningRate" min="0.01" max="0.5" step="0.01" value="0.1" oninput="updateLR()">
+            </div>
+
+            <div class="control-group">
+                <label for="maxIterations">最大迭代数: <span class="value-display" id="iterValue">100</span></label>
+                <input type="range" id="maxIterations" min="10" max="500" step="10" value="100" oninput="updateIter()">
+            </div>
+
+            <div class="control-group">
+                <button onclick="runOptimization()">▶ 运行优化</button>
+                <button onclick="resetOptimization()">🔄 重置</button>
+            </div>
+
+            <div class="control-group" style="width: 100%; margin-top: 10px;">
+                <label>选择优化器（可多选）</label>
+                <div class="algorithm-grid">
+                    <div class="algorithm-btn active" data-algo="gd" onclick="toggleAlgorithm('gd')">梯度下降</div>
+                    <div class="algorithm-btn active" data-algo="momentum" onclick="toggleAlgorithm('momentum')">Momentum</div>
+                    <div class="algorithm-btn active" data-algo="nesterov" onclick="toggleAlgorithm('nesterov')">Nesterov</div>
+                    <div class="algorithm-btn active" data-algo="adagrad" onclick="toggleAlgorithm('adagrad')">AdaGrad</div>
+                    <div class="algorithm-btn active" data-algo="rmsprop" onclick="toggleAlgorithm('rmsprop')">RMSProp</div>
+                    <div class="algorithm-btn active" data-algo="adam" onclick="toggleAlgorithm('adam')">Adam</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="plot"></div>
+        <div id="lossPlot"></div>
+
+        <div class="stats-box" id="statsBox"></div>
+    </div>
+
+    <script>
+        const selectedAlgorithms = new Set(['gd', 'momentum', 'nesterov', 'adagrad', 'rmsprop', 'adam']);
+
+        function toggleAlgorithm(algo) {
+            if (selectedAlgorithms.has(algo)) {
+                selectedAlgorithms.delete(algo);
+                document.querySelector(`[data-algo="${algo}"]`).classList.remove('active');
+            } else {
+                selectedAlgorithms.add(algo);
+                document.querySelector(`[data-algo="${algo}"]`).classList.add('active');
+            }
+        }
+
+        function updateLR() {
+            document.getElementById('lrValue').textContent = document.getElementById('learningRate').value;
+        }
+
+        function updateIter() {
+            document.getElementById('iterValue').textContent = document.getElementById('maxIterations').value;
+        }
+
+        // 损失函数及其梯度
+        const lossFunctions = {
+            bowl: {
+                f: (x, y) => x * x + y * y,
+                grad: (x, y) => [2 * x, 2 * y],
+                range: [-5, 5],
+                start: [4, 4]
+            },
+            rosenbrock: {
+                f: (x, y) => (1 - x) ** 2 + 100 * (y - x ** 2) ** 2,
+                grad: (x, y) => [
+                    -2 * (1 - x) - 400 * x * (y - x ** 2),
+                    200 * (y - x ** 2)
+                ],
+                range: [-2, 2],
+                start: [-1, 1]
+            },
+            beale: {
+                f: (x, y) => (1.5 - x + x * y) ** 2 + (2.25 - x + x * y ** 2) ** 2 + (2.625 - x + x * y ** 3) ** 2,
+                grad: (x, y) => {
+                    const t1 = 1.5 - x + x * y;
+                    const t2 = 2.25 - x + x * y ** 2;
+                    const t3 = 2.625 - x + x * y ** 3;
+                    return [
+                        2 * t1 * (-1 + y) + 2 * t2 * (-1 + y ** 2) + 2 * t3 * (-1 + y ** 3),
+                        2 * t1 * x + 2 * t2 * x * 2 * y + 2 * t3 * x * 3 * y ** 2
+                    ];
+                },
+                range: [-4.5, 4.5],
+                start: [3, 3]
+            },
+            rastrigin: {
+                f: (x, y) => 20 + x ** 2 + y ** 2 - 10 * (Math.cos(2 * Math.PI * x) + Math.cos(2 * Math.PI * y)),
+                grad: (x, y) => [
+                    2 * x + 20 * Math.PI * Math.sin(2 * Math.PI * x),
+                    2 * y + 20 * Math.PI * Math.sin(2 * Math.PI * y)
+                ],
+                range: [-5, 5],
+                start: [4, 4]
+            }
+        };
+
+        // 优化器实现
+        class Optimizer {
+            constructor(name, startPos, lr) {
+                this.name = name;
+                this.trajectory = [startPos.slice()];
+                this.losses = [];
+                this.lr = lr;
+            }
+
+            step(grad) {
+                // 子类实现
+            }
+
+            getCurrentPos() {
+                return this.trajectory[this.trajectory.length - 1];
+            }
+        }
+
+        class GD extends Optimizer {
+            step(grad) {
+                const pos = this.getCurrentPos();
+                const newPos = [
+                    pos[0] - this.lr * grad[0],
+                    pos[1] - this.lr * grad[1]
+                ];
+                this.trajectory.push(newPos);
+            }
+        }
+
+        class Momentum extends Optimizer {
+            constructor(name, startPos, lr) {
+                super(name, startPos, lr);
+                this.velocity = [0, 0];
+                this.beta = 0.9;
+            }
+
+            step(grad) {
+                this.velocity[0] = this.beta * this.velocity[0] + (1 - this.beta) * grad[0];
+                this.velocity[1] = this.beta * this.velocity[1] + (1 - this.beta) * grad[1];
+
+                const pos = this.getCurrentPos();
+                const newPos = [
+                    pos[0] - this.lr * this.velocity[0],
+                    pos[1] - this.lr * this.velocity[1]
+                ];
+                this.trajectory.push(newPos);
+            }
+        }
+
+        class Nesterov extends Optimizer {
+            constructor(name, startPos, lr) {
+                super(name, startPos, lr);
+                this.velocity = [0, 0];
+                this.beta = 0.9;
+            }
+
+            step(grad, lossFunc) {
+                // Nesterov look-ahead
+                const pos = this.getCurrentPos();
+                const lookahead = [
+                    pos[0] - this.beta * this.velocity[0],
+                    pos[1] - this.beta * this.velocity[1]
+                ];
+                const lookaheadGrad = lossFunc.grad(lookahead[0], lookahead[1]);
+
+                this.velocity[0] = this.beta * this.velocity[0] + (1 - this.beta) * lookaheadGrad[0];
+                this.velocity[1] = this.beta * this.velocity[1] + (1 - this.beta) * lookaheadGrad[1];
+
+                const newPos = [
+                    pos[0] - this.lr * this.velocity[0],
+                    pos[1] - this.lr * this.velocity[1]
+                ];
+                this.trajectory.push(newPos);
+            }
+        }
+
+        class AdaGrad extends Optimizer {
+            constructor(name, startPos, lr) {
+                super(name, startPos, lr);
+                this.sumSquares = [1e-7, 1e-7];
+            }
+
+            step(grad) {
+                this.sumSquares[0] += grad[0] ** 2;
+                this.sumSquares[1] += grad[1] ** 2;
+
+                const pos = this.getCurrentPos();
+                const newPos = [
+                    pos[0] - this.lr * grad[0] / Math.sqrt(this.sumSquares[0]),
+                    pos[1] - this.lr * grad[1] / Math.sqrt(this.sumSquares[1])
+                ];
+                this.trajectory.push(newPos);
+            }
+        }
+
+        class RMSProp extends Optimizer {
+            constructor(name, startPos, lr) {
+                super(name, startPos, lr);
+                this.movingAvg = [0, 0];
+                this.beta = 0.9;
+            }
+
+            step(grad) {
+                this.movingAvg[0] = this.beta * this.movingAvg[0] + (1 - this.beta) * grad[0] ** 2;
+                this.movingAvg[1] = this.beta * this.movingAvg[1] + (1 - this.beta) * grad[1] ** 2;
+
+                const pos = this.getCurrentPos();
+                const newPos = [
+                    pos[0] - this.lr * grad[0] / (Math.sqrt(this.movingAvg[0]) + 1e-7),
+                    pos[1] - this.lr * grad[1] / (Math.sqrt(this.movingAvg[1]) + 1e-7)
+                ];
+                this.trajectory.push(newPos);
+            }
+        }
+
+        class Adam extends Optimizer {
+            constructor(name, startPos, lr) {
+                super(name, startPos, lr);
+                this.m = [0, 0];
+                this.v = [0, 0];
+                this.beta1 = 0.9;
+                this.beta2 = 0.999;
+                this.t = 0;
+            }
+
+            step(grad) {
+                this.t += 1;
+
+                this.m[0] = this.beta1 * this.m[0] + (1 - this.beta1) * grad[0];
+                this.m[1] = this.beta1 * this.m[1] + (1 - this.beta1) * grad[1];
+
+                this.v[0] = this.beta2 * this.v[0] + (1 - this.beta2) * grad[0] ** 2;
+                this.v[1] = this.beta2 * this.v[1] + (1 - this.beta2) * grad[1] ** 2;
+
+                const m_hat = [
+                    this.m[0] / (1 - this.beta1 ** this.t),
+                    this.m[1] / (1 - this.beta1 ** this.t)
+                ];
+                const v_hat = [
+                    this.v[0] / (1 - this.beta2 ** this.t),
+                    this.v[1] / (1 - this.beta2 ** this.t)
+                ];
+
+                const pos = this.getCurrentPos();
+                const newPos = [
+                    pos[0] - this.lr * m_hat[0] / (Math.sqrt(v_hat[0]) + 1e-7),
+                    pos[1] - this.lr * m_hat[1] / (Math.sqrt(v_hat[1]) + 1e-7)
+                ];
+                this.trajectory.push(newPos);
+            }
+        }
+
+        function runOptimization() {
+            const lossType = document.getElementById('lossFunction').value;
+            const lossFunc = lossFunctions[lossType];
+            const lr = parseFloat(document.getElementById('learningRate').value);
+            const maxIter = parseInt(document.getElementById('maxIterations').value);
+
+            const optimizers = {};
+
+            if (selectedAlgorithms.has('gd')) optimizers.gd = new GD('GD', lossFunc.start, lr);
+            if (selectedAlgorithms.has('momentum')) optimizers.momentum = new Momentum('Momentum', lossFunc.start, lr);
+            if (selectedAlgorithms.has('nesterov')) optimizers.nesterov = new Nesterov('Nesterov', lossFunc.start, lr);
+            if (selectedAlgorithms.has('adagrad')) optimizers.adagrad = new AdaGrad('AdaGrad', lossFunc.start, lr);
+            if (selectedAlgorithms.has('rmsprop')) optimizers.rmsprop = new RMSProp('RMSProp', lossFunc.start, lr);
+            if (selectedAlgorithms.has('adam')) optimizers.adam = new Adam('Adam', lossFunc.start, lr);
+
+            // 运行优化
+            for (let iter = 0; iter < maxIter; iter++) {
+                for (const [key, opt] of Object.entries(optimizers)) {
+                    const pos = opt.getCurrentPos();
+                    const grad = lossFunc.grad(pos[0], pos[1]);
+                    const loss = lossFunc.f(pos[0], pos[1]);
+                    opt.losses.push(loss);
+
+                    if (key === 'nesterov') {
+                        opt.step(grad, lossFunc);
+                    } else {
+                        opt.step(grad);
+                    }
+
+                    // 检查发散
+                    const newPos = opt.getCurrentPos();
+                    if (Math.abs(newPos[0]) > 1000 || Math.abs(newPos[1]) > 1000) {
+                        break;
+                    }
+                }
+            }
+
+            // 可视化
+            visualizeOptimization(lossFunc, optimizers);
+        }
+
+        function visualizeOptimization(lossFunc, optimizers) {
+            // 生成等高线
+            const range = lossFunc.range;
+            const resolution = 50;
+            const x = [];
+            const y = [];
+            const z = [];
+
+            for (let i = 0; i < resolution; i++) {
+                const xi = range[0] + (range[1] - range[0]) * i / (resolution - 1);
+                x.push(xi);
+                z[i] = [];
+
+                for (let j = 0; j < resolution; j++) {
+                    if (i === 0) {
+                        const yj = range[0] + (range[1] - range[0]) * j / (resolution - 1);
+                        y.push(yj);
+                    }
+                    z[i][j] = Math.log(lossFunc.f(x[i], y[j]) + 1);
+                }
+            }
+
+            const traces = [{
+                x: x,
+                y: y,
+                z: z,
+                type: 'contour',
+                colorscale: 'Viridis',
+                showscale: false,
+                contours: {
+                    coloring: 'heatmap'
+                }
+            }];
+
+            // 添加优化轨迹
+            const colors = {
+                gd: '#e74c3c',
+                momentum: '#3498db',
+                nesterov: '#2ecc71',
+                adagrad: '#f39c12',
+                rmsprop: '#9b59b6',
+                adam: '#1abc9c'
+            };
+
+            for (const [key, opt] of Object.entries(optimizers)) {
+                const xTraj = opt.trajectory.map(p => p[0]);
+                const yTraj = opt.trajectory.map(p => p[1]);
+
+                traces.push({
+                    x: xTraj,
+                    y: yTraj,
+                    mode: 'lines+markers',
+                    type: 'scatter',
+                    name: opt.name,
+                    line: { color: colors[key], width: 2 },
+                    marker: { size: 4, color: colors[key] }
+                });
+            }
+
+            const layout = {
+                title: `优化轨迹 - ${document.getElementById('lossFunction').selectedOptions[0].text}`,
+                xaxis: { title: 'x' },
+                yaxis: { title: 'y' },
+                showlegend: true,
+                hovermode: 'closest'
+            };
+
+            Plotly.newPlot('plot', traces, layout, {responsive: true});
+
+            // 绘制损失曲线
+            const lossTraces = [];
+            for (const [key, opt] of Object.entries(optimizers)) {
+                lossTraces.push({
+                    y: opt.losses,
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: opt.name,
+                    line: { color: colors[key], width: 2 }
+                });
+            }
+
+            const lossLayout = {
+                title: '损失函数收敛曲线',
+                xaxis: { title: '迭代次数' },
+                yaxis: { title: 'Loss', type: 'log' },
+                showlegend: true
+            };
+
+            Plotly.newPlot('lossPlot', lossTraces, lossLayout, {responsive: true});
+
+            // 显示统计信息
+            let statsHTML = '<h3>优化结果对比</h3>';
+            for (const [key, opt] of Object.entries(optimizers)) {
+                const finalLoss = opt.losses[opt.losses.length - 1];
+                const finalPos = opt.getCurrentPos();
+                statsHTML += `
+                    <div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px;">
+                        <strong style="color: ${colors[key]}">${opt.name}:</strong>
+                        最终损失 = ${finalLoss.toFixed(6)},
+                        位置 = (${finalPos[0].toFixed(4)}, ${finalPos[1].toFixed(4)}),
+                        迭代 = ${opt.trajectory.length - 1}
+                    </div>
+                `;
+            }
+            document.getElementById('statsBox').innerHTML = statsHTML;
+        }
+
+        function resetOptimization() {
+            document.getElementById('plot').innerHTML = '';
+            document.getElementById('lossPlot').innerHTML = '';
+            document.getElementById('statsBox').innerHTML = '<h3>点击"运行优化"开始</h3>';
+        }
+
+        // 初始化
+        resetOptimization();
+    </script>
+</body>
+</html>

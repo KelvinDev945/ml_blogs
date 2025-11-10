@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>随机分词再探：从Viterbi Sampling到完美采样算法 | ML & Math Blog Posts</title>
-    <meta name="description" content="随机分词再探：从Viterbi Sampling到完美采样算法
+    <meta name="description" content="随机分词再探：从Viterbi Sampling到完美采样算法&para;
 原文链接: https://spaces.ac.cn/archives/9811
 发布日期: 
 
-在文章《随机分词浅探：从Viterbi Decoding到Viterbi Sampling》中，笔者提出了一种名为“Viterbi Sampling”的随机分词算法，它只是在求最优解的Viterbi Decoding基础上进行小修改，保留...">
+在文章《随机分词浅探：从Viterbi Decoding到Viterbi Sampling》中，笔者提出了一种名为“Viterbi Sampling”的随机分词算法，它只是在求最优解的Viterbi Decoding基础上进行...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -22,6 +22,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -66,40 +69,73 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=概率">概率</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #82 随机分词再探：从Viterbi Sampling到完美采样算法
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">随机分词再探：从Viterbi Sampling到完美采样算法</h1>
+            <h1 class="post-title">
+                <span class="post-number">#82</span>
+                随机分词再探：从Viterbi Sampling到完美采样算法
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/9811" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/9811" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> 概率</span>
-                <span class="tag"><i class="fas fa-tag"></i> 随机</span>
-                <span class="tag"><i class="fas fa-tag"></i> 优化</span>
-                <span class="tag"><i class="fas fa-tag"></i> 分词</span>
-                <span class="tag"><i class="fas fa-tag"></i> 采样</span>
+                <a href="../index.html?tags=概率" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 概率</span>
+                </a>
+                
+                <a href="../index.html?tags=随机" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 随机</span>
+                </a>
+                
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+                <a href="../index.html?tags=分词" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 分词</span>
+                </a>
+                
+                <a href="../index.html?tags=采样" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 采样</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="viterbi-sampling">随机分词再探：从Viterbi Sampling到完美采样算法</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="viterbi-sampling">随机分词再探：从Viterbi Sampling到完美采样算法<a class="toc-link" href="#viterbi-sampling" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9811">https://spaces.ac.cn/archives/9811</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>在文章<a href="/archives/9768">《随机分词浅探：从Viterbi Decoding到Viterbi Sampling》</a>中，笔者提出了一种名为“Viterbi Sampling”的随机分词算法，它只是在求最优解的Viterbi Decoding基础上进行小修改，保留了Viterbi算法的简单快速的特点，相比于已有的<a href="https://papers.cool/arxiv/1804.10959">Subword Regularization</a>明显更加高效。不过，知乎上的读者 <a href="https://www.zhihu.com/people/11f5cd888268129be2b1d9b298387f0d">@鶴舞</a> 指出，当前的采样算法可能会在多次二选一“稀释”了部分方案的出现概率，直接后果是原本分数最高的切分并不是以最高概率出现。</p>
 <p>经过仔细思考后，笔者发现相应的问题确实存在，当时为了尽快得到一种新的采样算法，在细节上的思考和处理确实比较粗糙。为此，本文将进一步完善Viterbi Sampling算法，并证明完善后的算法在效果上可以跟Subword Regularization等价的。</p>
-<h2 id="_1">问题分析</h2>
+<h2 id="_1">问题分析<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>首先，我们来看一下<a href="https://zhuanlan.zhihu.com/p/658440073">评论原话</a>：</p>
 <blockquote>
 <p>subword regularization中可以保证按概率数据（具有temperature超参数）。提出的方法中对于每个e，第一个算出的route会被多次1v1“挑战”，最终概率分布会不会和已有算法差蛮多的。 举个例子，watching三种分法watch ing，wat ching，和w atching概率都是三分之一，提出的方案的采样概率概率就会变成，前两个的概率是四分之一，第三个的概率是二分之一，是这样的吗？</p>
@@ -112,7 +148,7 @@ r_i = \left\{\begin{aligned}&amp;\,1\,, \,\, \varepsilon &lt; \sigma(\alpha(s_i 
 &amp;\,0\,, \,\, \text{else}\end{aligned}\right.<br />
 \end{equation}<br />
 这样一来，前面的两种切分方案先二选一，概率都是$\frac{1/3}{1/3+1/3}=1/2$；选出来一个结果之后，又跟第三种方案放一起来二选一，由于概率是按照各自得分来算的，所以这时候各自的概率还是$1/2$。于是，在完整的采样过程中，前两种方案出现的概率是$1/4$，后一种方案出现的概率是$1/2$，越晚出现的方案相对来说越“占便宜”，而越早出现的方案概率被稀释得越严重。而很不巧的是，按照BytePiece的AC自动机的返回顺序，越长的词（通常来说得分越高）出现的次序会越靠前，所以在Viterbi Sampling中，得分越高的方案反而更容易被稀释概率。</p>
-<h2 id="_2">解决办法</h2>
+<h2 id="_2">解决办法<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>现在看来，其实解决办法也很简单，每次进行二选一后，同时缓存累积概率就可以了，而从第二步开始，每次二选一时新进来的候选者不是跟已有候选者得分二选一，而是跟累积概率得分二选一，这就是俗称“<a href="https://en.wikipedia.org/wiki/Reservoir_sampling">水塘采样（Reservoir sampling）</a>”的算法。</p>
 <p>用前面的例子来说，先进来两种切分方案，按照$\frac{1/3}{1/3+1/3}=1/2$的概率选出一种，然后它们总的累积概率是$2/3$；接下来被选者跟新方案选一，新出现的方案被选到的概率应该是$\frac{1/3}{2/3+1/3}=1/3$，也就是说要跟累积概率比，而不是跟被选者自己的概率比，这样完整的采样流程下来，每种切分方案出现的概率都是$1/3$。</p>
 <p>对于Viterbi Sampling来说，每个终点位置会有多个切分方案，我们要对其进行多选一采样，被选中的概率是由各自的得分构造出来的$p_i = e^{\alpha s_i}/Z$，$Z$是归一化因子。因为我们是递归处理的，所以我们不知道多选一的“多”是多少，也无法计算$Z$，不过这不重要，知道$e^{\alpha s_i}$就够了，因为计算每一步的条件采样概率其实也用不到完整的$Z$，而是需要递归的$Z_i$：<br />
@@ -138,10 +174,10 @@ r_i =&amp;\, \left\{\begin{aligned}&amp;\,1\,, \,\, \varepsilon &lt; e^{\alpha s
 \end{aligned}\right.<br />
 \end{equation}<br />
 相应的实现已经内置在<code>bytepiece&gt;=0.5.0</code>中。</p>
-<h2 id="_3">完美采样</h2>
+<h2 id="_3">完美采样<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>总的来说，出现旧版Viterbi Sampling的缺陷，还是因为之前操之过急了，所以现在认真地给新版Viterbi Sampling补上数学证明。有意思的是，可以证明更新后的Viterbi Sampling跟Subword Regularization一样都是“完美采样”算法。</p>
 <p>之前我们介绍过，Subword Regularization的做法非常“粗暴”，直接找出得分最高的$k$个切分方案，然后通过$p_i = e^{\alpha s_i}/Z$的方式计算被选中的概率，其中$s_i$是第$i$种方案的得分。这种做法除了复杂度高外没有任何毛病，当$k$不做限制（即找出全部切分方案）时，我们得到 <em>所有切分方案的一个随机采样</em> ，而每种方案被采样到的概率正比于$e^{\alpha s_i}$——是得分$s_i$的单调增函数，即 <em>采样概率与得分的大小排序都是一样的</em> ，满足这两个条件的，笔者称之为“完美采样”。</p>
-<h3 id="decoding">Decoding</h3>
+<h3 id="decoding">Decoding<a class="toc-link" href="#decoding" title="Permanent link">&para;</a></h3>
 <p>为了证明新版Viterbi Sampling也是“完美采样”，我们先来回顾一下Viterbi Decoding。设有一个长度为$l$的字节串$c_1,c_2,\cdots,c_l$，用$S^<em>(c_1,c_2,\cdots,c_l)$表示最优切分方案的得分，假设我们知道$c_k,c_{k+1}$之间一定会分开，那么必然有<br />
 \begin{equation}S^</em>(c_1,c_2,\cdots,c_l) = S^<em>(c_1,c_2,\cdots,c_k) + S^</em>(c_{k+1},c_{k+2},\cdots,c_l)\end{equation}<br />
 也就是说，最优切分方案的子串，一定也是对应的子字节串的最优切分方案，这是动态规划的根本依据。当然，事实上我们不能预知哪一处会被切开，所以只能用枚举的方式：<br />
@@ -159,7 +195,7 @@ r_i =&amp;\, \left\{\begin{aligned}&amp;\,1\,, \,\, \varepsilon &lt; e^{\alpha s
 </blockquote>
 <p>当然，直接按照式$\eqref{eq:core}$进行递归的话，理论上复杂度是$\mathcal{O}(l^2)$，但事实上不可能每个子字节串都是词表中的一个token，所以可以用Trie树、AC自动机等方法根据词表提前扫描好所有可能出现的token，那么复杂度就正比于搜索出来的候选token数，关于$l$是线性的，如果非要估计一个数值，那么假设词表中token的最大长度为$m$，那么长度为$l\geq m$的字节串扫描出来的token数就不超过<br />
 \begin{equation}l + (l - 1) + \cdots + (l - m + 1) = lm - \frac{1}{2}m(m-1) = \mathcal{O}(lm)\end{equation}</p>
-<h3 id="sampling">Sampling</h3>
+<h3 id="sampling">Sampling<a class="toc-link" href="#sampling" title="Permanent link">&para;</a></h3>
 <p>有了Decoding部分做铺垫后，理解Sampling就相对容易一些了。其实关键还是在式$\eqref{eq:core}$，我们用$Z(c_1,c_2,\cdots,c_l)$表示字节串$c_1,c_2,\cdots,c_l$的所有切分方案的归一化因子（完美采样），那么有<br />
 \begin{equation}Z(c_1,c_2,\cdots,c_l) = \sum\left\{\begin{aligned}<br />
 &amp;\,\color{green}{e^{\alpha\cdot s\left(\overline{c_1,\cdots,c_l}\right)}} \\<br />
@@ -186,7 +222,7 @@ r_i =&amp;\, \left\{\begin{aligned}&amp;\,1\,, \,\, \varepsilon &lt; e^{\alpha s
 \end{aligned}\right\}<br />
 \end{equation}</p>
 <p>跟Viterbi Decoding的式$\eqref{eq:core}$区别就是$Z^{\log}$代替了$S^*$，$\text{logsumexp}$代替了$\max$，而$\text{logsumexp}$正好是$\max$的光滑近似，所以$\alpha\to\infty$时能退化为Viterbi Decoding。另一方面，在实际计算时，同一终点的多个切分方案是逐一到达而不是一次性到达的，所以就需要将单步的“多选一”转化为多步的“二选一”，这就是“解决办法”一节所讨论的内容。至此，我们证明了（或者说从Viterbi Decoding出发重新推导了）修改后的Viterbi Sampling实际是跟Subword Regularization一样的完美采样算法。</p>
-<h2 id="_4">文章小结</h2>
+<h2 id="_4">文章小结<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>本文完善了之前提出的随机分词算法Viterbi Sampling，并从数学上证明了它在效果上跟Subword Regularization一样都是“完美采样”算法，而在使用上有着比Subword Regularization明显更高的效率。</p>
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9811">https://spaces.ac.cn/archives/9811</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
@@ -208,15 +244,82 @@ month={Oct},<br />
 url={\url{https://spaces.ac.cn/archives/9811}},<br />
 } </p>
 <hr />
-<h2 id="_5">公式推导与注释</h2>
+<h2 id="_5">公式推导与注释<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="高阶mup更简明但更高明的谱条件缩放.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#81 高阶MuP：更简明但更高明的谱条件缩放</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="近乎完美地解决mathjax与marked的冲突.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#83 近乎完美地解决MathJax与Marked的冲突</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#viterbi-sampling">随机分词再探：从Viterbi Sampling到完美采样算法</a><ul>
+<li><a href="#_1">问题分析</a></li>
+<li><a href="#_2">解决办法</a></li>
+<li><a href="#_3">完美采样</a><ul>
+<li><a href="#decoding">Decoding</a></li>
+<li><a href="#sampling">Sampling</a></li>
+</ul>
+</li>
+<li><a href="#_4">文章小结</a></li>
+<li><a href="#_5">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -238,5 +341,41 @@ url={\url{https://spaces.ac.cn/archives/9811}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>

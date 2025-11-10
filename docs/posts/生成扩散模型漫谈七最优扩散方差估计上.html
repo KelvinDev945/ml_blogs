@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>生成扩散模型漫谈（七）：最优扩散方差估计（上） | ML & Math Blog Posts</title>
-    <meta name="description" content="生成扩散模型漫谈（七）：最优扩散方差估计（上）
+    <meta name="description" content="生成扩散模型漫谈（七）：最优扩散方差估计（上）&para;
 原文链接: https://spaces.ac.cn/archives/9245
 发布日期: 
 
 对于生成扩散模型来说，一个很关键的问题是生成过程的方差应该怎么选择，因为不同的方差会明显影响生成效果。
-在《生成扩散模型漫谈（二）：DDPM = 自回归式VAE》我们提到，DDPM分别假设数据服从两种特殊分布推出了两个可用的结果；《生成扩散模型漫谈（四）...">
+在《生成扩散模型漫谈（二）：DDPM = 自回归式VAE》我们提到，DDPM分别假设数据服从两种特殊分布推出了两个可用的结果；《生成扩散模...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -23,6 +23,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -67,41 +70,74 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=优化">优化</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #109 生成扩散模型漫谈（七）：最优扩散方差估计（上）
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">生成扩散模型漫谈（七）：最优扩散方差估计（上）</h1>
+            <h1 class="post-title">
+                <span class="post-number">#109</span>
+                生成扩散模型漫谈（七）：最优扩散方差估计（上）
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/9245" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/9245" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> 优化</span>
-                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
-                <span class="tag"><i class="fas fa-tag"></i> DDPM</span>
-                <span class="tag"><i class="fas fa-tag"></i> 扩散</span>
-                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=DDPM" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> DDPM</span>
+                </a>
+                
+                <a href="../index.html?tags=扩散" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 扩散</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="_1">生成扩散模型漫谈（七）：最优扩散方差估计（上）</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="_1">生成扩散模型漫谈（七）：最优扩散方差估计（上）<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9245">https://spaces.ac.cn/archives/9245</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>对于生成扩散模型来说，一个很关键的问题是生成过程的方差应该怎么选择，因为不同的方差会明显影响生成效果。</p>
 <p>在<a href="/archives/9152">《生成扩散模型漫谈（二）：DDPM = 自回归式VAE》</a>我们提到，DDPM分别假设数据服从两种特殊分布推出了两个可用的结果；<a href="/archives/9181">《生成扩散模型漫谈（四）：DDIM = 高观点DDPM》</a>中的DDIM则调整了生成过程，将方差变为超参数，甚至允许零方差生成，但方差为0的DDIM的生成效果普遍差于方差非0的DDPM；而<a href="/archives/9209">《生成扩散模型漫谈（五）：一般框架之SDE篇》</a>显示前、反向SDE的方差应该是一致的，但这原则上在$\Delta t\to 0$时才成立；<a href="https://papers.cool/arxiv/2006.11239">《Improved Denoising Diffusion Probabilistic Models》</a>则提出将它视为可训练参数来学习，但会增加训练难度。</p>
 <p>所以，生成过程的方差究竟该怎么设置呢？今年的两篇论文<a href="https://papers.cool/arxiv/2201.06503">《Analytic-DPM: an Analytic Estimate of the Optimal Reverse Variance in Diffusion Probabilistic Models》</a>和<a href="https://papers.cool/arxiv/2206.07309">《Estimating the Optimal Covariance with Imperfect Mean in Diffusion Probabilistic Models》</a>算是给这个问题提供了比较完美的答案。接下来我们一起欣赏一下它们的结果。</p>
-<h2 id="_2">不确定性</h2>
+<h2 id="_2">不确定性<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>事实上，这两篇论文出自同一团队，作者也基本相同。第一篇论文（简称Analytic-DPM）下面简称在DDIM的基础上，推导了无条件方差的一个解析解；第二篇论文（简称Extended-Analytic-DPM）则弱化了第一篇论文的假设，并提出了有条件方差的优化方法。本文首先介绍第一篇论文的结果。</p>
 <p>在<a href="/archives/9181">《生成扩散模型漫谈（四）：DDIM = 高观点DDPM》</a>中，我们推导了对于给定的$p(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t;\bar{\alpha}_t \boldsymbol{x}_0,\bar{\beta}_t^2 \boldsymbol{I})$，对应的$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0)$的一般解为<br />
 \begin{equation}p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0) = \mathcal{N}\left(\boldsymbol{x}</em>}; \frac{\sqrt{\bar{\beta<em t-1="t-1">{t-1}^2 - \sigma_t^2}}{\bar{\beta}_t} \boldsymbol{x}_t + \gamma_t \boldsymbol{x}_0, \sigma_t^2 \boldsymbol{I}\right)\end{equation}<br />
@@ -117,7 +153,7 @@
 \sim \sqrt{\sigma_t^2 + \gamma_t^2\bar{\sigma}<em t-1="t-1">t^2}\boldsymbol{\varepsilon}} \\<br />
 \end{aligned}\end{equation}<br />
 其中$\boldsymbol{\varepsilon}_1,\boldsymbol{\varepsilon}_2,\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})$。可以看到，$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)$更加接近均值为$\frac{\sqrt{\bar{\beta}</em>_t^2$这一项，因此即便$\sigma_t=0$，对应的方差也不为0。多出来的这一项，就是第一篇论文所提的最优方差的修正项。}^2 - \sigma_t^2}}{\bar{\beta}_t}\boldsymbol{x}_t + \gamma_t \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$、协方差为$\left(\sigma_t^2 + \gamma_t^2\bar{\sigma}_t^2\right)\boldsymbol{I}$的正态分布，其中均值跟以往的结果是一致的，不同的是方差多出了$\gamma_t^2\bar{\sigma</p>
-<h2 id="_3">均值优化</h2>
+<h2 id="_3">均值优化<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>现在我们来讨论如何用$\mathcal{N}(\boldsymbol{x}_0;\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t),\bar{\sigma}_t^2\boldsymbol{I})$去逼近真实的$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$，说白了就是求出$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$的均值和协方差。</p>
 <p>对于均值$\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t)$来说，它依赖于$\boldsymbol{x}_t$，所以需要一个模型来拟合它，而训练模型就需要损失函数。利用<br />
 \begin{equation}\mathbb{E}</em>}}[\boldsymbol{x}] = \mathop{\text{argmin}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\mu}}\mathbb{E}</em>}}\left[\Vert \boldsymbol{x} - \boldsymbol{\mu}\Vert^2\right]\label{eq:mean-opt}\end{equation<br />
@@ -131,7 +167,7 @@
 这就是训练$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$所用的损失函数。如果像之前一样引入参数化<br />
 \begin{equation}\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) = \frac{1}{\bar{\alpha}_t}\left(\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\right)\label{eq:bar-mu}\end{equation}<br />
 就可以得到DDPM训练所用的损失函数形式$\left\Vert\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>, t)\right\Vert^2$了。关于均值优化的结果是跟以往一致的，没有什么改动。}}(\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon</p>
-<h2 id="1">方差估计1</h2>
+<h2 id="1">方差估计1<a class="toc-link" href="#1" title="Permanent link">&para;</a></h2>
 <p>类似地，根据定义，协方差矩阵应该是<br />
 \begin{equation}\begin{aligned}<br />
 \boldsymbol{\Sigma}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t)=&amp;\, \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\right)\left(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\right)^{\top}\right] \\<br />
@@ -155,7 +191,7 @@
 \begin{equation}\bar{\sigma}_t^2 = \mathbb{V}ar[\boldsymbol{x}_0] - \frac{1}{d}\mathbb{E}</em>}_t\sim p(\boldsymbol{x}_t)}\left[\Vert\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0\Vert^2\right]\end{equation<br />
 这里的$\mathbb{V}ar[\boldsymbol{x}_0]$是全体训练数据$\boldsymbol{x}_0$的像素级方差。如果$\boldsymbol{x}_0$的每个像素值都在$[a,b]$区间内，那么它的方差显然不会超过$\left(\frac{b-a}{2}\right)^2$，从而有不等式<br />
 \begin{equation}\bar{\sigma}_t^2 \leq \mathbb{V}ar[\boldsymbol{x}_0] \leq \left(\frac{b-a}{2}\right)^2\end{equation}</p>
-<h2 id="2">方差估计2</h2>
+<h2 id="2">方差估计2<a class="toc-link" href="#2" title="Permanent link">&para;</a></h2>
 <p>刚才的解是笔者给出的、认为比较直观的一个解，Analytic-DPM原论文则给出了一个略有不同的解，但笔者认为相对来说没那么直观。通过代入式$\eqref{eq:bar-mu}$，我们可以得到：<br />
 \begin{equation}\begin{aligned}<br />
 \boldsymbol{\Sigma}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t)=&amp;\, \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\right)\left(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\right)^{\top}\right] \\<br />
@@ -177,7 +213,7 @@
 两边取迹然后除以$d$，得到<br />
 \begin{equation}\bar{\sigma}_t^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\left(1 - \frac{1}{d}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t\sim p(\boldsymbol{x}_t)}\left[ \Vert\boldsymbol{\epsilon}</em>}}(\boldsymbol{x}_t, t)\Vert^2\right]\right)\leq \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\label{eq:var-2}\end{equation<br />
 这就得到了另一个估计和上界，这就是Analytic-DPM的原始结果。</p>
-<h2 id="_4">实验结果</h2>
+<h2 id="_4">实验结果<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>原论文的实验结果显示，Analytic-DPM所做的方差修正，主要在生成扩散步数较少时会有比较明显的提升，所以它对扩散模型的加速比较有意义：  </p>
 <p><a href="/usr/uploads/2022/08/847522637.png" title="点击查看原图"><img alt="Analytic-DPM主要在扩散步数较少时会有比较明显的效果提升" src="/usr/uploads/2022/08/847522637.png" /></a></p>
 <p>Analytic-DPM主要在扩散步数较少时会有比较明显的效果提升</p>
@@ -191,11 +227,11 @@
 <p><a href="/usr/uploads/2022/08/4263413841.jpg" title="点击查看原图"><img alt="Analytic-DDPM在扩散步数为10时的生成结果" src="/usr/uploads/2022/08/4263413841.jpg" /></a></p>
 <p>Analytic-DDPM在扩散步数为10时的生成结果</p>
 <p>可以看到，在扩散步数较小时，DDPM的生成效果比较光滑，有点“重度磨皮”的感觉，相比之下Analytic-DDPM的结果显得更真实一些，但是也带来了额外的噪点。从评价指标来说，Analytic-DDPM要更好一些。</p>
-<h2 id="_5">吹毛求疵</h2>
+<h2 id="_5">吹毛求疵<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>至此，我们已经完成了Analytic-DPM的介绍，推导过程略带有一些技巧性，但不算太复杂，至少思路上还是很明朗的。如果读者觉得还是很难懂，那不妨再去看看原论文在附录中用7页纸、13个引理完成的推导，想必看到之后就觉得本文的推导是多么友好了哈哈～</p>
 <p>诚然，从首先得到这个方差的解析解来说，我为原作者们的洞察力而折服，但不得不说的是，从“事后诸葛亮”的角度来说，Analytic-DPM在推导和结果上都走了一些的“弯路”，显得“太绕”、”太巧“，从而感觉不到什么启发性。其中，一个最明显的特点是，原论文的结果都用了$\nabla_{\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t}\log p(\boldsymbol{x}_t)$来表达，这就带来了三个问题：一来使得推导过程特别不直观，难以理解“怎么想到的”；二来要求读者额外了解得分匹配的相关结果，增加了理解难度；最后落到实践时，$\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t}\log p(\boldsymbol{x}_t)$又要用回$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$或$\boldsymbol{\epsilon}</em>_t, t)$来表示，多绕一道。}}(\boldsymbol{x</p>
 <p>本文推导的出发点是，我们是在估计正态分布的参数，对于正态分布来说，矩估计与最大似然估计相同，因此直接去估算相应的均值方差即可。结果上，没必要强行在形式上去跟$\nabla_{\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t}\log p(\boldsymbol{x}_t)$、得分匹配对齐，因为很明显Analytic-DPM的baseline模型是DDIM，DDIM本身就没有以得分匹配为出发点，增加与得分匹配的联系，于理论和实验都无益。直接跟$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$或$\boldsymbol{\epsilon}</em>_t, t)$对齐，形式上更加直观，而且更容易跟实验形式进行转换。}}(\boldsymbol{x</p>
-<h2 id="_6">文章小结</h2>
+<h2 id="_6">文章小结<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
 <p>本文分享了论文Analytic-DPM中的扩散模型最优方差估计结果，它给出了直接可用的最优方差估计的解析式，使得我们不需要重新训练就可以直接应用它来改进生成效果。笔者用自己的思路简化了原论文的推导，并进行了简单的实验验证。</p>
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9245">https://spaces.ac.cn/archives/9245</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
@@ -217,15 +253,81 @@ month={Aug},<br />
 url={\url{https://spaces.ac.cn/archives/9245}},<br />
 } </p>
 <hr />
-<h2 id="_7">公式推导与注释</h2>
+<h2 id="_7">公式推导与注释<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="通过msign来计算奇异值裁剪mclip下.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#108 通过msign来计算奇异值裁剪mclip（下）</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="生成扩散模型漫谈二十六基于恒等式的蒸馏下.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#110 生成扩散模型漫谈（二十六）：基于恒等式的蒸馏（下）</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#_1">生成扩散模型漫谈（七）：最优扩散方差估计（上）</a><ul>
+<li><a href="#_2">不确定性</a></li>
+<li><a href="#_3">均值优化</a></li>
+<li><a href="#1">方差估计1</a></li>
+<li><a href="#2">方差估计2</a></li>
+<li><a href="#_4">实验结果</a></li>
+<li><a href="#_5">吹毛求疵</a></li>
+<li><a href="#_6">文章小结</a></li>
+<li><a href="#_7">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -247,5 +349,41 @@ url={\url{https://spaces.ac.cn/archives/9245}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>

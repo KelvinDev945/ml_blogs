@@ -1,8 +1,7 @@
 ---
 title: 关于WhiteningBERT原创性的疑问和沟通
 slug: 关于whiteningbert原创性的疑问和沟通
-date: 
-source: https://spaces.ac.cn/archives/8715
+date: 2021-01-11
 tags: 情感, 模型, 工作, 生成模型, attention
 status: pending
 ---

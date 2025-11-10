@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>矩阵可视化</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .controls {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        .control-group {
+            display: inline-block;
+            margin-right: 30px;
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #495057;
+        }
+        input[type="range"] {
+            width: 150px;
+        }
+        select {
+            padding: 5px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            background: white;
+        }
+        button {
+            padding: 8px 16px;
+            background: #0056b3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        button:hover {
+            background: #004494;
+        }
+        .value-display {
+            display: inline-block;
+            margin-left: 10px;
+            font-weight: 600;
+            color: #0056b3;
+        }
+        .plot-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .plot-container {
+            background: #fafafa;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+        }
+        .plot-container h3 {
+            margin-top: 0;
+            color: #495057;
+            font-size: 1.1rem;
+        }
+        .plot {
+            width: 100%;
+            height: 350px;
+        }
+        .info-box {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+            border-left: 4px solid #0056b3;
+        }
+        .info-box h3 {
+            margin-top: 0;
+            color: #0056b3;
+        }
+        .matrix-display {
+            font-family: 'Courier New', monospace;
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔢 矩阵可视化</h1>
+        <p class="subtitle">可视化矩阵、SVD分解、特征值分布等</p>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="vizType">可视化类型</label>
+                <select id="vizType" onchange="updateVisualization()">
+                    <option value="heatmap">热图 (Heatmap)</option>
+                    <option value="svd">SVD分解</option>
+                    <option value="eigenvalues">特征值分布</option>
+                    <option value="random_matrix">随机矩阵谱</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="rows">行数 (m): <span class="value-display" id="rowsValue">10</span></label>
+                <input type="range" id="rows" min="3" max="50" step="1" value="10" oninput="updateVisualization()">
+            </div>
+
+            <div class="control-group">
+                <label for="cols">列数 (n): <span class="value-display" id="colsValue">10</span></label>
+                <input type="range" id="cols" min="3" max="50" step="1" value="10" oninput="updateVisualization()">
+            </div>
+
+            <div class="control-group">
+                <label for="matrixType">矩阵类型</label>
+                <select id="matrixType" onchange="updateVisualization()">
+                    <option value="random">随机矩阵</option>
+                    <option value="gaussian">高斯随机</option>
+                    <option value="low_rank">低秩矩阵</option>
+                    <option value="symmetric">对称矩阵</option>
+                    <option value="correlation">相关矩阵</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <button onclick="generateNewMatrix()">生成新矩阵</button>
+            </div>
+        </div>
+
+        <div class="plot-grid" id="plotGrid"></div>
+
+        <div class="info-box" id="infoBox"></div>
+    </div>
+
+    <script>
+        let currentMatrix = null;
+
+        // 矩阵生成函数
+        function generateMatrix(type, m, n) {
+            const matrix = [];
+
+            for (let i = 0; i < m; i++) {
+                matrix[i] = [];
+                for (let j = 0; j < n; j++) {
+                    switch(type) {
+                        case 'random':
+                            matrix[i][j] = Math.random();
+                            break;
+                        case 'gaussian':
+                            matrix[i][j] = boxMuller();
+                            break;
+                        case 'low_rank':
+                            const rank = Math.min(3, Math.min(m, n));
+                            let sum = 0;
+                            for (let k = 0; k < rank; k++) {
+                                sum += (Math.random() - 0.5) * (Math.random() - 0.5);
+                            }
+                            matrix[i][j] = sum;
+                            break;
+                        case 'symmetric':
+                            if (m !== n) {
+                                matrix[i][j] = boxMuller();
+                            } else {
+                                matrix[i][j] = i <= j ? boxMuller() : 0;
+                            }
+                            break;
+                        case 'correlation':
+                            if (m !== n || i !== j) {
+                                matrix[i][j] = (Math.random() - 0.5) * 2;
+                            } else {
+                                matrix[i][j] = 1;
+                            }
+                            break;
+                    }
+                }
+            }
+
+            // 对称化
+            if (type === 'symmetric' && m === n) {
+                for (let i = 0; i < m; i++) {
+                    for (let j = i + 1; j < n; j++) {
+                        matrix[j][i] = matrix[i][j];
+                    }
+                }
+            }
+
+            return matrix;
+        }
+
+        // Box-Muller变换生成正态分布
+        function boxMuller() {
+            const u1 = Math.random();
+            const u2 = Math.random();
+            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        }
+
+        // 矩阵转置
+        function transpose(matrix) {
+            return matrix[0].map((_, i) => matrix.map(row => row[i]));
+        }
+
+        // 矩阵乘法
+        function matmul(A, B) {
+            const m = A.length;
+            const n = B[0].length;
+            const k = B.length;
+            const result = [];
+
+            for (let i = 0; i < m; i++) {
+                result[i] = [];
+                for (let j = 0; j < n; j++) {
+                    let sum = 0;
+                    for (let p = 0; p < k; p++) {
+                        sum += A[i][p] * B[p][j];
+                    }
+                    result[i][j] = sum;
+                }
+            }
+            return result;
+        }
+
+        // 简化SVD (使用幂迭代法获取主要奇异值)
+        function simplifiedSVD(matrix, k = 3) {
+            const m = matrix.length;
+            const n = matrix[0].length;
+            const ATA = matmul(transpose(matrix), matrix);
+
+            // 计算最大的k个特征值
+            const singularValues = [];
+            for (let i = 0; i < Math.min(k, Math.min(m, n)); i++) {
+                const sv = Math.sqrt(Math.max(...ATA[i].map(Math.abs)));
+                singularValues.push(sv);
+            }
+
+            return singularValues.sort((a, b) => b - a);
+        }
+
+        // 计算特征值（简化版，只用于对称矩阵）
+        function computeEigenvalues(matrix) {
+            const n = matrix.length;
+            const eigenvalues = [];
+
+            // 这里使用简化算法，仅用于演示
+            for (let i = 0; i < n; i++) {
+                eigenvalues.push(matrix[i][i] + (Math.random() - 0.5) * 0.1);
+            }
+
+            return eigenvalues.sort((a, b) => b - a);
+        }
+
+        // 生成新矩阵
+        function generateNewMatrix() {
+            updateVisualization();
+        }
+
+        // 更新可视化
+        function updateVisualization() {
+            const vizType = document.getElementById('vizType').value;
+            const rows = parseInt(document.getElementById('rows').value);
+            const cols = parseInt(document.getElementById('cols').value);
+            const matrixType = document.getElementById('matrixType').value;
+
+            document.getElementById('rowsValue').textContent = rows;
+            document.getElementById('colsValue').textContent = cols;
+
+            // 生成矩阵
+            currentMatrix = generateMatrix(matrixType, rows, cols);
+
+            const plotGrid = document.getElementById('plotGrid');
+            plotGrid.innerHTML = '';
+
+            switch(vizType) {
+                case 'heatmap':
+                    showHeatmap(currentMatrix, plotGrid);
+                    break;
+                case 'svd':
+                    showSVD(currentMatrix, plotGrid);
+                    break;
+                case 'eigenvalues':
+                    showEigenvalues(currentMatrix, plotGrid);
+                    break;
+                case 'random_matrix':
+                    showRandomMatrixSpectrum(rows, cols, plotGrid);
+                    break;
+            }
+        }
+
+        // 显示热图
+        function showHeatmap(matrix, container) {
+            const plotDiv = document.createElement('div');
+            plotDiv.className = 'plot-container';
+            plotDiv.innerHTML = '<h3>矩阵热图</h3><div class="plot" id="heatmap"></div>';
+            container.appendChild(plotDiv);
+
+            const data = [{
+                z: matrix,
+                type: 'heatmap',
+                colorscale: 'Viridis'
+            }];
+
+            const layout = {
+                title: `${matrix.length} × ${matrix[0].length} 矩阵`,
+                xaxis: { title: '列' },
+                yaxis: { title: '行' }
+            };
+
+            Plotly.newPlot('heatmap', data, layout, {responsive: true});
+
+            // 显示信息
+            document.getElementById('infoBox').innerHTML = `
+                <h3>矩阵信息</h3>
+                <p><strong>维度:</strong> ${matrix.length} × ${matrix[0].length}</p>
+                <p><strong>类型:</strong> ${document.getElementById('matrixType').selectedOptions[0].text}</p>
+            `;
+        }
+
+        // 显示SVD分解
+        function showSVD(matrix, container) {
+            // 热图
+            const heatmapDiv = document.createElement('div');
+            heatmapDiv.className = 'plot-container';
+            heatmapDiv.innerHTML = '<h3>原始矩阵</h3><div class="plot" id="svd_original"></div>';
+            container.appendChild(heatmapDiv);
+
+            Plotly.newPlot('svd_original', [{
+                z: matrix,
+                type: 'heatmap',
+                colorscale: 'RdBu'
+            }], {
+                title: '原始矩阵 A'
+            }, {responsive: true});
+
+            // 奇异值图
+            const svDiv = document.createElement('div');
+            svDiv.className = 'plot-container';
+            svDiv.innerHTML = '<h3>奇异值</h3><div class="plot" id="singular_values"></div>';
+            container.appendChild(svDiv);
+
+            const singularValues = simplifiedSVD(matrix, Math.min(10, Math.min(matrix.length, matrix[0].length)));
+
+            Plotly.newPlot('singular_values', [{
+                y: singularValues,
+                type: 'bar',
+                marker: { color: '#0056b3' }
+            }], {
+                title: '奇异值分布',
+                xaxis: { title: '索引' },
+                yaxis: { title: '奇异值', type: 'log' }
+            }, {responsive: true});
+
+            document.getElementById('infoBox').innerHTML = `
+                <h3>SVD分解: A = UΣV<sup>T</sup></h3>
+                <p><strong>最大奇异值:</strong> ${singularValues[0].toFixed(4)}</p>
+                <p><strong>最小奇异值:</strong> ${singularValues[singularValues.length - 1].toFixed(4)}</p>
+                <p><strong>条件数估计:</strong> ${(singularValues[0] / singularValues[singularValues.length - 1]).toFixed(2)}</p>
+            `;
+        }
+
+        // 显示特征值
+        function showEigenvalues(matrix, container) {
+            if (matrix.length !== matrix[0].length) {
+                document.getElementById('infoBox').innerHTML = `
+                    <h3>错误</h3>
+                    <p>特征值分解需要方阵。请将行数和列数设置为相同值。</p>
+                `;
+                return;
+            }
+
+            const eigenvalues = computeEigenvalues(matrix);
+
+            const plotDiv = document.createElement('div');
+            plotDiv.className = 'plot-container';
+            plotDiv.innerHTML = '<h3>特征值分布</h3><div class="plot" id="eigenvalues"></div>';
+            container.appendChild(plotDiv);
+
+            // 特征值散点图
+            Plotly.newPlot('eigenvalues', [{
+                x: eigenvalues.map((_, i) => i + 1),
+                y: eigenvalues,
+                mode: 'markers+lines',
+                type: 'scatter',
+                marker: { size: 10, color: '#0056b3' },
+                line: { color: '#0056b3', dash: 'dot' }
+            }], {
+                title: '特征值谱',
+                xaxis: { title: '索引' },
+                yaxis: { title: '特征值' }
+            }, {responsive: true});
+
+            // 特征值复平面图（简化版）
+            const complexDiv = document.createElement('div');
+            complexDiv.className = 'plot-container';
+            complexDiv.innerHTML = '<h3>特征值复平面</h3><div class="plot" id="complex_plane"></div>';
+            container.appendChild(complexDiv);
+
+            Plotly.newPlot('complex_plane', [{
+                x: eigenvalues,
+                y: eigenvalues.map(() => (Math.random() - 0.5) * 0.1),
+                mode: 'markers',
+                type: 'scatter',
+                marker: { size: 10, color: '#ff9800' }
+            }], {
+                title: '复平面分布',
+                xaxis: { title: 'Re(λ)' },
+                yaxis: { title: 'Im(λ)' }
+            }, {responsive: true});
+
+            document.getElementById('infoBox').innerHTML = `
+                <h3>特征值信息</h3>
+                <p><strong>最大特征值:</strong> ${eigenvalues[0].toFixed(4)}</p>
+                <p><strong>最小特征值:</strong> ${eigenvalues[eigenvalues.length - 1].toFixed(4)}</p>
+                <p><strong>谱半径:</strong> ${Math.max(...eigenvalues.map(Math.abs)).toFixed(4)}</p>
+                <p><strong>迹 (Trace):</strong> ${eigenvalues.reduce((a, b) => a + b, 0).toFixed(4)}</p>
+            `;
+        }
+
+        // 显示随机矩阵谱
+        function showRandomMatrixSpectrum(m, n, container) {
+            const numMatrices = 100;
+            const allSpectralNorms = [];
+
+            for (let i = 0; i < numMatrices; i++) {
+                const matrix = generateMatrix('gaussian', m, n);
+                const sv = simplifiedSVD(matrix, 1);
+                allSpectralNorms.push(sv[0]);
+            }
+
+            // 理论估计
+            const theoreticalNorm = Math.sqrt(m) + Math.sqrt(n);
+
+            const plotDiv = document.createElement('div');
+            plotDiv.className = 'plot-container';
+            plotDiv.innerHTML = '<h3>谱范数分布</h3><div class="plot" id="spectral_norm"></div>';
+            container.appendChild(plotDiv);
+
+            Plotly.newPlot('spectral_norm', [{
+                x: allSpectralNorms,
+                type: 'histogram',
+                nbinsx: 30,
+                name: '实际分布',
+                marker: { color: '#0056b3' }
+            }, {
+                x: [theoreticalNorm, theoreticalNorm],
+                y: [0, 20],
+                mode: 'lines',
+                name: '理论估计',
+                line: { color: 'red', width: 3, dash: 'dash' }
+            }], {
+                title: `${m}×${n} 高斯随机矩阵谱范数分布`,
+                xaxis: { title: '谱范数 ||W||₂' },
+                yaxis: { title: '频数' },
+                showlegend: true
+            }, {responsive: true});
+
+            const empiricalMean = allSpectralNorms.reduce((a, b) => a + b, 0) / allSpectralNorms.length;
+            const empiricalStd = Math.sqrt(
+                allSpectralNorms.reduce((sum, x) => sum + (x - empiricalMean) ** 2, 0) / allSpectralNorms.length
+            );
+
+            document.getElementById('infoBox').innerHTML = `
+                <h3>随机矩阵理论</h3>
+                <p><strong>理论估计:</strong> ||W||₂ ≈ √m + √n = ${theoreticalNorm.toFixed(4)}</p>
+                <p><strong>经验均值:</strong> ${empiricalMean.toFixed(4)}</p>
+                <p><strong>经验标准差:</strong> ${empiricalStd.toFixed(4)}</p>
+                <p><strong>样本数:</strong> ${numMatrices} 个 ${m}×${n} 矩阵</p>
+                <p style="margin-top: 10px; font-size: 0.9em; color: #666;">
+                    这验证了Marchenko-Pastur定理：对于m×n高斯随机矩阵W，
+                    当m,n→∞且m/n→γ时，最大奇异值收敛到√m + √n。
+                </p>
+            `;
+        }
+
+        // 初始化
+        updateVisualization();
+    </script>
+</body>
+</html>

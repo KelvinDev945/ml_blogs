@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Transformer升级之路：12、无限外推的ReRoPE？ | ML & Math Blog Posts</title>
-    <meta name="description" content="Transformer升级之路：12、无限外推的ReRoPE？
+    <meta name="description" content="Transformer升级之路：12、无限外推的ReRoPE？&para;
 原文链接: https://spaces.ac.cn/archives/9708
 发布日期: 
 
-自从在《Transformer升级之路：11、将β进制位置进行到底》中引入混合进制的思路进一步推广了NTK-aware Scaled RoPE后，笔者感觉类似思路的效果已经达到了上限，想要更大幅度的提升就必须另辟蹊径了。这时候笔者想起了此...">
+自从在《Transformer升级之路：11、将β进制位置进行到底》中引入混合进制的思路进一步推广了NTK-aware Scaled RoPE后，笔者感觉类似思路的效果已经达到了上限，想要更大幅度的提升就必须另辟蹊径了。这时候...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -22,6 +22,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -66,40 +69,73 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=attention">attention</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #178 Transformer升级之路：12、无限外推的ReRoPE？
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">Transformer升级之路：12、无限外推的ReRoPE？</h1>
+            <h1 class="post-title">
+                <span class="post-number">#178</span>
+                Transformer升级之路：12、无限外推的ReRoPE？
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/9708" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/9708" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> attention</span>
-                <span class="tag"><i class="fas fa-tag"></i> 位置编码</span>
-                <span class="tag"><i class="fas fa-tag"></i> 泛化</span>
-                <span class="tag"><i class="fas fa-tag"></i> 外推</span>
-                <span class="tag"><i class="fas fa-tag"></i> rope</span>
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+                <a href="../index.html?tags=位置编码" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 位置编码</span>
+                </a>
+                
+                <a href="../index.html?tags=泛化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 泛化</span>
+                </a>
+                
+                <a href="../index.html?tags=外推" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 外推</span>
+                </a>
+                
+                <a href="../index.html?tags=rope" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> rope</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="transformer12rerope">Transformer升级之路：12、无限外推的ReRoPE？</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="transformer12rerope">Transformer升级之路：12、无限外推的ReRoPE？<a class="toc-link" href="#transformer12rerope" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9708">https://spaces.ac.cn/archives/9708</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>自从在<a href="/archives/9706">《Transformer升级之路：11、将β进制位置进行到底》</a>中引入混合进制的思路进一步推广了NTK-aware Scaled RoPE后，笔者感觉类似思路的效果已经达到了上限，想要更大幅度的提升就必须另辟蹊径了。这时候笔者想起了此前构思过的一个思路，该思路由于复杂度较高所以被搁置下了，既然现在已经遇到了瓶颈，那么“唯一的办法就是最好的办法”，于是便将它重拾起来。</p>
 <p>万万没想到的是，尽管该方法增加了一些推理复杂度，但它的实验效果却惊人地好——甚至隐约有无限的长度外推能力！因此，笔者迫不及待地撰写了本文来分享该方法。由于形式上跟ReLU激活函数的相似性，所以笔者将该方法命名为“ReRoPE (Rectified Rotary Position Embeddings)”。</p>
-<h2 id="_1">重温</h2>
+<h2 id="_1">重温<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>我们知道，<a href="/archives/8265">RoPE</a>形式上是一种绝对位置编码，但实际上给Attention带来的是相对位置信息，即如下的<a href="https://en.wikipedia.org/wiki/Toeplitz_matrix">Toeplitz矩阵</a>：<br />
 \begin{equation}\begin{pmatrix}0 &amp; \\<br />
 1 &amp; 0 &amp; \\<br />
@@ -125,7 +161,7 @@
 \end{pmatrix}\end{equation}<br />
 这样一来，只要调整$k$，就可以保证最大的相对位置也不超过训练长度，因此避免了外推。然而，它使得位置信息更加“拥挤”了，所以还需要进行一定步数的微调才能让模型重新工作。而也正因为避免了外推，所以它所需要的微调步数相比直接外推要少得多（神经网络往往更擅长内插而不是外推）。</p>
 <p>至于后面提出的NTK-aware Scaled RoPE，则是“剑走偏锋”，巧妙地将外推压力平摊到每一个维度上，所以它不微调也能有不错的效果，但它终究还是依赖外推，这是神经网络不擅长的事情，所以效果存在上限，在笔者的实验中，它的Long Context表现还无法很接近训练效果。</p>
-<h2 id="_2">融合</h2>
+<h2 id="_2">融合<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>我们也可以从语言模型的局域性来考察这些方法。所谓局域性，是指语言模型在推断下一个token时，明显更依赖于邻近的token。直接外推保持了局域性（0附近位置编码不变），效果差是因为引入了超出训练长度的位置编码；位置内插虽然没有外推位置编码，但扰乱了局域性（0附近位置编码被压缩为$1/k$），所以不微调效果也不好；而NTK-aware Scaled RoPE通过“高频外推、低频内插”隐含了两者优点，保证了局域性，又没有明显外推位置编码，所以不微调也有不错的效果。</p>
 <p>有没有能更直接地结合外推和内插的方法呢？有，我们可以设定一个窗口大小$w$，在窗口内我们使用大小为$1$的位置间隔，在窗口外我们使用大小为$1/k$的位置间隔，整个相对位置矩阵如下：<br />
 \begin{equation}\begin{pmatrix}<br />
@@ -160,7 +196,7 @@
 \end{pmatrix}\label{eq:rerope}\end{equation}<br />
 在这个case下，不管输入长度是多少，它的位置编码范围都不超过$w$，所以这是一种有可能支持任意长度的Context的方案！</p>
 <p>形式上，矩阵$\eqref{eq:rerope}$、$\eqref{eq:leaky-rerope}$与标准RoPE矩阵$\eqref{eq:rope}$的关系，就相当于ReLU、Leaky ReLU与Linear的关系，所以笔者将$\eqref{eq:rerope}$称为“ReRoPE（Rectified RoPE）”，将$\eqref{eq:leaky-rerope}$称为“Leaky ReRoPE”。</p>
-<h2 id="_3">计算</h2>
+<h2 id="_3">计算<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>其实，类似的思路并不难想到，以往基于Attention Bias的相对位置编码（比如<a href="/archives/8130#%E7%BB%8F%E5%85%B8%E5%BC%8F">经典相对位置编码</a>、<a href="/archives/8130#T5%E5%BC%8F">T5位置编码</a>）经常会出现这样的分块运算。然而跟这些相对位置编码不同，在RoPE中实现这样的分块运算会明显增加计算量，这也是该思路会被笔者搁置的主要原因。</p>
 <p>怎么理解增加计算量呢？我们知道RoPE是“通过绝对位置实现相对位置”，这样只能得到线性的相对位置，而矩阵$\eqref{eq:leaky-rerope}$、$\eqref{eq:rerope}$是非线性的（或者说分段线性的），要实现它只能算两次Attention矩阵，然后组合起来。具体来说，首先用标准的RoPE计算一次Attention矩阵（Softmax之前）<br />
 \begin{equation}a_{i,j}^{(1)} = \left(\boldsymbol{\mathcal{R}}^i\boldsymbol{q}<em i_j="i,j">i\right)^{\top}\left(\boldsymbol{\mathcal{R}}^j\boldsymbol{k}_j\right) = \boldsymbol{q}_i^{\top}\boldsymbol{\mathcal{R}}^{j-i}\boldsymbol{k}_j\end{equation}<br />
@@ -178,7 +214,7 @@
 &amp;\boldsymbol{q}_i^{\top}\left(\boldsymbol{\mathcal{R}}^{\max(j-i,-w)}\boldsymbol{k}_j\right), \quad(\text{ReRoPE})\\[8pt]<br />
 &amp;\boldsymbol{q}_i^{\top}\left(\boldsymbol{\mathcal{R}}^{\max(j-i,(j-i+w)/k-w)}\boldsymbol{k}_j\right), \quad(\text{Leaky ReRoPE})<br />
 \end{aligned}\right.\end{equation}</p>
-<h2 id="_4">实验</h2>
+<h2 id="_4">实验<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>继续沿着<a href="/archives/9706">《Transformer升级之路：11、将β进制位置进行到底》</a>的设置，我们对ReRoPE进行了实验，效果如下表：<br />
 \begin{array}{c|cc}<br />
 \hline<br />
@@ -268,7 +304,7 @@
 <blockquote>
 <p><strong>Github：<a href="https://github.com/bojone/rerope">https://github.com/bojone/rerope</a></strong></p>
 </blockquote>
-<h2 id="_5">小结</h2>
+<h2 id="_5">小结<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>在这篇文章中，笔者提出了ReRoPE (Rectified RoPE)，它同样是一种RoPE的后处理方案，实验结果显示它的不微调长度外推能力不仅明显超过了此前的NTK-aware Scaled RoPE，甚至还超过了之前专门设计的需要从零训练的HFWA。此外，不同于NTK-aware Scaled RoPE在超过某个长度后能力会大幅下降，ReRoPE似乎在任意长度下都表现良好。除了对比实验外，文章还给出了基于transformers-llama的参考实现，有兴趣的读者可以自行测试。</p>
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9708">https://spaces.ac.cn/archives/9708</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
@@ -290,15 +326,79 @@ month={Aug},<br />
 url={\url{https://spaces.ac.cn/archives/9708}},<br />
 } </p>
 <hr />
-<h2 id="_6">公式推导与注释</h2>
+<h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="cosent二特征式匹配与交互式匹配有多大差距.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#177 CoSENT（二）：特征式匹配与交互式匹配有多大差距？</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="矩阵的有效秩effective-rank.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#179 矩阵的有效秩（Effective Rank）</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#transformer12rerope">Transformer升级之路：12、无限外推的ReRoPE？</a><ul>
+<li><a href="#_1">重温</a></li>
+<li><a href="#_2">融合</a></li>
+<li><a href="#_3">计算</a></li>
+<li><a href="#_4">实验</a></li>
+<li><a href="#_5">小结</a></li>
+<li><a href="#_6">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -320,5 +420,41 @@ url={\url{https://spaces.ac.cn/archives/9708}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>

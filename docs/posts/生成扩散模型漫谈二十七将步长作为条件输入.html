@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>生成扩散模型漫谈（二十七）：将步长作为条件输入 | ML & Math Blog Posts</title>
-    <meta name="description" content="生成扩散模型漫谈（二十七）：将步长作为条件输入
+    <meta name="description" content="生成扩散模型漫谈（二十七）：将步长作为条件输入&para;
 原文链接: https://spaces.ac.cn/archives/10617
 发布日期: 
 
-这篇文章我们再次聚焦于扩散模型的采样加速。众所周知，扩散模型的采样加速主要有两种思路，一是开发更高效的求解器，二是事后蒸馏。然而，据笔者观察，除了上两篇文章介绍过的SiD外，这两种方案都鲜有能将生成步数降低到一步的结果。虽然SiD能做到单步生成，但它需...">
+这篇文章我们再次聚焦于扩散模型的采样加速。众所周知，扩散模型的采样加速主要有两种思路，一是开发更高效的求解器，二是事后蒸馏。然而，据笔者观察，除了上两篇文章介绍过的SiD外，这两种方案都鲜有能将生成步数降低到一步的结果。虽然SiD能做到单步...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -22,6 +22,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -66,40 +69,73 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=微分方程">微分方程</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #58 生成扩散模型漫谈（二十七）：将步长作为条件输入
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">生成扩散模型漫谈（二十七）：将步长作为条件输入</h1>
+            <h1 class="post-title">
+                <span class="post-number">#58</span>
+                生成扩散模型漫谈（二十七）：将步长作为条件输入
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/10617" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/10617" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> 微分方程</span>
-                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
-                <span class="tag"><i class="fas fa-tag"></i> 采样</span>
-                <span class="tag"><i class="fas fa-tag"></i> 扩散</span>
-                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <a href="../index.html?tags=微分方程" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 微分方程</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=采样" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 采样</span>
+                </a>
+                
+                <a href="../index.html?tags=扩散" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 扩散</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="_1">生成扩散模型漫谈（二十七）：将步长作为条件输入</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="_1">生成扩散模型漫谈（二十七）：将步长作为条件输入<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10617">https://spaces.ac.cn/archives/10617</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>这篇文章我们再次聚焦于扩散模型的采样加速。众所周知，扩散模型的采样加速主要有两种思路，一是开发更高效的求解器，二是事后蒸馏。然而，据笔者观察，除了上两篇文章介绍过的<a href="/archives/10085">SiD</a>外，这两种方案都鲜有能将生成步数降低到一步的结果。虽然SiD能做到单步生成，但它需要额外的蒸馏成本，并且蒸馏过程中用到了类似GAN的交替训练过程，总让人感觉差点意思。</p>
 <p>本文要介绍的是<a href="https://papers.cool/arxiv/2410.12557">《One Step Diffusion via Shortcut Models》</a>，其突破性思想是将生成步长也作为扩散模型的条件输入，然后往训练目标中加入了一个直观的正则项，这样就能直接稳定训练出可以单步生成模型，可谓简单有效的经典之作。</p>
-<h2 id="ode">ODE扩散</h2>
+<h2 id="ode">ODE扩散<a class="toc-link" href="#ode" title="Permanent link">&para;</a></h2>
 <p>原论文的结论是基于ODE式扩散模型的，而对于ODE式扩散的理论基础，我们在本系列的<a href="/archives/9228">（六）</a>、<a href="/archives/9280">（十二）</a>、<a href="/archives/9370">（十四）</a>、<a href="/archives/9379">（十五）</a>、<a href="/archives/9497">（十七）</a>等博客中已经多次介绍，其中最简单的一种理解方式大概是<a href="/archives/9497">（十七）</a>中的ReFlow视角，下面我们简单重复一下。</p>
 <p>假设$\boldsymbol{x}<em>0\sim p_0(\boldsymbol{x}_0)$是先验分布采样的 _随机噪声</em> ，$\boldsymbol{x}<em>1\sim p_1(\boldsymbol{x}_1)$是目标分布采样的 _真实样本</em> （注：前面的文章中，普通都是$\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">T$是噪声、$\boldsymbol{x}_0$是目标样本，这里方便起见反过来了），ReFlow允许我们指定任意从$\boldsymbol{x}_0$到$\boldsymbol{x}_1$的运动轨迹，最简单的轨迹自然是直线：<br />
 \begin{equation}\boldsymbol{x}_t = (1-t)\boldsymbol{x}_0 + t \boldsymbol{x}_1\label{eq:line}\end{equation}<br />
@@ -110,7 +146,7 @@
 以及<br />
 \begin{equation}\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{x}_1 - \boldsymbol{x}_0\quad\Rightarrow\quad\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{v}</em>^</em>}(\boldsymbol{x}_t, t)\label{eq:ode-core}\end{equation}<br />
 这就是ReFlow。当然这里边还欠缺了一个理论证明，就是通过平方误差来拟合$\boldsymbol{v}</em>_t, t)$所得到的ODE确实能生成我们期望的分布，这部分大家自行看}}(\boldsymbol{x<a href="/archives/9497">《生成扩散模型漫谈（十七）：构建ODE的一般步骤（下）》</a>就好。</p>
-<h2 id="_2">步长自洽</h2>
+<h2 id="_2">步长自洽<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>假设我们已经有了$\boldsymbol{v}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$，那么通过求解微分方程$\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{v}</em>}}(\boldsymbol{x<em _="+" _epsilon="\epsilon" t="t">t, t)$就可以实现从$\boldsymbol{x}_0$到$\boldsymbol{x}_1$的变换。划重点，是“微分方程”，但实际上我们没法真的去数值计算微分方程，而是只能算“差分方程”：<br />
 \begin{equation}\boldsymbol{x}</em>} - \boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t = \boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) \epsilon\label{eq:de}\end{equation}<br />
 这个差分方程是原始ODE的“欧拉近似”，近似程度取决于步长$\epsilon$的大小，当$\epsilon\to 0$时就精确等于原始ODE，换言之步长越小越精确。然而，生成步数等于$1/\epsilon$，我们希望生成步数越少越好，这意味着不能用太大的步长，最好$\epsilon$可以等于1，这样$\boldsymbol{x}_1 = \boldsymbol{x}_0 + \boldsymbol{v}</em>_0, 0)$，一步就可以完成生成。}}(\boldsymbol{x</p>
@@ -124,14 +160,14 @@
 \begin{equation}\mathcal{L}_2 = \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p_0(\boldsymbol{x}_0),\boldsymbol{x}_1\sim p_1(\boldsymbol{x}_1)}\left[\Vert\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, 2\epsilon) - [\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, \epsilon)+ \boldsymbol{v}</em>}}(\color{green}{\tilde{\boldsymbol{x}}_{t+\epsilon}}, t+\epsilon, \epsilon) ]/2\Vert^2\right]\end{equation<br />
 $\mathcal{L}_1$与$\mathcal{L}_2$相加，就构成了Shortcut模型的损失函数。</p>
 <p>（注：有读者指出，更早的<a href="https://papers.cool/arxiv/2310.02279">《Consistency Trajectory Models: Learning Probability Flow ODE Trajectory of Diffusion》</a>提出过以离散化时间的起点和终点作为条件输入的做法，指定起点和终点后步长其实也就确定了，所以Shortcut以步长为输入的做法并不算完全创新。）</p>
-<h2 id="_3">模型细节</h2>
+<h2 id="_3">模型细节<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>以上基本就是Shortcut模型的全部理论内容，非常精巧且简明，但从理论到实验，还需要一些细节，比如步长$\epsilon$如何融入到模型中去。</p>
 <p>首先，在训练$\mathcal{L}_2$时，Shortcut并没有均匀地从$[0,1]$采样$\epsilon$，而是设置了一个最小步长$2^{-7}$，然后将它们倍增至1，即所有的非零步长只有$\{2^{-7},2^{-6},2^{-5},2^{-4},2^{-3},2^{-2},2^{-1},1\}$这8个值，从前7个中均匀采样来训练$\mathcal{L}_2$。这样一来，$\epsilon$的取值就是有限的，算上$0$一共就只有9个，所以Shortcut模型直接以Embedding的方式来输入$\epsilon$，将它跟$t$的Embedding加在一起。</p>
 <p>其次，注意到$\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">2$的计算量是比$\mathcal{L}_1$大的，因为$\boldsymbol{v}</em>_1$更好训练，所以它的训练样本可以适当少些。}}(\tilde{\boldsymbol{x}}_{t+\epsilon}, t, \epsilon)$这一项需要两次前向传播，所以论文的做法是每个batch中$3/4$的样本都用来计算$\mathcal{L}_1$，剩下的$1/4$样本才用来算$\mathcal{L}_2$。该操作不仅是为了节省计算量，实际上还调节了$\mathcal{L}_1,\mathcal{L}_2$的权重，因为$\mathcal{L}_2$比$\mathcal{L</p>
 <p>除此之外，论文在实践的时候还对$\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">2$做了微调，多加了个stop gradient算子：<br />
 \begin{equation}\mathcal{L}_2 = \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p_0(\boldsymbol{x}_0),\boldsymbol{x}_1\sim p_1(\boldsymbol{x}_1)}\left[\Vert\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, 2\epsilon) - \color{skyblue}{\text{sg}[}\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, \epsilon)+ \boldsymbol{v}</em>}}(\color{green}{\tilde{\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t+\epsilon}}, t+\epsilon, \epsilon) \color{skyblue}{]}/2\Vert^2\right]\end{equation}<br />
 为什么要这样做呢？按照作者的<a href="https://openreview.net/forum?id=OlzB6LnXcS¬eId=k4If3csXST">回复</a>，这是自引导学习的常见做法，被stop gradient的部分属于目标，不应该有梯度，跟<a href="https://papers.cool/arxiv/2006.07733">BYOL</a>、<a href="https://papers.cool/arxiv/2011.10566">SimSiam</a>等无监督学习方案类似。不过照笔者看来，这个操作最大的价值还是节省训练成本，因为$\boldsymbol{v}</em>, t, \epsilon)$这一项做了两次前向传播，如果要对它反向传播，计算量也要翻倍。}}(\tilde{\boldsymbol{x}}_{t+\epsilon</p>
-<h2 id="_4">实验效果</h2>
+<h2 id="_4">实验效果<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>现在我们来看Shortcut模型的实验效果，看起来它是目前单步生成效果最好的、单阶段训练的扩散模型：  </p>
 <p><a href="/usr/uploads/2024/12/2449555374.png" title="点击查看原图"><img alt="各种扩散模型的生成质量评估" src="/usr/uploads/2024/12/2449555374.png" /></a></p>
 <p>各种扩散模型的生成质量评估</p>
@@ -144,7 +180,7 @@ $\mathcal{L}_1$与$\mathcal{L}_2$相加，就构成了Shortcut模型的损失函
 <p><strong><a href="https://github.com/kvfrans/shortcut-models">https://github.com/kvfrans/shortcut-models</a></strong></p>
 </blockquote>
 <p>顺便说，Shortcut模型投到了ICLR 2025上，获得了reviewer的一致好评（全8分）。</p>
-<h2 id="_5">延伸思考</h2>
+<h2 id="_5">延伸思考<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>看到Shortcut模型，不知道大家想到了哪些相关工作？笔者想到了一个可能大家都意想不到的，那就是我们在<a href="/archives/9881">《生成扩散模型漫谈（二十一）：中值定理加速ODE采样》</a>介绍过的AMED。</p>
 <p>Shortcut模型与AMED的底层思想是相通的，它们都已经发现，单靠研究复杂的高阶求解器，将生成的NFE（模型的运行次数）降低到个位数就已经很简单了，更不用说做单步生成了。所以它们一致认为，真正要变的并不是求解器，而是模型。该怎么变呢？AMED想到的是“中值定理”：对ODE两端积分，我们有精确的<br />
 \begin{equation}\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t + \epsilon} - \boldsymbol{x}_t = \int_t^{t + \epsilon}\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">{\tau}, \tau) d\tau\end{equation}<br />
@@ -155,7 +191,7 @@ $\mathcal{L}_1$与$\mathcal{L}_2$相加，就构成了Shortcut模型的损失函
 当然，积分中值定理实际上只对标量函数成立，对向量函数是不保证成立的，所以说是“类比”。现在的问题是并不知道$s$的值，所以AMED的后续做法是用一个非常小的（计算量几乎可以忽略的）模型去预测$s$。</p>
 <p>AMED是基于现成扩散模型的事后修正方法，因此它的效果取决于中值定理对$\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$模型的成立程度，这显得有些“运气成分”，并且AMED需要先用欧拉格式预估一下$\boldsymbol{x}_s$，所以它的NFE最少是2，不能做到单步生成。相比之下，Shortcut模型更“激进”，它直接把步长作为条件输入，将加速生成的条件$\eqref{eq:cond}$作为损失函数，这样一来不仅避免了“中值定理”近似的可行性讨论，还使得最少NFE可以降低到1。</p>
 <p>更巧妙的是，细思之下我们会发现两者的做法其实也有些共性，前面我们说了Shortcut是直接将$\epsilon$转成Embedding加到$t$的Embeddding上的，这不相当于跟AMED一样都是修改$t$嘛！只不过AMED是直接修改$t$的数值，而Shortcut修改的是$t$的Embedding。</p>
-<h2 id="_6">文章小结</h2>
+<h2 id="_6">文章小结<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
 <p>本文介绍了一个单阶段训练就可以实现单步生成的扩散模型新工作，它的突破思想是将步长也当成条件输入到扩散模型中，并配以一个直观的正则项，这样只通过单阶段训练就可以得到单步生成的扩散模型。</p>
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10617">https://spaces.ac.cn/archives/10617</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
@@ -177,15 +213,80 @@ month={Dec},<br />
 url={\url{https://spaces.ac.cn/archives/10617}},<br />
 } </p>
 <hr />
-<h2 id="_7">公式推导与注释</h2>
+<h2 id="_7">公式推导与注释<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="概率分布的熵归一化entropy-normalization.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#57 概率分布的熵归一化（Entropy Normalization）</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="生成扩散模型漫谈十五构建ode的一般步骤中.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#59 生成扩散模型漫谈（十五）：构建ODE的一般步骤（中）</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#_1">生成扩散模型漫谈（二十七）：将步长作为条件输入</a><ul>
+<li><a href="#ode">ODE扩散</a></li>
+<li><a href="#_2">步长自洽</a></li>
+<li><a href="#_3">模型细节</a></li>
+<li><a href="#_4">实验效果</a></li>
+<li><a href="#_5">延伸思考</a></li>
+<li><a href="#_6">文章小结</a></li>
+<li><a href="#_7">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -207,5 +308,41 @@ url={\url{https://spaces.ac.cn/archives/10617}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>

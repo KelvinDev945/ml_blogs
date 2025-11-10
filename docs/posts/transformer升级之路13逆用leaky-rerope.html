@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Transformer升级之路：13、逆用Leaky ReRoPE | ML & Math Blog Posts</title>
-    <meta name="description" content="Transformer升级之路：13、逆用Leaky ReRoPE
+    <meta name="description" content="Transformer升级之路：13、逆用Leaky ReRoPE&para;
 原文链接: https://spaces.ac.cn/archives/9728
 发布日期: 
 
-上周在《Transformer升级之路：12、无限外推的ReRoPE？》中，笔者提出了ReRoPE和Leaky ReRoPE，诸多实验结果表明，它们能够在几乎不损失训练效果的情况下免微调地扩展LLM的Context长度，并且实现了“l...">
+上周在《Transformer升级之路：12、无限外推的ReRoPE？》中，笔者提出了ReRoPE和Leaky ReRoPE，诸多实验结果表明，它们能够在几乎不损失训练效果的情况下免微调地扩展LLM的Context长度，并...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -22,6 +22,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -66,40 +69,73 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=attention">attention</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #70 Transformer升级之路：13、逆用Leaky ReRoPE
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">Transformer升级之路：13、逆用Leaky ReRoPE</h1>
+            <h1 class="post-title">
+                <span class="post-number">#70</span>
+                Transformer升级之路：13、逆用Leaky ReRoPE
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/9728" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/9728" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> attention</span>
-                <span class="tag"><i class="fas fa-tag"></i> 位置编码</span>
-                <span class="tag"><i class="fas fa-tag"></i> 泛化</span>
-                <span class="tag"><i class="fas fa-tag"></i> 外推</span>
-                <span class="tag"><i class="fas fa-tag"></i> rope</span>
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+                <a href="../index.html?tags=位置编码" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 位置编码</span>
+                </a>
+                
+                <a href="../index.html?tags=泛化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 泛化</span>
+                </a>
+                
+                <a href="../index.html?tags=外推" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 外推</span>
+                </a>
+                
+                <a href="../index.html?tags=rope" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> rope</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="transformer13leaky-rerope">Transformer升级之路：13、逆用Leaky ReRoPE</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="transformer13leaky-rerope">Transformer升级之路：13、逆用Leaky ReRoPE<a class="toc-link" href="#transformer13leaky-rerope" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9728">https://spaces.ac.cn/archives/9728</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>上周在<a href="/archives/9708">《Transformer升级之路：12、无限外推的ReRoPE？》</a>中，笔者提出了ReRoPE和Leaky ReRoPE，诸多实验结果表明，它们能够在几乎不损失训练效果的情况下免微调地扩展LLM的Context长度，并且实现了“longer context, lower loss”的理想特性，此外跟NTK-aware Scaled RoPE不同的是，其中ReRoPE似乎还有表现出了无限的Context处理能力。</p>
 <p>总之，ReRoPE看起来相当让人满意，但美中不足的是会增加推理成本，具体表现为第一步推理需要算两次Attention，以及后续每步推理需要重新计算位置编码。本文试图通过在训练中逆用Leaky ReRoPE的方法来解决这个问题。</p>
-<h2 id="_1">回顾</h2>
+<h2 id="_1">回顾<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>让我们不厌其烦地重温一下：RoPE形式上是一种绝对位置编码，但实际达到的效果是相对位置编码，对应的相对位置矩阵是：<br />
 \begin{equation}\begin{pmatrix}0 &amp; \\<br />
 1 &amp; 0 &amp; \\<br />
@@ -141,12 +177,12 @@
 \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
 \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
 \end{pmatrix}\label{eq:rerope}\end{equation}</p>
-<h2 id="_2">反转</h2>
+<h2 id="_2">反转<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>从上一篇的评测结果来看，作为一种免训练的外推方案，ReRoPE和Leaky ReRoPE的效果都是相当让人满意的，既没有损失训练长度内的效果，又实现了“Longer Context, Lower Loss”。唯一美中不足的是，它们的推理速度相比原本的Attention来说是变慢的，并且目前尚不兼容Flash Attention等加速技术。</p>
 <p>那么，能否反过来呢？ReRoPE/Leaky ReRoPE在训练阶段是正常速度的RoPE，推理阶段则是变慢了，反过来也就是说：能否让训练阶段变慢，让推理阶段变为常规的RoPE？可能有读者疑惑：为什么会想要让训练阶段变慢？训练成本不是更高吗？这是因为ReRoPE/Leaky ReRoPE是一种长度外推方法，场景是“Train Short, Test Long”，训练速度的变慢是短期的、可控的，推理速度的变慢才是长期的、难顶的，所以相较之下，如果是同等程度的变慢的话，我们更愿意将变慢的部分放到训练阶段。</p>
 <p>让我们再看一下Leaky ReRoPE，它在训练阶段的相对位置矩阵是步长为1的式$\eqref{eq:rope}$，推理阶段则在$w$的窗口内使用$1$的步长，在窗口外使用$\frac{1}{k} &lt; 1$的步长，即式$\eqref{eq:leaky-rerope}$，换句话说， <em>差别是推理阶段窗口外使用更小的步长</em> 。如果我们反过来，在训练阶段使用Leaky ReRoPE，并让它窗口外的步长大于$1$，那么按照“推理阶段窗口外使用更小的步长”的原则，推理阶段窗口外是否就可以使用等于$1$的步长，从而退化为RoPE了？</p>
 <p>笔者将以上想法称之为“InvLeaky ReRoPE（Inverse Leaky ReRoPE）”。事不宜迟，我们马上做实验测试。</p>
-<h2 id="_3">实验</h2>
+<h2 id="_3">实验<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>继续之前的“<a href="/archives/8934">GAU</a> + <a href="/archives/8978">Deep Norm</a> + <a href="/archives/9512">Tiger</a> + 语言模型”实验组合，在训练阶段使用$k=1/16, w=128$的Leaky ReRoPE，在推理阶段使用正常的RoPE，测试结果如下：</p>
 <p>\begin{array}{c|cc}<br />
 \hline<br />
@@ -174,7 +210,7 @@
 \end{array}</p>
 <p>其中$\text{b8}$是指RoPE的频率底数从10000换成了80000。可以看到，“Leaky ReRoPE → RoPE”的InvLeaky ReRoPE虽然效果上不如“RoPE → ReRoPE/Leaky ReRoPE”，但依然胜过了HFWA，并且由于推理阶段是常规的RoPE，可以套用现成的加速技术，因此依然是有相当竞争力的。此外，笔者对$k,w,b$等参数做了一些简单的调参，发现最优解基本上就是以上两个组合了，即“$k$设置为‘扩展倍数的2倍的倒数’、$w$设置为训练长度的$\frac{1}{4}$、$b$可选乘以扩展倍数”。</p>
 <p>那么，InvLeaky ReRoPE对训练速度有多大影响呢？在上述实验中，模型是1亿参数量，训练长度是512，每1000步的训练时间从330秒增加到了350秒，增加不到10%，当然这里边有GAU的原因，因为GAU是单头的注意力，本就比多头注意力快。如果多头注意力或者训练长度更长的话，增加幅度应该会大一些，但目测应该不超过50%都是可以接受的。</p>
-<h2 id="_4">小结</h2>
+<h2 id="_4">小结<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>本文提出了Leaky ReRoPE的“逆用”做法，通过在训练阶段使用更大步长的Leaky ReRoPE，使得推理阶段可以退回常规的RoPE，从而可以保持推理速度不变，实验结果显示这种做法还是有一定的竞争力的。</p>
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9728">https://spaces.ac.cn/archives/9728</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
@@ -196,15 +232,78 @@ month={Aug},<br />
 url={\url{https://spaces.ac.cn/archives/9728}},<br />
 } </p>
 <hr />
-<h2 id="_5">公式推导与注释</h2>
+<h2 id="_5">公式推导与注释<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="softmax后传寻找top-k的光滑近似.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#69 Softmax后传：寻找Top-K的光滑近似</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="transformer升级之路20mla好在哪里上.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#71 Transformer升级之路：20、MLA好在哪里?（上）</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#transformer13leaky-rerope">Transformer升级之路：13、逆用Leaky ReRoPE</a><ul>
+<li><a href="#_1">回顾</a></li>
+<li><a href="#_2">反转</a></li>
+<li><a href="#_3">实验</a></li>
+<li><a href="#_4">小结</a></li>
+<li><a href="#_5">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -226,5 +325,41 @@ url={\url{https://spaces.ac.cn/archives/9728}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>

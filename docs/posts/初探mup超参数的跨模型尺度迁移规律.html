@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>初探MuP：超参数的跨模型尺度迁移规律 | ML & Math Blog Posts</title>
-    <meta name="description" content="初探MuP：超参数的跨模型尺度迁移规律
+    <meta name="description" content="初探MuP：超参数的跨模型尺度迁移规律&para;
 原文链接: https://spaces.ac.cn/archives/10770
 发布日期: 
 
-众所周知，完整训练一次大型LLM的成本是昂贵的，这就决定了我们不可能直接在大型LLM上反复测试超参数。一个很自然的想法是希望可以在同结构的小模型上仔细搜索超参数，找到最优组合后直接迁移到大模型上。尽管这个想法很朴素，但要实现它并不平凡，它需要我们了解常见的超参...">
+众所周知，完整训练一次大型LLM的成本是昂贵的，这就决定了我们不可能直接在大型LLM上反复测试超参数。一个很自然的想法是希望可以在同结构的小模型上仔细搜索超参数，找到最优组合后直接迁移到大模型上。尽管这个想法很朴素，但要实现它并不平凡，它需要我们了...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -22,6 +22,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -66,40 +69,73 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=梯度">梯度</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #202 初探MuP：超参数的跨模型尺度迁移规律
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">初探MuP：超参数的跨模型尺度迁移规律</h1>
+            <h1 class="post-title">
+                <span class="post-number">#202</span>
+                初探MuP：超参数的跨模型尺度迁移规律
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/10770" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/10770" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
-                <span class="tag"><i class="fas fa-tag"></i> 学习率</span>
-                <span class="tag"><i class="fas fa-tag"></i> 优化器</span>
-                <span class="tag"><i class="fas fa-tag"></i> 尺度定律</span>
-                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <a href="../index.html?tags=梯度" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
+                </a>
+                
+                <a href="../index.html?tags=学习率" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 学习率</span>
+                </a>
+                
+                <a href="../index.html?tags=优化器" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化器</span>
+                </a>
+                
+                <a href="../index.html?tags=尺度定律" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 尺度定律</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="mup">初探MuP：超参数的跨模型尺度迁移规律</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="mup">初探MuP：超参数的跨模型尺度迁移规律<a class="toc-link" href="#mup" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10770">https://spaces.ac.cn/archives/10770</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>众所周知，完整训练一次大型LLM的成本是昂贵的，这就决定了我们不可能直接在大型LLM上反复测试超参数。一个很自然的想法是希望可以在同结构的小模型上仔细搜索超参数，找到最优组合后直接迁移到大模型上。尽管这个想法很朴素，但要实现它并不平凡，它需要我们了解常见的超参数与模型尺度之间的缩放规律，而MuP正是这个想法的一个实践。</p>
 <p>MuP，有时也写$\mu P$，全名是Maximal Update Parametrization，出自论文<a href="https://papers.cool/arxiv/2203.03466">《Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer》</a>，随着LLM训练的普及，它逐渐已经成为了科学炼丹的事实标配之一。</p>
-<h2 id="_1">方法大意</h2>
+<h2 id="_1">方法大意<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>在接入主题之前，必须先吐槽一下MuP原论文写得实在太过晦涩，并且结论的表达也不够清晰，平白增加了不少理解难度，所以接下来笔者尽量以一种（自认为）简明扼要的方式来复现MuP的结论。</p>
 <p>先说结论，MuP主要研究超参数跨模型尺度的迁移规律。这里有几个关键词：</p>
 <blockquote>
@@ -114,7 +150,7 @@
 <p>2、说白了就是假设做好初始化，后面就会自动沿着正确的轨迹走（好的开始是成功的一大半？）;</p>
 <p>3、当然也可以给这个假设讲<strong>大数定律</strong> 或<strong>中心极限定理</strong> 的故事，但个人认为非必须。</p>
 </blockquote>
-<h2 id="_2">前向传播</h2>
+<h2 id="_2">前向传播<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>我们从前向传播开始讨论，因为这是相对简单且成熟的部分。首先，考虑线性层$\boldsymbol{Y}=\boldsymbol{X}\boldsymbol{W}$，其中$\boldsymbol{X}\in\mathbb{R}^{b\times d_{in}},\boldsymbol{W}\in\mathbb{R}^{d_{in}\times d_{out}}$。我们用RMS（Root Mean Square）来作为矩阵尺度的指标，例如<br />
 \begin{equation}\text{RMS}(\boldsymbol{W}) = \sqrt{\frac{1}{d_{in} d_{out}}\sum_{i=1}^{d_{in}} \sum_{j=1}^{d_{out}} W_{i,j}^2}\end{equation}</p>
 <p>我们知道，要让初始化阶段$\boldsymbol{X}$的RMS跟$\boldsymbol{Y}$的RMS大致相等（简称“<strong>稳定</strong> ”），那么$\boldsymbol{W}$要用：</p>
@@ -131,7 +167,7 @@
 <p><strong>fan_in初始化</strong> ：要保证前向传播的稳定性，那么应该要用“均值为0、方差 <em>正比于</em> $1/d_{in}$”的随机初始化。</p>
 </blockquote>
 <p>这个结论也可以理解为“激活函数的影响是模型尺度无关的”，所以如果我们只想分析模型尺度的效应，那么可以忽略（Element-wise的）激活函数的存在，由LeCun初始化直接得到缩放规律$\propto 1/d_{in}$。</p>
-<h2 id="_3">反向传播</h2>
+<h2 id="_3">反向传播<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>现在我们继续分析反向传播（梯度），注意这里约定变量及其梯度具有相同的shape，那么可以算得<br />
 \begin{align}<br />
 \frac{\partial\mathcal{L}}{\partial \boldsymbol{W}} =&amp;\, \boldsymbol{X}^{\top}\left(\frac{\partial\mathcal{L}}{\partial \boldsymbol{Y}}\otimes \phi'(\boldsymbol{X}\boldsymbol{W})\right) \\[5pt]<br />
@@ -152,7 +188,7 @@
 <p><strong>Xavier初始化</strong> ：“均值为0、方差为$2/(d_{in} + d_{out})$”的随机初始化。</p>
 </blockquote>
 <p>这也叫“<strong>fan_avg初始化</strong> ”，因为就是将$d_{in}$和$d_{out}$简单代数平均了一下，其他平均方式也可以考虑，参考<a href="/archives/8725">《初始化方法中非方阵的维度平均策略思考》</a>。Xavier初始化看上去同时兼顾了前向和反向，但也可以说两者都没兼顾，更好的办法是设计模型让大部分参数都是方阵，如后面讨论的模型簇$\eqref{eq:model}$。</p>
-<h2 id="_4">损失增量</h2>
+<h2 id="_4">损失增量<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>有了前向传播和反向传播的铺垫，我们就可以尝试分析损失函数的增量了。考虑$\boldsymbol{W}\to \boldsymbol{W} + \Delta\boldsymbol{W}$时损失函数的变化量<br />
 \begin{equation}\Delta \mathcal{L} = \mathcal{L}(\boldsymbol{W} + \Delta\boldsymbol{W}) - \mathcal{L}(\boldsymbol{W})\approx \left\langle\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}}, \Delta\boldsymbol{W}\right\rangle_F\end{equation}<br />
 这里的$\langle\cdot,\cdot\rangle_F$是Frobenius内积，即把矩阵展平成向量后算向量内积。考虑梯度下降$\Delta\boldsymbol{W} = -\eta \frac{\partial\mathcal{L}}{\partial \boldsymbol{W}}$，这里$\eta$自然是学习率，结合式$\eqref{eq:grad-w}$，我们有<br />
@@ -168,7 +204,7 @@ $$\begin{equation}\Delta \mathcal{L}\approx -\eta\left\Vert\frac{\partial\mathca
 <p>第4点可能要多加评述一下。$\boldsymbol{X}^{\top}$是一个$d_{in}\times b$矩阵，$\frac{\partial\mathcal{L}}{\partial \boldsymbol{Y}}$是一个$b\times d_{out}$矩阵，两者相乘就是$d_{in} d_{out}$个$b$维向量对做内积，内积是$b$项求和，而损失$\mathcal{L}$通常是对样本求平均（即包含了除以$b$操作），所以如果$\boldsymbol{X}^{\top}$和$\frac{\partial\mathcal{L}}{\partial \boldsymbol{Y}}$都是尺度无关的，那么它们乘起来基本也是尺度无关的【即RMS都是$\mathcal{\Theta}(1)$】。</p>
 <p>最后的结论表明，如果我们直接将小模型的学习率用于大模型，那么对于足够大的模型，它的每一步损失增量就会随着参数尺度（即$d_{in} d_{out}$）的变大而 <em><strong>爆炸</strong></em> ，这意味着没法复制小模型的收敛过程，甚至可能因为步子迈得太大导致无法收敛。</p>
 <p>此时大家可能想到的一个做法是让$\eta\propto 1/(d_{in} d_{out})$来缩放$\Delta\mathcal{L}$，事实上这个想法已经跟上了MuP的思路，但实际场景中由于前面说的前向和反向的不兼容性，导致第4点“如果前向和反向都稳定，那么$\boldsymbol{X}^{\top}\frac{\partial\mathcal{L}}{\partial \boldsymbol{Y}}$每个元素就是$\mathcal{\Theta}(1)$”不能总是成立，所以实际情况更为复杂一些，</p>
-<h2 id="_5">模型假设</h2>
+<h2 id="_5">模型假设<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>现在让我们考虑一个更接近实践的场景。我们的任务是训练一个$\mathbb{R}^{d_{in}}\mapsto \mathbb{R}^{d_{out}}$的模型，其中$d_{in},d_{out}$是数据决定的，不可改变。开头我们就说了，MuP旨在研究超参数随着模型尺度的缩放规律，所以一切固定不变的量，都相当于是常数或者说$\mathcal{\Theta}(1)$，比如初始化方差为$1/d_{in}$，等价于说初始化方差为$\mathcal{\Theta}(1)$。</p>
 <p>我们可以改变的是模型的架构、参数量等部分，但MuP主要考虑宽度的规律，所以我们把模型的架构定一下。这里主要考虑的模型簇是：<br />
 \begin{equation}\begin{gathered}<br />
@@ -193,7 +229,7 @@ $$\begin{equation}\Delta \mathcal{L}\approx -\eta\left\Vert\frac{\partial\mathca
 \end{aligned}\end{equation}<br />
 这里$\boldsymbol{\Omega}=\{\boldsymbol{W}_1,\boldsymbol{W}_2,\cdots,\boldsymbol{W}_K\}$，$\boldsymbol{W}_k\in\mathbb{R}^{d\times d}$，即都是$d\times d$的<strong>方阵</strong> ，全都用<strong>fan_in初始化</strong> （等价地，也是<strong>fan_out初始化</strong> ）。</p>
 <p>补充一下，这里约定所有参数矩阵都是$d\times d$方阵，纯粹是为了简化分析，并不是强制要求。因为这里真正的目的是假设$\text{NN}$的参数里 <em>没有尺度无关的形状</em> ，比如不允许$d\times 64$这样的形状，因为$64$是一个常数，但$d\times 4d$这样的形状是允许的，因为你不管fan_in、fan_out或fan_avg初始化，方差都是正比于$1/d$。</p>
-<h2 id="_6">组装起来</h2>
+<h2 id="_6">组装起来<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
 <p>确立后具体模型后，我们就可以把前面的结论都组装起来了。要更新的参数分为$\boldsymbol{W}<em out="out">{in},\boldsymbol{\Omega},\boldsymbol{W}</em>$三部分，分别求梯度：<br />
 \begin{align}<br />
 \frac{\partial\mathcal{L}}{\partial \boldsymbol{W}<em out="out">{out}} =&amp;\, \boldsymbol{Y}</em> \\[6pt]}^{\top}\frac{\partial\mathcal{L}}{\partial \boldsymbol{Z}<br />
@@ -215,7 +251,7 @@ $$\begin{equation}\Delta \mathcal{L}\approx -\eta\left\Vert\frac{\partial\mathca
 <p>2、$\left\Vert\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}<em out="out">k}\right\Vert_F^2$是$d^2$个数求和，$\frac{\partial \boldsymbol{Y}</em>}}{\partial \boldsymbol{W<em out="out">k}$和$\frac{\partial\mathcal{L}}{\partial \boldsymbol{Z}}$的RMS都是$\mathcal{\Theta}(1)$，我们直接将$\boldsymbol{W}</em>(1)$，因此学习率不用变化；}$的初始化方差设为$\propto 1/d^2$，那么$\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}_k}$的RMS就是$\mathcal{\Theta}(1/d)$，平方求和后就正好是$\mathcal{\Theta</p>
 <p>3、此时$\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}<em in="in">{in}}$的RMS也是$\mathcal{\Theta}(1/d)$，但$\left\Vert\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}</em>\propto d$。}}\right\Vert_F^2$只是$d_{in}\times d$个数平方和，所以结果是$\mathcal{\Theta}(1/d)$的，为了得到$\mathcal{\Theta}(1)$的$\Delta\mathcal{L}$，学习率反而需要放大$d$倍来抵消这个影响，即$\eta_{in</p>
 </blockquote>
-<h2 id="_7">特征变化</h2>
+<h2 id="_7">特征变化<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
 <p>以上结果是没有问题的，但仔细思考我们会发现推导过程的一个问题：上面的第2、3点，都建立在“我们直接将$\boldsymbol{W}_{out}$的初始化方差设为$\propto 1/d^2$”这个设置上，然而这个设置目前来说并没有直接的依据。如果不对此进一步解释，那么推导过程还是不够完备的。</p>
 <p>事实上，单看$\Delta \mathcal{L}=\mathcal{\Theta}(1)$这个要求的话，确实是无法排除其他选择的可能性的，比如$\boldsymbol{W}<em out="out">{out}$的初始化方差设为$\propto 1/d$，此时$\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}_k}$的RMS是$\mathcal{\Theta}(1/\sqrt{d})$，平方求和后是$\mathcal{\Theta}(d)$，那么只要学习率$\eta\propto 1/d$同样可以实现$\Delta \mathcal{L}=\mathcal{\Theta}(1)$。因此，为了解释“$\boldsymbol{W}</em>$的初始化方差设为$\propto 1/d^2$”的必要性，那么就需要引入新的条件。</p>
 <p>损失函数$\mathcal{L}$是模型的一个宏观指标，或者说外部指标，单看它的变化已经不足以解释全部结果了，那么就需要细化到模型内部了。具体来说，我们希望模型每一层的输出（通常也称为特征，有时也称激活值）变化量也具有尺度不变性。比如线性层$\boldsymbol{Y}<em k-1="k-1">k = \boldsymbol{Y}</em>} \boldsymbol{W<em k-1="k-1">k$，参数$\boldsymbol{W}_k\to \boldsymbol{W}_k + \Delta \boldsymbol{W}_k$带来的输出变化是<br />
@@ -225,7 +261,7 @@ $$\begin{equation}\Delta \mathcal{L}\approx -\eta\left\Vert\frac{\partial\mathca
 \begin{equation}\text{RMS}(\Delta \boldsymbol{W}_k) = \mathcal{\Theta}(1 / d)\label{eq:dw-rms}\end{equation}</p>
 <p>结合$\Delta \boldsymbol{W}<em out="out">k = -\eta\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}_k}$和$\Delta\mathcal{L}=\mathcal{\Theta}(1)$，我们就可以得到“$\boldsymbol{W}</em>$的初始化方差设为$\propto 1/d^2$”的结果。</p>
 <p>（注：这一节依赖于 <a href="/archives/10770/comment-page-1#comment-27212">@Chenyu Zheng</a> 的指点，非常感谢！）</p>
-<h2 id="adam">Adam版本</h2>
+<h2 id="adam">Adam版本<a class="toc-link" href="#adam" title="Permanent link">&para;</a></h2>
 <p>以上就是SGD的MuP，对于Adam，我们通常用SignSGD近似做数量级分析：</p>
 <blockquote>
 <p>1、$\Delta \boldsymbol{W} = -\eta \mathop{\text{sign}}\left(\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}}\right)$；</p>
@@ -240,7 +276,7 @@ $$\begin{equation}\Delta \mathcal{L}\approx -\eta\left\Vert\frac{\partial\mathca
 <p>3、此时$\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}<em in="in">{in}}$的RMS也是$\mathcal{\Theta}(1/d)$，但$\left|\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}</em>\right|}<em in="in">1$只是$d</em>(1)$，从而学习率不用随尺度改变。}\times d$个数求和，所以它已经是$\mathcal{\Theta</p>
 </blockquote>
 <p>（注：读者可以自行检查一下式$\eqref{eq:dw-rms}$是满足的。）</p>
-<h2 id="muon">Muon版本</h2>
+<h2 id="muon">Muon版本<a class="toc-link" href="#muon" title="Permanent link">&para;</a></h2>
 <p>接下来自然少不了Muon的分析。对于Muon本身，我们已经在<a href="/archives/10592">《Muon优化器赏析：从向量到矩阵的本质跨越》</a>、<a href="/archives/10739">《Muon续集：为什么我们选择尝试Muon？》</a>做了详细介绍，这里不再重复。跟Adam用SignSGD类似，我们用MSignSGD来近似Muon：</p>
 <blockquote>
 <p>1、$\Delta \boldsymbol{W} = -\eta \mathop{\text{msign}}\left(\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}}\right)$；</p>
@@ -257,7 +293,7 @@ $$\begin{equation}\Delta \mathcal{L}\approx -\eta\left\Vert\frac{\partial\mathca
 <p>3、此时$\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}<em in="in">{in}}$的RMS也是$\mathcal{\Theta}(1/d)$，但$\left\Vert\frac{\partial\mathcal{L}}{\partial \boldsymbol{W}</em>$。}}\right\Vert_F$只是$d_{in}\times d$个数的平方和平方根，所以它是$\mathcal{\Theta}(1/\sqrt{d})$的，学习率反而需要放大$\sqrt{d}$倍来抵消这个影响，即$\eta_{in}\propto \sqrt{d</p>
 </blockquote>
 <p>（注：这里Muon的结论是对的，但它不满足条件$\eqref{eq:dw-rms}$，因为式$\eqref{eq:dw-rms}$要细说的话还依赖于一个更新量是Element-wise的假设，而Muon不符合这个假设，所以实际上不可用。这里没有仔细展开相关讨论，而是直接沿用了“$\boldsymbol{W}_{out}$的初始化方差设为$\propto 1/d^2$”的结论，回避了式$\eqref{eq:dw-rms}$。）</p>
-<h2 id="_8">结论汇总</h2>
+<h2 id="_8">结论汇总<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
 <p>将上述结论汇总在一起是：<br />
 \begin{array}{c|c|c|c|c|c|c}<br />
 \hline<br />
@@ -277,7 +313,7 @@ $$\begin{equation}\Delta \mathcal{L}\approx -\eta\left\Vert\frac{\partial\mathca
 <blockquote>
 <p>3、$\eta_k\propto 1/\sqrt{d}$ 。</p>
 </blockquote>
-<h2 id="_9">文章小结</h2>
+<h2 id="_9">文章小结<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
 <p>本文以尽可能简明清晰的方式介绍了MuP（Maximal Update Parametrization），这是旨在研究超参数跨模型尺度的迁移规律的工作。基于MuP，我们可以在小模型上以相对较小的成本仔细搜索超参数（这里主要是学习率和初始化），然后迁移到大模型上，降低大模型的炼丹成本。</p>
 <p>客观来讲，这里的介绍和分析还比较初步，比如没有考虑Bias项、没有评估结论在MLP以外架构的通用性、也没有仔细考虑Normalization和残差的作用等。没有考虑Bias项这个单纯是偷懒，权当留给读者的习题了；至于不同架构下的MuP，一般分析起来比较麻烦，但由于神经网络的相似性，结论大致上是相同的，我们可以不加证明地用着。个人认为比较关键的改进点是Normalization和残差的影响，尤其是Normalization，它使得不依赖特殊的初始化就可以稳定前向传播，带来了更大的自由度和可能性。</p>
 <p>当然，这些都留给后续分析了。</p>
@@ -301,15 +337,85 @@ month={Mar},<br />
 url={\url{https://spaces.ac.cn/archives/10770}},<br />
 } </p>
 <hr />
-<h2 id="_10">公式推导与注释</h2>
+<h2 id="_10">公式推导与注释<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="苏剑林-我的pretrain的小模型暂时没有链接.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#201 苏剑林: 我的pretrain的小模型，暂时没有链接。</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="从重参数的角度看离散概率分布的构建.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#203 从重参数的角度看离散概率分布的构建</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#mup">初探MuP：超参数的跨模型尺度迁移规律</a><ul>
+<li><a href="#_1">方法大意</a></li>
+<li><a href="#_2">前向传播</a></li>
+<li><a href="#_3">反向传播</a></li>
+<li><a href="#_4">损失增量</a></li>
+<li><a href="#_5">模型假设</a></li>
+<li><a href="#_6">组装起来</a></li>
+<li><a href="#_7">特征变化</a></li>
+<li><a href="#adam">Adam版本</a></li>
+<li><a href="#muon">Muon版本</a></li>
+<li><a href="#_8">结论汇总</a></li>
+<li><a href="#_9">文章小结</a></li>
+<li><a href="#_10">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -331,5 +437,41 @@ url={\url{https://spaces.ac.cn/archives/10770}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>

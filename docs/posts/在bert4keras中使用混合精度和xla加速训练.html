@@ -4,12 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>在bert4keras中使用混合精度和XLA加速训练 | ML & Math Blog Posts</title>
-    <meta name="description" content="在bert4keras中使用混合精度和XLA加速训练
+    <meta name="description" content="在bert4keras中使用混合精度和XLA加速训练&para;
 原文链接: https://spaces.ac.cn/archives/9059
 发布日期: 
 
-之前笔者一直都是聚焦于模型的构思和实现，鲜有关注模型的训练加速，像混合精度和XLA这些技术，虽然也有听过，但没真正去实践过。这两天折腾了一番，成功在bert4keras中使用了混合精度和XLA来加速训练，在此做个简单的总结，供大家参考。
-本文的多数...">
+之前笔者一直都是聚焦于模型的构思和实现，鲜有关注模型的训练加速，像混合精度和XLA这些技术，虽然也有听过，但没真正去实践过。这两天折腾了一番，成功在bert4keras中使用了混合精度和XLA来加速训练，在此做个简单的总结，供大家参考。...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -23,6 +22,9 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="../assets/css/main.css">
     <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
 
     <!-- MathJax for math rendering -->
     <script>
@@ -67,54 +69,87 @@
 
     <!-- Post Content -->
     <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=模型">模型</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #93 在bert4keras中使用混合精度和XLA加速训练
+                </li>
+            </ol>
+        </nav>
+
         <!-- Post Header -->
         <header class="post-header mb-4">
-            <h1 class="post-title">在bert4keras中使用混合精度和XLA加速训练</h1>
+            <h1 class="post-title">
+                <span class="post-number">#93</span>
+                在bert4keras中使用混合精度和XLA加速训练
+            </h1>
             <div class="post-meta">
                 <span><i class="far fa-calendar"></i> </span>
                 
                 <span class="ms-3">
                     <i class="fas fa-link"></i>
-                    <a href="https://spaces.ac.cn/archives/9059" target="_blank">原文链接</a>
+                    <a href="https://spaces.ac.cn/archives/9059" target="_blank" rel="noopener">原文链接</a>
                 </span>
                 
             </div>
             
             <div class="post-tags mt-3">
                 
-                <span class="tag"><i class="fas fa-tag"></i> 模型</span>
-                <span class="tag"><i class="fas fa-tag"></i> 优化</span>
-                <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
-                <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
-                <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                <a href="../index.html?tags=模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 模型</span>
+                </a>
+                
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+                <a href="../index.html?tags=梯度" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
                 
             </div>
             
         </header>
 
-        <!-- Post Body -->
-        <div class="post-content">
-            <h1 id="bert4kerasxla">在bert4keras中使用混合精度和XLA加速训练</h1>
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="bert4kerasxla">在bert4keras中使用混合精度和XLA加速训练<a class="toc-link" href="#bert4kerasxla" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9059">https://spaces.ac.cn/archives/9059</a></p>
 <p><strong>发布日期</strong>: </p>
 <hr />
 <p>之前笔者一直都是聚焦于模型的构思和实现，鲜有关注模型的训练加速，像混合精度和XLA这些技术，虽然也有听过，但没真正去实践过。这两天折腾了一番，成功在bert4keras中使用了混合精度和XLA来加速训练，在此做个简单的总结，供大家参考。</p>
 <p>本文的多数经验结论并不只限于bert4keras中使用，之所以在标题中强调bert4keras，只不过bert4keras中的模型实现相对较为规整，因此启动这些加速技巧所要做的修改相对更少。</p>
-<h2 id="_1">实验环境</h2>
+<h2 id="_1">实验环境<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>本文的实验显卡为3090，使用的docker镜像为nvcr.io/nvidia/tensorflow:21.09-tf1-py3，其中自带的tensorflow版本为1.15.5。另外，实验所用的bert4keras版本为0.11.3。其他环境也可以参考着弄，要注意有折腾精神，不要指望着无脑调用。</p>
 <p>顺便提一下，3090、A100等卡只能用cuda11，而tensorflow官网的1.15版本是不支持cuda11的，如果还想用tensorflow 1.x，那么只能用nvidia亲自维护的<a href="https://github.com/NVIDIA/tensorflow">nvidia-tensorflow</a>，或者用其构建的<a href="https://docs.nvidia.com/deeplearning/frameworks/tensorflow-release-notes/running.html">docker镜像</a>。用nvidia而不是google维护的tensorflow，除了能让你在最新的显卡用上1.x版本外，还有nvidia专门做的一些额外优化，具体文档可以参考<a href="https://docs.nvidia.com/deeplearning/frameworks/tensorflow-user-guide/index.html">这里</a>。</p>
 <p>不要说“tensorflow都出到2.8了，怎么还用1.15”这样的话，你的显卡是nvidia产的，所以哪个版本的tensorflow最好用，你我说了不算，甚至Google说了都不算，nvidia说的才算，nvidia还在维护着1.15，那说明1.15才是yyds。</p>
-<h2 id="_2">混合精度</h2>
+<h2 id="_2">混合精度<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>首先我们来看混合精度训练，简单来说就是模型计算用FP16、参数更新和存储用FP32，FP16的表示范围大致是$6\times 10^{-8}\sim 65504$，其上下界都是我们在实现模型时有可能触碰到的，所以引入FP16后最大的问题就是溢出和精度损失。更详细的原理介绍大家自行搜索就好，本文主要关注怎么用。</p>
 <p>nvidia-tensorflow的帮助文档中对混合精度训练的介绍可见<a href="https://docs.nvidia.com/deeplearning/frameworks/tensorflow-user-guide/index.html#tfamp">这里</a>，其中启动混合精度训练最简单的方法是脚本的开头添加环境变量：</p>
-<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
 <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;TF_KERAS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;1&#39;</span>  <span class="c1"># 必须使用tf.keras</span>
 <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;TF_ENABLE_AUTO_MIXED_PRECISION_GRAPH_REWRITE&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;1&#39;</span>  <span class="c1"># 混合精度训练</span>
 </code></pre></div>
 
 <p>读者或许留意到，多数教程介绍的是 TF_ENABLE_AUTO_MIXED_PRECISION 而我这里是 TF_ENABLE_AUTO_MIXED_PRECISION_GRAPH_REWRITE ，它们的区别在于前者会自动添加“动态损失放大（Loss Scaling）”而后者不会，但笔者测试发现“动态损失放大”并不能替代手动调整损失，因此干脆不要这个功能了。</p>
 <p>添加完环境变量后，可以重新启动训练脚本看看情况。如果训练开始就出现了NaN，那么可以调整一下infinity和epsilon：</p>
-<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">bert4keras.backend</span><span class="w"> </span><span class="kn">import</span> <span class="n">K</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">bert4keras.backend</span><span class="w"> </span><span class="kn">import</span> <span class="n">K</span>
 <span class="n">K</span><span class="o">.</span><span class="n">set_infinity</span><span class="p">(</span><span class="mf">1e4</span><span class="p">)</span>
 <span class="n">K</span><span class="o">.</span><span class="n">set_epsilon</span><span class="p">(</span><span class="mf">1e-5</span><span class="p">)</span>
 </code></pre></div>
@@ -122,33 +157,33 @@
 <p>调整完后通常不会一开始就NaN了（如果还有，那就检查一下模型其他地方有没有用到不受这这两个函数控制的 infinity 和 epsilon 并修改过来），但有可能出现的是loss先降后升最后NaN，这是因为初始化不好，或者是像<a href="/archives/8994">DeepNet</a>那样刻意为之，使得模型存在部分参数的梯度极小（小于$10^{-8}$），这时候在FP16的精度内它就直接等于0了，于是这部分参数不会得到更新，或者等价说梯度是不准的，长时间用不准的梯度更新，就容易不收敛。</p>
 <p>这时候解决方案就是“损失放大”了。我们可以直接在损失函数上乘上一个放大因子（比如1000，可以自行调试，不出现NaN的前提下越大越好），使得原本很小的梯度就得以放大到FP16范围内，不至于直接置零，避免了梯度的精度损失。而对于我们平时用的Adam、<a href="/archives/8978">LAMB</a>等优化器来说，损失函数乘上一个常数并不会改变这些优化器的训练过程，也就是它们完全是兼容“损失放大”的。</p>
 <p>事实上，笔者发现“损失放大”技巧不仅仅在混合精度训练场景下有效，即便是全FP32精度训练也会有一定作用：在全FP32精度训练时，如果不进行损失放大，开始阶段模型会停留在某个损失值一段时间，然后才慢慢下降；而如果进行了损失放大，那么开始阶段模型就一直保持缓慢下降趋势，相对来说收敛更快了。</p>
-<h2 id="_3">代数加速</h2>
+<h2 id="_3">代数加速<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>现在我们来看XLA，全称为“Accelerated Linear Algebra”，即专门用来加速线性代数运算的。简单来说，XLA就是对计算图提前进行编译优化，将能合并的算子进行合并（减少缓存变量以节省内存），将能并行的算子进行并行（提高计算速度）。</p>
 <p>在nvidia-tensorflow中，启动XLA的最简单方式依旧是添加环境变量：</p>
-<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
 <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;TF_KERAS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;1&#39;</span>  <span class="c1"># 必须使用tf.keras</span>
 <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;TF_XLA_FLAGS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;--tf_xla_auto_jit=1&#39;</span>  <span class="c1"># 启用XLA</span>
 </code></pre></div>
 
 <p>但要注意，XLA不是保证有提升的，刚才我们说到，XLA会将能并行的算子尽量并行，很明显这是通过空间换时间的方案，因此启用XLA后可能会消耗更多的显存以导致OOM，甚至并行簇过大时反而会导致性能下降。<a href="https://docs.nvidia.com/deeplearning/frameworks/tensorflow-user-guide/index.html#xla-best-practices">官方文档</a>对有可能出现的异常做了比较详尽的分析并提出了相应的建议，其中笔者推荐的解决方法是补充<code>--tf_xla_enable_lazy_compilation=false</code>参数：</p>
-<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
 <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;TF_KERAS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;1&#39;</span>  <span class="c1"># 必须使用tf.keras</span>
 <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;TF_XLA_FLAGS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;--tf_xla_auto_jit=1&#39;</span>  <span class="c1"># 启用XLA</span>
 <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;TF_XLA_FLAGS&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="s1">&#39; --tf_xla_enable_lazy_compilation=false&#39;</span>  <span class="c1"># 优化XLA</span>
 </code></pre></div>
 
 <p>如果这都不能解决，那就换成XLA Lite：</p>
-<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
 <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;TF_KERAS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;1&#39;</span>  <span class="c1"># 必须使用tf.keras</span>
 <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;TF_XLA_FLAGS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;--tf_xla_auto_jit=fusible&#39;</span>  <span class="c1"># 启用XLA Lite</span>
 </code></pre></div>
 
 <p>如果换成XLA Lite都无法解决，那基本就说明XLA不适合你的模型了。</p>
-<h2 id="_4">性能比较</h2>
+<h2 id="_4">性能比较<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>在3090上，启动混合精度训练带来的加速大概是10%多一点。这个幅度可能不如大家想象的那么快，笔者猜测这是因为3090、A100等新卡上面，默认的FP32格式实际上用的是一种名为TF32的格式（参考<a href="https://developer.nvidia.com/blog/accelerating-tensorflow-on-a100-gpus/">这里</a>），TF32某种意义来说本身就是一种“半精度格式”，比FP32更快。换句话说，3090上的FP32本身就相当于已经做过一定的半精度优化了，速度本来就更快，因此换成混合精度后的提升相对来说就小了。</p>
 <p>至于XLA带来的提升，大致是15%左右。在笔者的训练脚本中，直接设置环境变量 TF_XLA_FLAGS 为<code>--tf_xla_auto_jit=1</code>会OOM，补充<code>--tf_xla_enable_lazy_compilation=false</code>依旧，而改为<code>--tf_xla_auto_jit=fusible</code>则可以正常训练。</p>
 <p>最后，最关键的是，混合精度与XLA可以叠加使用！两者一起使用带来的加速大概是30%左右，并且混合精度训练的加入基本上可以抵消XLA带来的显存消耗增加，两者真可谓是相得益彰了。</p>
-<h2 id="_5">文章小结</h2>
+<h2 id="_5">文章小结<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>本文介绍了在bert4keras中使用混合精度和XLA加速训练的尝试，两者同时启用大概能在3090上加速30%左右。</p>
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9059">https://spaces.ac.cn/archives/9059</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
@@ -170,15 +205,79 @@ month={Apr},<br />
 url={\url{https://spaces.ac.cn/archives/9059}},<br />
 } </p>
 <hr />
-<h2 id="_6">公式推导与注释</h2>
+<h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
 <p>TODO: 添加详细的数学公式推导和注释</p>
-        </div>
+                </div>
 
-        <!-- Back to Home -->
-        <div class="text-center mt-5 mb-4">
-            <a href="../index.html" class="btn btn-outline-primary">
-                <i class="fas fa-arrow-left"></i> 返回首页
-            </a>
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="等值振荡定理最优多项式逼近的充要条件.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#92 等值振荡定理：最优多项式逼近的充要条件</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="智能家居之热水器零冷水技术原理浅析.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#94 智能家居之热水器零冷水技术原理浅析</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#bert4kerasxla">在bert4keras中使用混合精度和XLA加速训练</a><ul>
+<li><a href="#_1">实验环境</a></li>
+<li><a href="#_2">混合精度</a></li>
+<li><a href="#_3">代数加速</a></li>
+<li><a href="#_4">性能比较</a></li>
+<li><a href="#_5">文章小结</a></li>
+<li><a href="#_6">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
         </div>
     </article>
 
@@ -200,5 +299,41 @@ url={\url{https://spaces.ac.cn/archives/9059}},<br />
 
     <!-- Syntax highlighting -->
     <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
 </body>
 </html>
