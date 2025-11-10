@@ -30,7 +30,7 @@
 
 ### 短期目标（进行中）
 - [x] 程序化抓取所有blog，并存储于blog_list.txt（已完成：234篇）
-- [ ] **【当前任务】为234篇文章添加极详细数学推导（49/234篇已完成，21%）**
+- [ ] **【当前任务】为234篇文章添加极详细数学推导（67/234篇已完成，29%）**
   - 策略：按主题分批处理
   - 批次大小：10-15篇/批
   - 详细程度：极详细（20+公式，200+行，多角度解释）
@@ -95,6 +95,25 @@
     * [x] 生成扩散模型漫谈二十二：信噪比与大图生成（上） ✅
     * [x] 生成扩散模型漫谈十六：W距离≤得分匹配 ✅
     * [x] 生成扩散模型漫谈十三：从万有引力到扩散模型 ✅
+  - **第五批（Transformer/Attention主题，18篇）** ✅：
+    * [x] Transformer升级之路6：旋转位置编码的完备性分析 ✅
+    * [x] Transformer升级之路7：长度外推性与局部注意力 ✅
+    * [x] Transformer升级之路8：长度外推性与位置鲁棒性 ✅
+    * [x] Transformer升级之路9：一种全局长度外推的新思路 ✅
+    * [x] Transformer升级之路10：RoPE是一种β进制编码 ✅
+    * [x] Transformer升级之路11：将β进制位置进行到底 ✅
+    * [x] Transformer升级之路12：无限外推的ReRoPE ✅
+    * [x] Transformer升级之路13：逆用Leaky ReRoPE ✅
+    * [x] Transformer升级之路14：当HWFA遇见ReRoPE ✅
+    * [x] Transformer升级之路15：Key归一化助力长度外推 ✅
+    * [x] Transformer升级之路16：复盘长度外推技术 ✅
+    * [x] Transformer升级之路17：多模态位置编码的简单思考 ✅
+    * [x] Transformer升级之路18：RoPE的底数选择原则 ✅
+    * [x] Transformer升级之路20：MLA好在哪里（上） ✅
+    * [x] Transformer升级之路21：MLA好在哪里（下） ✅
+    * [x] 为什么线性注意力要加Short Conv？ ✅
+    * [x] 低精度Attention可能存在有偏的舍入误差 ✅
+    * [x] 相对位置编码Transformer的一个理论缺陷与对策 ✅
 - [x] 优化首页搜索功能（添加标签筛选）
 - [x] 添加文章分类功能
 
