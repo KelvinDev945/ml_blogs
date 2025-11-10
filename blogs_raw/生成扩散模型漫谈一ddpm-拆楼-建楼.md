@@ -184,7 +184,591 @@ url={\url{https://spaces.ac.cn/archives/9119}},
 
 ---
 
-## 公式推导与注释
+## 详细数学推导
 
-TODO: 添加详细的数学公式推导和注释
+本节我们将对DDPM的数学原理进行极其详细的推导，包括前向扩散过程、后向去噪过程、变分下界证明、损失函数推导等核心内容。
+
+### 1. DDPM的完整数学定义
+
+#### 1.1 前向扩散过程（马尔可夫链）
+
+DDPM的前向扩散过程是一个参数固定的马尔可夫链，从数据分布$q(\boldsymbol{x}_0)$出发，逐步添加高斯噪声，经过$T$步后得到近似的各向同性高斯分布。
+
+**定义1（前向过程）**：给定数据样本$\boldsymbol{x}_0 \sim q(\boldsymbol{x}_0)$，前向扩散过程定义为：
+
+\begin{equation}
+q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0) = \prod_{t=1}^{T} q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})
+\end{equation}
+
+其中每一步的转移概率为：
+
+\begin{equation}
+q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) = \mathcal{N}(\boldsymbol{x}_t; \alpha_t\boldsymbol{x}_{t-1}, \beta_t^2\boldsymbol{I})
+\end{equation}
+
+这里$\alpha_t, \beta_t > 0$且满足约束$\alpha_t^2 + \beta_t^2 = 1$。
+
+**定理1（任意步前向扩散）**：对于任意时刻$t$，我们可以直接从$\boldsymbol{x}_0$采样得到$\boldsymbol{x}_t$：
+
+\begin{equation}
+q(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t\boldsymbol{x}_0, \bar{\beta}_t^2\boldsymbol{I})
+\end{equation}
+
+其中$\bar{\alpha}_t = \prod_{s=1}^{t}\alpha_s$，$\bar{\beta}_t = \sqrt{1-\bar{\alpha}_t^2}$。
+
+**证明**：我们通过数学归纳法证明此定理。
+
+*基础步骤*（$t=1$）：根据定义，$q(\boldsymbol{x}_1|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_1; \alpha_1\boldsymbol{x}_0, \beta_1^2\boldsymbol{I})$。
+由于$\alpha_1^2 + \beta_1^2 = 1$，所以$\bar{\alpha}_1 = \alpha_1$，$\bar{\beta}_1 = \beta_1$，命题成立。
+
+*归纳步骤*：假设对$t-1$命题成立，即
+\begin{equation}
+q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_{t-1}; \bar{\alpha}_{t-1}\boldsymbol{x}_0, \bar{\beta}_{t-1}^2\boldsymbol{I})
+\end{equation}
+
+根据重参数化技巧，我们可以写成：
+\begin{equation}
+\boldsymbol{x}_{t-1} = \bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\boldsymbol{\varepsilon}_{t-1}, \quad \boldsymbol{\varepsilon}_{t-1} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})
+\end{equation}
+
+再应用一步扩散：
+\begin{equation}
+\boldsymbol{x}_t = \alpha_t\boldsymbol{x}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t, \quad \boldsymbol{\varepsilon}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})
+\end{equation}
+
+代入得：
+\begin{equation}
+\begin{aligned}
+\boldsymbol{x}_t &= \alpha_t(\bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\boldsymbol{\varepsilon}_{t-1}) + \beta_t\boldsymbol{\varepsilon}_t \\
+&= \alpha_t\bar{\alpha}_{t-1}\boldsymbol{x}_0 + \alpha_t\bar{\beta}_{t-1}\boldsymbol{\varepsilon}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t
+\end{aligned}
+\end{equation}
+
+由于$\boldsymbol{\varepsilon}_{t-1}$和$\boldsymbol{\varepsilon}_t$相互独立，根据**高斯分布的叠加性**：两个独立高斯随机变量$\mathcal{N}(0, \sigma_1^2)$和$\mathcal{N}(0, \sigma_2^2)$的线性组合$a_1\boldsymbol{\varepsilon}_1 + a_2\boldsymbol{\varepsilon}_2$服从$\mathcal{N}(0, a_1^2\sigma_1^2 + a_2^2\sigma_2^2)$。
+
+因此，$\alpha_t\bar{\beta}_{t-1}\boldsymbol{\varepsilon}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t$的方差为：
+\begin{equation}
+\alpha_t^2\bar{\beta}_{t-1}^2 + \beta_t^2 = \alpha_t^2(1-\bar{\alpha}_{t-1}^2) + \beta_t^2
+\end{equation}
+
+利用$\alpha_t^2 + \beta_t^2 = 1$，我们有$\beta_t^2 = 1 - \alpha_t^2$，代入得：
+\begin{equation}
+\begin{aligned}
+\alpha_t^2(1-\bar{\alpha}_{t-1}^2) + \beta_t^2 &= \alpha_t^2 - \alpha_t^2\bar{\alpha}_{t-1}^2 + 1 - \alpha_t^2 \\
+&= 1 - \alpha_t^2\bar{\alpha}_{t-1}^2 \\
+&= 1 - \bar{\alpha}_t^2 \\
+&= \bar{\beta}_t^2
+\end{aligned}
+\end{equation}
+
+因此：
+\begin{equation}
+\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})
+\end{equation}
+
+即$q(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t\boldsymbol{x}_0, \bar{\beta}_t^2\boldsymbol{I})$。证毕。
+
+#### 1.2 后向去噪过程（反向马尔可夫链）
+
+**定义2（后向过程）**：后向去噪过程定义为参数化的马尔可夫链：
+
+\begin{equation}
+p_{\boldsymbol{\theta}}(\boldsymbol{x}_{0:T}) = p(\boldsymbol{x}_T)\prod_{t=1}^{T} p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)
+\end{equation}
+
+其中先验$p(\boldsymbol{x}_T) = \mathcal{N}(\boldsymbol{x}_T; \boldsymbol{0}, \boldsymbol{I})$，反向转移概率建模为：
+
+\begin{equation}
+p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{x}_{t-1}; \boldsymbol{\mu}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t), \sigma_t^2\boldsymbol{I})
+\end{equation}
+
+其中$\boldsymbol{\mu}_{\boldsymbol{\theta}}$是需要学习的均值函数，$\sigma_t^2$是预设的方差。
+
+### 2. 后向条件分布的推导
+
+为了理解如何设计后向过程，我们需要推导真实的后向条件分布$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$。
+
+**定理2（后向条件分布）**：给定$\boldsymbol{x}_t$和$\boldsymbol{x}_0$，后向条件分布为：
+
+\begin{equation}
+q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_{t-1}; \tilde{\boldsymbol{\mu}}_t(\boldsymbol{x}_t, \boldsymbol{x}_0), \tilde{\beta}_t^2\boldsymbol{I})
+\end{equation}
+
+其中均值和方差为：
+
+\begin{equation}
+\tilde{\boldsymbol{\mu}}_t(\boldsymbol{x}_t, \boldsymbol{x}_0) = \frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\boldsymbol{x}_t + \frac{\beta_t^2\bar{\alpha}_{t-1}}{\bar{\beta}_t^2}\boldsymbol{x}_0
+\end{equation}
+
+\begin{equation}
+\tilde{\beta}_t^2 = \frac{\bar{\beta}_{t-1}^2\beta_t^2}{\bar{\beta}_t^2}
+\end{equation}
+
+**证明**：根据贝叶斯定理：
+
+\begin{equation}
+q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \frac{q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}, \boldsymbol{x}_0)q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0)}{q(\boldsymbol{x}_t|\boldsymbol{x}_0)}
+\end{equation}
+
+由于马尔可夫性质，$q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}, \boldsymbol{x}_0) = q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})$，因此：
+
+\begin{equation}
+q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) \propto q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0)
+\end{equation}
+
+我们知道：
+\begin{align}
+q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) &= \mathcal{N}(\boldsymbol{x}_t; \alpha_t\boldsymbol{x}_{t-1}, \beta_t^2\boldsymbol{I}) \\
+q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) &= \mathcal{N}(\boldsymbol{x}_{t-1}; \bar{\alpha}_{t-1}\boldsymbol{x}_0, \bar{\beta}_{t-1}^2\boldsymbol{I})
+\end{align}
+
+将高斯分布的密度函数代入：
+
+\begin{equation}
+\begin{aligned}
+&q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) \\
+&\propto \exp\left(-\frac{1}{2}\left[\frac{\|\boldsymbol{x}_t - \alpha_t\boldsymbol{x}_{t-1}\|^2}{\beta_t^2} + \frac{\|\boldsymbol{x}_{t-1} - \bar{\alpha}_{t-1}\boldsymbol{x}_0\|^2}{\bar{\beta}_{t-1}^2}\right]\right)
+\end{aligned}
+\end{equation}
+
+展开二次项：
+
+\begin{equation}
+\begin{aligned}
+&\frac{\|\boldsymbol{x}_t - \alpha_t\boldsymbol{x}_{t-1}\|^2}{\beta_t^2} + \frac{\|\boldsymbol{x}_{t-1} - \bar{\alpha}_{t-1}\boldsymbol{x}_0\|^2}{\bar{\beta}_{t-1}^2} \\
+&= \frac{1}{\beta_t^2}(\boldsymbol{x}_t^{\top}\boldsymbol{x}_t - 2\alpha_t\boldsymbol{x}_t^{\top}\boldsymbol{x}_{t-1} + \alpha_t^2\boldsymbol{x}_{t-1}^{\top}\boldsymbol{x}_{t-1}) \\
+&\quad + \frac{1}{\bar{\beta}_{t-1}^2}(\boldsymbol{x}_{t-1}^{\top}\boldsymbol{x}_{t-1} - 2\bar{\alpha}_{t-1}\boldsymbol{x}_{t-1}^{\top}\boldsymbol{x}_0 + \bar{\alpha}_{t-1}^2\boldsymbol{x}_0^{\top}\boldsymbol{x}_0)
+\end{aligned}
+\end{equation}
+
+收集关于$\boldsymbol{x}_{t-1}$的二次项：
+
+\begin{equation}
+\left(\frac{\alpha_t^2}{\beta_t^2} + \frac{1}{\bar{\beta}_{t-1}^2}\right)\boldsymbol{x}_{t-1}^{\top}\boldsymbol{x}_{t-1}
+\end{equation}
+
+收集关于$\boldsymbol{x}_{t-1}$的一次项：
+
+\begin{equation}
+-2\left(\frac{\alpha_t}{\beta_t^2}\boldsymbol{x}_t^{\top} + \frac{\bar{\alpha}_{t-1}}{\bar{\beta}_{t-1}^2}\boldsymbol{x}_0^{\top}\right)\boldsymbol{x}_{t-1}
+\end{equation}
+
+后验分布$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$仍然是高斯分布，其精度（方差的倒数）为：
+
+\begin{equation}
+\tilde{\beta}_t^{-2} = \frac{\alpha_t^2}{\beta_t^2} + \frac{1}{\bar{\beta}_{t-1}^2} = \frac{\alpha_t^2\bar{\beta}_{t-1}^2 + \beta_t^2}{\beta_t^2\bar{\beta}_{t-1}^2}
+\end{equation}
+
+利用$\alpha_t^2\bar{\beta}_{t-1}^2 + \beta_t^2 = \alpha_t^2(1-\bar{\alpha}_{t-1}^2) + (1-\alpha_t^2) = 1 - \alpha_t^2\bar{\alpha}_{t-1}^2 = \bar{\beta}_t^2$，得：
+
+\begin{equation}
+\tilde{\beta}_t^2 = \frac{\beta_t^2\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}
+\end{equation}
+
+均值为：
+
+\begin{equation}
+\begin{aligned}
+\tilde{\boldsymbol{\mu}}_t &= \tilde{\beta}_t^2\left(\frac{\alpha_t}{\beta_t^2}\boldsymbol{x}_t + \frac{\bar{\alpha}_{t-1}}{\bar{\beta}_{t-1}^2}\boldsymbol{x}_0\right) \\
+&= \frac{\beta_t^2\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\left(\frac{\alpha_t}{\beta_t^2}\boldsymbol{x}_t + \frac{\bar{\alpha}_{t-1}}{\bar{\beta}_{t-1}^2}\boldsymbol{x}_0\right) \\
+&= \frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\boldsymbol{x}_t + \frac{\beta_t^2\bar{\alpha}_{t-1}}{\bar{\beta}_t^2}\boldsymbol{x}_0
+\end{aligned}
+\end{equation}
+
+证毕。
+
+### 3. 变分下界（ELBO）的完整推导
+
+DDPM的训练目标是最大化对数似然$\log p_{\boldsymbol{\theta}}(\boldsymbol{x}_0)$。我们通过变分推断推导变分下界。
+
+**定理3（变分下界）**：对数似然的变分下界为：
+
+\begin{equation}
+\log p_{\boldsymbol{\theta}}(\boldsymbol{x}_0) \geq \mathbb{E}_{q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)}\left[\log\frac{p_{\boldsymbol{\theta}}(\boldsymbol{x}_{0:T})}{q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)}\right] =: \mathcal{L}
+\end{equation}
+
+**证明**：使用Jensen不等式。对于任意分布$q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)$：
+
+\begin{equation}
+\begin{aligned}
+\log p_{\boldsymbol{\theta}}(\boldsymbol{x}_0) &= \log\int p_{\boldsymbol{\theta}}(\boldsymbol{x}_{0:T})d\boldsymbol{x}_{1:T} \\
+&= \log\int q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)\frac{p_{\boldsymbol{\theta}}(\boldsymbol{x}_{0:T})}{q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)}d\boldsymbol{x}_{1:T} \\
+&= \log\mathbb{E}_{q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)}\left[\frac{p_{\boldsymbol{\theta}}(\boldsymbol{x}_{0:T})}{q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)}\right] \\
+&\geq \mathbb{E}_{q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)}\left[\log\frac{p_{\boldsymbol{\theta}}(\boldsymbol{x}_{0:T})}{q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)}\right]
+\end{aligned}
+\end{equation}
+
+最后一步使用了Jensen不等式（$\log$是凹函数）。证毕。
+
+**定理4（ELBO的KL散度分解）**：变分下界可以分解为：
+
+\begin{equation}
+\begin{aligned}
+\mathcal{L} = &\mathbb{E}_q[\log p_{\boldsymbol{\theta}}(\boldsymbol{x}_0|\boldsymbol{x}_1)] \\
+&- D_{KL}(q(\boldsymbol{x}_T|\boldsymbol{x}_0) \| p(\boldsymbol{x}_T)) \\
+&- \sum_{t=2}^{T}\mathbb{E}_{q(\boldsymbol{x}_t|\boldsymbol{x}_0)}[D_{KL}(q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t,\boldsymbol{x}_0) \| p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t))]
+\end{aligned}
+\end{equation}
+
+**证明**：展开ELBO：
+
+\begin{equation}
+\begin{aligned}
+\mathcal{L} &= \mathbb{E}_q\left[\log\frac{p_{\boldsymbol{\theta}}(\boldsymbol{x}_{0:T})}{q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)}\right] \\
+&= \mathbb{E}_q\left[\log\frac{p(\boldsymbol{x}_T)\prod_{t=1}^{T}p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)}{\prod_{t=1}^{T}q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})}\right] \\
+&= \mathbb{E}_q\left[\log p(\boldsymbol{x}_T) + \sum_{t=1}^{T}\log p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) - \sum_{t=1}^{T}\log q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})\right]
+\end{aligned}
+\end{equation}
+
+利用链式法则$q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0) = q(\boldsymbol{x}_T|\boldsymbol{x}_0)\prod_{t=2}^{T}q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t,\boldsymbol{x}_0)$（通过贝叶斯定理验证），我们可以改写：
+
+\begin{equation}
+\begin{aligned}
+\mathcal{L} &= \mathbb{E}_q\left[\log\frac{p(\boldsymbol{x}_T)p_{\boldsymbol{\theta}}(\boldsymbol{x}_0|\boldsymbol{x}_1)}{q(\boldsymbol{x}_T|\boldsymbol{x}_0)} + \sum_{t=2}^{T}\log\frac{p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)}{q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t,\boldsymbol{x}_0)}\right] \\
+&= \mathbb{E}_q[\log p_{\boldsymbol{\theta}}(\boldsymbol{x}_0|\boldsymbol{x}_1)] - D_{KL}(q(\boldsymbol{x}_T|\boldsymbol{x}_0) \| p(\boldsymbol{x}_T)) \\
+&\quad - \sum_{t=2}^{T}\mathbb{E}_{q(\boldsymbol{x}_t|\boldsymbol{x}_0)}[D_{KL}(q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t,\boldsymbol{x}_0) \| p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t))]
+\end{aligned}
+\end{equation}
+
+证毕。
+
+### 4. 损失函数的详细推导
+
+#### 4.1 基于噪声预测的参数化
+
+根据定理2，真实的后向均值为：
+
+\begin{equation}
+\tilde{\boldsymbol{\mu}}_t(\boldsymbol{x}_t, \boldsymbol{x}_0) = \frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\boldsymbol{x}_t + \frac{\beta_t^2\bar{\alpha}_{t-1}}{\bar{\beta}_t^2}\boldsymbol{x}_0
+\end{equation}
+
+从$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$，我们可以解出：
+
+\begin{equation}
+\boldsymbol{x}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\varepsilon}}{\bar{\alpha}_t}
+\end{equation}
+
+代入均值表达式：
+
+\begin{equation}
+\begin{aligned}
+\tilde{\boldsymbol{\mu}}_t &= \frac{\alpha_t\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\boldsymbol{x}_t + \frac{\beta_t^2\bar{\alpha}_{t-1}}{\bar{\beta}_t^2} \cdot \frac{\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\varepsilon}}{\bar{\alpha}_t} \\
+&= \frac{1}{\bar{\beta}_t^2}\left[\alpha_t\bar{\beta}_{t-1}^2\boldsymbol{x}_t + \frac{\beta_t^2\bar{\alpha}_{t-1}}{\bar{\alpha}_t}\boldsymbol{x}_t - \frac{\beta_t^2\bar{\alpha}_{t-1}\bar{\beta}_t}{\bar{\alpha}_t}\boldsymbol{\varepsilon}\right]
+\end{aligned}
+\end{equation}
+
+利用$\bar{\alpha}_t = \alpha_t\bar{\alpha}_{t-1}$和$\bar{\beta}_t^2 = 1 - \bar{\alpha}_t^2$，化简系数：
+
+\begin{equation}
+\begin{aligned}
+\alpha_t\bar{\beta}_{t-1}^2 + \frac{\beta_t^2\bar{\alpha}_{t-1}}{\bar{\alpha}_t} &= \alpha_t(1-\bar{\alpha}_{t-1}^2) + \frac{\beta_t^2\bar{\alpha}_{t-1}}{\alpha_t\bar{\alpha}_{t-1}} \\
+&= \alpha_t - \alpha_t\bar{\alpha}_{t-1}^2 + \frac{\beta_t^2}{\alpha_t} \\
+&= \alpha_t - \alpha_t\bar{\alpha}_{t-1}^2 + \frac{1-\alpha_t^2}{\alpha_t} \\
+&= \frac{\alpha_t^2 - \alpha_t^2\bar{\alpha}_{t-1}^2 + 1 - \alpha_t^2}{\alpha_t} \\
+&= \frac{1 - \bar{\alpha}_t^2}{\alpha_t} = \frac{\bar{\beta}_t^2}{\alpha_t}
+\end{aligned}
+\end{equation}
+
+因此：
+
+\begin{equation}
+\tilde{\boldsymbol{\mu}}_t = \frac{1}{\alpha_t}\left[\boldsymbol{x}_t - \frac{\beta_t^2\bar{\alpha}_{t-1}\bar{\beta}_t}{\bar{\alpha}_t\bar{\beta}_t^2}\boldsymbol{\varepsilon}\right] = \frac{1}{\alpha_t}\left[\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t\alpha_t\bar{\alpha}_{t-1}}\boldsymbol{\varepsilon}\right]
+\end{equation}
+
+利用$\bar{\alpha}_t = \alpha_t\bar{\alpha}_{t-1}$，进一步化简：
+
+\begin{equation}
+\tilde{\boldsymbol{\mu}}_t = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t\bar{\alpha}_t}\boldsymbol{\varepsilon}\right)
+\end{equation}
+
+注意本文的记号中$\beta_t^2 = 1 - \alpha_t^2$，而原始DDPM论文中定义的$\beta_t$对应本文的$\beta_t^2$。因此在原始论文记号下：
+
+\begin{equation}
+\tilde{\boldsymbol{\mu}}_t = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}\boldsymbol{\varepsilon}\right)
+\end{equation}
+
+这启发我们将模型参数化为：
+
+\begin{equation}
+\boldsymbol{\mu}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\right)
+\end{equation}
+
+其中$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$是噪声预测网络。
+
+#### 4.2 L_t损失的推导
+
+对于$t \geq 2$，KL散度项为：
+
+\begin{equation}
+\begin{aligned}
+L_{t-1} &= \mathbb{E}_q[D_{KL}(q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t,\boldsymbol{x}_0) \| p_{\boldsymbol{\theta}}(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t))] \\
+&= \mathbb{E}_q\left[\frac{1}{2\sigma_t^2}\|\tilde{\boldsymbol{\mu}}_t - \boldsymbol{\mu}_{\boldsymbol{\theta}}\|^2\right] + \text{const}
+\end{aligned}
+\end{equation}
+
+这里使用了两个高斯分布KL散度的公式：
+
+\begin{equation}
+D_{KL}(\mathcal{N}(\boldsymbol{\mu}_1, \Sigma_1) \| \mathcal{N}(\boldsymbol{\mu}_2, \Sigma_2)) = \frac{1}{2}\left[\log\frac{|\Sigma_2|}{|\Sigma_1|} - d + \text{tr}(\Sigma_2^{-1}\Sigma_1) + (\boldsymbol{\mu}_2-\boldsymbol{\mu}_1)^{\top}\Sigma_2^{-1}(\boldsymbol{\mu}_2-\boldsymbol{\mu}_1)\right]
+\end{equation}
+
+当方差相同时，简化为：
+
+\begin{equation}
+D_{KL}(\mathcal{N}(\boldsymbol{\mu}_1, \sigma^2\boldsymbol{I}) \| \mathcal{N}(\boldsymbol{\mu}_2, \sigma^2\boldsymbol{I})) = \frac{1}{2\sigma^2}\|\boldsymbol{\mu}_1 - \boldsymbol{\mu}_2\|^2
+\end{equation}
+
+代入均值的表达式：
+
+\begin{equation}
+\begin{aligned}
+L_{t-1} &= \mathbb{E}_{\boldsymbol{x}_0,\boldsymbol{\varepsilon}}\left[\frac{1}{2\sigma_t^2}\left\|\frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}\boldsymbol{\varepsilon}\right) - \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t)\right)\right\|^2\right] \\
+&= \mathbb{E}_{\boldsymbol{x}_0,\boldsymbol{\varepsilon}}\left[\frac{\beta_t^2}{2\sigma_t^2\alpha_t^2(1-\bar{\alpha}_t)}\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t)\|^2\right] \\
+&= \mathbb{E}_{\boldsymbol{x}_0,\boldsymbol{\varepsilon}}\left[\frac{\beta_t^2}{2\sigma_t^2\alpha_t^2(1-\bar{\alpha}_t)}\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\bar{\alpha}_t\boldsymbol{x}_0+\sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon},t)\|^2\right]
+\end{aligned}
+\end{equation}
+
+#### 4.3 简化损失函数（L_simple）
+
+DDPM发现，忽略权重系数$\frac{\beta_t^2}{2\sigma_t^2\alpha_t^2(1-\bar{\alpha}_t)}$，使用简化的损失函数：
+
+\begin{equation}
+L_{\text{simple}} = \mathbb{E}_{t\sim\mathcal{U}(1,T), \boldsymbol{x}_0\sim q(\boldsymbol{x}_0), \boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})}\left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\bar{\alpha}_t\boldsymbol{x}_0+\sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon},t)\|^2\right]
+\end{equation}
+
+实际上效果更好。这可以理解为：
+
+1. **重参数化技巧**：将采样$\boldsymbol{x}_t \sim q(\boldsymbol{x}_t|\boldsymbol{x}_0)$转化为确定性变换$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}$
+
+2. **去噪自编码器视角**：模型学习预测添加到干净数据$\boldsymbol{x}_0$上的噪声$\boldsymbol{\varepsilon}$
+
+3. **多尺度去噪**：不同的$t$对应不同噪声水平，模型学习在所有噪声水平下预测噪声
+
+### 5. 与VAE的深层联系
+
+DDPM实际上是一个具有特殊结构的层次化VAE（Hierarchical VAE）。
+
+**定理5（DDPM作为VAE）**：DDPM可以视为满足以下性质的VAE：
+
+1. **潜变量维度**：潜变量$\boldsymbol{x}_{1:T}$与数据$\boldsymbol{x}_0$维度相同
+2. **编码器结构**：编码器$q(\boldsymbol{x}_{1:T}|\boldsymbol{x}_0)$是固定的（不可学习）高斯转移
+3. **潜变量层次**：$T$层潜变量形成马尔可夫链
+4. **解码器结构**：解码器$p_{\boldsymbol{\theta}}(\boldsymbol{x}_{0:T-1}|\boldsymbol{x}_{1:T})$反向遍历马尔可夫链
+
+**与标准VAE的对比**：
+
+| 特性 | 标准VAE | DDPM |
+|------|---------|------|
+| 潜变量维度 | $\dim(\boldsymbol{z}) \ll \dim(\boldsymbol{x})$ | $\dim(\boldsymbol{x}_t) = \dim(\boldsymbol{x}_0)$ |
+| 编码器 | 可学习的$q_{\phi}(\boldsymbol{z}|\boldsymbol{x})$ | 固定的$q(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})$ |
+| 潜变量结构 | 单层 | $T$层马尔可夫链 |
+| ELBO | $\mathbb{E}_q[\log p_{\boldsymbol{\theta}}(\boldsymbol{x}|\boldsymbol{z})] - D_{KL}(q_{\phi}(\boldsymbol{z}|\boldsymbol{x})\|p(\boldsymbol{z}))$ | 式(39)的分解形式 |
+
+**优势分析**：
+
+1. **避免后验坍缩**：固定编码器防止了VAE训练中常见的后验坍缩问题
+2. **渐进式建模**：$T$步渐进生成比一步生成更容易学习
+3. **表达能力**：高维潜空间保留更多信息
+
+### 6. 采样算法的详细推导
+
+#### 6.1 确定性采样（DDPM采样）
+
+**算法1（DDPM采样）**：
+
+```
+输入：训练好的噪声预测模型 ε_θ(x_t, t)
+输出：生成样本 x_0
+
+1. 采样 x_T ~ N(0, I)
+2. for t = T, T-1, ..., 1 do
+3.     采样 z ~ N(0, I) if t > 1, else z = 0
+4.     计算 x_{t-1} = (1/α_t)[x_t - (β_t/√(1-ᾱ_t))ε_θ(x_t, t)] + σ_t z
+5. end for
+6. return x_0
+```
+
+**噪声方差的选择**：
+
+根据定理2，理论上应该使用$\sigma_t = \tilde{\beta}_t = \frac{\beta_t\sqrt{1-\bar{\alpha}_{t-1}}}{\sqrt{1-\bar{\alpha}_t}}$。
+
+DDPM也尝试了固定方差$\sigma_t^2 = \beta_t^2$（对应本文记号），发现两者效果相近。
+
+#### 6.2 概率解释
+
+每一步采样可以理解为：
+
+\begin{equation}
+\boldsymbol{x}_{t-1}|\boldsymbol{x}_t \sim \mathcal{N}\left(\frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t)\right), \sigma_t^2\boldsymbol{I}\right)
+\end{equation}
+
+**均值项**：$\frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t)\right)$
+
+- $\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t)$：预测的噪声
+- $\frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}$：噪声的缩放因子
+- $\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t)$：去噪后的估计
+- $\frac{1}{\alpha_t}$：反向缩放
+
+**方差项**：$\sigma_t^2\boldsymbol{I}$
+
+- 控制采样的随机性
+- $\sigma_t = 0$：确定性去噪（类似Greedy Decoding）
+- $\sigma_t > 0$：随机采样（类似Random Sampling）
+
+### 7. Score-Based模型的等价性
+
+DDPM与基于分数的生成模型（Score-Based Generative Models）有深刻联系。
+
+**定义3（Score函数）**：数据分布$q(\boldsymbol{x})$的score函数定义为：
+
+\begin{equation}
+\nabla_{\boldsymbol{x}}\log q(\boldsymbol{x})
+\end{equation}
+
+**定理6（DDPM的Score解释）**：DDPM的噪声预测网络$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$与score函数的关系为：
+
+\begin{equation}
+\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t) = -\sqrt{1-\bar{\alpha}_t} \nabla_{\boldsymbol{x}_t}\log q(\boldsymbol{x}_t)
+\end{equation}
+
+**证明**：对于$q(\boldsymbol{x}_t) = \int q(\boldsymbol{x}_t|\boldsymbol{x}_0)q(\boldsymbol{x}_0)d\boldsymbol{x}_0$，有：
+
+\begin{equation}
+\begin{aligned}
+\nabla_{\boldsymbol{x}_t}\log q(\boldsymbol{x}_t) &= \frac{\nabla_{\boldsymbol{x}_t}q(\boldsymbol{x}_t)}{q(\boldsymbol{x}_t)} \\
+&= \frac{\int \nabla_{\boldsymbol{x}_t}q(\boldsymbol{x}_t|\boldsymbol{x}_0)q(\boldsymbol{x}_0)d\boldsymbol{x}_0}{\int q(\boldsymbol{x}_t|\boldsymbol{x}_0)q(\boldsymbol{x}_0)d\boldsymbol{x}_0} \\
+&= \mathbb{E}_{q(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\nabla_{\boldsymbol{x}_t}\log q(\boldsymbol{x}_t|\boldsymbol{x}_0)]
+\end{aligned}
+\end{equation}
+
+由于$q(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\bar{\alpha}_t\boldsymbol{x}_0, (1-\bar{\alpha}_t)\boldsymbol{I})$，有：
+
+\begin{equation}
+\nabla_{\boldsymbol{x}_t}\log q(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{1-\bar{\alpha}_t} = -\frac{\boldsymbol{\varepsilon}}{\sqrt{1-\bar{\alpha}_t}}
+\end{equation}
+
+因此：
+
+\begin{equation}
+\nabla_{\boldsymbol{x}_t}\log q(\boldsymbol{x}_t) = -\frac{1}{\sqrt{1-\bar{\alpha}_t}}\mathbb{E}_{q(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\boldsymbol{\varepsilon}]
+\end{equation}
+
+DDPM训练的目标正是让$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t) \approx \mathbb{E}_{q(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\boldsymbol{\varepsilon}]$，因此：
+
+\begin{equation}
+\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t) = -\sqrt{1-\bar{\alpha}_t}\nabla_{\boldsymbol{x}_t}\log q(\boldsymbol{x}_t)
+\end{equation}
+
+证毕。
+
+这说明DDPM本质上是在学习每个噪声水平下的score函数，采样过程等价于**退火的朗之万动力学**（Annealed Langevin Dynamics）。
+
+### 8. 理论收敛性分析
+
+#### 8.1 离散时间分析
+
+**定理7（重构误差界）**：假设噪声预测误差有界，即$\mathbb{E}[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t)\|^2] \leq \epsilon^2$，则生成分布与真实分布的KL散度满足：
+
+\begin{equation}
+D_{KL}(q(\boldsymbol{x}_0) \| p_{\boldsymbol{\theta}}(\boldsymbol{x}_0)) \leq C_1 T\epsilon^2 + C_2/T
+\end{equation}
+
+其中$C_1, C_2$是与数据分布相关的常数。
+
+**直观解释**：
+
+- 第一项$C_1 T\epsilon^2$：累积的预测误差，随步数$T$线性增长
+- 第二项$C_2/T$：离散化误差，$T$越大离散化越精细
+
+**最优步数**：平衡两项误差，最优$T \sim \epsilon^{-1}$，此时误差为$O(\epsilon)$。
+
+#### 8.2 连续时间极限
+
+当$T \to \infty$，DDPM收敛到**随机微分方程**（SDE）：
+
+**前向SDE**：
+\begin{equation}
+d\boldsymbol{x} = -\frac{1}{2}\beta(t)\boldsymbol{x}dt + \sqrt{\beta(t)}d\boldsymbol{w}
+\end{equation}
+
+**后向SDE**（[Anderson 1982](https://doi.org/10.1016/0304-4149(82)90051-5)）：
+\begin{equation}
+d\boldsymbol{x} = \left[-\frac{1}{2}\beta(t)\boldsymbol{x} - \beta(t)\nabla_{\boldsymbol{x}}\log q_t(\boldsymbol{x})\right]dt + \sqrt{\beta(t)}d\bar{\boldsymbol{w}}
+\end{equation}
+
+其中$\boldsymbol{w}, \bar{\boldsymbol{w}}$是标准布朗运动，$\beta(t)$是噪声调度函数。
+
+**概率流ODE**（Probability Flow ODE）：
+
+后向SDE对应的确定性ODE为：
+
+\begin{equation}
+d\boldsymbol{x} = \left[-\frac{1}{2}\beta(t)\boldsymbol{x} - \frac{1}{2}\beta(t)\nabla_{\boldsymbol{x}}\log q_t(\boldsymbol{x})\right]dt
+\end{equation}
+
+这个ODE与SDE有相同的边缘分布$q_t(\boldsymbol{x})$，但轨迹是确定性的，这为后续的DDIM等快速采样算法提供了理论基础。
+
+### 9. 实践中的技巧与改进
+
+#### 9.1 噪声调度的选择
+
+**线性调度**（DDPM原始）：
+\begin{equation}
+\beta_t^2 = \beta_{\min} + \frac{t-1}{T-1}(\beta_{\max} - \beta_{\min})
+\end{equation}
+
+**余弦调度**（Improved DDPM）：
+\begin{equation}
+\bar{\alpha}_t = \frac{f(t)}{f(0)}, \quad f(t) = \cos\left(\frac{t/T + s}{1+s} \cdot \frac{\pi}{2}\right)^2
+\end{equation}
+
+余弦调度在接近$t=0$和$t=T$时变化更平缓，避免了过快的信号损失。
+
+#### 9.2 方差的学习
+
+固定方差$\sigma_t^2 = \beta_t^2$或$\sigma_t^2 = \tilde{\beta}_t^2$效果已经不错，但也可以让模型学习方差：
+
+\begin{equation}
+\sigma_t^2 = \exp(v\log\beta_t^2 + (1-v)\log\tilde{\beta}_t^2)
+\end{equation}
+
+其中$v = \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) \in [0,1]$是模型输出的插值系数。
+
+#### 9.3 重要性采样
+
+均匀采样时间步$t \sim \mathcal{U}(1,T)$不是最优的。根据损失权重，可以设计重要性采样：
+
+\begin{equation}
+p(t) \propto \sqrt{\mathbb{E}[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t)\|^2]}
+\end{equation}
+
+在训练早期，高噪声水平（大$t$）的误差更大，应该更频繁地采样。
+
+### 10. 总结与展望
+
+本节详细推导了DDPM的核心数学原理，包括：
+
+1. **前向扩散过程**：证明了任意步扩散的闭式解（定理1）
+2. **后向条件分布**：推导了精确的后验分布形式（定理2）
+3. **变分下界**：完整证明了ELBO及其KL散度分解（定理3-4）
+4. **损失函数**：从变分推断到简化损失函数的推导
+5. **与VAE的联系**：揭示了DDPM作为特殊层次VAE的本质（定理5）
+6. **Score-Based等价性**：建立了与score匹配的联系（定理6）
+7. **理论保证**：分析了收敛性和连续时间极限（定理7）
+
+**关键洞察**：
+
+- DDPM通过$T$步渐进去噪，将困难的一步生成问题分解为$T$个简单的去噪步骤
+- 固定的编码器避免了VAE的后验坍缩问题
+- 噪声预测等价于score函数估计，连接了基于能量的模型
+- 连续时间极限揭示了与SDE的深刻联系
+
+**未解决的问题**：
+
+1. 如何进一步加速采样（DDIM、DPM-Solver等后续工作）
+2. 最优的噪声调度设计
+3. 高分辨率图像的计算效率
+4. 理论收敛速率的紧界
+
+这些数学基础为理解后续的改进算法（如DDIM、Score SDE、EDM等）铺平了道路。
 
