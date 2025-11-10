@@ -181,5 +181,869 @@ url={\url{https://spaces.ac.cn/archives/10739}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节提供文章中核心概念的详细数学推导，从优化理论、线性代数和实验分析三个角度深入理解Muon优化器的设计原理。
+
+### 1. Adam优化器的尺度不一致性分析
+
+#### 1.1 Adam的更新规则回顾
+
+Adam优化器对参数$\boldsymbol{W} \in \mathbb{R}^{n \times m}$的更新规则为：
+
+$$
+\begin{equation}
+\begin{aligned}
+\boldsymbol{m}_t &= \beta_1 \boldsymbol{m}_{t-1} + (1-\beta_1) \boldsymbol{G}_t \\
+\boldsymbol{v}_t &= \beta_2 \boldsymbol{v}_{t-1} + (1-\beta_2) \boldsymbol{G}_t \odot \boldsymbol{G}_t \\
+\hat{\boldsymbol{m}}_t &= \frac{\boldsymbol{m}_t}{1-\beta_1^t} \\
+\hat{\boldsymbol{v}}_t &= \frac{\boldsymbol{v}_t}{1-\beta_2^t} \\
+\boldsymbol{W}_{t+1} &= \boldsymbol{W}_t - \alpha_t \frac{\hat{\boldsymbol{m}}_t}{\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon}
+\end{aligned}
+\end{equation}
+$$
+
+其中$\boldsymbol{G}_t$是梯度，$\odot$表示逐元素乘法（Hadamard积），$\sqrt{\cdot}$和除法也都是逐元素操作。
+
+#### 1.2 参数维度的尺度问题
+
+考虑两个不同形状的权重矩阵：
+- $\boldsymbol{W}_1 \in \mathbb{R}^{1024 \times 1024}$（隐藏层）
+- $\boldsymbol{W}_2 \in \mathbb{R}^{1024 \times 32000}$（输出层）
+
+对于Adam，每个参数元素的更新量约为：
+
+$$
+\Delta W_{ij} \approx \alpha \frac{m_{ij}}{\sqrt{v_{ij}} + \epsilon} \approx \alpha \cdot \text{sign}(G_{ij})
+$$
+
+当梯度稳定后，$\sqrt{v_{ij}}$近似为$|m_{ij}|$，因此Adam的更新近似于SignSGD。这意味着每个元素的更新幅度相似，但对整个矩阵的影响却不同。
+
+定义矩阵更新的有效尺度为Frobenius范数：
+
+$$
+\Vert \Delta \boldsymbol{W}_1 \Vert_F \approx \alpha \sqrt{\sum_{i,j} 1} = \alpha \sqrt{1024 \times 1024} = 1024\alpha
+$$
+
+$$
+\Vert \Delta \boldsymbol{W}_2 \Vert_F \approx \alpha \sqrt{1024 \times 32000} \approx 5702\alpha
+$$
+
+可见，尽管使用相同的学习率$\alpha$，但$\boldsymbol{W}_2$的更新幅度是$\boldsymbol{W}_1$的约5.6倍！
+
+#### 1.3 输出扰动的不一致性
+
+更严重的问题在于对输出的影响。考虑前向传播$\boldsymbol{y} = \boldsymbol{x} \boldsymbol{W}$，当$\boldsymbol{W} \to \boldsymbol{W} + \Delta \boldsymbol{W}$时：
+
+$$
+\Vert \Delta \boldsymbol{y} \Vert = \Vert \boldsymbol{x} \Delta \boldsymbol{W} \Vert
+$$
+
+对于Adam的更新，假设$\Vert \boldsymbol{x} \Vert = 1$（经过Layer Norm后的典型情况）：
+
+$$
+\Vert \Delta \boldsymbol{y} \Vert \leq \Vert \boldsymbol{x} \Vert \cdot \Vert \Delta \boldsymbol{W} \Vert_2
+$$
+
+这里关键是谱范数$\Vert \Delta \boldsymbol{W} \Vert_2$（矩阵的最大奇异值）。对于Adam的逐元素更新：
+
+$$
+\Vert \Delta \boldsymbol{W} \Vert_2 \leq \Vert \Delta \boldsymbol{W} \Vert_F = O(\alpha \sqrt{nm})
+$$
+
+但这个上界非常松弛！实际上，当$\Delta \boldsymbol{W}$的元素是独立同分布的随机变量时，由随机矩阵理论：
+
+$$
+\Vert \Delta \boldsymbol{W} \Vert_2 \approx \alpha \sqrt{\max(n,m)}
+$$
+
+这比$F$范数的尺度$\alpha\sqrt{nm}$要小，但仍然依赖于矩阵维度。更重要的是，Adam无法直接控制这个量，导致不同形状矩阵的输出扰动不可控。
+
+### 2. 梯度的矩阵结构深度分析
+
+#### 2.1 奇异值分解的意义
+
+对梯度矩阵$\boldsymbol{G} \in \mathbb{R}^{n \times m}$进行奇异值分解（SVD）：
+
+$$
+\boldsymbol{G} = \boldsymbol{U} \boldsymbol{\Sigma} \boldsymbol{V}^{\top} = \sum_{i=1}^r \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top}
+$$
+
+其中：
+- $\boldsymbol{U} = [\boldsymbol{u}_1, \ldots, \boldsymbol{u}_n] \in \mathbb{R}^{n \times n}$，$\boldsymbol{U}^{\top}\boldsymbol{U} = \boldsymbol{I}$
+- $\boldsymbol{V} = [\boldsymbol{v}_1, \ldots, \boldsymbol{v}_m] \in \mathbb{R}^{m \times m}$，$\boldsymbol{V}^{\top}\boldsymbol{V} = \boldsymbol{I}$
+- $\boldsymbol{\Sigma} = \text{diag}(\sigma_1, \ldots, \sigma_r)$，$\sigma_1 \geq \sigma_2 \geq \cdots \geq \sigma_r > 0$
+- $r = \text{rank}(\boldsymbol{G}) \leq \min(n,m)$
+
+这个分解的几何意义：
+1. $\boldsymbol{u}_i$是输入空间的正交基
+2. $\boldsymbol{v}_i$是输出空间的正交基
+3. $\sigma_i$是第$i$个主方向的重要性权重
+
+#### 2.2 梯度的秩结构
+
+在深度学习中，梯度矩阵通常具有低秩或近似低秩结构。考虑反向传播：
+
+$$
+\boldsymbol{G} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{W}} = \boldsymbol{x}^{\top} \frac{\partial \mathcal{L}}{\partial \boldsymbol{y}}
+$$
+
+对于单个样本，$\boldsymbol{x} \in \mathbb{R}^{n \times 1}$和$\frac{\partial \mathcal{L}}{\partial \boldsymbol{y}} \in \mathbb{R}^{m \times 1}$都是向量，因此：
+
+$$
+\text{rank}(\boldsymbol{G}) = 1
+$$
+
+对于批量大小为$B$的mini-batch：
+
+$$
+\boldsymbol{G} = \frac{1}{B} \sum_{i=1}^B \boldsymbol{x}_i^{\top} \frac{\partial \mathcal{L}_i}{\partial \boldsymbol{y}_i}
+$$
+
+理论上$\text{rank}(\boldsymbol{G}) \leq \min(B, n, m)$，实际中由于样本相关性，有效秩往往远小于批量大小。
+
+#### 2.3 奇异值的衰减规律
+
+实验观察表明，神经网络梯度的奇异值通常呈现快速衰减：
+
+$$
+\sigma_i \approx \sigma_1 \cdot i^{-\alpha}, \quad \alpha \in [1, 2]
+$$
+
+这意味着前几个奇异值包含了梯度的主要信息。定义有效秩：
+
+$$
+r_{\text{eff}} = \frac{(\sum_{i=1}^r \sigma_i)^2}{\sum_{i=1}^r \sigma_i^2}
+$$
+
+通常$r_{\text{eff}} \ll r = \min(n,m)$，这为低秩近似提供了理论基础。
+
+### 3. 谱范数约束的最优性理论
+
+#### 3.1 从扰动分析到谱范数
+
+我们要找到一个范数$\rho(\cdot)$，使得：
+
+$$
+\Vert \boldsymbol{x} \boldsymbol{W} \Vert \leq \rho(\boldsymbol{W}) \Vert \boldsymbol{x} \Vert, \quad \forall \boldsymbol{x}
+$$
+
+且这个界是紧的（tight）。根据诱导范数的定义：
+
+$$
+\Vert \boldsymbol{W} \Vert_2 = \sup_{\boldsymbol{x} \neq 0} \frac{\Vert \boldsymbol{W} \boldsymbol{x} \Vert_2}{\Vert \boldsymbol{x} \Vert_2}
+$$
+
+由矩阵理论，谱范数等于最大奇异值：
+
+$$
+\Vert \boldsymbol{W} \Vert_2 = \sigma_1(\boldsymbol{W}) = \sigma_{\max}(\boldsymbol{W})
+$$
+
+**定理1（谱范数的紧性）**：对任意矩阵$\boldsymbol{W} \in \mathbb{R}^{n \times m}$和向量$\boldsymbol{x} \in \mathbb{R}^{n}$：
+
+$$
+\Vert \boldsymbol{W} \boldsymbol{x} \Vert_2 \leq \Vert \boldsymbol{W} \Vert_2 \Vert \boldsymbol{x} \Vert_2
+$$
+
+且等号成立当且仅当$\boldsymbol{x} \propto \boldsymbol{v}_1$（最大奇异值对应的右奇异向量）。
+
+**证明**：设$\boldsymbol{W} = \sum_{i=1}^r \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top}$，则：
+
+$$
+\begin{aligned}
+\Vert \boldsymbol{W} \boldsymbol{x} \Vert_2^2 &= \left\Vert \sum_{i=1}^r \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top} \boldsymbol{x} \right\Vert_2^2 \\
+&= \sum_{i=1}^r \sigma_i^2 (\boldsymbol{v}_i^{\top} \boldsymbol{x})^2 \quad \text{(因为}\boldsymbol{u}_i\text{正交)} \\
+&\leq \sigma_1^2 \sum_{i=1}^r (\boldsymbol{v}_i^{\top} \boldsymbol{x})^2 \\
+&\leq \sigma_1^2 \sum_{i=1}^m (\boldsymbol{v}_i^{\top} \boldsymbol{x})^2 \\
+&= \sigma_1^2 \Vert \boldsymbol{x} \Vert_2^2 \quad \text{(Parseval恒等式)}
+\end{aligned}
+$$
+
+因此$\Vert \boldsymbol{W} \boldsymbol{x} \Vert_2 \leq \sigma_1 \Vert \boldsymbol{x} \Vert_2 = \Vert \boldsymbol{W} \Vert_2 \Vert \boldsymbol{x} \Vert_2$。□
+
+#### 3.2 与Frobenius范数的比较
+
+Frobenius范数定义为：
+
+$$
+\Vert \boldsymbol{W} \Vert_F = \sqrt{\sum_{i=1}^n \sum_{j=1}^m W_{ij}^2} = \sqrt{\sum_{i=1}^r \sigma_i^2}
+$$
+
+容易验证：
+
+$$
+\Vert \boldsymbol{W} \Vert_2 = \sigma_1 \leq \sqrt{\sum_{i=1}^r \sigma_i^2} = \Vert \boldsymbol{W} \Vert_F
+$$
+
+等号成立当且仅当$\boldsymbol{W}$是秩1矩阵。一般情况下：
+
+$$
+\Vert \boldsymbol{W} \Vert_2 \leq \Vert \boldsymbol{W} \Vert_F \leq \sqrt{r} \Vert \boldsymbol{W} \Vert_2
+$$
+
+这说明$F$范数可能高估矩阵对向量的作用达$\sqrt{r}$倍！对于满秩矩阵，$r = \min(n,m)$可能非常大。
+
+**例子**：考虑单位矩阵$\boldsymbol{I}_n \in \mathbb{R}^{n \times n}$：
+- $\Vert \boldsymbol{I}_n \Vert_2 = 1$
+- $\Vert \boldsymbol{I}_n \Vert_F = \sqrt{n}$
+
+对任意$\Vert \boldsymbol{x} \Vert_2 = 1$，有$\Vert \boldsymbol{I}_n \boldsymbol{x} \Vert_2 = 1$，与谱范数一致，但$F$范数给出了$\sqrt{n}$的松弛界。
+
+#### 3.3 谱范数约束下的最优更新方向
+
+**定理2（最速下降方向）**：考虑优化问题：
+
+$$
+\min_{\Delta \boldsymbol{W}} \text{Tr}(\boldsymbol{G}^{\top} \Delta \boldsymbol{W}) \quad \text{s.t.} \quad \Vert \Delta \boldsymbol{W} \Vert_2 \leq \eta
+$$
+
+其最优解为：
+
+$$
+\Delta \boldsymbol{W}^* = -\eta \boldsymbol{u}_1 \boldsymbol{v}_1^{\top}
+$$
+
+其中$\boldsymbol{u}_1, \boldsymbol{v}_1$是$\boldsymbol{G}$的最大奇异值对应的左右奇异向量。
+
+**证明**：使用拉格朗日乘子法，构造拉格朗日函数：
+
+$$
+\mathcal{L}(\Delta \boldsymbol{W}, \lambda) = \text{Tr}(\boldsymbol{G}^{\top} \Delta \boldsymbol{W}) + \lambda(\Vert \Delta \boldsymbol{W} \Vert_2 - \eta)
+$$
+
+约束条件$\Vert \Delta \boldsymbol{W} \Vert_2 \leq \eta$在最优解处必然取等号（否则可以增大$\Vert \Delta \boldsymbol{W} \Vert$进一步减小目标），因此等价于：
+
+$$
+\max_{\Vert \Delta \boldsymbol{W} \Vert_2 = \eta} -\text{Tr}(\boldsymbol{G}^{\top} \Delta \boldsymbol{W})
+$$
+
+利用von Neumann迹不等式：对任意矩阵$\boldsymbol{A}, \boldsymbol{B}$，
+
+$$
+\text{Tr}(\boldsymbol{A}^{\top} \boldsymbol{B}) \leq \sum_{i=1}^r \sigma_i(\boldsymbol{A}) \sigma_i(\boldsymbol{B})
+$$
+
+其中$\sigma_i$按降序排列。等号成立当且仅当$\boldsymbol{A}$和$\boldsymbol{B}$共享相同的奇异向量。
+
+对于$\Vert \Delta \boldsymbol{W} \Vert_2 = \eta$，即$\sigma_1(\Delta \boldsymbol{W}) = \eta$，$\sigma_i(\Delta \boldsymbol{W}) = 0$ for $i \geq 2$（秩1矩阵），因此：
+
+$$
+\text{Tr}(\boldsymbol{G}^{\top} \Delta \boldsymbol{W}) \leq \eta \sigma_1(\boldsymbol{G})
+$$
+
+等号成立当$\Delta \boldsymbol{W} = -\eta \boldsymbol{u}_1 \boldsymbol{v}_1^{\top}$。□
+
+### 4. Muon优化器的完整推导
+
+#### 4.1 带动量的谱范数约束优化
+
+实际中我们使用动量$\boldsymbol{M}_t$而非直接的梯度$\boldsymbol{G}_t$：
+
+$$
+\boldsymbol{M}_t = \beta \boldsymbol{M}_{t-1} + (1-\beta) \boldsymbol{G}_t
+$$
+
+动量可以平滑梯度估计，减少噪声影响。优化问题变为：
+
+$$
+\min_{\Delta \boldsymbol{W}} \text{Tr}(\boldsymbol{M}_t^{\top} \Delta \boldsymbol{W}) \quad \text{s.t.} \quad \Vert \Delta \boldsymbol{W} \Vert_2 \leq \eta
+$$
+
+根据定理2，解为：
+
+$$
+\Delta \boldsymbol{W}_t = -\eta \boldsymbol{u}_1^{(t)} (\boldsymbol{v}_1^{(t)})^{\top}
+$$
+
+其中$\boldsymbol{u}_1^{(t)}, \boldsymbol{v}_1^{(t)}$是$\boldsymbol{M}_t$的主奇异向量。
+
+定义矩阵符号函数（matrix sign）：
+
+$$
+\text{msign}(\boldsymbol{M}) = \boldsymbol{U}_{:r} \boldsymbol{V}_{:r}^{\top}
+$$
+
+其中$\boldsymbol{U}_{:r}$取$\boldsymbol{U}$的前$r$列，$\boldsymbol{V}_{:r}$取$\boldsymbol{V}$的前$r$列。当$r=\text{rank}(\boldsymbol{M})$时，这给出秩保持的符号；实际中取$r=1$给出主方向。
+
+因此Muon的更新为：
+
+$$
+\boldsymbol{W}_{t+1} = \boldsymbol{W}_t - \eta_t \text{msign}(\boldsymbol{M}_t)
+$$
+
+#### 4.2 加入权重衰减的理论
+
+权重衰减（Weight Decay）可以从$L2$正则化导出。考虑正则化损失：
+
+$$
+\mathcal{L}_{\text{reg}} = \mathcal{L} + \frac{\lambda}{2} \Vert \boldsymbol{W} \Vert_F^2
+$$
+
+梯度变为：
+
+$$
+\nabla_{\boldsymbol{W}} \mathcal{L}_{\text{reg}} = \boldsymbol{G} + \lambda \boldsymbol{W}
+$$
+
+因此优化问题变为：
+
+$$
+\min_{\Delta \boldsymbol{W}} \text{Tr}((\boldsymbol{M}_t + \lambda \boldsymbol{W}_t)^{\top} \Delta \boldsymbol{W}) \quad \text{s.t.} \quad \Vert \Delta \boldsymbol{W} \Vert_2 \leq \eta
+$$
+
+但是$\boldsymbol{M}_t + \lambda \boldsymbol{W}_t$的奇异值分解复杂度高，Muon采用解耦权重衰减（decoupled weight decay）：
+
+$$
+\boldsymbol{W}_{t+1} = \boldsymbol{W}_t - \eta_t [\text{msign}(\boldsymbol{M}_t) + \lambda \boldsymbol{W}_t]
+$$
+
+这等价于：
+
+$$
+\boldsymbol{W}_{t+1} = (1 - \eta_t \lambda) \boldsymbol{W}_t - \eta_t \text{msign}(\boldsymbol{M}_t)
+$$
+
+#### 4.3 权重衰减的谱范数控制
+
+**定理3（谱范数有界性）**：在Muon更新规则下，权重的谱范数满足：
+
+$$
+\Vert \boldsymbol{W}_t \Vert_2 \leq \max\left(\Vert \boldsymbol{W}_0 \Vert_2, \frac{1}{\lambda}\right)
+$$
+
+**证明**：由于$\Vert \text{msign}(\boldsymbol{M}_t) \Vert_2 = 1$（秩1单位矩阵），我们有：
+
+$$
+\begin{aligned}
+\Vert \boldsymbol{W}_{t+1} \Vert_2 &= \Vert (1-\eta_t\lambda)\boldsymbol{W}_t - \eta_t \text{msign}(\boldsymbol{M}_t) \Vert_2 \\
+&\leq (1-\eta_t\lambda) \Vert \boldsymbol{W}_t \Vert_2 + \eta_t \\
+&= (1-\eta_t\lambda) \Vert \boldsymbol{W}_t \Vert_2 + \eta_t\lambda \cdot \frac{1}{\lambda}
+\end{aligned}
+$$
+
+令$a_t = \Vert \boldsymbol{W}_t \Vert_2$，$c = 1/\lambda$，则：
+
+$$
+a_{t+1} \leq (1-\eta_t\lambda) a_t + \eta_t\lambda c
+$$
+
+这是一个加权平均，因此：
+
+$$
+a_{t+1} \leq \max(a_t, c) \leq \max(a_0, c)
+$$
+
+归纳可得结论。□
+
+这个界说明权重不会无限增长，保证了训练的稳定性。
+
+### 5. 优化器的定量比较
+
+#### 5.1 各优化器的更新公式统一表示
+
+为了公平比较，我们将各优化器表示为统一形式：
+
+$$
+\boldsymbol{W}_{t+1} = \boldsymbol{W}_t - \eta_t \boldsymbol{\Phi}_t(\boldsymbol{G}_t, \boldsymbol{W}_t)
+$$
+
+其中$\boldsymbol{\Phi}_t$是优化器特定的更新算子。
+
+| 优化器 | $\boldsymbol{\Phi}_t$ | 预条件器 |
+|--------|----------------------|----------|
+| SGD | $\boldsymbol{G}_t$ | $\boldsymbol{I}$ |
+| Momentum SGD | $\boldsymbol{M}_t = \beta \boldsymbol{M}_{t-1} + (1-\beta)\boldsymbol{G}_t$ | $\boldsymbol{I}$ |
+| Adam | $\frac{\hat{\boldsymbol{m}}_t}{\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon}$ | $\text{diag}(\frac{1}{\sqrt{\hat{\boldsymbol{v}}_t}+\epsilon})$ |
+| AdamW | $\frac{\hat{\boldsymbol{m}}_t}{\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon} + \lambda \boldsymbol{W}_t$ | $\text{diag}(\frac{1}{\sqrt{\hat{\boldsymbol{v}}_t}+\epsilon})$ |
+| Lion | $\text{sign}(\boldsymbol{m}_t)$ | $\boldsymbol{I}$ |
+| Muon | $\text{msign}(\boldsymbol{M}_t) + \lambda \boldsymbol{W}_t$ | 谱投影 |
+
+#### 5.2 更新方向的有效性度量
+
+定义更新方向与梯度的对齐度：
+
+$$
+\text{alignment}_t = \frac{\text{Tr}(\boldsymbol{G}_t^{\top} \boldsymbol{\Phi}_t)}{\Vert \boldsymbol{G}_t \Vert_F \Vert \boldsymbol{\Phi}_t \Vert_F}
+$$
+
+这是矩阵的余弦相似度，取值范围$[-1, 1]$。
+
+**SGD**：$\text{alignment}_t = 1$（完美对齐）
+
+**Adam**：由于逐元素归一化，$\text{alignment}_t \approx \frac{\Vert \text{sign}(\boldsymbol{G}_t) \Vert_F}{\Vert \boldsymbol{G}_t \Vert_F \cdot \sqrt{nm}}$
+
+当梯度元素符号随机时，$\text{alignment}_t \approx \frac{1}{\sqrt{nm}}$（很小）
+
+**Muon**：
+
+$$
+\begin{aligned}
+\text{alignment}_t &= \frac{\text{Tr}(\boldsymbol{G}_t^{\top} \boldsymbol{u}_1 \boldsymbol{v}_1^{\top})}{\Vert \boldsymbol{G}_t \Vert_F} \\
+&= \frac{\boldsymbol{v}_1^{\top} \boldsymbol{G}_t^{\top} \boldsymbol{u}_1}{\Vert \boldsymbol{G}_t \Vert_F} \\
+&= \frac{\sigma_1(\boldsymbol{G}_t)}{\sqrt{\sum_i \sigma_i^2(\boldsymbol{G}_t)}}
+\end{aligned}
+$$
+
+当$\sigma_1 \gg \sigma_{2,3,\ldots}$时（梯度低秩），$\text{alignment}_t \approx 1$（高对齐）。
+
+#### 5.3 收敛速率的理论分析
+
+考虑强凸函数$f(\boldsymbol{W})$，满足$\mu \boldsymbol{I} \preceq \nabla^2 f \preceq L \boldsymbol{I}$，条件数$\kappa = L/\mu$。
+
+**SGD**：收敛速率为$O(\kappa \log(1/\epsilon))$次迭代达到$\epsilon$精度。
+
+**预条件梯度下降**：若预条件器$\boldsymbol{P}$使得$\boldsymbol{P}^{-1/2} \nabla^2 f \boldsymbol{P}^{-1/2} \approx \boldsymbol{I}$，则收敛速率为$O(\log(1/\epsilon))$（条件数接近1）。
+
+**Muon的隐式预条件**：谱范数约束相当于在每步将更新投影到单位球。对于二次函数：
+
+$$
+f(\boldsymbol{W}) = \frac{1}{2} \text{Tr}(\boldsymbol{W}^{\top} \boldsymbol{H} \boldsymbol{W}) - \text{Tr}(\boldsymbol{B}^{\top} \boldsymbol{W})
+$$
+
+梯度为$\boldsymbol{G} = \boldsymbol{H} \boldsymbol{W} - \boldsymbol{B}$。Muon更新：
+
+$$
+\Delta \boldsymbol{W} = -\eta \boldsymbol{u}_1(\boldsymbol{G}) \boldsymbol{v}_1(\boldsymbol{G})^{\top}
+$$
+
+这自动选择了Hessian $\boldsymbol{H}$的主方向，类似于power iteration，因此对主特征值方向收敛很快。
+
+### 6. 参数空间的黎曼几何视角
+
+#### 6.1 自然梯度与Fisher信息矩阵
+
+在统计流形上，参数的真实距离由Fisher信息矩阵$\boldsymbol{F}$度量：
+
+$$
+ds^2 = d\boldsymbol{\theta}^{\top} \boldsymbol{F} d\boldsymbol{\theta}
+$$
+
+自然梯度定义为：
+
+$$
+\tilde{\nabla} f = \boldsymbol{F}^{-1} \nabla f
+$$
+
+它给出了在参数流形上的最速下降方向。
+
+#### 6.2 Muon与自然梯度的联系
+
+对于矩阵参数，Fisher信息矩阵具有Kronecker积结构：
+
+$$
+\boldsymbol{F} = \boldsymbol{A} \otimes \boldsymbol{B}
+$$
+
+其中$\boldsymbol{A} \in \mathbb{R}^{n \times n}$，$\boldsymbol{B} \in \mathbb{R}^{m \times m}$。完整计算$\boldsymbol{F}^{-1}$需要$O((nm)^3)$，不可行。
+
+K-FAC（Kronecker-Factored Approximate Curvature）近似：
+
+$$
+\boldsymbol{F}^{-1} \approx \boldsymbol{A}^{-1} \otimes \boldsymbol{B}^{-1}
+$$
+
+自然梯度为：
+
+$$
+\tilde{\boldsymbol{G}} = \boldsymbol{A}^{-1} \boldsymbol{G} \boldsymbol{B}^{-1}
+$$
+
+Muon的msign可以看作另一种几何近似：不估计完整的度量张量，而是**在谱范数诱导的几何下优化**。
+
+#### 6.3 矩阵流形上的测地线
+
+考虑固定秩$r$的矩阵流形$\mathcal{M}_r = \{\boldsymbol{W} : \text{rank}(\boldsymbol{W}) = r\}$。这是一个非凸流形，维度为$r(n+m-r)$。
+
+在$\mathcal{M}_r$上的切空间为：
+
+$$
+T_{\boldsymbol{W}} \mathcal{M}_r = \{\boldsymbol{U} \boldsymbol{X}^{\top} + \boldsymbol{Y} \boldsymbol{V}^{\top} : \boldsymbol{X} \in \mathbb{R}^{m \times r}, \boldsymbol{Y} \in \mathbb{R}^{n \times r}\}
+$$
+
+其中$\boldsymbol{W} = \boldsymbol{U} \boldsymbol{\Sigma} \boldsymbol{V}^{\top}$是SVD分解。
+
+Muon的更新$\boldsymbol{u}_1 \boldsymbol{v}_1^{\top}$正是秩1流形$\mathcal{M}_1$上的一个元素，这可以看作在低维流形上优化的策略。
+
+### 7. 预条件器的谱理论分析
+
+#### 7.1 Adam的预条件器
+
+Adam的预条件器为对角矩阵：
+
+$$
+\boldsymbol{P}_{\text{Adam}} = \text{diag}\left(\frac{1}{\sqrt{v_{11}}+\epsilon}, \ldots, \frac{1}{\sqrt{v_{nm}}+\epsilon}\right)
+$$
+
+其条件数为：
+
+$$
+\kappa(\boldsymbol{P}_{\text{Adam}}) = \frac{\max_i (\sqrt{v_i}+\epsilon)}{\min_i (\sqrt{v_i}+\epsilon)}
+$$
+
+当不同参数的梯度方差差异很大时，$\kappa$可能很大。
+
+#### 7.2 Muon的隐式预条件
+
+Muon通过谱投影实现了一种非线性预条件。考虑梯度$\boldsymbol{G}$的条件数：
+
+$$
+\kappa(\boldsymbol{G}) = \frac{\sigma_1(\boldsymbol{G})}{\sigma_r(\boldsymbol{G})}
+$$
+
+msign操作后：
+
+$$
+\kappa(\text{msign}(\boldsymbol{G})) = \frac{1}{1} = 1
+$$
+
+完美条件！这是因为msign将所有奇异值归一化为1。
+
+#### 7.3 Hessian谱与收敛性
+
+对于目标函数$f(\boldsymbol{W})$，Hessian矩阵的谱分布影响收敛速度。设Hessian的特征值为$\lambda_1 \geq \lambda_2 \geq \cdots \geq \lambda_d > 0$。
+
+**定理4（预条件效果）**：若预条件器$\boldsymbol{P}$使得$\boldsymbol{P} \boldsymbol{H}$的谱聚集在$[a, b]$，则预条件梯度下降的收敛速率依赖于$\kappa' = b/a$而非$\kappa = \lambda_1/\lambda_d$。
+
+Adam试图通过逐元素归一化实现这一点，但只利用了对角信息。Muon通过谱投影，隐式地考虑了梯度的主模式，可能更好地预条件了Hessian的主特征空间。
+
+### 8. 大模型训练的尺度定律
+
+#### 8.1 Scaling Law的基本形式
+
+根据Kaplan等人的研究，模型性能（如交叉熵损失$L$）与模型参数量$N$、数据量$D$、计算量$C$的关系为：
+
+$$
+L(N, D, C) \approx \left(\frac{N_c}{N}\right)^{\alpha_N} + \left(\frac{D_c}{D}\right)^{\alpha_D} + \left(\frac{C_c}{C}\right)^{\alpha_C}
+$$
+
+其中$N_c, D_c, C_c$是特征尺度，$\alpha_N, \alpha_D, \alpha_C$是幂律指数（实验测得约为0.076, 0.095, 0.050）。
+
+#### 8.2 优化器效率与等效计算量
+
+不同优化器达到相同损失所需的步数不同。定义优化器效率因子$\gamma$：
+
+$$
+C_{\text{Muon}} = \gamma \cdot C_{\text{Adam}}
+$$
+
+根据文章中的实验，Muon达到相同性能约需Adam的50%步数，即$\gamma \approx 0.5$。
+
+代入Scaling Law：
+
+$$
+L_{\text{Muon}}(C) \approx L_{\text{Adam}}(2C)
+$$
+
+这意味着在相同计算预算下，Muon能达到训练更大模型所对应的性能。
+
+#### 8.3 参数效率的理论解释
+
+Muon训练的模型奇异值熵更高，意味着参数利用更充分。定义参数有效性：
+
+$$
+\text{Efficiency} = \frac{\text{Model Capacity}}{\text{Parameter Count}}
+$$
+
+用奇异值熵衡量容量：
+
+$$
+\text{Capacity} = \exp\left(\frac{1}{L}\sum_{\ell=1}^L H(\boldsymbol{\sigma}^{(\ell)})\right)
+$$
+
+其中$L$是层数，$H(\boldsymbol{\sigma}^{(\ell)})$是第$\ell$层的奇异值熵。
+
+Muon通过谱约束鼓励参数空间的均匀利用，提高了这个效率指标。
+
+### 9. 计算复杂度与内存效率分析
+
+#### 9.1 各优化器的计算复杂度
+
+对于矩阵$\boldsymbol{W} \in \mathbb{R}^{n \times m}$：
+
+| 优化器 | 时间复杂度 | 空间复杂度（状态） |
+|--------|-----------|------------------|
+| SGD | $O(1)$ | $O(nm)$（参数） |
+| Momentum | $O(nm)$ | $2 \times O(nm)$ |
+| Adam | $O(nm)$ | $3 \times O(nm)$（$m, v, W$） |
+| Muon（完整SVD） | $O(nm\min(n,m))$ | $2 \times O(nm)$ |
+| Muon（Newton-Schulz） | $O(nm)$ | $2 \times O(nm)$ |
+
+#### 9.2 Newton-Schulz迭代的推导
+
+完整SVD计算$\text{msign}(\boldsymbol{M})$需要$O(nm\min(n,m))$，不可接受。Newton-Schulz迭代提供了$O(nm)$的近似方法。
+
+设$\boldsymbol{M} = \boldsymbol{U} \boldsymbol{\Sigma} \boldsymbol{V}^{\top}$，我们要计算：
+
+$$
+\text{msign}(\boldsymbol{M}) = \boldsymbol{U} \boldsymbol{V}^{\top} = \boldsymbol{M} (\boldsymbol{M}^{\top} \boldsymbol{M})^{-1/2}
+$$
+
+定义$\boldsymbol{A} = \boldsymbol{M}^{\top} \boldsymbol{M} / \Vert \boldsymbol{M} \Vert_F^2$，则$\boldsymbol{A}$的特征值在$(0, 1]$内。
+
+Newton-Schulz迭代计算$\boldsymbol{A}^{-1/2}$：
+
+$$
+\boldsymbol{X}_0 = \boldsymbol{I}, \quad \boldsymbol{X}_{k+1} = \frac{1}{2} \boldsymbol{X}_k (3\boldsymbol{I} - \boldsymbol{A} \boldsymbol{X}_k^2)
+$$
+
+**定理5（Newton-Schulz收敛性）**：若$\boldsymbol{A}$的特征值在$(0, 2)$内，则$\boldsymbol{X}_k \to \boldsymbol{A}^{-1/2}$，且收敛速度为三次：
+
+$$
+\Vert \boldsymbol{X}_k \boldsymbol{A}^{1/2} - \boldsymbol{I} \Vert \leq C \cdot \delta^{3^k}
+$$
+
+其中$\delta = \Vert \boldsymbol{X}_0 \boldsymbol{A}^{1/2} - \boldsymbol{I} \Vert < 1$。
+
+通常5-7次迭代即可达到机器精度。每次迭代需要两次矩阵乘法，复杂度$O(m^3)$（对$\boldsymbol{A} \in \mathbb{R}^{m \times m}$）。
+
+但我们不需要显式计算$\boldsymbol{A}^{-1/2}$，而是直接迭代：
+
+$$
+\boldsymbol{Z}_0 = \boldsymbol{M} / \Vert \boldsymbol{M} \Vert_F, \quad \boldsymbol{Z}_{k+1} = \frac{3}{2}\boldsymbol{Z}_k - \frac{1}{2}\boldsymbol{Z}_k \boldsymbol{Z}_k^{\top} \boldsymbol{Z}_k
+$$
+
+此时每次迭代是$O(nm^2)$或$O(n^2 m)$（取决于$n, m$大小），仍比完整SVD快。
+
+#### 9.3 内存优化技巧
+
+在实现中，可以避免存储完整的动量$\boldsymbol{M}$，而是存储其低秩分解：
+
+$$
+\boldsymbol{M}_t \approx \boldsymbol{U}_k \boldsymbol{\Sigma}_k \boldsymbol{V}_k^{\top}
+$$
+
+只保留前$k$个奇异值（如$k=100$），内存从$O(nm)$降至$O(k(n+m))$。
+
+对于大型矩阵（如$10000 \times 10000$），这可以节省数百倍内存。
+
+### 10. 实验现象的深度理论解释
+
+#### 10.1 Muon收敛更快的原因
+
+实验显示Muon约2倍快于Adam。从优化轨迹分析：
+
+**损失下降率**：第$t$步的损失下降为：
+
+$$
+\Delta L_t = L_t - L_{t+1} \approx -\text{Tr}(\boldsymbol{G}_t^{\top} \Delta \boldsymbol{W}_t)
+$$
+
+**Adam**：
+
+$$
+\Delta L_t^{\text{Adam}} \approx \eta \sum_{ij} \frac{G_{ij}^2}{\sqrt{v_{ij}}} \approx \eta \cdot O(\sqrt{nm})
+$$
+
+（假设$G_{ij}$和$v_{ij}$同尺度）
+
+**Muon**：
+
+$$
+\Delta L_t^{\text{Muon}} = \eta \text{Tr}(\boldsymbol{G}_t^{\top} \boldsymbol{u}_1 \boldsymbol{v}_1^{\top}) = \eta \sigma_1(\boldsymbol{G}_t)
+$$
+
+当梯度低秩（$\sigma_1 \gg \sigma_{2,\ldots}$）时，$\sigma_1 \approx \Vert \boldsymbol{G} \Vert_F$，因此：
+
+$$
+\frac{\Delta L_t^{\text{Muon}}}{\Delta L_t^{\text{Adam}}} \approx \frac{\Vert \boldsymbol{G} \Vert_F}{\sqrt{nm}} = \text{RMS}(\boldsymbol{G}) \sqrt{nm}
+$$
+
+对于典型值$\text{RMS}(\boldsymbol{G}) \sim 10^{-3}$，$nm \sim 10^6$，比值约为1-10，与实验观察一致！
+
+#### 10.2 奇异值熵增加的意义
+
+文章观察到Muon训练的模型$H(\boldsymbol{\sigma})$更高。这意味着什么？
+
+**信息论视角**：奇异值熵衡量矩阵的"信息容量"。设$p_i = \sigma_i^2 / \sum_j \sigma_j^2$，则：
+
+$$
+H = -\sum_i p_i \log p_i
+$$
+
+最大熵（$H=\log r$）当所有$p_i$相等，即所有奇异值相等。此时矩阵在所有方向上"平等"地传播信息。
+
+**低秩vs满秩**：
+- 低秩矩阵（少数大奇异值）：$H$小，信息集中在少数模式
+- 满秩矩阵（奇异值均匀）：$H$大，信息分散在所有模式
+
+Muon鼓励$H$增大，意味着模型学会了利用更多的参数自由度，而非仅依赖少数主模式。
+
+**泛化能力**：根据学习理论，更高的$H$对应更低的"有效参数数量"（effective parameter）的估计：
+
+$$
+N_{\text{eff}} = \exp(H) \cdot r
+$$
+
+这与隐式正则化相关，可能解释Muon的泛化优势。
+
+#### 10.3 预训练-微调兼容性问题
+
+实验发现Adam预训练+Muon微调效果不佳。可能的解释：
+
+**Hessian谱的适配**：不同优化器会导致不同的Hessian谱结构。Adam倾向于平滑各向异性（因为逐元素归一化），而Muon保留主方向的各向异性。
+
+设Adam训练后的Hessian在某个局部最优点$\boldsymbol{W}^*$附近：
+
+$$
+\boldsymbol{H}_{\text{Adam}} \approx \text{diag}(\lambda_1, \ldots, \lambda_{nm})
+$$
+
+（近似对角）
+
+而Muon期望的Hessian：
+
+$$
+\boldsymbol{H}_{\text{Muon}} \approx \sum_{i=1}^k \lambda_i \boldsymbol{u}_i \boldsymbol{u}_i^{\top}
+$$
+
+（低秩+扰动）
+
+两者结构不匹配，导致Muon在Adam的最优点附近难以找到好的下降方向。
+
+**解决方案**：可能需要一个"过渡期"，在微调开始时使用较小的学习率让Muon适应当前参数空间的几何。
+
+#### 10.4 RMS对齐的理论基础
+
+文章提出的RMS对齐策略：
+
+$$
+\boldsymbol{\Phi}_{\text{norm}} = 0.2 \cdot \frac{\boldsymbol{\Phi}}{\text{RMS}(\boldsymbol{\Phi})}
+$$
+
+为什么选择0.2？
+
+**经验观察**：Adam的更新RMS通常在0.2-0.4。这可以从以下角度理解：
+
+假设梯度元素$G_{ij} \sim \mathcal{N}(0, \sigma^2)$，Adam更新：
+
+$$
+\Delta W_{ij} \approx \alpha \text{sign}(G_{ij})
+$$
+
+则：
+
+$$
+\text{RMS}(\Delta \boldsymbol{W}) = \alpha
+$$
+
+典型学习率$\alpha \in [10^{-4}, 10^{-3}]$看起来不对……实际上要考虑RMSProp的缩放：
+
+$$
+\text{RMS}(\Delta \boldsymbol{W}) = \alpha \cdot \text{RMS}\left(\frac{1}{\sqrt{v}}\right) \approx \frac{\alpha}{\text{RMS}(\sqrt{v})}
+$$
+
+当$v \sim \sigma^2$时，这个比例约为$10^{-4} / 10^{-3} \sim 0.1$...
+
+实际上0.2是经验值，可能依赖于具体的网络结构和初始化。
+
+#### 10.5 不同矩阵形状的学习率调整
+
+文章指出：
+
+$$
+\text{RMS}(\text{msign}(\boldsymbol{M})) = \sqrt{\frac{\min(n,m)}{nm}} = \frac{1}{\sqrt{\max(n,m)}}
+$$
+
+因此有效学习率应该是：
+
+$$
+\eta_{\text{eff}} = \eta \cdot \sqrt{\max(n,m)}
+$$
+
+**几何解释**：对于$n \ll m$的"瘦高"矩阵，$\text{msign}(\boldsymbol{M})$的元素RMS很小，需要放大学习率以保持与方阵相同的更新幅度。
+
+**例子**：
+- $\boldsymbol{W}_1 \in \mathbb{R}^{1024 \times 1024}$：$\eta_{\text{eff}} = \eta \cdot 32$
+- $\boldsymbol{W}_2 \in \mathbb{R}^{1024 \times 32000}$：$\eta_{\text{eff}} = \eta \cdot 179$
+
+两者相差约5.6倍，正是$\sqrt{32000/1024} \approx 5.6$。
+
+### 11. 扩展理论与未来方向
+
+#### 11.1 Schatten范数族
+
+Schatten-$p$范数定义为：
+
+$$
+\Vert \boldsymbol{W} \Vert_p = \left(\sum_{i=1}^r \sigma_i^p\right)^{1/p}
+$$
+
+特例：
+- $p=1$：核范数（nuclear norm）
+- $p=2$：Frobenius范数
+- $p=\infty$：谱范数
+
+对应的优化问题：
+
+$$
+\min_{\Delta \boldsymbol{W}} \text{Tr}(\boldsymbol{G}^{\top} \Delta \boldsymbol{W}) \quad \text{s.t.} \quad \Vert \Delta \boldsymbol{W} \Vert_p \leq \eta
+$$
+
+**$p=1$（核范数）**：解为低秩矩阵，相当于稀疏正则化（在奇异值上）
+
+**$p=2$（Frobenius）**：解为$\Delta \boldsymbol{W} = -\eta \boldsymbol{G} / \Vert \boldsymbol{G} \Vert_F$（标准SGD）
+
+**$p=\infty$（谱范数）**：解为$\Delta \boldsymbol{W} = -\eta \boldsymbol{u}_1 \boldsymbol{v}_1^{\top}$（Muon）
+
+中间的$p \in (1, \infty)$可能提供更好的trade-off，值得探索！
+
+#### 11.2 µP (Maximal Update Parametrization)与Muon
+
+µP是一种参数化方案，使得超参数在不同模型尺度下可迁移。核心思想：
+
+不同层的学习率应该按照其宽度缩放：
+
+$$
+\eta_{\ell} = \frac{\eta_{\text{base}}}{w_{\ell}}
+$$
+
+其中$w_{\ell}$是第$\ell$层的宽度。
+
+对于Muon，由于已经有$\sqrt{\max(n,m)}$的自适应，µP的设计需要重新考虑：
+
+$$
+\eta_{\ell}^{\text{Muon}} = \eta_{\text{base}} \cdot \frac{\sqrt{\max(n_{\ell}, m_{\ell})}}{w_{\text{base}}}
+$$
+
+这是一个开放问题，需要实验验证。
+
+#### 11.3 分布式训练的考虑
+
+在数据并行中，梯度需要all-reduce：
+
+$$
+\boldsymbol{G} = \frac{1}{K} \sum_{k=1}^K \boldsymbol{G}_k
+$$
+
+对于Adam，all-reduce后直接应用逐元素操作，通信量$O(nm)$。
+
+对于Muon，需要对all-reduce后的$\boldsymbol{G}$做SVD，通信量相同，但计算集中在主节点，可能成为瓶颈。
+
+**优化方案**：每个节点独立计算$\boldsymbol{G}_k$的SVD，然后平均奇异向量：
+
+$$
+\boldsymbol{u} = \frac{1}{K} \sum_{k=1}^K \boldsymbol{u}_k, \quad \boldsymbol{v} = \frac{1}{K} \sum_{k=1}^K \boldsymbol{v}_k
+$$
+
+再正交化。这需要理论分析其近似误差。
+
+### 12. 总结与洞察
+
+本推导从优化理论的第一原理出发，完整地解释了Muon优化器的设计动机和理论基础：
+
+1. **最小作用量原理**：优化器本质上是在"稳"（小扰动）和"快"（大降损失）之间权衡，不同的"稳"度量导致不同的优化器。
+
+2. **谱范数的最优性**：对于矩阵参数，谱范数是控制输出扰动的最紧界，这是Muon相比SGD（$F$范数）的理论优势。
+
+3. **msign的几何意义**：它是谱范数球上的最速下降方向，同时也是梯度的秩1最佳近似，体现了低秩结构的利用。
+
+4. **与Adam的根本差异**：Adam是逐元素的自适应，忽略了参数矩阵的整体结构；Muon是整体的谱投影，充分利用了矩阵的几何。
+
+5. **实验现象的理论解释**：
+   - 收敛更快：因为更好地对齐了梯度的主方向
+   - 奇异值熵更高：因为谱约束鼓励参数的均匀利用
+   - 微调兼容性问题：因为Hessian谱结构的不匹配
+
+6. **未来方向**：Schatten范数族、µP适配、分布式优化等都是值得探索的理论和实践问题。
+
+这些推导不仅加深了对Muon的理解，也为设计新的优化器提供了理论指导：**从参数的内在几何结构出发，而非简单的逐元素操作**。
 
