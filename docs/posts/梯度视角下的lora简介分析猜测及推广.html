@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #88 梯度视角下的LoRA：简介、分析、猜测及推广
+                    #82 梯度视角下的LoRA：简介、分析、猜测及推广
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#88</span>
+                <span class="post-number">#82</span>
                 梯度视角下的LoRA：简介、分析、猜测及推广
             </h1>
             <div class="post-meta">
@@ -145,7 +149,7 @@ $$\style{display: inline-block; width: 24ex; padding: 10ex 0; border: 1px solid 
 <p>正如<a href="/archives/9138">《Ladder Side-Tuning：预训练模型的“过墙梯”》</a>所提到的，很多参数高效的微调实际上只是降低了显存需求，并没有降低计算量。那么LoRA是否例外呢？它在显存和计算量方面的效率如何呢？下面我们来分析一下。</p>
 <p>首先，我们知道训练模型所消耗的显存来源包括<strong>模型参数</strong> 、<strong>模型梯度</strong> 、<strong>模型激活值</strong> 、<strong>优化器状态</strong> 四部份，LoRA通过低秩分解降低了模型参数量，那么梯度和优化器状态也会随之降低，因此节省的显存是很明显的。那它能否节省计算量呢？</p>
 <p>这取决于LoRA的实现方式，不同的实现方式计算梯度的复杂度不一样。LoRA的两种等效实现如下：<br />
-\begin{align}Y =&amp;\, XW = X(W_0 + AB) \label{eq:lora-1}\\[5pt]<br />
+\begin{align}Y =&amp;\, XW = X(W_0 + AB) \label{eq:lora-1}\\[5pt]
 Y =&amp;\, XW_0 + XAB = XW_0 + ZB \label{eq:lora-2}\end{align}<br />
 其中$X\in\mathbb{R}^{b\times n}$是模型输入，$Z=XA\in\mathbb{R}^{b\times r}$是中间输出。针对实现$\eqref{eq:lora-1}$，我们有<br />
 \begin{equation}\frac{\partial \mathcal{L}}{\partial A} = \frac{\partial \mathcal{L}}{\partial W} B^{\top} = \left(X^{\top}\frac{\partial \mathcal{L}}{\partial Y}\right) B^{\top},\quad \frac{\partial \mathcal{L}}{\partial B} = A^{\top}\frac{\partial \mathcal{L}}{\partial W} = A^{\top}\left(X^{\top}\frac{\partial \mathcal{L}}{\partial Y}\right)\label{eq:grad-1}\end{equation}<br />
@@ -164,9 +168,9 @@ $\mathcal{L}$是损失函数。很明显，这种实现导致的后果是需要�
 <h2 id="_4">优化视角<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>梯度$\eqref{eq:grad-1}$还告诉了我们如何从优化器角度来实现LoRA。优化器可以直接获取到全量梯度$\frac{\partial \mathcal{L}}{\partial W}$，然后我们只需要按照公式$\eqref{eq:grad-1}$对梯度进行投影，就得到$A,B$的梯度，接着就可以按照常规的优化器实现$A,B$的更新了。</p>
 <p>假如优化器是SGD，那么就是<br />
-\begin{equation}\begin{aligned}<br />
-A_{t+1} =&amp;\, A_t - \eta\frac{\partial \mathcal{L}}{\partial W_t} B_t^{\top},\quad B_{t+1} = B_t - \eta A_t^{\top}\frac{\partial \mathcal{L}}{\partial W_t}\\[5pt]<br />
-W_{t+1} =&amp;\, W_0 + A_{t+1} B_{t+1} = W_t + (A_{t+1} B_{t+1} - A_t B_t)<br />
+\begin{equation}\begin{aligned}
+A_{t+1} =&amp;\, A_t - \eta\frac{\partial \mathcal{L}}{\partial W_t} B_t^{\top},\quad B_{t+1} = B_t - \eta A_t^{\top}\frac{\partial \mathcal{L}}{\partial W_t}\\[5pt]
+W_{t+1} =&amp;\, W_0 + A_{t+1} B_{t+1} = W_t + (A_{t+1} B_{t+1} - A_t B_t)
 \end{aligned}\end{equation}<br />
 如果是Adam之类的带滑动变量的优化器，则只需要滑动投影后的梯度，因此是降低了优化器的参数量，节省了一定的显存。模型越大，这部分参数所占的显存比例也就越大。</p>
 <p>LoRA约定$A$或$B$之一使用全零初始化，这是为了保证初始状态模型跟预训练一致，但同时也带来了不对称问题（一个全零，一个非全零）。事实上，$A,B$都使用非全零初始化也是可以的，只需要事先将预训练权重减去$A_0 B_0$就行了，或者等价地说，将$W$参数化为<br />
@@ -181,13 +185,13 @@ W_{t+1} =&amp;\, W_0 + A_{t+1} B_{t+1} = W_t + (A_{t+1} B_{t+1} - A_t B_t)<br />
 <p>简单起见，接下来我们只关心$r=1$的情形，留意到在上式中，$t$时刻的投影向量$A_t,B_t$是依赖于$t$的，如果我们将它们换成不依赖于$t$的随机向量（每步训练都重新随机生成），那么会发生什么呢？我们考虑$u,v\sim\mathcal{N}(0,1)$，其中$u\in\mathbb{R}^{m\times 1}, v\in\mathbb{R}^{1\times n}$，那么更新量就变为<br />
 \begin{equation}- \eta\left(\frac{\partial \mathcal{L}}{\partial W_t} v^{\top} v + u u^{\top}\frac{\partial \mathcal{L}}{\partial W_t}\right)\end{equation}<br />
 可以证明的是<br />
-\begin{equation}\mathbb{E}<em n="n" n_times="n\times">{u\sim \mathcal{N}(0,1)}[u u^{\top}] = I</em>},\quad \mathbb{E<em m="m" m_times="m\times">{v\sim \mathcal{N}(0,1)}[v^{\top} v] = I</em>}\end{equation<br />
+\begin{equation}\mathbb{E}<em n="n" n_times="n\times">{u\sim \mathcal{N}(0,1)}[u u^{\top}] = I</em>},\quad \mathbb{E<em m="m" m_times="m\times">{v\sim \mathcal{N}(0,1)}[v^{\top} v] = I</em>}\end{equation
 这里的$I_{n\times n},I_{m\times m}$分别指$n\times n,m\times m$的单位矩阵。因此，跟“<a href="/archives/7737#%E9%9B%B6%E9%98%B6%E6%A2%AF%E5%BA%A6">零阶梯度</a>”类似，在平均意义下，这种每步都重新初始化的LoRA事实上等价于满秩的SGD。然而，真要按照这个方式实现的话，其速度甚至可能比满秩的SGD都要慢，所以它的目的不是提速，而是希望能缓解灾难遗忘问题——通过对单个（batch）样本使用低秩矩阵（而不是满秩）更新量的方式，减少对整个模型权重的影响。当然，这只是猜测，实际效果如何，笔者还没有实验过。</p>
 <h2 id="_6">一个变体<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
 <p>同样还是先只考虑$r=1$的情形，LoRA相当于假设了$\Delta w_{i,j} = u_i v_j$，我们能不能做其他低秩分解假设呢？比如$\Delta w_{i,j} = u_i + v_j$？写成矩阵形式就是<br />
-\begin{equation}W = W_0 + A \mathbb{1}<em 1="1" n_times="n\times">{1\times m} + \mathbb{1}</em>} B,\qquad A\in\mathbb{R}^{n\times 1},B\in\mathbb{R}^{1\times m}\end{equation<br />
+\begin{equation}W = W_0 + A \mathbb{1}<em 1="1" n_times="n\times">{1\times m} + \mathbb{1}</em>} B,\qquad A\in\mathbb{R}^{n\times 1},B\in\mathbb{R}^{1\times m}\end{equation
 其中$\mathbb{1}<em 1="1" n_times="n\times">{1\times m},\mathbb{1}</em>$分别指$1\times m,n\times 1$的全1矩阵。容易求出它的梯度是：<br />
-\begin{equation}\frac{\partial \mathcal{L}}{\partial A} = \frac{\partial \mathcal{L}}{\partial W} \mathbb{1}<em 1_times="1\times" n="n">{m\times 1},\quad \frac{\partial \mathcal{L}}{\partial B} = \mathbb{1}</em>}\frac{\partial \mathcal{L}}{\partial W}\end{equation<br />
+\begin{equation}\frac{\partial \mathcal{L}}{\partial A} = \frac{\partial \mathcal{L}}{\partial W} \mathbb{1}<em 1_times="1\times" n="n">{m\times 1},\quad \frac{\partial \mathcal{L}}{\partial B} = \mathbb{1}</em>}\frac{\partial \mathcal{L}}{\partial W}\end{equation
 其实就是原本梯度的行求和与列求和。相比原版LoRA，这个加性分解有两个优点：1、加比乘计算量更低，梯度形式也更简单；2、$AB$的秩一定是1，但是$A \mathbb{1}<em 1="1" n_times="n\times">{1\times m} + \mathbb{1}</em> B$的秩可能是2，如果秩代表了模型能力的话，那也就是说同样的参数量，加性的表达能力可能还更强。至于具体效果如何，后面笔者用到LoRA的时候，再做对比实验吧。</p>
 <p>那么，加性分解能不能推广到$r &gt; 1$的情形呢？自然是可以的，但稍微有些技巧。这里约定$m,n$都能被$r$整除，那么我们只需要将参数化方式改为<br />
 \begin{equation}W = W_0 + A I_{r(1\times m/r)} + I_{r(n/r\times 1)} B,\qquad A\in\mathbb{R}^{n\times r},B\in\mathbb{R}^{r\times m}\end{equation}<br />
@@ -218,212 +222,212 @@ url={\url{https://spaces.ac.cn/archives/9590}},<br />
 <h3 id="1-lora">1. LoRA的低秩分解数学定义<a class="toc-link" href="#1-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定义1.1（预训练权重矩阵）</strong>：设预训练模型中某一层的权重矩阵为 $W_0 \in \mathbb{R}^{n \times m}$，其中 $n$ 是输出维度，$m$ 是输入维度。</p>
 <p><strong>定义1.2（LoRA的低秩分解）</strong>：LoRA假设权重的更新可以用低秩矩阵的乘积表示：</p>
-<p>$$<br />
-W = W_0 + \Delta W = W_0 + AB<br />
+<p>$$
+W = W_0 + \Delta W = W_0 + AB
 $$</p>
-<p>其中：<br />
-- $A \in \mathbb{R}^{n \times r}$ 是降维矩阵<br />
-- $B \in \mathbb{R}^{r \times m}$ 是升维矩阵<br />
+<p>其中：
+- $A \in \mathbb{R}^{n \times r}$ 是降维矩阵
+- $B \in \mathbb{R}^{r \times m}$ 是升维矩阵
 - $r \ll \min(n, m)$ 是秩（rank），通常 $r \in {1, 2, 4, 8, 16}$</p>
 <p><strong>性质1.1（秩约束）</strong>：更新矩阵 $\Delta W = AB$ 的秩满足：</p>
-<p>$$<br />
-\text{rank}(\Delta W) = \text{rank}(AB) \leq \min(r, n, m) = r<br />
+<p>$$
+\text{rank}(\Delta W) = \text{rank}(AB) \leq \min(r, n, m) = r
 $$</p>
 <p>因为 $A$ 的列空间维度最多为 $r$，$B$ 的行空间维度最多为 $r$。</p>
 <p><strong>定理1.1（参数数量对比）</strong>：</p>
 <p>全量微调的参数数量：$nm$</p>
 <p>LoRA的参数数量：$nr + rm = r(n+m)$</p>
-<p>参数压缩比：<br />
-$$<br />
-\rho = \frac{r(n+m)}{nm} = \frac{r}{nm}(n+m)<br />
+<p>参数压缩比：
+$$
+\rho = \frac{r(n+m)}{nm} = \frac{r}{nm}(n+m)
 $$</p>
 <p><strong>示例</strong>：设 $n = m = 4096, r = 8$，则：</p>
-<p>$$<br />
-\rho = \frac{8 \times (4096 + 4096)}{4096 \times 4096} = \frac{8 \times 8192}{16777216} \approx 0.0039<br />
+<p>$$
+\rho = \frac{8 \times (4096 + 4096)}{4096 \times 4096} = \frac{8 \times 8192}{16777216} \approx 0.0039
 $$</p>
 <p>即LoRA只需要约0.39%的参数。</p>
 <h3 id="2-lora">2. LoRA的初始化策略<a class="toc-link" href="#2-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定义2.1（零初始化策略）</strong>：为了保证初始状态与预训练模型一致，LoRA采用：</p>
-<p>$$<br />
-A \sim \mathcal{N}(0, \sigma^2), \quad B = 0<br />
+<p>$$
+A \sim \mathcal{N}(0, \sigma^2), \quad B = 0
 $$</p>
 <p>或者：</p>
-<p>$$<br />
-A = 0, \quad B \sim \mathcal{N}(0, \sigma^2)<br />
+<p>$$
+A = 0, \quad B \sim \mathcal{N}(0, \sigma^2)
 $$</p>
 <p><strong>性质2.1（初始等价性）</strong>：当 $B = 0$ 或 $A = 0$ 时：</p>
-<p>$$<br />
-W|_{t=0} = W_0 + AB = W_0 + A \cdot 0 = W_0<br />
+<p>$$
+W|_{t=0} = W_0 + AB = W_0 + A \cdot 0 = W_0
 $$</p>
 <p>因此初始模型输出与预训练模型完全一致。</p>
 <p><strong>定理2.1（Kaiming初始化）</strong>：对于非零的矩阵（如 $A$），通常使用Kaiming初始化：</p>
-<p>$$<br />
-A_{ij} \sim \mathcal{N}\left(0, \frac{2}{n_{in}}\right)<br />
+<p>$$
+A_{ij} \sim \mathcal{N}\left(0, \frac{2}{n_{in}}\right)
 $$</p>
 <p>其中 $n_{in}$ 是输入维度。这保证了前向传播时激活值的方差稳定。</p>
 <h3 id="3-lora">3. LoRA的前向传播<a class="toc-link" href="#3-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定义3.1（标准前向传播）</strong>：给定输入 $x \in \mathbb{R}^{b \times m}$（$b$ 是batch size），输出为：</p>
-<p>$$<br />
-y = xW = x(W_0 + AB)<br />
+<p>$$
+y = xW = x(W_0 + AB)
 $$</p>
 <p><strong>定义3.2（分解形式的前向传播）</strong>：为了计算效率，实际实现为：</p>
-<p>$$<br />
-y = xW_0 + xAB = xW_0 + (xA)B<br />
+<p>$$
+y = xW_0 + xAB = xW_0 + (xA)B
 $$</p>
 <p>令 $h = xA \in \mathbb{R}^{b \times r}$，则：</p>
-<p>$$<br />
-y = xW_0 + hB<br />
+<p>$$
+y = xW_0 + hB
 $$</p>
 <p><strong>定理3.1（计算复杂度对比）</strong>：</p>
-<p>直接计算 $x(W_0 + AB)$ 的复杂度：<br />
-1. 计算 $AB$：$O(nrm)$<br />
-2. 计算 $x(W_0 + AB)$：$O(bnm)$<br />
+<p>直接计算 $x(W_0 + AB)$ 的复杂度：
+1. 计算 $AB$：$O(nrm)$
+2. 计算 $x(W_0 + AB)$：$O(bnm)$
 3. 总计：$O(nrm + bnm)$</p>
-<p>分解计算 $xW_0 + (xA)B$ 的复杂度：<br />
-1. 计算 $xW_0$：$O(bnm)$<br />
-2. 计算 $xA$：$O(bnr)$<br />
-3. 计算 $(xA)B$：$O(brm)$<br />
+<p>分解计算 $xW_0 + (xA)B$ 的复杂度：
+1. 计算 $xW_0$：$O(bnm)$
+2. 计算 $xA$：$O(bnr)$
+3. 计算 $(xA)B$：$O(brm)$
 4. 总计：$O(bnm + bnr + brm) = O(bnm + br(n+m))$</p>
 <p>当 $b$ 较小且 $r \ll \min(n, m)$ 时，分解形式更高效。</p>
 <h3 id="4-lora">4. LoRA的梯度推导<a class="toc-link" href="#4-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定理4.1（损失对A的梯度）</strong>：设损失函数为 $\mathcal{L}$，则：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial A} = \frac{\partial \mathcal{L}}{\partial y} \frac{\partial y}{\partial h} \frac{\partial h}{\partial A} = \left(\frac{\partial \mathcal{L}}{\partial y} B^T\right)^T x = x^T \frac{\partial \mathcal{L}}{\partial y} B^T<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial A} = \frac{\partial \mathcal{L}}{\partial y} \frac{\partial y}{\partial h} \frac{\partial h}{\partial A} = \left(\frac{\partial \mathcal{L}}{\partial y} B^T\right)^T x = x^T \frac{\partial \mathcal{L}}{\partial y} B^T
 $$</p>
 <p><strong>详细推导</strong>：</p>
 <p>从 $y = xW_0 + hB$ 和 $h = xA$，我们有：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial A} = \frac{\partial \mathcal{L}}{\partial h} \frac{\partial h}{\partial A}<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial A} = \frac{\partial \mathcal{L}}{\partial h} \frac{\partial h}{\partial A}
 $$</p>
 <p>首先计算 $\frac{\partial \mathcal{L}}{\partial h}$：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial h} = \frac{\partial \mathcal{L}}{\partial y} \frac{\partial y}{\partial h} = \frac{\partial \mathcal{L}}{\partial y} B^T<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial h} = \frac{\partial \mathcal{L}}{\partial y} \frac{\partial y}{\partial h} = \frac{\partial \mathcal{L}}{\partial y} B^T
 $$</p>
 <p>因为 $y = xW_0 + hB$，对 $h$ 求导得 $B^T$（注意矩阵维度）。</p>
 <p>然后计算 $\frac{\partial h}{\partial A}$：</p>
 <p>由 $h = xA$，我们有：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial A} = x^T \frac{\partial \mathcal{L}}{\partial h} = x^T \left(\frac{\partial \mathcal{L}}{\partial y} B^T\right)<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial A} = x^T \frac{\partial \mathcal{L}}{\partial h} = x^T \left(\frac{\partial \mathcal{L}}{\partial y} B^T\right)
 $$</p>
 <p>整理得：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial A} = x^T \frac{\partial \mathcal{L}}{\partial y} B^T \in \mathbb{R}^{m \times n} \rightarrow \mathbb{R}^{n \times r} \quad \text{（转置后）}<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial A} = x^T \frac{\partial \mathcal{L}}{\partial y} B^T \in \mathbb{R}^{m \times n} \rightarrow \mathbb{R}^{n \times r} \quad \text{（转置后）}
 $$</p>
 <p>实际上：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial A} = \left(x^T \frac{\partial \mathcal{L}}{\partial y}\right) B^T \in \mathbb{R}^{n \times r}<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial A} = \left(x^T \frac{\partial \mathcal{L}}{\partial y}\right) B^T \in \mathbb{R}^{n \times r}
 $$</p>
 <p><strong>定理4.2（损失对B的梯度）</strong>：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial B} = h^T \frac{\partial \mathcal{L}}{\partial y} = (xA)^T \frac{\partial \mathcal{L}}{\partial y} = A^T x^T \frac{\partial \mathcal{L}}{\partial y}<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial B} = h^T \frac{\partial \mathcal{L}}{\partial y} = (xA)^T \frac{\partial \mathcal{L}}{\partial y} = A^T x^T \frac{\partial \mathcal{L}}{\partial y}
 $$</p>
 <p><strong>详细推导</strong>：</p>
 <p>从 $y = xW_0 + hB$，对 $B$ 求导：</p>
-<p>$$<br />
-\frac{\partial y}{\partial B} = h^T \text{（根据矩阵微积分）}<br />
+<p>$$
+\frac{\partial y}{\partial B} = h^T \text{（根据矩阵微积分）}
 $$</p>
 <p>因此：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial B} = h^T \frac{\partial \mathcal{L}}{\partial y} = (xA)^T \frac{\partial \mathcal{L}}{\partial y} \in \mathbb{R}^{r \times m}<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial B} = h^T \frac{\partial \mathcal{L}}{\partial y} = (xA)^T \frac{\partial \mathcal{L}}{\partial y} \in \mathbb{R}^{r \times m}
 $$</p>
 <h3 id="5">5. 梯度的低秩结构分析<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
 <p><strong>定义5.1（完整权重的梯度）</strong>：如果我们对整个 $W = W_0 + AB$ 进行全量微调，梯度为：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial W} = x^T \frac{\partial \mathcal{L}}{\partial y} \in \mathbb{R}^{m \times n} \rightarrow \mathbb{R}^{n \times m}<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial W} = x^T \frac{\partial \mathcal{L}}{\partial y} \in \mathbb{R}^{m \times n} \rightarrow \mathbb{R}^{n \times m}
 $$</p>
 <p>（转置后维度正确）</p>
 <p><strong>定理5.1（LoRA梯度的低秩分解）</strong>：LoRA实际更新的等效梯度可以表示为：</p>
-<p>$$<br />
-\Delta W_{LoRA} = AB<br />
+<p>$$
+\Delta W_{LoRA} = AB
 $$</p>
 <p>其梯度更新等价于：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial W}_{LoRA} = \frac{\partial \mathcal{L}}{\partial A} \frac{\partial A}{\partial W} + \frac{\partial \mathcal{L}}{\partial B} \frac{\partial B}{\partial W}<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial W}_{LoRA} = \frac{\partial \mathcal{L}}{\partial A} \frac{\partial A}{\partial W} + \frac{\partial \mathcal{L}}{\partial B} \frac{\partial B}{\partial W}
 $$</p>
 <p>但这里的关键洞察是：LoRA隐式地假设 $\frac{\partial \mathcal{L}}{\partial W}$ 具有低秩结构。</p>
 <p><strong>定理5.2（梯度的秩上界）</strong>：LoRA的有效梯度 $G_{eff}$ 可以表示为：</p>
-<p>$$<br />
-G_{eff} = \frac{\partial \mathcal{L}}{\partial A} B + A \frac{\partial \mathcal{L}}{\partial B}<br />
+<p>$$
+G_{eff} = \frac{\partial \mathcal{L}}{\partial A} B + A \frac{\partial \mathcal{L}}{\partial B}
 $$</p>
 <p>其秩满足：</p>
-<p>$$<br />
-\text{rank}(G_{eff}) \leq 2r<br />
+<p>$$
+\text{rank}(G_{eff}) \leq 2r
 $$</p>
 <p><strong>证明</strong>：</p>
 <p>第一项：$\frac{\partial \mathcal{L}}{\partial A} B$ 的秩 $\leq r$（因为 $B$ 的秩 $\leq r$）</p>
 <p>第二项：$A \frac{\partial \mathcal{L}}{\partial B}$ 的秩 $\leq r$（因为 $A$ 的秩 $\leq r$）</p>
 <p>根据秩的次可加性：</p>
-<p>$$<br />
-\text{rank}(G_{eff}) \leq \text{rank}\left(\frac{\partial \mathcal{L}}{\partial A} B\right) + \text{rank}\left(A \frac{\partial \mathcal{L}}{\partial B}\right) \leq 2r<br />
+<p>$$
+\text{rank}(G_{eff}) \leq \text{rank}\left(\frac{\partial \mathcal{L}}{\partial A} B\right) + \text{rank}\left(A \frac{\partial \mathcal{L}}{\partial B}\right) \leq 2r
 $$</p>
 <p>这说明LoRA的梯度更新被限制在一个低秩子空间中。$\square$</p>
 <h3 id="6">6. 参数效率的理论证明<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
 <p><strong>定义6.1（参数效率）</strong>：参数效率定义为达到相同性能所需的参数量之比。</p>
 <p><strong>定理6.1（显存占用对比）</strong>：</p>
-<p>全量微调的显存占用（主要部分）：<br />
-- 模型参数：$nm$ 个float<br />
-- 梯度：$nm$ 个float<br />
-- 优化器状态（Adam）：$2nm$ 个float（一阶动量 + 二阶动量）<br />
+<p>全量微调的显存占用（主要部分）：
+- 模型参数：$nm$ 个float
+- 梯度：$nm$ 个float
+- 优化器状态（Adam）：$2nm$ 个float（一阶动量 + 二阶动量）
 - 总计：$4nm$ 个float</p>
-<p>LoRA微调的显存占用：<br />
-- 预训练参数（冻结）：$nm$ 个float（不需要梯度）<br />
-- LoRA参数 $A, B$：$r(n+m)$ 个float<br />
-- 梯度：$r(n+m)$ 个float<br />
-- 优化器状态：$2r(n+m)$ 个float<br />
+<p>LoRA微调的显存占用：
+- 预训练参数（冻结）：$nm$ 个float（不需要梯度）
+- LoRA参数 $A, B$：$r(n+m)$ 个float
+- 梯度：$r(n+m)$ 个float
+- 优化器状态：$2r(n+m)$ 个float
 - 总计：$nm + 3r(n+m)$ 个float</p>
 <p><strong>显存节省比</strong>：</p>
-<p>$$<br />
-\text{Saving} = 1 - \frac{nm + 3r(n+m)}{4nm} = 1 - \frac{1}{4} - \frac{3r(n+m)}{4nm}<br />
+<p>$$
+\text{Saving} = 1 - \frac{nm + 3r(n+m)}{4nm} = 1 - \frac{1}{4} - \frac{3r(n+m)}{4nm}
 $$</p>
 <p>当 $r \ll \frac{nm}{n+m}$ 时，节省接近75%。</p>
 <p><strong>示例</strong>：$n = m = 4096, r = 8$</p>
-<p>$$<br />
-\text{Saving} = 1 - \frac{4096^2 + 3 \times 8 \times 8192}{4 \times 4096^2} \approx 1 - 0.25 - 0.003 = 74.7\%<br />
+<p>$$
+\text{Saving} = 1 - \frac{4096^2 + 3 \times 8 \times 8192}{4 \times 4096^2} \approx 1 - 0.25 - 0.003 = 74.7\%
 $$</p>
 <h3 id="7">7. 梯度更新的等价性分析<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
 <p><strong>定理7.1（单步更新的形式）</strong>：使用SGD优化器，LoRA的一步更新为：</p>
-<p>$$<br />
-A_{t+1} = A_t - \eta \frac{\partial \mathcal{L}}{\partial A_t}<br />
+<p>$$
+A_{t+1} = A_t - \eta \frac{\partial \mathcal{L}}{\partial A_t}
 $$</p>
-<p>$$<br />
-B_{t+1} = B_t - \eta \frac{\partial \mathcal{L}}{\partial B_t}<br />
+<p>$$
+B_{t+1} = B_t - \eta \frac{\partial \mathcal{L}}{\partial B_t}
 $$</p>
 <p>等价的权重更新为：</p>
-<p>$$<br />
-W_{t+1} = W_0 + A_{t+1}B_{t+1}<br />
+<p>$$
+W_{t+1} = W_0 + A_{t+1}B_{t+1}
 $$</p>
 <p><strong>定理7.2（更新的非线性）</strong>：LoRA的更新是非线性的：</p>
-<p>$$<br />
-W_{t+1} - W_t = A_{t+1}B_{t+1} - A_t B_t<br />
+<p>$$
+W_{t+1} - W_t = A_{t+1}B_{t+1} - A_t B_t
 $$</p>
 <p>展开：</p>
-<p>$$<br />
-= (A_t - \eta \nabla_A)(B_t - \eta \nabla_B) - A_t B_t<br />
+<p>$$
+= (A_t - \eta \nabla_A)(B_t - \eta \nabla_B) - A_t B_t
 $$</p>
-<p>$$<br />
-= A_t B_t - \eta A_t \nabla_B - \eta \nabla_A B_t + \eta^2 \nabla_A \nabla_B - A_t B_t<br />
+<p>$$
+= A_t B_t - \eta A_t \nabla_B - \eta \nabla_A B_t + \eta^2 \nabla_A \nabla_B - A_t B_t
 $$</p>
-<p>$$<br />
-= -\eta(A_t \nabla_B + \nabla_A B_t) + \eta^2 \nabla_A \nabla_B<br />
+<p>$$
+= -\eta(A_t \nabla_B + \nabla_A B_t) + \eta^2 \nabla_A \nabla_B
 $$</p>
 <p>其中 $\nabla_A = \frac{\partial \mathcal{L}}{\partial A_t}, \nabla_B = \frac{\partial \mathcal{L}}{\partial B_t}$。</p>
 <p><strong>近似7.1（忽略二阶项）</strong>：当学习率 $\eta$ 较小时，忽略 $\eta^2$ 项：</p>
-<p>$$<br />
-W_{t+1} - W_t \approx -\eta(A_t \nabla_B + \nabla_A B_t)<br />
+<p>$$
+W_{t+1} - W_t \approx -\eta(A_t \nabla_B + \nabla_A B_t)
 $$</p>
 <p>这是LoRA的一阶近似更新。</p>
 <h3 id="8">8. 与全参数微调的关系<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
 <p><strong>定义8.1（全参数微调）</strong>：全参数微调直接更新所有权重：</p>
-<p>$$<br />
-W_{t+1} = W_t - \eta \frac{\partial \mathcal{L}}{\partial W_t}<br />
+<p>$$
+W_{t+1} = W_t - \eta \frac{\partial \mathcal{L}}{\partial W_t}
 $$</p>
 <p><strong>定理8.1（LoRA作为约束优化）</strong>：LoRA可以看作是在低秩约束下的优化：</p>
-<p>$$<br />
-\min_{W} \mathcal{L}(W) \quad \text{s.t.} \quad \text{rank}(W - W_0) \leq r<br />
+<p>$$
+\min_{W} \mathcal{L}(W) \quad \text{s.t.} \quad \text{rank}(W - W_0) \leq r
 $$</p>
 <p><strong>证明</strong>：LoRA的参数化 $W = W_0 + AB$ 自动满足：</p>
-<p>$$<br />
-\text{rank}(W - W_0) = \text{rank}(AB) \leq r<br />
+<p>$$
+\text{rank}(W - W_0) = \text{rank}(AB) \leq r
 $$</p>
 <p>因此LoRA在参数空间的一个低秩流形上进行优化。$\square$</p>
 <p><strong>定理8.2（表达能力的限制）</strong>：LoRA无法表示任意的权重更新。</p>
@@ -436,17 +440,17 @@ $$</p>
 <p>然而，实验表明在许多任务中，$r$ 很小（如8）就足够了，暗示梯度确实具有低秩结构。</p>
 <h3 id="9-r">9. 不同秩r的表达能力<a class="toc-link" href="#9-r" title="Permanent link">&para;</a></h3>
 <p><strong>定义9.1（秩r的自由度）</strong>：秩为 $r$ 的 $n \times m$ 矩阵的自由度为：</p>
-<p>$$<br />
-\text{DoF}(r) = r(n + m - r)<br />
+<p>$$
+\text{DoF}(r) = r(n + m - r)
 $$</p>
 <p><strong>推导</strong>：秩$r$矩阵可以表示为 $UV^T$，其中 $U \in \mathbb{R}^{n \times r}, V \in \mathbb{R}^{m \times r}$。</p>
 <p>但这个表示不唯一，对于任意可逆矩阵 $R \in \mathbb{R}^{r \times r}$：</p>
-<p>$$<br />
-UV^T = (UR)(R^{-1}V^T)<br />
+<p>$$
+UV^T = (UR)(R^{-1}V^T)
 $$</p>
 <p>因此实际自由度为：</p>
-<p>$$<br />
-nr + mr - r^2 = r(n + m - r)<br />
+<p>$$
+nr + mr - r^2 = r(n + m - r)
 $$</p>
 <p><strong>定理9.1（秩与表达能力的关系）</strong>：</p>
 <ul>
@@ -455,70 +459,70 @@ $$</p>
 <li>$r \in (1, \min(n,m))$：部分表达能力</li>
 </ul>
 <p><strong>定理9.2（秩增长与性能）</strong>：实验观察表明，性能随 $r$ 增长的曲线通常为：</p>
-<p>$$<br />
-\text{Performance}(r) = P_{\max} - (P_{\max} - P_0) e^{-\lambda r}<br />
+<p>$$
+\text{Performance}(r) = P_{\max} - (P_{\max} - P_0) e^{-\lambda r}
 $$</p>
 <p>其中 $P_{\max}$ 是全量微调性能，$P_0$ 是零样本性能，$\lambda$ 是任务相关常数。</p>
-<p>这表明：<br />
-- 小 $r$ 时，性能快速提升<br />
-- 大 $r$ 时，边际收益递减<br />
+<p>这表明：
+- 小 $r$ 时，性能快速提升
+- 大 $r$ 时，边际收益递减
 - 存在一个"充分秩" $r^*$，超过它性能不再显著提升</p>
 <h3 id="10-lora">10. LoRA的梯度低秩假设的理论依据<a class="toc-link" href="#10-lora" title="Permanent link">&para;</a></h3>
 <p><strong>假设10.1（本征维度假设）</strong>：许多下游任务的本征维度远低于参数空间维度。</p>
 <p>形式化地，存在一个低维子空间 $\mathcal{S} \subset \mathbb{R}^{nm}$，维度为 $d \ll nm$，使得在 $\mathcal{S}$ 内优化就能达到接近全局最优的性能。</p>
 <p><strong>定理10.1（梯度的主成分）</strong>：如果梯度 $\nabla_W \mathcal{L}$ 可以被低秩分解良好近似，即：</p>
-<p>$$<br />
-\nabla_W \mathcal{L} \approx \sum_{i=1}^r \sigma_i u_i v_i^T<br />
+<p>$$
+\nabla_W \mathcal{L} \approx \sum_{i=1}^r \sigma_i u_i v_i^T
 $$</p>
 <p>其中 $\sigma_1 \geq \sigma_2 \geq \cdots \geq \sigma_r$ 是主要奇异值，且 $\sum_{i&gt;r} \sigma_i^2 \ll \sum_{i=1}^r \sigma_i^2$，则LoRA能够捕获梯度的主要方向。</p>
 <p><strong>定理10.2（预训练的作用）</strong>：预训练模型已经学习了数据的通用表示，因此在下游任务的微调中，只需要在低维子空间中调整即可。</p>
 <p><strong>证明思路</strong>：设预训练模型的权重为 $W_0$，最优微调权重为 $W^*$。如果 $W_0$ 已经接近最优，则：</p>
-<p>$$<br />
-W^* = W_0 + \Delta W, \quad |\Delta W| \ll |W_0|<br />
+<p>$$
+W^* = W_0 + \Delta W, \quad |\Delta W| \ll |W_0|
 $$</p>
 <p>此时 $\Delta W$ 可以看作是在 $W_0$ 处的局部调整，很可能具有低秩结构。$\square$</p>
 <h3 id="11-lora">11. LoRA的优化轨迹分析<a class="toc-link" href="#11-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定义11.1（优化轨迹）</strong>：LoRA的优化轨迹在参数空间中为：</p>
-<p>$$<br />
-W(t) = W_0 + A(t)B(t)<br />
+<p>$$
+W(t) = W_0 + A(t)B(t)
 $$</p>
 <p>其中 $A(t), B(t)$ 随训练时间 $t$ 演化。</p>
 <p><strong>定理11.1（轨迹的流形约束）</strong>：LoRA的优化被约束在一个 $r(n+m)$ 维的流形上：</p>
-<p>$$<br />
-\mathcal{M}_r = {W_0 + AB : A \in \mathbb{R}^{n \times r}, B \in \mathbb{R}^{r \times m}}<br />
+<p>$$
+\mathcal{M}_r = {W_0 + AB : A \in \mathbb{R}^{n \times r}, B \in \mathbb{R}^{r \times m}}
 $$</p>
 <p><strong>性质11.1（流形的维度）</strong>：$\mathcal{M}_r$ 是 $\mathbb{R}^{n \times m}$ 中的一个子流形，维度为 $r(n+m) - r^2$（考虑旋转不变性）。</p>
 <p><strong>定理11.2（投影梯度下降）</strong>：LoRA可以看作是在流形 $\mathcal{M}_r$ 上的黎曼梯度下降。</p>
 <p>在每一步，全量梯度 $\nabla_W \mathcal{L}$ 被投影到 $\mathcal{M}_r$ 的切空间上：</p>
-<p>$$<br />
-\nabla_{LoRA} = \text{Proj}_{\mathcal{M}_r}(\nabla_W \mathcal{L})<br />
+<p>$$
+\nabla_{LoRA} = \text{Proj}_{\mathcal{M}_r}(\nabla_W \mathcal{L})
 $$</p>
 <p>然后沿着投影梯度更新参数。</p>
 <h3 id="12-lora">12. LoRA与其他低秩方法的对比<a class="toc-link" href="#12-lora" title="Permanent link">&para;</a></h3>
 <p><strong>方法12.1（Adapters）</strong>：Adapters在每层插入小型MLP瓶颈：</p>
-<p>$$<br />
-h' = h + f(h), \quad f(h) = W_{up} \sigma(W_{down} h)<br />
+<p>$$
+h' = h + f(h), \quad f(h) = W_{up} \sigma(W_{down} h)
 $$</p>
 <p>其中 $W_{down} \in \mathbb{R}^{r \times d}, W_{up} \in \mathbb{R}^{d \times r}$。</p>
-<p><strong>对比</strong>：<br />
-- LoRA：直接修改权重矩阵，推理无额外开销<br />
+<p><strong>对比</strong>：
+- LoRA：直接修改权重矩阵，推理无额外开销
 - Adapters：引入额外的前向计算，推理有开销</p>
 <p><strong>方法12.2（Prompt Tuning）</strong>：只优化输入的prompt向量：</p>
-<p>$$<br />
-x' = [p_1, p_2, \ldots, p_k, x_1, x_2, \ldots, x_n]<br />
+<p>$$
+x' = [p_1, p_2, \ldots, p_k, x_1, x_2, \ldots, x_n]
 $$</p>
 <p>其中 $p_i$ 是可学习的prompt向量。</p>
-<p><strong>对比</strong>：<br />
-- LoRA：参数量 $O(r \cdot \text{model size})$<br />
+<p><strong>对比</strong>：
+- LoRA：参数量 $O(r \cdot \text{model size})$
 - Prompt Tuning：参数量 $O(k \cdot d)$，与层数无关</p>
 <p><strong>方法12.3（BitFit）</strong>：只微调bias参数。</p>
-<p><strong>对比</strong>：<br />
-- LoRA：修改权重矩阵，表达能力强<br />
+<p><strong>对比</strong>：
+- LoRA：修改权重矩阵，表达能力强
 - BitFit：只修改bias，参数量最少但表达能力弱</p>
 <h3 id="13-lora">13. LoRA的缩放因子分析<a class="toc-link" href="#13-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定义13.1（LoRA的缩放）</strong>：实际实现中，LoRA的输出会乘以一个缩放因子：</p>
-<p>$$<br />
-y = xW_0 + \frac{\alpha}{r} xAB<br />
+<p>$$
+y = xW_0 + \frac{\alpha}{r} xAB
 $$</p>
 <p>其中 $\alpha$ 是可调节的超参数（通常设为 $r$）。</p>
 <p><strong>定理13.1（缩放因子的作用）</strong>：缩放因子 $\frac{\alpha}{r}$ 有两个作用：</p>
@@ -534,32 +538,32 @@ $$</p>
 <p><strong>直觉</strong>：低秩约束起到了正则化的作用，减少了过拟合的风险，允许使用更大的学习率。</p>
 <p><strong>定理14.2（渐近性能）</strong>：在足够的训练后，LoRA的性能会接近但略低于全量微调（如果秩不够大）。</p>
 <p>形式化地，设 $L_{LoRA}^<em>$ 和 $L_{full}^</em>$ 分别是LoRA和全量微调的最优损失，则：</p>
-<p>$$<br />
-L_{LoRA}^<em> \geq L_{full}^</em><br />
+<p>$$
+L_{LoRA}^<em> \geq L_{full}^</em>
 $$</p>
 <p>等号成立当且仅当最优更新 $\Delta W^*$ 的秩 $\leq r$。</p>
 <p><strong>定理14.3（正则化效应）</strong>：LoRA的低秩约束起到了隐式正则化的作用：</p>
-<p>$$<br />
-\min_{W} \mathcal{L}(W) + \lambda \text{rank}(W - W_0)<br />
+<p>$$
+\min_{W} \mathcal{L}(W) + \lambda \text{rank}(W - W_0)
 $$</p>
 <p>这有助于防止过拟合，特别是在小样本场景下。</p>
 <h3 id="15-lora">15. LoRA的组合与分解<a class="toc-link" href="#15-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定理15.1（LoRA模块的可加性）</strong>：多个LoRA模块可以通过简单相加组合：</p>
 <p>设有两个任务对应的LoRA：$\Delta W_1 = A_1 B_1$ 和 $\Delta W_2 = A_2 B_2$，则：</p>
-<p>$$<br />
-W_{combined} = W_0 + \alpha_1 A_1 B_1 + \alpha_2 A_2 B_2<br />
+<p>$$
+W_{combined} = W_0 + \alpha_1 A_1 B_1 + \alpha_2 A_2 B_2
 $$</p>
 <p>其中 $\alpha_1, \alpha_2$ 是混合权重。</p>
 <p><strong>应用</strong>：这允许多任务学习和任务插值。</p>
 <p><strong>定理15.2（LoRA的合并）</strong>：推理时，LoRA可以合并到原始权重中：</p>
-<p>$$<br />
-W_{merged} = W_0 + AB<br />
+<p>$$
+W_{merged} = W_0 + AB
 $$</p>
 <p>这样推理时只需要执行 $y = xW_{merged}$，没有额外开销。</p>
 <p><strong>定理15.3（动态秩调整）</strong>：训练过程中，可以动态调整秩：</p>
 <p>从较小的 $r_1$ 开始，逐渐增加到 $r_2$。实现方法是填充零：</p>
-<p>$$<br />
-A' = [A, 0_{n \times (r_2 - r_1)}], \quad B' = \begin{bmatrix} B \ 0_{(r_2-r_1) \times m} \end{bmatrix}<br />
+<p>$$
+A' = [A, 0_{n \times (r_2 - r_1)}], \quad B' = \begin{bmatrix} B \ 0_{(r_2-r_1) \times m} \end{bmatrix}
 $$</p>
 <h3 id="16-lora">16. LoRA的梯度流分析<a class="toc-link" href="#16-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定理16.1（梯度的反向传播）</strong>：在反向传播中，梯度流经两条路径：</p>
@@ -569,8 +573,8 @@ $$</p>
 </ol>
 <p><strong>详细分析</strong>：</p>
 <p>设输出层损失为 $\mathcal{L}$，则：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial x} = \frac{\partial \mathcal{L}}{\partial y} \frac{\partial y}{\partial x} = \frac{\partial \mathcal{L}}{\partial y} (W_0 + AB)^T<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial x} = \frac{\partial \mathcal{L}}{\partial y} \frac{\partial y}{\partial x} = \frac{\partial \mathcal{L}}{\partial y} (W_0 + AB)^T
 $$</p>
 <p>这个梯度包含了 $W_0$ 和 $AB$ 的信息，因此即使 $W_0$ 被冻结，它仍然参与梯度的反向传播。</p>
 <p><strong>定理16.2（梯度消失/爆炸的缓解）</strong>：LoRA可以缓解深层网络中的梯度消失/爆炸问题。</p>
@@ -578,33 +582,33 @@ $$</p>
 <p>这种渐进式的调整比突然改变所有权重更稳定。</p>
 <h3 id="17-lora">17. LoRA的泛化性能分析<a class="toc-link" href="#17-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定理17.1（泛化界）</strong>：基于Rademacher复杂度，LoRA的泛化误差上界为：</p>
-<p>$$<br />
-\mathcal{R}(h_{LoRA}) \leq \hat{\mathcal{R}}(h_{LoRA}) + O\left(\sqrt{\frac{r(n+m)}{N}}\right)<br />
+<p>$$
+\mathcal{R}(h_{LoRA}) \leq \hat{\mathcal{R}}(h_{LoRA}) + O\left(\sqrt{\frac{r(n+m)}{N}}\right)
 $$</p>
 <p>其中 $\mathcal{R}$ 是泛化误差，$\hat{\mathcal{R}}$ 是训练误差，$N$ 是样本数。</p>
 <p>对比全量微调：</p>
-<p>$$<br />
-\mathcal{R}(h_{full}) \leq \hat{\mathcal{R}}(h_{full}) + O\left(\sqrt{\frac{nm}{N}}\right)<br />
+<p>$$
+\mathcal{R}(h_{full}) \leq \hat{\mathcal{R}}(h_{full}) + O\left(\sqrt{\frac{nm}{N}}\right)
 $$</p>
 <p><strong>推论17.1</strong>：当 $r(n+m) \ll nm$ 时，LoRA的泛化界更紧，意味着更好的泛化性能。</p>
 <p><strong>定理17.2（VC维）</strong>：LoRA的VC维约为 $O(r(n+m))$，远小于全量微调的 $O(nm)$。</p>
 <p>较低的VC维意味着更强的泛化能力，特别是在样本有限时。</p>
 <h3 id="18-lora">18. LoRA的变体：加性分解<a class="toc-link" href="#18-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定义18.1（加性分解）</strong>：如文章所提，一个替代方案是使用加性分解：</p>
-<p>$$<br />
-W = W_0 + A \mathbf{1}<em 1="1" _times="\times" n="n">{1 \times m} + \mathbf{1}</em> B<br />
+<p>$$
+W = W_0 + A \mathbf{1}<em 1="1" _times="\times" n="n">{1 \times m} + \mathbf{1}</em> B
 $$</p>
 <p>其中 $A \in \mathbb{R}^{n \times 1}, B \in \mathbb{R}^{1 \times m}$，$\mathbf{1}$ 表示全1向量。</p>
 <p><strong>定理18.1（加性分解的秩）</strong>：加性分解的秩可以达到2（而乘性的秩为1当$r=1$时）：</p>
-<p>$$<br />
-\text{rank}(A \mathbf{1}^T + \mathbf{1} B^T) \leq 2<br />
+<p>$$
+\text{rank}(A \mathbf{1}^T + \mathbf{1} B^T) \leq 2
 $$</p>
 <p><strong>梯度18.1（加性分解的梯度）</strong>：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial A} = \left(\frac{\partial \mathcal{L}}{\partial W}\right) \mathbf{1}_{m \times 1}<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial A} = \left(\frac{\partial \mathcal{L}}{\partial W}\right) \mathbf{1}_{m \times 1}
 $$</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial B} = \mathbf{1}_{1 \times n} \frac{\partial \mathcal{L}}{\partial W}<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial B} = \mathbf{1}_{1 \times n} \frac{\partial \mathcal{L}}{\partial W}
 $$</p>
 <p>即原始梯度的行和与列和。</p>
 <p><strong>定理18.2（加性分解的优势）</strong>：</p>
@@ -615,40 +619,40 @@ $$</p>
 </ol>
 <p><strong>定理18.3（加性分解的扩展到高秩）</strong>：对于 $r &gt; 1$，可以分块处理：</p>
 <p>将 $W$ 分为 $r \times r$ 个块，每个块使用加性分解：</p>
-<p>$$<br />
-W = W_0 + \sum_{i=1}^r \sum_{j=1}^r A_i \mathbf{1}^T + \mathbf{1} B_j^T<br />
+<p>$$
+W = W_0 + \sum_{i=1}^r \sum_{j=1}^r A_i \mathbf{1}^T + \mathbf{1} B_j^T
 $$</p>
 <p>但这需要精心设计块的划分。</p>
 <h3 id="19-lora">19. LoRA的数值稳定性<a class="toc-link" href="#19-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定理19.1（条件数的影响）</strong>：LoRA的数值稳定性与矩阵 $A$ 和 $B$ 的条件数相关。</p>
 <p>设 $\kappa(A) = \frac{\sigma_{max}(A)}{\sigma_{min}(A)}$ 是条件数，则当 $\kappa(A)$ 或 $\kappa(B)$ 很大时，训练可能不稳定。</p>
 <p><strong>解决方案19.1（正交初始化）</strong>：可以使用正交初始化来保证 $\kappa(A) = \kappa(B) = 1$：</p>
-<p>$$<br />
-A^T A = I_{r \times r}, \quad BB^T = I_{r \times r}<br />
+<p>$$
+A^T A = I_{r \times r}, \quad BB^T = I_{r \times r}
 $$</p>
 <p>这样 $A$ 和 $B$ 都是正交矩阵（的一部分），条件数为1。</p>
 <p><strong>定理19.2（梯度裁剪）</strong>：为了防止梯度爆炸，建议使用梯度裁剪：</p>
-<p>$$<br />
-\nabla \leftarrow \begin{cases}<br />
-\nabla &amp; \text{if } |\nabla| \leq \theta \<br />
-\theta \frac{\nabla}{|\nabla|} &amp; \text{if } |\nabla| &gt; \theta<br />
-\end{cases}<br />
+<p>$$
+\nabla \leftarrow \begin{cases}
+\nabla &amp; \text{if } |\nabla| \leq \theta \
+\theta \frac{\nabla}{|\nabla|} &amp; \text{if } |\nabla| &gt; \theta
+\end{cases}
 $$</p>
 <p>其中 $\theta$ 是裁剪阈值（如1.0）。</p>
 <h3 id="20-lora">20. LoRA的可视化理解<a class="toc-link" href="#20-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定理20.1（秩1的几何解释）</strong>：当 $r = 1$ 时，$\Delta W = ab^T$ 是一个秩1矩阵，其几何意义为：</p>
-<p>$$<br />
-\Delta W = ab^T = \begin{bmatrix} a_1 b_1 &amp; a_1 b_2 &amp; \cdots &amp; a_1 b_m \ a_2 b_1 &amp; a_2 b_2 &amp; \cdots &amp; a_2 b_m \ \vdots &amp; \vdots &amp; \ddots &amp; \vdots \ a_n b_1 &amp; a_n b_2 &amp; \cdots &amp; a_n b_m \end{bmatrix}<br />
+<p>$$
+\Delta W = ab^T = \begin{bmatrix} a_1 b_1 &amp; a_1 b_2 &amp; \cdots &amp; a_1 b_m \ a_2 b_1 &amp; a_2 b_2 &amp; \cdots &amp; a_2 b_m \ \vdots &amp; \vdots &amp; \ddots &amp; \vdots \ a_n b_1 &amp; a_n b_2 &amp; \cdots &amp; a_n b_m \end{bmatrix}
 $$</p>
 <p>每一列都是 $a$ 的标量倍数，每一行都是 $b$ 的标量倍数。</p>
 <p><strong>可视化</strong>：$\Delta W$ 的所有列向量都在同一条直线上（由 $a$ 定义），所有行向量也在同一条直线上（由 $b$ 定义）。</p>
 <p><strong>定理20.2（秩r的几何解释）</strong>：当 $r &gt; 1$ 时：</p>
-<p>$$<br />
-\Delta W = AB = \sum_{i=1}^r a_i b_i^T<br />
+<p>$$
+\Delta W = AB = \sum_{i=1}^r a_i b_i^T
 $$</p>
 <p>是 $r$ 个秩1矩阵的和，即：</p>
-<p>$$<br />
-\Delta W = a_1 b_1^T + a_2 b_2^T + \cdots + a_r b_r^T<br />
+<p>$$
+\Delta W = a_1 b_1^T + a_2 b_2^T + \cdots + a_r b_r^T
 $$</p>
 <p><strong>可视化</strong>：$\Delta W$ 的列空间是 $r$ 维的，由 ${a_1, \ldots, a_r}$ 张成；行空间也是 $r$ 维的，由 ${b_1, \ldots, b_r}$ 张成。</p>
 <h3 id="21-lora">21. LoRA在不同架构中的应用<a class="toc-link" href="#21-lora" title="Permanent link">&para;</a></h3>
@@ -664,14 +668,14 @@ $$</p>
 <p><strong>应用21.2（CNN中的LoRA）</strong>：在卷积层中，可以将卷积核reshape为矩阵后应用LoRA：</p>
 <p>卷积核 $W \in \mathbb{R}^{c_{out} \times c_{in} \times k \times k}$ 可以reshape为 $\mathbb{R}^{c_{out} \times (c_{in} \cdot k^2)}$，然后应用LoRA。</p>
 <p><strong>应用21.3（RNN中的LoRA）</strong>：在RNN中，可以对隐藏状态转移矩阵应用LoRA：</p>
-<p>$$<br />
-h_t = \tanh((W_0 + AB) h_{t-1} + U x_t)<br />
+<p>$$
+h_t = \tanh((W_0 + AB) h_{t-1} + U x_t)
 $$</p>
 <h3 id="22-lora">22. LoRA的理论局限<a class="toc-link" href="#22-lora" title="Permanent link">&para;</a></h3>
 <p><strong>局限22.1（秩不足的问题）</strong>：如果真实的最优更新矩阵的秩大于 $r$，LoRA无法找到真正的最优解。</p>
 <p><strong>定理22.1（次优性）</strong>：存在任务使得LoRA的最优解严格差于全量微调：</p>
-<p>$$<br />
-\min_{A,B} \mathcal{L}(W_0 + AB) &gt; \min_W \mathcal{L}(W)<br />
+<p>$$
+\min_{A,B} \mathcal{L}(W_0 + AB) &gt; \min_W \mathcal{L}(W)
 $$</p>
 <p><strong>例子</strong>：如果目标是学习一个满秩矩阵，而 $r &lt; \text{rank}(\Delta W^*)$，则LoRA必然次优。</p>
 <p><strong>局限22.2（任务特异性）</strong>：最优秩 $r$ 是任务相关的，没有通用的选择准则。</p>
@@ -682,24 +686,24 @@ $$</p>
 <p>核心思想：重要的层使用更大的 $r$，不重要的层使用更小的 $r$。</p>
 <p><strong>变体23.2（QLoRA）</strong>：结合量化的LoRA。</p>
 <p>将预训练权重 $W_0$ 量化为低精度（如4-bit），只有 $A, B$ 使用高精度。</p>
-<p><strong>公式</strong>：<br />
-$$<br />
-W = \text{Dequant}(W_0^{quant}) + AB<br />
+<p><strong>公式</strong>：
+$$
+W = \text{Dequant}(W_0^{quant}) + AB
 $$</p>
 <p><strong>优势</strong>：进一步减少显存占用。</p>
 <p><strong>变体23.3（LoRA+）</strong>：在LoRA的基础上增加额外的正则化：</p>
-<p>$$<br />
-\mathcal{L}<em task="task">{total} = \mathcal{L}</em> + \lambda_1 |A|<em>F^2 + \lambda_2 |B|_F^2 + \lambda_3 |AB|</em>*<br />
+<p>$$
+\mathcal{L}<em task="task">{total} = \mathcal{L}</em> + \lambda_1 |A|<em>F^2 + \lambda_2 |B|_F^2 + \lambda_3 |AB|</em>*
 $$</p>
 <p>其中 $|\cdot|_*$ 是核范数（所有奇异值之和），鼓励低秩。</p>
 <h3 id="24-lora">24. LoRA的信息论视角<a class="toc-link" href="#24-lora" title="Permanent link">&para;</a></h3>
 <p><strong>定义24.1（互信息）</strong>：定义输入 $x$ 和输出 $y$ 的互信息：</p>
-<p>$$<br />
-I(X; Y) = H(Y) - H(Y|X)<br />
+<p>$$
+I(X; Y) = H(Y) - H(Y|X)
 $$</p>
 <p><strong>定理24.1（信息瓶颈）</strong>：LoRA通过低秩约束实现了一种信息瓶颈：</p>
-<p>$$<br />
-\max_{A,B} I(X; Y) \quad \text{s.t.} \quad I(X; {A,B}) \leq r(n+m) \log 2<br />
+<p>$$
+\max_{A,B} I(X; Y) \quad \text{s.t.} \quad I(X; {A,B}) \leq r(n+m) \log 2
 $$</p>
 <p>（假设参数用固定精度编码）</p>
 <p><strong>推论24.1</strong>：LoRA强制模型在有限的"信息预算"下学习任务相关的特征，这自然地起到了正则化作用。</p>
@@ -707,18 +711,18 @@ $$</p>
 <h3 id="25-lora">25. LoRA的未来方向与理论展望<a class="toc-link" href="#25-lora" title="Permanent link">&para;</a></h3>
 <p><strong>方向25.1（自动秩选择）</strong>：开发理论指导的自动秩选择方法。</p>
 <p><strong>提议</strong>：基于梯度矩阵的奇异值衰减速度自动选择 $r$：</p>
-<p>$$<br />
-r^* = \arg\min_r \left{ \frac{\sum_{i&gt;r} \sigma_i^2}{\sum_{i=1}^n \sigma_i^2} &lt; \epsilon \right}<br />
+<p>$$
+r^* = \arg\min_r \left{ \frac{\sum_{i&gt;r} \sigma_i^2}{\sum_{i=1}^n \sigma_i^2} &lt; \epsilon \right}
 $$</p>
 <p>其中 $\sigma_i$ 是梯度矩阵的奇异值，$\epsilon$ 是容忍的误差。</p>
 <p><strong>方向25.2（非线性低秩分解）</strong>：探索非线性的低秩分解：</p>
-<p>$$<br />
-W = W_0 + f(A) g(B)<br />
+<p>$$
+W = W_0 + f(A) g(B)
 $$</p>
 <p>其中 $f, g$ 是非线性函数（如神经网络）。</p>
 <p><strong>方向25.3（动态LoRA）</strong>：根据输入动态调整 $A$ 和 $B$：</p>
-<p>$$<br />
-A(x) = A_0 + h_A(x), \quad B(x) = B_0 + h_B(x)<br />
+<p>$$
+A(x) = A_0 + h_A(x), \quad B(x) = B_0 + h_B(x)
 $$</p>
 <p>其中 $h_A, h_B$ 是轻量级的动态调整网络。</p>
 <p><strong>定理25.1（LoRA的普适性）</strong>：LoRA的核心思想（低秩近似）可以应用于：</p>
@@ -730,8 +734,8 @@ $$</p>
 </ol>
 <p><strong>最终定理</strong>：LoRA揭示了深度学习中的一个基本原理：<strong>预训练模型的适应是低维的</strong>。</p>
 <p>形式化地：</p>
-<p>$$<br />
-\mathcal{H}<em full="full">{adapt} \subset \mathcal{H}</em>}, \quad \dim(\mathcal{H<em full="full">{adapt}) \ll \dim(\mathcal{H}</em>)<br />
+<p>$$
+\mathcal{H}<em full="full">{adapt} \subset \mathcal{H}</em>}, \quad \dim(\mathcal{H<em full="full">{adapt}) \ll \dim(\mathcal{H}</em>)
 $$</p>
 <p>其中 $\mathcal{H}<em full="full">{adapt}$ 是适应子空间，$\mathcal{H}</em>$ 是完整参数空间。</p>
 <p>这一原理不仅适用于LoRA，也适用于其他参数高效微调方法，是理解和设计高效微调方法的理论基础。</p>
@@ -756,7 +760,7 @@ $$</p>
                             
                             <a href="从jl引理看熵不变性attention.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#87 从JL引理看熵不变性Attention</div>
+                                <div class="nav-title">#81 从JL引理看熵不变性Attention</div>
                             </a>
                             
                         </div>
@@ -764,7 +768,7 @@ $$</p>
                             
                             <a href="注意力和softmax的两点有趣发现鲁棒性和信息量.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#89 注意力和Softmax的两点有趣发现：鲁棒性和信息量</div>
+                                <div class="nav-title">#83 注意力和Softmax的两点有趣发现：鲁棒性和信息量</div>
                             </a>
                             
                         </div>

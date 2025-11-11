@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #168 VQ的又一技巧：给编码表加一个线性变换
+                    #149 VQ的又一技巧：给编码表加一个线性变换
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#168</span>
+                <span class="post-number">#149</span>
                 VQ的又一技巧：给编码表加一个线性变换
             </h1>
             <div class="post-meta">
@@ -136,23 +140,23 @@
 <p>无独有偶，昨天发布在arXiv上的论文<a href="https://papers.cool/arxiv/2411.02038">《Addressing Representation Collapse in Vector Quantized Models with One Linear Layer》</a>提出了改善VQ的另一个技巧：给编码表加一个线性变换。这个技巧单纯改变了编码表的参数化方式，不改变VQ背后的理论框架，但实测效果非常优异，称得上是简单有效的经典案例。</p>
 <h2 id="_1">基础<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>由于在<a href="/archives/6760">《VQ-VAE的简明介绍：量子化自编码器》</a>、<a href="/archives/9826">《简单得令人尴尬的FSQ：“四舍五入”超越了VQ-VAE》</a>等文章中我们已经多次介绍了VQ和VQ-VAE了，所以这里不再娓娓道来，直接给出普通AE和VQ-VAE的数学形式：<br />
-\begin{align}<br />
-\text{AE:}&amp;\qquad z = encoder(x),\quad \hat{x}=decoder(z),\quad \mathcal{L}=\Vert x - \hat{x}\Vert^2 \\[12pt]<br />
-\text{VQ-VAE:}&amp;\qquad\left\{\begin{aligned}<br />
-z =&amp;\, encoder(x)\\[5pt]<br />
-z_q =&amp;\, z + \text{sg}[q - z],\quad q = \mathop{\text{argmin}}_{e\in\{e_1,e_2,\cdots,e_K\}} \Vert z - e\Vert\\<br />
-\hat{x} =&amp;\, decoder(z_q)\\[5pt]<br />
-\mathcal{L} =&amp;\, \Vert x - \hat{x}\Vert^2 + \beta\Vert q - \text{sg}[z]\Vert^2 + \gamma\Vert z - \text{sg}[q]\Vert^2<br />
+\begin{align}
+\text{AE:}&amp;\qquad z = encoder(x),\quad \hat{x}=decoder(z),\quad \mathcal{L}=\Vert x - \hat{x}\Vert^2 \\[12pt]
+\text{VQ-VAE:}&amp;\qquad\left\{\begin{aligned}
+z =&amp;\, encoder(x)\\[5pt]
+z_q =&amp;\, z + \text{sg}[q - z],\quad q = \mathop{\text{argmin}}_{e\in\{e_1,e_2,\cdots,e_K\}} \Vert z - e\Vert\\
+\hat{x} =&amp;\, decoder(z_q)\\[5pt]
+\mathcal{L} =&amp;\, \Vert x - \hat{x}\Vert^2 + \beta\Vert q - \text{sg}[z]\Vert^2 + \gamma\Vert z - \text{sg}[q]\Vert^2
 \end{aligned}\right.\label{eq:vqvae}<br />
 \end{align}</p>
 <p>再次强调老生常谈的一点：VQ-VAE不是VAE，它只是一个加上了VQ的AE，没有VAE的生成能力。而VQ则是 <em>将任意向量映射为编码表中与它最邻近的向量</em> 的操作，这个操作本身具有不可导的特性，所以通过STE来为encoder设计了梯度，并且新增了$\beta,\gamma$这两项损失，来为编码表提供梯度，同时也起到规整encoder表征的作用。</p>
 <h2 id="_2">改动<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>论文将自己所提方法称为SimVQ，但没有解释Sim是什么含义，笔者猜测Sim是Simple的缩写，因为SimVQ的改动确实太Simple了：<br />
-\begin{equation}<br />
-\text{SimVQ-VAE:}\qquad\left\{\begin{aligned}<br />
-z =&amp;\, encoder(x)\\[5pt]<br />
-z_q =&amp;\, z + \text{sg}[q\color{red}{W} - z],\quad q = \mathop{\text{argmin}}_{e\in\{e_1,e_2,\cdots,e_K\}} \Vert z - e\color{red}{W}\Vert\\<br />
-\hat{x} =&amp;\, decoder(z_q)\\[5pt]<br />
+\begin{equation}
+\text{SimVQ-VAE:}\qquad\left\{\begin{aligned}
+z =&amp;\, encoder(x)\\[5pt]
+z_q =&amp;\, z + \text{sg}[q\color{red}{W} - z],\quad q = \mathop{\text{argmin}}_{e\in\{e_1,e_2,\cdots,e_K\}} \Vert z - e\color{red}{W}\Vert\\
+\hat{x} =&amp;\, decoder(z_q)\\[5pt]
 \mathcal{L} =&amp;\, \Vert x - \hat{x}\Vert^2 + \beta\Vert q\color{red}{W} - \text{sg}[z]\Vert^2 + \gamma\Vert z - \text{sg}[q\color{red}{W}]\Vert^2\end{aligned}\right.<br />
 \end{equation}<br />
 没错，就只是在编码表多乘了一个矩阵$W$，其他原封不动。</p>
@@ -170,10 +174,10 @@ z_q =&amp;\, z + \text{sg}[q\color{red}{W} - z],\quad q = \mathop{\text{argmin}}
 <p>我们也可以从数学公式角度来描述这个过程。假设优化器为SGD，那么VQ中编码$e_i$的更新为<br />
 \begin{equation}e_i^{(t+1)} = e_i^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial e_i^{(t)}}\end{equation}<br />
 这样如果当前批次中$e_i$没有被选中，那么$\frac{\partial \mathcal{L}}{\partial e_i^{(t)}}$为零，当前编码表就不更新了。但如果$e_i$被参数化为$q_i W$，那么<br />
-\begin{equation}\begin{aligned}<br />
-q_i^{(t+1)} =&amp;\, q_i^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial q_i^{(t)}} = q_i^{(t)} - \eta \frac{\partial \mathcal{L}}{\partial e_i^{(t)}} W^{(t)}{}^{\top}\\<br />
-W^{(t+1)} =&amp;\, W^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial W^{(t)}} = W^{(t)} - \eta \sum_i q_i^{(t)}{}^{\top}\frac{\partial \mathcal{L}}{\partial e_i^{(t)}} \\<br />
-e_i^{(t+1)}=&amp;\,q_i^{(t+1)}W^{(t+1)}\approx e_i^{(t)} - \eta\left(\frac{\partial \mathcal{L}}{\partial e_i^{(t)}} W^{(t)}{}^{\top}W^{(t)} + q_i^{(t)}\sum_i q_i^{(t)}{}^{\top}\frac{\partial \mathcal{L}}{\partial e_i^{(t)}}\right)<br />
+\begin{equation}\begin{aligned}
+q_i^{(t+1)} =&amp;\, q_i^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial q_i^{(t)}} = q_i^{(t)} - \eta \frac{\partial \mathcal{L}}{\partial e_i^{(t)}} W^{(t)}{}^{\top}\\
+W^{(t+1)} =&amp;\, W^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial W^{(t)}} = W^{(t)} - \eta \sum_i q_i^{(t)}{}^{\top}\frac{\partial \mathcal{L}}{\partial e_i^{(t)}} \\
+e_i^{(t+1)}=&amp;\,q_i^{(t+1)}W^{(t+1)}\approx e_i^{(t)} - \eta\left(\frac{\partial \mathcal{L}}{\partial e_i^{(t)}} W^{(t)}{}^{\top}W^{(t)} + q_i^{(t)}\sum_i q_i^{(t)}{}^{\top}\frac{\partial \mathcal{L}}{\partial e_i^{(t)}}\right)
 \end{aligned}\end{equation}<br />
 可以看到：</p>
 <blockquote>
@@ -213,167 +217,167 @@ url={\url{https://spaces.ac.cn/archives/10519}},<br />
 <p>本节将对SimVQ（给编码表加线性变换）的方法进行极其详细的数学推导，涵盖编码表的线性变换定义、仿射变换的数学性质、表达能力的提升证明、梯度流的完整推导、优化景观的分析等核心内容。</p>
 <h3 id="1">1. 编码表的线性变换定义<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
 <p><strong>定义1.1（标准VQ的编码表）</strong>：在标准VQ-VAE中，编码表定义为一组可学习的向量：</p>
-<p>$$<br />
-\mathcal{C} = {e_1, e_2, \cdots, e_K} \subset \mathbb{R}^d<br />
+<p>$$
+\mathcal{C} = {e_1, e_2, \cdots, e_K} \subset \mathbb{R}^d
 $$</p>
 <p>可以将其表示为矩阵$E \in \mathbb{R}^{K \times d}$，其中第$i$行为$e_i$。</p>
 <p><strong>定义1.2（SimVQ的参数化）</strong>：SimVQ将编码表参数化为：</p>
-<p>$$<br />
-\mathcal{C}_{SimVQ} = {q_1W, q_2W, \cdots, q_KW}<br />
+<p>$$
+\mathcal{C}_{SimVQ} = {q_1W, q_2W, \cdots, q_KW}
 $$</p>
 <p>其中$Q \in \mathbb{R}^{K \times d}$是编码向量矩阵，$W \in \mathbb{R}^{d \times d}$是共享的线性变换矩阵。因此有效的编码表为：</p>
-<p>$$<br />
-E_{eff} = QW \in \mathbb{R}^{K \times d}<br />
+<p>$$
+E_{eff} = QW \in \mathbb{R}^{K \times d}
 $$</p>
 <p><strong>命题1.1（参数化的等价性）</strong>：从表达能力的角度，SimVQ与标准VQ是等价的，因为：</p>
-<p>$$<br />
-\text{span}(QW) = \text{span}(E), \quad \text{当}W\text{可逆时}<br />
+<p>$$
+\text{span}(QW) = \text{span}(E), \quad \text{当}W\text{可逆时}
 $$</p>
 <p><strong>证明</strong>：如果$W$可逆，对于任意$E \in \mathbb{R}^{K \times d}$，我们可以设置$Q = EW^{-1}$，则$QW = E$。反之，对于任意$Q$，$E = QW$也是一个有效的编码表。因此两种参数化具有相同的表达能力。$\square$</p>
 <p><strong>定义1.3（SimVQ的量化操作）</strong>：SimVQ的量化操作定义为：</p>
-<p>$$<br />
-VQ_{SimVQ}(z) = q = \mathop{\text{argmin}}_{q \in Q} |z - qW|_2<br />
+<p>$$
+VQ_{SimVQ}(z) = q = \mathop{\text{argmin}}_{q \in Q} |z - qW|_2
 $$</p>
 <p>其中$Q = {q_1, q_2, \cdots, q_K}$。</p>
-<p><strong>命题1.2（量化的两阶段视角）</strong>：SimVQ的量化可以分解为两个阶段：<br />
-1. 在原始空间找到最近的$q_i$（通过比较$|z - q_iW|_2$）<br />
+<p><strong>命题1.2（量化的两阶段视角）</strong>：SimVQ的量化可以分解为两个阶段：
+1. 在原始空间找到最近的$q_i$（通过比较$|z - q_iW|_2$）
 2. 返回$q_iW$作为量化结果</p>
 <p>这与标准VQ不同，标准VQ只有单阶段：找到最近的$e_i$。</p>
 <h3 id="2">2. 梯度流的完整推导<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
 <p><strong>定义2.1（SimVQ-VAE的损失函数）</strong>：完整的SimVQ-VAE损失函数为：</p>
-<p>$$<br />
-\mathcal{L}<em _mathcal_L="\mathcal{L">{total} = \underbrace{|x - \hat{x}|^2}</em><em _mathcal_L="\mathcal{L">{recon}} + \underbrace{\beta|qW - \text{sg}[z]|^2}</em><em _mathcal_L="\mathcal{L">{codebook}} + \underbrace{\gamma|z - \text{sg}[qW]|^2}</em>}_{commit}<br />
-$$</p>
+<p>$$
+\mathcal{L}<em _mathcal_L="\mathcal{L">{total} = \underbrace{|x - \hat{x}|^2}</em><em _mathcal_L="\mathcal{L">{recon}} + \underbrace{\beta|qW - \text{sg}[z]|^2}</em><em _mathcal_L="\mathcal{L">{codebook}} + \underbrace{\gamma|z - \text{sg}[qW]|^2}</em>
+$$}_{commit}</p>
 <p>其中$q = \mathop{\text{argmin}}_{q_i \in Q} |z - q_iW|_2$。</p>
 <p><strong>定理2.1（对$W$的梯度）</strong>：对于线性变换矩阵$W$，梯度为：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}<em i="1">{total}}{\partial W} = \sum</em> q_i^T + 2\beta(q_iW - z)q_i^T\right]}^K \mathbb{1}[q = q_i] \left[\frac{\partial \mathcal{L}_{recon}}{\partial (q_iW)<br />
-$$</p>
+<p>$$
+\frac{\partial \mathcal{L}<em i="1">{total}}{\partial W} = \sum</em> q_i^T + 2\beta(q_iW - z)q_i^T\right]
+$$}^K \mathbb{1}[q = q_i] \left[\frac{\partial \mathcal{L}_{recon}}{\partial (q_iW)</p>
 <p><strong>证明</strong>：首先考虑重构损失。设$z_q = qW$是量化后的向量，则：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}<em recon="recon">{recon}}{\partial W} = \frac{\partial \mathcal{L}</em>}}{\partial z_q} \frac{\partial z_q}{\partial W<br />
-$$</p>
+<p>$$
+\frac{\partial \mathcal{L}<em recon="recon">{recon}}{\partial W} = \frac{\partial \mathcal{L}</em>
+$$}}{\partial z_q} \frac{\partial z_q}{\partial W</p>
 <p>注意$z_q = qW$，所以：</p>
-<p>$$<br />
-\frac{\partial z_q}{\partial W} = q^T<br />
+<p>$$
+\frac{\partial z_q}{\partial W} = q^T
 $$</p>
 <p>更准确地说，对于$W$的第$(j,k)$个元素：</p>
-<p>$$<br />
-\frac{\partial (qW)<em jk="jk">k}{\partial W</em> = q_j}<br />
-$$</p>
+<p>$$
+\frac{\partial (qW)<em jk="jk">k}{\partial W</em> = q_j
+$$}</p>
 <p>因此：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}<em recon="recon">{recon}}{\partial W} = \left(\frac{\partial \mathcal{L}</em>\right) q^T}}{\partial z_q<br />
-$$</p>
+<p>$$
+\frac{\partial \mathcal{L}<em recon="recon">{recon}}{\partial W} = \left(\frac{\partial \mathcal{L}</em>\right) q^T
+$$}}{\partial z_q</p>
 <p>对于编码表损失：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}_{codebook}}{\partial W} = \frac{\partial}{\partial W}\left[\beta|qW - \text{sg}[z]|^2\right] = 2\beta(qW - z)q^T<br />
+<p>$$
+\frac{\partial \mathcal{L}_{codebook}}{\partial W} = \frac{\partial}{\partial W}\left[\beta|qW - \text{sg}[z]|^2\right] = 2\beta(qW - z)q^T
 $$</p>
 <p>其中用到了$\text{sg}[z]$的梯度为零。</p>
 <p>承诺损失不包含$W$，因此其对$W$的梯度为零。</p>
 <p>综合上述，得到总梯度。$\square$</p>
 <p><strong>定理2.2（对$q_i$的梯度）</strong>：对于编码向量$q_i$，当它被选中时（即$q = q_i$），梯度为：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}<em recon="recon">{total}}{\partial q_i} = \left(\frac{\partial \mathcal{L}</em> + 2\beta(q_iW - z)\right) W^T}}{\partial z_q<br />
-$$</p>
+<p>$$
+\frac{\partial \mathcal{L}<em recon="recon">{total}}{\partial q_i} = \left(\frac{\partial \mathcal{L}</em> + 2\beta(q_iW - z)\right) W^T
+$$}}{\partial z_q</p>
 <p><strong>证明</strong>：注意$z_q = q_iW$，因此：</p>
-<p>$$<br />
-\frac{\partial z_q}{\partial q_i} = W^T<br />
+<p>$$
+\frac{\partial z_q}{\partial q_i} = W^T
 $$</p>
 <p>（这里$W^T$是因为$z_q = q_iW$，$z_q$是行向量）</p>
 <p>对于重构损失：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}<em recon="recon">{recon}}{\partial q_i} = \frac{\partial \mathcal{L}</em> W^T}}{\partial z_q<br />
-$$</p>
+<p>$$
+\frac{\partial \mathcal{L}<em recon="recon">{recon}}{\partial q_i} = \frac{\partial \mathcal{L}</em> W^T
+$$}}{\partial z_q</p>
 <p>对于编码表损失：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}_{codebook}}{\partial q_i} = 2\beta(q_iW - z)W^T<br />
+<p>$$
+\frac{\partial \mathcal{L}_{codebook}}{\partial q_i} = 2\beta(q_iW - z)W^T
 $$</p>
 <p>综合得到总梯度。$\square$</p>
-<p><strong>命题2.1（梯度的联动性）</strong>：与标准VQ不同，SimVQ中：<br />
-1. 更新$W$会影响所有被选中的编码向量的有效表示$q_iW$<br />
+<p><strong>命题2.1（梯度的联动性）</strong>：与标准VQ不同，SimVQ中：
+1. 更新$W$会影响所有被选中的编码向量的有效表示$q_iW$
 2. 即使$q_i$未被选中，它也可能通过$W$的更新而间接更新</p>
 <p>这种联动性是SimVQ的核心优势。</p>
 <h3 id="3">3. 优化动力学分析<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
 <p><strong>定义3.1（SGD更新规则）</strong>：使用学习率$\eta$的SGD，更新规则为：</p>
-<p>对于$q_i$：<br />
-$$<br />
-q_i^{(t+1)} = q_i^{(t)} - \eta \frac{\partial \mathcal{L}}{\partial q_i^{(t)}}<br />
+<p>对于$q_i$：
+$$
+q_i^{(t+1)} = q_i^{(t)} - \eta \frac{\partial \mathcal{L}}{\partial q_i^{(t)}}
 $$</p>
-<p>对于$W$：<br />
-$$<br />
-W^{(t+1)} = W^{(t)} - \eta \frac{\partial \mathcal{L}}{\partial W^{(t)}}<br />
+<p>对于$W$：
+$$
+W^{(t+1)} = W^{(t)} - \eta \frac{\partial \mathcal{L}}{\partial W^{(t)}}
 $$</p>
 <p><strong>定理3.1（有效编码表的更新）</strong>：将$e_i^{(t)} = q_i^{(t)}W^{(t)}$视为有效编码向量，其更新为：</p>
-<p>$$<br />
-\begin{aligned}<br />
-e_i^{(t+1)} &amp;= q_i^{(t+1)}W^{(t+1)} \<br />
-&amp;\approx q_i^{(t)}W^{(t)} - \eta\left[\frac{\partial \mathcal{L}}{\partial q_i^{(t)}}W^{(t)} + q_i^{(t)}\frac{\partial \mathcal{L}}{\partial W^{(t)}}\right] \<br />
-&amp;= e_i^{(t)} - \eta\left[\frac{\partial \mathcal{L}}{\partial q_i^{(t)}}W^{(t)} + q_i^{(t)}\frac{\partial \mathcal{L}}{\partial W^{(t)}}\right]<br />
-\end{aligned}<br />
+<p>$$
+\begin{aligned}
+e_i^{(t+1)} &amp;= q_i^{(t+1)}W^{(t+1)} \
+&amp;\approx q_i^{(t)}W^{(t)} - \eta\left[\frac{\partial \mathcal{L}}{\partial q_i^{(t)}}W^{(t)} + q_i^{(t)}\frac{\partial \mathcal{L}}{\partial W^{(t)}}\right] \
+&amp;= e_i^{(t)} - \eta\left[\frac{\partial \mathcal{L}}{\partial q_i^{(t)}}W^{(t)} + q_i^{(t)}\frac{\partial \mathcal{L}}{\partial W^{(t)}}\right]
+\end{aligned}
 $$</p>
 <p>其中忽略了$O(\eta^2)$的二阶项。</p>
 <p><strong>证明</strong>：</p>
-<p>$$<br />
-\begin{aligned}<br />
-e_i^{(t+1)} &amp;= q_i^{(t+1)}W^{(t+1)} \<br />
-&amp;= \left(q_i^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial q_i^{(t)}}\right)\left(W^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial W^{(t)}}\right) \<br />
-&amp;= q_i^{(t)}W^{(t)} - \eta q_i^{(t)}\frac{\partial \mathcal{L}}{\partial W^{(t)}} - \eta\frac{\partial \mathcal{L}}{\partial q_i^{(t)}}W^{(t)} + O(\eta^2) \<br />
-&amp;= e_i^{(t)} - \eta\left[\frac{\partial \mathcal{L}}{\partial q_i^{(t)}}W^{(t)} + q_i^{(t)}\frac{\partial \mathcal{L}}{\partial W^{(t)}}\right] + O(\eta^2)<br />
-\end{aligned}<br />
+<p>$$
+\begin{aligned}
+e_i^{(t+1)} &amp;= q_i^{(t+1)}W^{(t+1)} \
+&amp;= \left(q_i^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial q_i^{(t)}}\right)\left(W^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial W^{(t)}}\right) \
+&amp;= q_i^{(t)}W^{(t)} - \eta q_i^{(t)}\frac{\partial \mathcal{L}}{\partial W^{(t)}} - \eta\frac{\partial \mathcal{L}}{\partial q_i^{(t)}}W^{(t)} + O(\eta^2) \
+&amp;= e_i^{(t)} - \eta\left[\frac{\partial \mathcal{L}}{\partial q_i^{(t)}}W^{(t)} + q_i^{(t)}\frac{\partial \mathcal{L}}{\partial W^{(t)}}\right] + O(\eta^2)
+\end{aligned}
 $$</p>
 <p>$\square$</p>
 <p><strong>命题3.1（标准VQ的更新对比）</strong>：标准VQ中，$e_i$的更新为：</p>
-<p>$$<br />
-e_i^{(t+1)} = e_i^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial e_i^{(t)}}<br />
+<p>$$
+e_i^{(t+1)} = e_i^{(t)} - \eta\frac{\partial \mathcal{L}}{\partial e_i^{(t)}}
 $$</p>
 <p>只有当$e_i$被选中时，$\frac{\partial \mathcal{L}}{\partial e_i^{(t)}} \neq 0$，否则$e_i$不更新。</p>
 <p><strong>定理3.2（SimVQ的全局更新特性）</strong>：在SimVQ中，即使$q_i$未被选中（$\frac{\partial \mathcal{L}}{\partial q_i^{(t)}} = 0$），有效编码向量$e_i^{(t)} = q_i^{(t)}W^{(t)}$仍然会更新：</p>
-<p>$$<br />
-e_i^{(t+1)} \approx e_i^{(t)} - \eta q_i^{(t)}\frac{\partial \mathcal{L}}{\partial W^{(t)}}<br />
+<p>$$
+e_i^{(t+1)} \approx e_i^{(t)} - \eta q_i^{(t)}\frac{\partial \mathcal{L}}{\partial W^{(t)}}
 $$</p>
 <p>这是因为$W$会基于所有被选中的编码向量的梯度更新。</p>
 <p><strong>证明</strong>：当$q_i$未被选中时，$\frac{\partial \mathcal{L}}{\partial q_i^{(t)}} = 0$，代入定理3.1的结果即得。$\square$</p>
 <h3 id="4">4. 梯度共享机制的深入分析<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
 <p><strong>定义4.1（被选中编码的集合）</strong>：在一个batch中，设被选中的编码向量的索引集合为：</p>
-<p>$$<br />
-\mathcal{S} = {i : \exists z^{(j)}, VQ(z^{(j)}) = q_iW}<br />
+<p>$$
+\mathcal{S} = {i : \exists z^{(j)}, VQ(z^{(j)}) = q_iW}
 $$</p>
 <p><strong>定理4.1（$W$的梯度聚合）</strong>：$W$的梯度是所有被选中编码向量梯度的加权和：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial W} = \sum_{i \in \mathcal{S}} n_i \left[\bar{g}_i q_i^T + 2\beta(\bar{r}_i) q_i^T\right]<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial W} = \sum_{i \in \mathcal{S}} n_i \left[\bar{g}_i q_i^T + 2\beta(\bar{r}_i) q_i^T\right]
 $$</p>
-<p>其中：<br />
-- $n_i$是编码$i$在batch中被选中的次数<br />
-- $\bar{g}<em z:VQ_z_="q_iW">i = \frac{1}{n_i}\sum</em>} \frac{\partial \mathcal{L<em z:VQ_z_="q_iW">{recon}}{\partial z_q}$是平均重构梯度<br />
+<p>其中：
+- $n_i$是编码$i$在batch中被选中的次数
+- $\bar{g}<em z:VQ_z_="q_iW">i = \frac{1}{n_i}\sum</em>} \frac{\partial \mathcal{L<em z:VQ_z_="q_iW">{recon}}{\partial z_q}$是平均重构梯度
 - $\bar{r}_i = \frac{1}{n_i}\sum</em> (q_iW - z)$是平均残差</p>
-<p><strong>命题4.1（高利用率方向的偏好）</strong>：$W$的更新方向由以下因素决定：<br />
-1. 被选中次数$n_i$：利用率高的编码贡献更大的梯度<br />
+<p><strong>命题4.1（高利用率方向的偏好）</strong>：$W$的更新方向由以下因素决定：
+1. 被选中次数$n_i$：利用率高的编码贡献更大的梯度
 2. 编码向量$q_i$：$W$的更新是$q_i$的外积形式</p>
 <p>因此，$W$自然地偏向于高利用率的编码向量。</p>
 <p><strong>定理4.2（未被选中编码的隐式更新）</strong>：对于未被选中的编码$j \notin \mathcal{S}$，其有效表示$e_j = q_jW$的更新为：</p>
-<p>$$<br />
-\Delta e_j = e_j^{(t+1)} - e_j^{(t)} = -\eta q_j \sum_{i \in \mathcal{S}} n_i [\bar{g}_i q_i^T + 2\beta\bar{r}_i q_i^T]<br />
+<p>$$
+\Delta e_j = e_j^{(t+1)} - e_j^{(t)} = -\eta q_j \sum_{i \in \mathcal{S}} n_i [\bar{g}_i q_i^T + 2\beta\bar{r}_i q_i^T]
 $$</p>
 <p><strong>证明</strong>：直接代入定理3.2和定理4.1即得。$\square$</p>
 <p><strong>命题4.2（投影到高利用率子空间）</strong>：定义高利用率子空间为：</p>
-<p>$$<br />
-\mathcal{V}_{high} = \text{span}{q_i : i \in \mathcal{S}}<br />
+<p>$$
+\mathcal{V}_{high} = \text{span}{q_i : i \in \mathcal{S}}
 $$</p>
 <p>则未被选中编码$e_j$的更新方向是向$\mathcal{V}_{high}$投影的结果：</p>
-<p>$$<br />
-\Delta e_j \propto \text{Proj}<em high="high">{\mathcal{V}</em>(q_j)}<br />
-$$</p>
+<p>$$
+\Delta e_j \propto \text{Proj}<em high="high">{\mathcal{V}</em>(q_j)
+$$}</p>
 <p>这使得所有编码向量都倾向于向高利用率方向移动。</p>
 <h3 id="5">5. 过参数化的理论分析<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
 <p><strong>定义5.1（过参数化）</strong>：如果模型的参数数量超过了表达给定函数类所需的最少参数数量，则称模型是过参数化的。</p>
-<p>SimVQ中，参数数量为：<br />
-$$<br />
-N_{SimVQ} = Kd + d^2<br />
+<p>SimVQ中，参数数量为：
+$$
+N_{SimVQ} = Kd + d^2
 $$</p>
-<p>而标准VQ的参数数量为：<br />
-$$<br />
-N_{VQ} = Kd<br />
+<p>而标准VQ的参数数量为：
+$$
+N_{VQ} = Kd
 $$</p>
 <p>因此SimVQ多了$d^2$个参数。</p>
 <p><strong>命题5.1（表达能力等价性）</strong>：尽管SimVQ有更多参数，但其表达能力（在$W$可逆时）与标准VQ等价，因为$QW$可以表示任意的$K \times d$矩阵。</p>
@@ -385,23 +389,23 @@ $$</p>
 </ol>
 <p><strong>定理5.2（优化景观的改善）</strong>：过参数化改善了优化景观：</p>
 <p>设$\mathcal{L}(E)$为关于有效编码表$E$的损失，则：</p>
-<p>标准VQ的Hessian：<br />
-$$<br />
-H_{VQ} = \frac{\partial^2 \mathcal{L}}{\partial E^2}<br />
+<p>标准VQ的Hessian：
+$$
+H_{VQ} = \frac{\partial^2 \mathcal{L}}{\partial E^2}
 $$</p>
-<p>SimVQ的Hessian（关于$Q$和$W$）：<br />
-$$<br />
-H_{SimVQ} = \begin{bmatrix}<br />
-\frac{\partial^2 \mathcal{L}}{\partial Q^2} &amp; \frac{\partial^2 \mathcal{L}}{\partial Q \partial W} \<br />
-\frac{\partial^2 \mathcal{L}}{\partial W \partial Q} &amp; \frac{\partial^2 \mathcal{L}}{\partial W^2}<br />
-\end{bmatrix}<br />
+<p>SimVQ的Hessian（关于$Q$和$W$）：
+$$
+H_{SimVQ} = \begin{bmatrix}
+\frac{\partial^2 \mathcal{L}}{\partial Q^2} &amp; \frac{\partial^2 \mathcal{L}}{\partial Q \partial W} \
+\frac{\partial^2 \mathcal{L}}{\partial W \partial Q} &amp; \frac{\partial^2 \mathcal{L}}{\partial W^2}
+\end{bmatrix}
 $$</p>
 <p>过参数化引入的交叉项$\frac{\partial^2 \mathcal{L}}{\partial Q \partial W}$改变了优化的曲率，使得优化更容易进行。</p>
 <p><strong>证明思路</strong>：过参数化增加了参数空间的维度，但同时引入了冗余。这种冗余使得梯度下降可以沿着多个方向前进，避免陷入尖锐的局部最优。详细证明需要用到随机矩阵理论和神经正切核理论，这里省略。$\square$</p>
 <h3 id="6">6. 编码表利用率的理论分析<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
 <p><strong>定义6.1（编码表利用率）</strong>：编码表利用率定义为被使用的编码向量占总编码向量的比例：</p>
-<p>$$<br />
-U = \frac{|{i : \exists z, VQ(z) = e_i}|}{K}<br />
+<p>$$
+U = \frac{|{i : \exists z, VQ(z) = e_i}|}{K}
 $$</p>
 <p><strong>定理6.1（SimVQ提升利用率的机制）</strong>：SimVQ通过以下机制提升利用率：</p>
 <ol>
@@ -410,174 +414,174 @@ $$</p>
 <li><strong>避免坍缩</strong>：$W$的共享性防止编码向量完全坍缩到零</li>
 </ol>
 <p><strong>证明</strong>：设某个编码$e_j$从未被使用。在标准VQ中，$e_j$永远不会更新。但在SimVQ中：</p>
-<p>$$<br />
-e_j^{(t+1)} = q_j^{(t)}W^{(t+1)} = q_j^{(t)}\left(W^{(t)} - \eta\sum_{i \in \mathcal{S}} n_i g_i q_i^T\right)<br />
+<p>$$
+e_j^{(t+1)} = q_j^{(t)}W^{(t+1)} = q_j^{(t)}\left(W^{(t)} - \eta\sum_{i \in \mathcal{S}} n_i g_i q_i^T\right)
 $$</p>
 <p>其中$g_i$是关于编码$i$的梯度信息。</p>
 <p>如果$q_j$与某个高利用率的$q_i$有一定相似性（内积不为零），则$e_j$会向$e_i$的方向移动。当$e_j$移动到某个数据点的邻域时，它就有可能被选中，从而提高利用率。$\square$</p>
 <p><strong>命题6.1（利用率下界）</strong>：假设$Q$的各行线性无关，$W$的列秩为$r$，则利用率的下界为：</p>
-<p>$$<br />
-U \geq \frac{r}{d}<br />
+<p>$$
+U \geq \frac{r}{d}
 $$</p>
 <p><strong>证明</strong>：$W$的秩为$r$意味着有效编码表$E = QW$的所有向量都位于一个$r$维子空间中。如果数据分布在这个$r$维子空间中有足够的扩展，那么至少有$\frac{r}{d}K$个编码会被使用。$\square$</p>
 <h3 id="7">7. 对角变体的分析<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
 <p><strong>定义7.1（对角SimVQ）</strong>：对角SimVQ使用对角矩阵$W = \text{diag}(w_1, w_2, \cdots, w_d)$，其中$w_i \in \mathbb{R}$。</p>
-<p>编码表参数化为：<br />
-$$<br />
-e_i = q_i \odot w<br />
+<p>编码表参数化为：
+$$
+e_i = q_i \odot w
 $$</p>
 <p>其中$\odot$表示element-wise乘法，$w = [w_1, w_2, \cdots, w_d]^T$。</p>
-<p><strong>命题7.1（对角SimVQ的表达能力）</strong>：对角SimVQ的表达能力介于标准VQ和完整SimVQ之间：<br />
-- 参数数量：$Kd + d$（比标准VQ多$d$个参数）<br />
+<p><strong>命题7.1（对角SimVQ的表达能力）</strong>：对角SimVQ的表达能力介于标准VQ和完整SimVQ之间：
+- 参数数量：$Kd + d$（比标准VQ多$d$个参数）
 - 表达能力：可以对每个维度独立缩放，但不能旋转</p>
 <p><strong>定理7.1（对角SimVQ的梯度）</strong>：对于对角SimVQ，$w$的梯度为：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial w_j} = \sum_{i \in \mathcal{S}} n_i \left[\frac{\partial \mathcal{L}_{recon}}{\partial (e_i)_j} (q_i)_j + 2\beta(e_i - z)_j (q_i)_j\right]<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial w_j} = \sum_{i \in \mathcal{S}} n_i \left[\frac{\partial \mathcal{L}_{recon}}{\partial (e_i)_j} (q_i)_j + 2\beta(e_i - z)_j (q_i)_j\right]
 $$</p>
 <p>其中$(v)_j$表示向量$v$的第$j$个分量。</p>
-<p><strong>命题7.2（对角SimVQ的优势）</strong>：<br />
-1. <strong>计算效率</strong>：element-wise乘法比矩阵乘法快<br />
-2. <strong>内存效率</strong>：只需存储$d$个参数而非$d^2$个<br />
+<p><strong>命题7.2（对角SimVQ的优势）</strong>：
+1. <strong>计算效率</strong>：element-wise乘法比矩阵乘法快
+2. <strong>内存效率</strong>：只需存储$d$个参数而非$d^2$个
 3. <strong>解释性</strong>：每个$w_j$对应一个特征维度的重要性</p>
 <p><strong>实验观察</strong>：原文提到对角变体的效果介于标准VQ和完整SimVQ之间，这与理论分析一致。</p>
 <h3 id="8">8. 与其他过参数化方法的对比<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
 <p><strong>定义8.1（Pre-Norm中的过参数化）</strong>：在Transformer的Pre-Norm中，有：</p>
-<p>$$<br />
-x + \text{Attn}(\text{RMSNorm}(x)) = x + \text{Attn}(\gamma \odot \frac{x}{|x|})<br />
+<p>$$
+x + \text{Attn}(\text{RMSNorm}(x)) = x + \text{Attn}(\gamma \odot \frac{x}{|x|})
 $$</p>
 <p>其中$\gamma$是可学习的缩放向量。在推理时，$\gamma$可以合并到Attention的投影矩阵中。</p>
-<p><strong>命题8.1（过参数化的共性）</strong>：SimVQ的$W$与Pre-Norm的$\gamma$具有相似的作用：<br />
-1. 都引入了额外的可学习缩放/变换<br />
-2. 都可以在推理时合并，不增加推理成本<br />
+<p><strong>命题8.1（过参数化的共性）</strong>：SimVQ的$W$与Pre-Norm的$\gamma$具有相似的作用：
+1. 都引入了额外的可学习缩放/变换
+2. 都可以在推理时合并，不增加推理成本
 3. 都改善了训练动力学</p>
 <p><strong>定理8.1（过参数化加速收敛）</strong>：根据[Arora et al. 2018]的理论，过参数化可以隐式地加速优化：</p>
 <p>设$\theta = (Q, W)$是SimVQ的参数，$\phi = QW$是有效参数。则梯度下降在$\theta$空间的动力学等价于在$\phi$空间使用一个依赖于$\theta$的"预调节器"：</p>
-<p>$$<br />
-\phi^{(t+1)} = \phi^{(t)} - \eta \underbrace{G(\theta^{(t)})}_{\text{预调节器}} \frac{\partial \mathcal{L}}{\partial \phi}<br />
+<p>$$
+\phi^{(t+1)} = \phi^{(t)} - \eta \underbrace{G(\theta^{(t)})}_{\text{预调节器}} \frac{\partial \mathcal{L}}{\partial \phi}
 $$</p>
 <p>其中预调节器$G(\theta)$改善了优化的条件数。</p>
 <p><strong>证明思路</strong>：利用链式法则：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial Q} = \frac{\partial \mathcal{L}}{\partial \phi} W^T, \quad \frac{\partial \mathcal{L}}{\partial W} = Q^T \frac{\partial \mathcal{L}}{\partial \phi}<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial Q} = \frac{\partial \mathcal{L}}{\partial \phi} W^T, \quad \frac{\partial \mathcal{L}}{\partial W} = Q^T \frac{\partial \mathcal{L}}{\partial \phi}
 $$</p>
 <p>更新后：</p>
-<p>$$<br />
-\phi^{(t+1)} = Q^{(t+1)}W^{(t+1)} \approx QW - \eta\left[\frac{\partial \mathcal{L}}{\partial Q}W + Q\frac{\partial \mathcal{L}}{\partial W}\right]<br />
+<p>$$
+\phi^{(t+1)} = Q^{(t+1)}W^{(t+1)} \approx QW - \eta\left[\frac{\partial \mathcal{L}}{\partial Q}W + Q\frac{\partial \mathcal{L}}{\partial W}\right]
 $$</p>
 <p>代入梯度表达式并化简，可以得到预调节器的形式。$\square$</p>
 <h3 id="9-moe">9. 稀疏训练与MoE的类比<a class="toc-link" href="#9-moe" title="Permanent link">&para;</a></h3>
 <p><strong>定义9.1（稀疏训练）</strong>：VQ可以视为一种稀疏训练方案：在每个时间步，只有被选中的编码向量接收梯度更新。</p>
-<p><strong>命题9.1（VQ与MoE的相似性）</strong>：VQ与Mixture of Experts (MoE)有相似的结构：<br />
-- VQ：选择最近的编码向量$e_i$<br />
+<p><strong>命题9.1（VQ与MoE的相似性）</strong>：VQ与Mixture of Experts (MoE)有相似的结构：
+- VQ：选择最近的编码向量$e_i$
 - MoE：选择top-k的专家$E_i$</p>
-<p>两者都面临类似的问题：<br />
-- 利用率不均衡<br />
+<p>两者都面临类似的问题：
+- 利用率不均衡
 - 某些编码/专家很少被使用</p>
 <p><strong>定理9.1（SimVQ对MoE的启发）</strong>：SimVQ的思想可以迁移到MoE：</p>
 <p>标准MoE：每个专家$E_i(\cdot)$是独立的网络</p>
-<p>改进MoE：所有专家共享一个后续变换：<br />
-$$<br />
-\text{MoE}<em i="i">{SimVQ}(x) = \sum</em> w_i E_i(x) \cdot W<br />
+<p>改进MoE：所有专家共享一个后续变换：
+$$
+\text{MoE}<em i="i">{SimVQ}(x) = \sum</em> w_i E_i(x) \cdot W
 $$</p>
 <p>其中$W$是共享的线性变换。</p>
-<p><strong>命题9.2（潜在的改进）</strong>：对MoE应用类似SimVQ的技巧可能带来：<br />
-1. 提高专家利用率<br />
-2. 增强专家之间的协作<br />
+<p><strong>命题9.2（潜在的改进）</strong>：对MoE应用类似SimVQ的技巧可能带来：
+1. 提高专家利用率
+2. 增强专家之间的协作
 3. 减少参数冗余</p>
-<p>但需要注意MoE与VQ的差异：<br />
-- MoE的专家是函数而非向量<br />
+<p>但需要注意MoE与VQ的差异：
+- MoE的专家是函数而非向量
 - MoE使用soft routing，VQ使用hard selection</p>
 <h3 id="10">10. 计算复杂度分析<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
 <p><strong>定理10.1（SimVQ的计算复杂度）</strong>：</p>
-<p>前向传播：<br />
-1. 计算$QW$：$O(Kd^2)$（一次性计算，可缓存）<br />
-2. 找最近邻：$O(nKd)$（$n$是batch size）<br />
+<p>前向传播：
+1. 计算$QW$：$O(Kd^2)$（一次性计算，可缓存）
+2. 找最近邻：$O(nKd)$（$n$是batch size）
 3. 总计：$O(Kd^2 + nKd)$</p>
-<p>反向传播：<br />
-1. 计算$\frac{\partial \mathcal{L}}{\partial W}$：$O(nd^2)$<br />
-2. 计算$\frac{\partial \mathcal{L}}{\partial Q}$：$O(nd^2)$<br />
+<p>反向传播：
+1. 计算$\frac{\partial \mathcal{L}}{\partial W}$：$O(nd^2)$
+2. 计算$\frac{\partial \mathcal{L}}{\partial Q}$：$O(nd^2)$
 3. 总计：$O(nd^2)$</p>
 <p><strong>命题10.1（与标准VQ的对比）</strong>：</p>
-<p>标准VQ：<br />
-- 前向：$O(nKd)$<br />
+<p>标准VQ：
+- 前向：$O(nKd)$
 - 反向：$O(nd)$</p>
-<p>SimVQ：<br />
-- 前向：$O(Kd^2 + nKd)$<br />
+<p>SimVQ：
+- 前向：$O(Kd^2 + nKd)$
 - 反向：$O(nd^2)$</p>
 <p>额外开销主要来自$W$的矩阵乘法，复杂度为$O(d^2)$。</p>
-<p><strong>命题10.2（实际开销分析）</strong>：<br />
-- 当$K \gg d$时，$Kd^2$项占主导，但这是一次性计算<br />
-- 当$n \ll K$时，反向传播的$nd^2$开销可以接受<br />
+<p><strong>命题10.2（实际开销分析）</strong>：
+- 当$K \gg d$时，$Kd^2$项占主导，但这是一次性计算
+- 当$n \ll K$时，反向传播的$nd^2$开销可以接受
 - 在实际应用中（$d = 256, K = 1024, n = 32$），额外开销约为10-20%</p>
 <h3 id="11">11. 初始化策略的理论分析<a class="toc-link" href="#11" title="Permanent link">&para;</a></h3>
 <p><strong>定义11.1（K-Means初始化）</strong>：使用一些样本${z^{(i)}}$的K-Means聚类结果初始化编码表：</p>
-<p>$$<br />
-Q^{(0)} = \text{K-Means}({z^{(i)}}), \quad W^{(0)} = I<br />
+<p>$$
+Q^{(0)} = \text{K-Means}({z^{(i)}}), \quad W^{(0)} = I
 $$</p>
 <p><strong>定理11.1（K-Means初始化的优势）</strong>：K-Means初始化确保：</p>
-<p>$$<br />
-\mathbb{E}[|q_iW - z|_2] \approx \mathbb{E}[|z - \mathbb{E}[z|c(z)=i]|_2]<br />
+<p>$$
+\mathbb{E}[|q_iW - z|_2] \approx \mathbb{E}[|z - \mathbb{E}[z|c(z)=i]|_2]
 $$</p>
 <p>其中$c(z)$是$z$的聚类标签。这是量化误差的理论下界（在$K$固定时）。</p>
 <p><strong>证明</strong>：K-Means最小化的目标正是：</p>
-<p>$$<br />
-\min_{Q} \mathbb{E}\left[\min_i |z - q_i|_2^2\right]<br />
+<p>$$
+\min_{Q} \mathbb{E}\left[\min_i |z - q_i|_2^2\right]
 $$</p>
 <p>因此K-Means初始化给出了接近最优的初始编码表。$\square$</p>
 <p><strong>命题11.1（随机初始化的问题）</strong>：如果使用随机初始化：</p>
-<p>$$<br />
-Q^{(0)} \sim \mathcal{N}(0, \sigma_Q^2 I), \quad W^{(0)} \sim \mathcal{N}(0, \sigma_W^2 I)<br />
+<p>$$
+Q^{(0)} \sim \mathcal{N}(0, \sigma_Q^2 I), \quad W^{(0)} \sim \mathcal{N}(0, \sigma_W^2 I)
 $$</p>
 <p>则初始的有效编码表$E^{(0)} = Q^{(0)}W^{(0)}$的分布为：</p>
-<p>$$<br />
-E^{(0)} \sim \mathcal{N}(0, \sigma_Q^2 \sigma_W^2 d I)<br />
+<p>$$
+E^{(0)} \sim \mathcal{N}(0, \sigma_Q^2 \sigma_W^2 d I)
 $$</p>
 <p>这可能导致$|e_i|$与$|z|$的尺度不匹配，引发训练困难。</p>
 <p><strong>定理11.2（$W$初始化为单位矩阵的重要性）</strong>：初始化$W^{(0)} = I$确保：</p>
-<p>$$<br />
-E^{(0)} = Q^{(0)}I = Q^{(0)}<br />
+<p>$$
+E^{(0)} = Q^{(0)}I = Q^{(0)}
 $$</p>
 <p>即初始的有效编码表等于$Q^{(0)}$。如果$Q^{(0)}$是通过K-Means得到的，那么初始性能就很好。</p>
 <p>之后$W$会从单位矩阵开始逐渐学习有用的变换，这是一个"渐进式"的学习过程。</p>
 <h3 id="12">12. 收敛性分析<a class="toc-link" href="#12" title="Permanent link">&para;</a></h3>
 <p><strong>假设12.1（Lipschitz连续性）</strong>：假设损失函数$\mathcal{L}$关于$E = QW$是$L$-Lipschitz连续的。</p>
 <p><strong>假设12.2（平滑性）</strong>：假设$\mathcal{L}$关于$E$是$\beta$-smooth的，即：</p>
-<p>$$<br />
-\left|\frac{\partial^2 \mathcal{L}}{\partial E^2}\right| \leq \beta<br />
+<p>$$
+\left|\frac{\partial^2 \mathcal{L}}{\partial E^2}\right| \leq \beta
 $$</p>
 <p><strong>定理12.1（SimVQ的收敛率）</strong>：在假设12.1和12.2下，使用学习率$\eta &lt; \frac{1}{\beta}$的SGD，SimVQ收敛到$\epsilon$-最优解需要的迭代次数为：</p>
-<p>$$<br />
-T = O\left(\frac{1}{\eta\epsilon}\right)<br />
+<p>$$
+T = O\left(\frac{1}{\eta\epsilon}\right)
 $$</p>
 <p>这与标准VQ的收敛率相同。</p>
 <p><strong>证明思路</strong>：虽然SimVQ有过参数化，但其有效参数$E = QW$的优化仍然遵循标准的凸优化理论（在VQ操作固定时）。利用SGD的标准收敛性分析即可得到结果。$\square$</p>
 <p><strong>定理12.2（过参数化的加速效应）</strong>：尽管理论收敛率相同，但过参数化改善了优化的常数因子：</p>
-<p>$$<br />
-T_{SimVQ} \leq \frac{1}{\kappa_{SimVQ}} T_{VQ} \leq T_{VQ}<br />
+<p>$$
+T_{SimVQ} \leq \frac{1}{\kappa_{SimVQ}} T_{VQ} \leq T_{VQ}
 $$</p>
 <p>其中$\kappa_{SimVQ} \geq 1$是过参数化带来的加速因子，通常$\kappa_{SimVQ} \in [1.2, 2]$。</p>
 <p><strong>证明思路</strong>：过参数化改善了Hessian矩阵的条件数，使得优化更快收敛。详细证明需要分析$H_{SimVQ}$的谱，这里省略。$\square$</p>
 <h3 id="13">13. 信息论视角<a class="toc-link" href="#13" title="Permanent link">&para;</a></h3>
 <p><strong>定义13.1（互信息）</strong>：编码器输出$z$与量化后的$z_q$之间的互信息定义为：</p>
-<p>$$<br />
-I(z; z_q) = H(z_q) - H(z_q|z) = H(z_q)<br />
+<p>$$
+I(z; z_q) = H(z_q) - H(z_q|z) = H(z_q)
 $$</p>
 <p>其中第二个等号是因为$z_q$是$z$的确定性函数（给定编码表）。</p>
 <p><strong>定理13.1（SimVQ的信息保留）</strong>：SimVQ与标准VQ保留相同的信息量（在编码表大小$K$相同时）：</p>
-<p>$$<br />
-I_{SimVQ}(z; z_q) = I_{VQ}(z; z_q) = \log K<br />
+<p>$$
+I_{SimVQ}(z; z_q) = I_{VQ}(z; z_q) = \log K
 $$</p>
 <p><strong>证明</strong>：因为两者都将$z$映射到$K$个离散值之一，熵都是$\log K$。$\square$</p>
 <p><strong>命题13.1（率失真理论）</strong>：根据率失真理论，最优的量化器在给定率$R = \log K$时，最小化失真：</p>
-<p>$$<br />
-D^* = \min_{VQ} \mathbb{E}[|z - VQ(z)|^2], \quad \text{subject to } H(VQ(z)) = R<br />
+<p>$$
+D^* = \min_{VQ} \mathbb{E}[|z - VQ(z)|^2], \quad \text{subject to } H(VQ(z)) = R
 $$</p>
 <p>SimVQ通过更好的优化动力学，更接近这个理论下界$D^*$。</p>
 <h3 id="14">14. 实验结果的理论解释<a class="toc-link" href="#14" title="Permanent link">&para;</a></h3>
 <p><strong>观察14.1（重构损失降低）</strong>：实验显示SimVQ的重构损失显著低于标准VQ。</p>
 <p><strong>理论解释</strong>：根据定理6.1，SimVQ提高了编码表利用率。更高的利用率意味着更细粒度的量化，从而：</p>
-<p>$$<br />
-\mathcal{E}<em VQ="VQ">{SimVQ} = \mathbb{E}[\min_i |z - e_i|^2] &lt; \mathcal{E}</em><br />
+<p>$$
+\mathcal{E}<em VQ="VQ">{SimVQ} = \mathbb{E}[\min_i |z - e_i|^2] &lt; \mathcal{E}</em>
 $$</p>
 <p>量化误差的降低直接导致重构损失的降低。</p>
 <p><strong>观察14.2（编码表利用率提升）</strong>：实验显示SimVQ的利用率接近100%。</p>
@@ -586,20 +590,20 @@ $$</p>
 <p><strong>理论解释</strong>：根据定理8.1和定理12.2，过参数化引入的隐式预调节改善了优化的条件数，加速了收敛。</p>
 <p><strong>观察14.4（只更新$W$也有效）</strong>：实验显示固定$Q$只更新$W$也能取得很好的效果。</p>
 <p><strong>理论解释</strong>：当$Q$通过K-Means初始化时，它已经提供了一个很好的编码方向基。$W$的学习相当于在这个基上学习最优的线性组合，这是一个更简单的优化问题：</p>
-<p>$$<br />
-\min_W \mathbb{E}[\mathcal{L}(QW)]<br />
+<p>$$
+\min_W \mathbb{E}[\mathcal{L}(QW)]
 $$</p>
 <p>相比于联合优化$Q$和$W$，这个问题的搜索空间更小，因此更容易优化。</p>
 <p>同时，固定$Q$避免了编码表坍缩的风险，因为$Q$的各个向量在初始化后保持不变，只是它们的线性组合（通过$W$）在变化。</p>
 <h3 id="15">15. 与矩阵分解的联系<a class="toc-link" href="#15" title="Permanent link">&para;</a></h3>
 <p><strong>定义15.1（低秩矩阵分解）</strong>：SimVQ的参数化$E = QW$可以视为一种矩阵分解：</p>
-<p>$$<br />
-E_{K \times d} = Q_{K \times d} W_{d \times d}<br />
+<p>$$
+E_{K \times d} = Q_{K \times d} W_{d \times d}
 $$</p>
 <p>如果$W$的秩为$r &lt; d$，则$E$是低秩矩阵。</p>
 <p><strong>命题15.1（秩的约束）</strong>：实际上，$E = QW$的秩满足：</p>
-<p>$$<br />
-\text{rank}(E) \leq \min(\text{rank}(Q), \text{rank}(W), d)<br />
+<p>$$
+\text{rank}(E) \leq \min(\text{rank}(Q), \text{rank}(W), d)
 $$</p>
 <p>如果$Q$的行线性无关且$W$满秩，则$\text{rank}(E) = \min(K, d)$。</p>
 <p><strong>定理15.1（隐式正则化为低秩）</strong>：梯度下降在优化$W$时，倾向于学习低秩的$W$（即使没有显式的秩约束）。这是因为：</p>
@@ -612,23 +616,23 @@ $$</p>
 <p><strong>证明思路</strong>：利用梯度下降的隐式偏置理论，小步长的梯度下降倾向于找到范数最小的解。对于矩阵$W$，这对应于核范数（奇异值之和）最小，即低秩解。$\square$</p>
 <h3 id="16">16. 扩展与变体<a class="toc-link" href="#16" title="Permanent link">&para;</a></h3>
 <p><strong>变体16.1（多层线性变换）</strong>：可以将$W$扩展为多层：</p>
-<p>$$<br />
-E = Q W_1 W_2 \cdots W_L<br />
+<p>$$
+E = Q W_1 W_2 \cdots W_L
 $$</p>
 <p>这增加了表达能力，但也增加了计算成本和优化难度。</p>
 <p><strong>变体16.2（组特定的线性变换）</strong>：将编码表分为$G$组，每组有自己的$W_g$：</p>
-<p>$$<br />
-E_g = Q_g W_g, \quad g = 1, 2, \cdots, G<br />
+<p>$$
+E_g = Q_g W_g, \quad g = 1, 2, \cdots, G
 $$</p>
 <p>这在编码表很大时可以减少$W$的参数量（从$d^2$降到$G \cdot d^2 / G = d^2$... 等等，这似乎不对）。</p>
 <p>实际上应该是每组的维度为$d/G$，则每个$W_g$的大小为$(d/G) \times (d/G)$，总参数量为：</p>
-<p>$$<br />
-G \cdot (d/G)^2 = d^2 / G<br />
+<p>$$
+G \cdot (d/G)^2 = d^2 / G
 $$</p>
 <p>这确实减少了参数量。</p>
 <p><strong>变体16.3（仿射变换）</strong>：将线性变换扩展为仿射变换：</p>
-<p>$$<br />
-E = QW + b<br />
+<p>$$
+E = QW + b
 $$</p>
 <p>其中$b \in \mathbb{R}^{1 \times d}$是偏置向量（broadcast到所有编码）。</p>
 <p>这增加了$d$个参数，允许编码表整体平移。</p>
@@ -637,31 +641,31 @@ $$</p>
 <p><strong>局限17.2（计算开销）</strong>：额外的矩阵乘法$QW$增加了约10-20%的计算开销。对于实时应用可能是个问题。</p>
 <p><strong>局限17.3（理论理解不足）</strong>：虽然SimVQ实验效果很好，但为什么过参数化在VQ中如此有效，仍缺乏深入的理论理解。</p>
 <p><strong>未来方向17.1（自适应$W$）</strong>：$W$可以根据输入动态调整，例如：</p>
-<p>$$<br />
-W(z) = W_0 + \text{MLP}(z)<br />
+<p>$$
+W(z) = W_0 + \text{MLP}(z)
 $$</p>
 <p>这使得量化操作具有上下文感知能力。</p>
 <p><strong>未来方向17.2（多尺度编码表）</strong>：结合SimVQ和多尺度VQ（Residual VQ），在每个尺度应用线性变换：</p>
-<p>$$<br />
-E_l = Q_l W_l, \quad l = 1, 2, \cdots, L<br />
+<p>$$
+E_l = Q_l W_l, \quad l = 1, 2, \cdots, L
 $$</p>
 <p><strong>未来方向17.3（与旋转技巧结合）</strong>：将SimVQ与旋转技巧结合：</p>
-<p>$$<br />
-z_q = \text{sg}<a href="q W">G</a> + \text{sg}[qW - G(qW)]<br />
+<p>$$
+z_q = \text{sg}<a href="q W">G</a> + \text{sg}[qW - G(qW)]
 $$</p>
 <p>其中$G$是旋转矩阵。这可能进一步提升性能。</p>
 <h3 id="18">18. 总结<a class="toc-link" href="#18" title="Permanent link">&para;</a></h3>
-<p><strong>核心洞察18.1</strong>：SimVQ通过简单的线性变换$W$，实现了：<br />
-1. 全局编码更新：所有编码通过$W$共享梯度<br />
-2. 隐式正则化：过参数化改善优化景观<br />
+<p><strong>核心洞察18.1</strong>：SimVQ通过简单的线性变换$W$，实现了：
+1. 全局编码更新：所有编码通过$W$共享梯度
+2. 隐式正则化：过参数化改善优化景观
 3. 利用率提升：未使用的编码向高利用率方向移动</p>
-<p><strong>理论贡献18.2</strong>：<br />
-1. 揭示了过参数化在VQ中的作用机制<br />
-2. 建立了梯度共享与利用率提升的联系<br />
+<p><strong>理论贡献18.2</strong>：
+1. 揭示了过参数化在VQ中的作用机制
+2. 建立了梯度共享与利用率提升的联系
 3. 证明了表达能力等价性但优化性能更优</p>
-<p><strong>实践价值18.3</strong>：<br />
-1. 实现简单：仅需添加一个矩阵$W$<br />
-2. 效果显著：利用率、重构质量、收敛速度全面提升<br />
+<p><strong>实践价值18.3</strong>：
+1. 实现简单：仅需添加一个矩阵$W$
+2. 效果显著：利用率、重构质量、收敛速度全面提升
 3. 通用性强：可应用于各种VQ架构</p>
 <hr />
 <p>本推导全面分析了SimVQ的数学原理、优化动力学、理论性质和实践效果，为理解和应用这一简单而有效的技术提供了坚实的理论基础。</p>
@@ -674,7 +678,7 @@ $$</p>
                             
                             <a href="低秩近似之路四id.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#167 低秩近似之路（四）：ID</div>
+                                <div class="nav-title">#148 低秩近似之路（四）：ID</div>
                             </a>
                             
                         </div>
@@ -682,7 +686,7 @@ $$</p>
                             
                             <a href="当batch-size增大时学习率该如何随之变化.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#169 当Batch Size增大时，学习率该如何随之变化？</div>
+                                <div class="nav-title">#150 当Batch Size增大时，学习率该如何随之变化？</div>
                             </a>
                             
                         </div>

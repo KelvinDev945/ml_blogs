@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=模型">模型</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #11 Dropout视角下的MLM和MAE：一些新的启发
+                    #8 Dropout视角下的MLM和MAE：一些新的启发
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#11</span>
+                <span class="post-number">#8</span>
                 Dropout视角下的MLM和MAE：一些新的启发
             </h1>
             <div class="post-meta">
@@ -144,7 +148,7 @@
 <p>在<a href="/archives/8496">《又是Dropout两次！这次它做到了有监督任务的SOTA》</a>中我们证明过，如果损失函数是MSE，那么训练完成后的最佳预测模型应该是<br />
 \begin{equation}\mathbb{E}<em _varepsilon="\varepsilon">{\varepsilon}[f(x\varepsilon/p)]\end{equation}<br />
 这意味着我们应该要不关闭Dropout地预测多次，然后将预测结果进行平均来作为最终的预测结果，即进行“模型平均”。但很显然这样做计算量很大，所以实际中我们很少会用这种做法，更多的是直接关闭Dropout，即将$\varepsilon/p$改为1。而我们知道<br />
-\begin{equation}f(x)=f(x\,\mathbb{E}</em>}[\varepsilon]/p)\end{equation<br />
+\begin{equation}f(x)=f(x\,\mathbb{E}</em>}[\varepsilon]/p)\end{equation
 所以关闭Dropout事实上是一种“权重平均”（将$\varepsilon$视为模型的随机权重）。也就是说，理论的最优解是“模型平均”，但由于计算量的原因，我们通常用“权重平均”来近似，它可以视为“模型平均”的一阶近似。</p>
 <h2 id="mlm">MLM模型<a class="toc-link" href="#mlm" title="Permanent link">&para;</a></h2>
 <p>在这一节中，我们将MLM模型视为一种特殊的Dropout，由此可以清楚描述地预训练和微调的不一致之处，并且可以导出一个简单的修正策略，可以更好地缓解这种不一致性。</p>
@@ -156,8 +160,8 @@
 此时，MLM在微调阶段的不一致性就体现出来了：我们将预训练的MLM视为一种特殊的Dropout，那么微调阶段对应的是“取消Dropout”，按照常规做法，此时我们应该将每个token的Embedding改为$x_i p + m (1-p)$，但事实上我们没有，而是保留了原始的$x_i$。</p>
 <h3 id="embedding">修正Embedding<a class="toc-link" href="#embedding" title="Permanent link">&para;</a></h3>
 <p>按照BERT的默认设置，在训练MLM的时候，会有15%的token被选中来做MLM预测，而在这15%的token中，有80%的概率被替换为[MASK]，有10%的概率保持不变，剩下10%的概率则随机替换为一个随机token，这样根据上述分析，我们在MLM预训练完成之后，应该对Embedding进行如下调整：<br />
-\begin{equation}\text{Embedding[i]} \leftarrow 0.85\times \text{Embedding[i]} + 0.15\times\left(\begin{array}{l}0.8\times \text{Embedding[m]} \,+\\<br />
-0.1 \times \text{Embedding[i]} \,+ \\<br />
+\begin{equation}\text{Embedding[i]} \leftarrow 0.85\times \text{Embedding[i]} + 0.15\times\left(\begin{array}{l}0.8\times \text{Embedding[m]} \,+\\
+0.1 \times \text{Embedding[i]} \,+ \\
 0.1\times \text{Avg[Embedding]}\end{array}\right)<br />
 \end{equation}<br />
 其中$\text{Embedding[m]}$是[MASK]的Embedding，而$\text{Avg[Embedding]}$的全体token的平均Embedding。在bert4keras中，参考代码如下：</p>
@@ -183,11 +187,11 @@ K.set_value(model.weights[0], embeddings)  # 重新赋值
 \begin{equation}f(\cdots,A,\cdots)\quad\rightarrow\quad f(\cdots,\text{Norm}(A\otimes \tilde{M}_1\otimes \tilde{M}_2\otimes \cdots\otimes \tilde{M}_n),\cdots)\end{equation}<br />
 这里$\text{Norm}$是指将矩阵重新按行归一化；$\otimes$时逐个元素对应相乘；当有多个Attention层时，各个Attention层共用同一批$\tilde{M}_1,\tilde{M}_2,\cdots,\tilde{M}_n$。</p>
 <p>这样，我们将MAE转换为了一种特殊的Attention Dropout。那么同样按照微调阶段“取消Dropout”的做法，我们知道它对应的模型应该是<br />
-\begin{equation}\begin{aligned}<br />
-&amp;\,f(\cdots,\text{Norm}(A\otimes \mathbb{E}[\tilde{M}_1\otimes \tilde{M}_2\otimes \cdots\otimes \tilde{M}_n]),\cdots)\\<br />
-=&amp;\,f(\cdots,\text{Norm}(A\otimes \mathbb{E}[\tilde{M}_1]\otimes \mathbb{E}[\tilde{M}_2]\otimes \cdots\otimes \mathbb{E}[\tilde{M}_n]),\cdots)\\<br />
-=&amp;\,f(\cdots,\text{Norm}(Ap),\cdots)\\<br />
-=&amp;\,f(\cdots,A,\cdots)<br />
+\begin{equation}\begin{aligned}
+&amp;\,f(\cdots,\text{Norm}(A\otimes \mathbb{E}[\tilde{M}_1\otimes \tilde{M}_2\otimes \cdots\otimes \tilde{M}_n]),\cdots)\\
+=&amp;\,f(\cdots,\text{Norm}(A\otimes \mathbb{E}[\tilde{M}_1]\otimes \mathbb{E}[\tilde{M}_2]\otimes \cdots\otimes \mathbb{E}[\tilde{M}_n]),\cdots)\\
+=&amp;\,f(\cdots,\text{Norm}(Ap),\cdots)\\
+=&amp;\,f(\cdots,A,\cdots)
 \end{aligned}\end{equation}<br />
 其中第二个等号是因为$\mathbb{E}[\tilde{M}_i]$是一个第$i$列为$p$、其余为1的矩阵，那么$\mathbb{E}[\tilde{M}_1]\otimes \mathbb{E}[\tilde{M}_2]\otimes \cdots\otimes \mathbb{E}[\tilde{M}_n]$事实上就是一个全为$p$的矩阵，所以与$A$相乘的结果等价于$A$直接乘以常数$p$；第三个等号则是因为全体元素乘以同一个常数，不影响归一化结果。</p>
 <p>从这个结果中看到，对于MAE来说，“取消Dropout”之后跟原模型一致，这说明了MAE相比原始的MLM模型，不仅仅是速度上的提升，还具有更好的预训练与微调的一致性。</p>
@@ -197,19 +201,19 @@ K.set_value(model.weights[0], embeddings)  # 重新赋值
 <p>DropToken示意图</p>
 <p>之所以会这样想，是因为常规的Dropout虽然通常被直接地理解为采样一个子网络训练，但那纯粹是直观的想象，实际上Dropout的加入还会降低训练速度，而DropToken由于显式了缩短了序列长度，是可以提高训练速度的，如果有效那必然是一种非常实用的技巧。此外，有些读者可能已经试过删除某些字词的方式来进行数据扩增，它跟DropToken的区别在于DropToken虽然删除了一些Token，但依然保留了剩余token的原始位置，这个实现依赖于Transformer结构本身。</p>
 <p>在CLUE上做的几个实验对比，基准模型为BERT base，下标的数字是drop比例，最终的效果参差不齐，除了IFLYTEK明确有效外，其他看缘分（其实很多防止过拟合手段都这样），最优drop比例在0.1～0.15之间：<br />
-$$\begin{array}{c}<br />
-\text{CLUE分类任务对比实验（验证集）} \\<br />
-{\begin{array}{c|ccccccc}<br />
-\hline<br />
-&amp; \text{IFLYTEK} &amp; \text{TNEWS} &amp; \text{AFQMC} &amp; \text{OCNLI} &amp; \text{WSC} &amp; \text{CSL} \\<br />
-\hline<br />
-\text{BERT}<em _text_0.10="\text{0.10">{\text{0.00}} &amp; 60.06 &amp; 56.80 &amp; 72.41 &amp; 73.93 &amp; 78.62 &amp; 83.93 \\<br />
-\text{BERT}</em> &amp; 60.56 &amp; 57.00 &amp; 72.61 &amp; 73.76 &amp; 77.30 &amp; 83.33\\}<br />
-\text{BERT}<em _text_0.25="\text{0.25">{\text{0.15}} &amp; 60.10 &amp; 56.68 &amp; 72.50 &amp; 74.54 &amp; 77.30 &amp; 83.30\\<br />
-\text{BERT}</em> &amp; 61.29 &amp; 56.88 &amp; 72.34 &amp; 73.09 &amp; 73.68 &amp; 83.37\\}<br />
-\text{BERT}_{\text{0.50}} &amp; 61.45 &amp; 57.02 &amp; 69.76 &amp; 70.68 &amp; 69.41 &amp; 82.56\\<br />
-\hline<br />
-\end{array}}<br />
+$$\begin{array}{c}
+\text{CLUE分类任务对比实验（验证集）} \\
+{\begin{array}{c|ccccccc}
+\hline
+&amp; \text{IFLYTEK} &amp; \text{TNEWS} &amp; \text{AFQMC} &amp; \text{OCNLI} &amp; \text{WSC} &amp; \text{CSL} \\
+\hline
+\text{BERT}<em _text_0.10="\text{0.10">{\text{0.00}} &amp; 60.06 &amp; 56.80 &amp; 72.41 &amp; 73.93 &amp; 78.62 &amp; 83.93 \\
+\text{BERT}</em> &amp; 60.56 &amp; 57.00 &amp; 72.61 &amp; 73.76 &amp; 77.30 &amp; 83.33\\}
+\text{BERT}<em _text_0.25="\text{0.25">{\text{0.15}} &amp; 60.10 &amp; 56.68 &amp; 72.50 &amp; 74.54 &amp; 77.30 &amp; 83.30\\
+\text{BERT}</em> &amp; 61.29 &amp; 56.88 &amp; 72.34 &amp; 73.09 &amp; 73.68 &amp; 83.37\\}
+\text{BERT}_{\text{0.50}} &amp; 61.45 &amp; 57.02 &amp; 69.76 &amp; 70.68 &amp; 69.41 &amp; 82.56\\
+\hline
+\end{array}}
 \end{array}$$</p>
 <h2 id="_4">本文小结<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>本文从Dropout的视角考察了MLM和MAE两个模型，它们均可视为特殊的Dropout，从这个视角中，我们可以得到了一种修正MLM的不一致性的技巧，以及得到一种类似MAE的防止过拟合技巧。</p>
@@ -244,15 +248,15 @@ url={\url{https://spaces.ac.cn/archives/8770}},<br />
                             
                             <a href="childtuning试试把dropout加到梯度上去.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#10 ChildTuning：试试把Dropout加到梯度上去？</div>
+                                <div class="nav-title">#7 ChildTuning：试试把Dropout加到梯度上去？</div>
                             </a>
                             
                         </div>
                         <div class="col-6">
                             
-                            <a href="开局一段扯数据全靠编真被一篇神论文气到了.html" class="nav-link-next">
+                            <a href="变分自编码器八估计样本概率密度.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#12 开局一段扯，数据全靠编？真被一篇“神论文”气到了</div>
+                                <div class="nav-title">#9 变分自编码器（八）：估计样本概率密度</div>
                             </a>
                             
                         </div>

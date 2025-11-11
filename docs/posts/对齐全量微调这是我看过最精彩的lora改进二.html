@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #152 对齐全量微调！这是我看过最精彩的LoRA改进（二）
+                    #139 对齐全量微调！这是我看过最精彩的LoRA改进（二）
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#152</span>
+                <span class="post-number">#139</span>
                 对齐全量微调！这是我看过最精彩的LoRA改进（二）
             </h1>
             <div class="post-meta">
@@ -141,9 +145,9 @@
 <p>上一节我们说到，全量微调很多时候效果都优于LoRA，所以全量微调就是LoRA最应该对齐的方向。为了定量描述这一点，我们分别写出全量微调和LoRA微调在SGD下的优化公式，结果分别是<br />
 \begin{equation} W_{t+1} = W_t - \eta G_t\end{equation}<br />
 和<br />
-\begin{equation}\begin{gathered}<br />
-A_{t+1} = A_t - \eta G_{A,t} = A_t - \eta G_t B_t^{\top},\quad B_{t+1} = B_t - \eta G_{B,t} = B_t - \eta A_t^{\top}G_t \\[8pt]<br />
-W_{t+1} = W_t - A_t B_t + A_{t+1} B_{t+1} \approx W_t - \eta(A_t A_t^{\top}G_t + G_tB_t^{\top} B_t)<br />
+\begin{equation}\begin{gathered}
+A_{t+1} = A_t - \eta G_{A,t} = A_t - \eta G_t B_t^{\top},\quad B_{t+1} = B_t - \eta G_{B,t} = B_t - \eta A_t^{\top}G_t \\[8pt]
+W_{t+1} = W_t - A_t B_t + A_{t+1} B_{t+1} \approx W_t - \eta(A_t A_t^{\top}G_t + G_tB_t^{\top} B_t)
 \end{gathered}\end{equation}<br />
 其中$\mathcal{L}$是损失函数，$\eta$是学习率，还有$G_t=\frac{\partial \mathcal{L}}{\partial W_t}$、$G_{A,t}=\frac{\partial \mathcal{L}}{\partial A_t}=\frac{\partial \mathcal{L}}{\partial W_t} B_t^{\top}=G_t B_t^{\top}$以及$G_{B,t}=\frac{\partial \mathcal{L}}{\partial B_t}=A_t^{\top}\frac{\partial \mathcal{L}}{\partial W_t} =A_t^{\top}G_t$。</p>
 <p>LoRA-GA的想法是，我们至少要让全量微调和LoRA的$W_1$尽可能相近，于是它最小化目标<br />
@@ -152,15 +156,15 @@ W_{t+1} = W_t - A_t B_t + A_{t+1} B_{t+1} \approx W_t - \eta(A_t A_t^{\top}G_t +
 <h2 id="_2">逐步对齐<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>LoRA-Pro的想法更彻底，它希望对齐全量微调和LoRA的每一个$W_t$。可是要怎样才能做到这一点呢？难道每一步都要最小化$\left\Vert A_t A_t^{\top}G_t + G_t B_t^{\top} B_t - G_t\right\Vert_F^2$？这显然是不对的，因为$A_t,B_t$是由优化器根据$A_{t-1},B_{t-1}$和它们的梯度确定的，并不是可自由调节的参数。</p>
 <p>看上去已经没有能够让我们修改的地方了？不，LoRA-Pro非常机智地想到：既然“$A_t,B_t$是由优化器根据$A_{t-1},B_{t-1}$和它们的梯度确定的”，后面的$A_{t-1},B_{t-1}$和梯度我们都没法改，那我们还可以改优化器呀！具体来说，我们将$A_t,B_t$的更新规则改为：<br />
-\begin{equation}\begin{gathered}<br />
-A_{t+1} = A_t - \eta H_{A,t} \\<br />
-B_{t+1} = B_t - \eta H_{B,t}<br />
+\begin{equation}\begin{gathered}
+A_{t+1} = A_t - \eta H_{A,t} \\
+B_{t+1} = B_t - \eta H_{B,t}
 \end{gathered}\end{equation}<br />
 其中$H_{A,t},H_{B,t}$待定，但它们的形状跟$A,B$一致。现在可以写出<br />
 \begin{equation}W_{t+1} = W_t - A_t B_t + A_{t+1} B_{t+1} \approx W_t - \eta(H_{A,t} B_t + A_t H_{B,t}) \end{equation}<br />
 这时候我们就可以调整$H_{A,t},H_{B,t}$，让这个$W_{t+1}$跟SGD的$W_{t+1}$尽可能相近了：<br />
-\begin{equation}\mathop{\text{argmin}}<em A_t="A,t">{H</em>},H_{B,t}}\left\Vert H_{A,t} B_t + A_t H_{B,t} - G_t\right\Vert_F^2\end{equation<br />
-下面我们来求解这个优化问题。简单起见，在求解过程中我们省略下标$t$，即考虑<br />
+\begin{equation}\mathop{\text{argmin}}<em A_t="A,t">{H</em>},H_{B,t}}\left\Vert H_{A,t} B_t + A_t H_{B,t} - G_t\right\Vert_F^2\end{equation
+下面我们来求解这个优化问题。简单起见，在求解过程中我们省略下标$t$，即考虑
 \begin{equation}\mathop{\text{argmin}}_{H_A,H_B}\left\Vert H_A B + A H_B - G\right\Vert_F^2\label{eq:loss}\end{equation}</p>
 <h2 id="_3">简化目标<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>由于$H_A,H_B$之间没有约束，所以$H_A,H_B$的优化是独立的，因此我们可以采取先优化$H_A$再优化$H_B$的策略（当然反过来也可以）。当我们优化$H_A$时，$H_B$就相当于是常数，为此，我们可以先考虑如下简化的等价命题<br />
@@ -184,19 +188,19 @@ B_{t+1} = B_t - \eta H_{B,t}<br />
 根据式$\eqref{eq:h-ax}$得<br />
 \begin{equation}H_B = (A^{\top} A)^{-1}A^{\top}G(I - B^{\top}(B B^{\top})^{-1}B)\end{equation}<br />
 留意到$G B^{\top},A^{\top}G$正好分别是$A,B$的梯度$G_A,G_B$，以及再次利用前述不变性，我们可以写出完整的解<br />
-\begin{equation}\left\{\begin{aligned} H_A =&amp;\, G_A (B B^{\top})^{-1} + AC \\<br />
-H_B =&amp;\, (A^{\top} A)^{-1}G_B(I - B^{\top}(B B^{\top})^{-1}B) - CB<br />
+\begin{equation}\left\{\begin{aligned} H_A =&amp;\, G_A (B B^{\top})^{-1} + AC \\
+H_B =&amp;\, (A^{\top} A)^{-1}G_B(I - B^{\top}(B B^{\top})^{-1}B) - CB
 \end{aligned}\right.\end{equation}</p>
 <h2 id="_5">最优参数<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
 <p>至此，我们求解出了$H_A,H_B$的形式，但解不是唯一的，它有一个可以自由选择的参数矩阵$C$。我们可以选择适当的$C$，来使得最终的$H_A,H_B$具备一些我们所期望的特性。</p>
 <p>比如，现在$H_A,H_B$是不大对称的，$H_B$多了$-(A^{\top} A)^{-1}G_B B^{\top}(B B^{\top})^{-1}B$这一项，我们可以将它平均分配到$H_A,H_B$中，使得它们更对称一些，这等价于选择$C = -\frac{1}{2}(A^{\top} A)^{-1}G_B B^{\top}(B B^{\top})^{-1}$：<br />
-\begin{equation}\left\{\begin{aligned} H_A =&amp;\, \left[I - \frac{1}{2}A(A^{\top}A)^{-1}A^{\top}\right]G_A (B B^{\top})^{-1} \\<br />
-H_B =&amp;\, (A^{\top} A)^{-1}G_B\left[I - \frac{1}{2}B^{\top}(B B^{\top})^{-1}B\right]<br />
+\begin{equation}\left\{\begin{aligned} H_A =&amp;\, \left[I - \frac{1}{2}A(A^{\top}A)^{-1}A^{\top}\right]G_A (B B^{\top})^{-1} \\
+H_B =&amp;\, (A^{\top} A)^{-1}G_B\left[I - \frac{1}{2}B^{\top}(B B^{\top})^{-1}B\right]
 \end{aligned}\right.\end{equation}<br />
 这个$C$也是如下两个优化问题的解：<br />
-\begin{align}<br />
-&amp;\,\mathop{\text{argmin}}_C \Vert H_A B - A H_B\Vert_F^2 \\<br />
-&amp;\,\mathop{\text{argmin}}_C \Vert H_A B - G\Vert_F^2 + \Vert A H_B - G\Vert_F^2 \\<br />
+\begin{align}
+&amp;\,\mathop{\text{argmin}}_C \Vert H_A B - A H_B\Vert_F^2 \\
+&amp;\,\mathop{\text{argmin}}_C \Vert H_A B - G\Vert_F^2 + \Vert A H_B - G\Vert_F^2 \\
 \end{align}<br />
 第一个优化目标可以理解为让$A,B$对最终效果的贡献尽可能一样，这跟<a href="/archives/10001">《配置不同的学习率，LoRA还能再涨一点？》</a>的假设有一定异曲同工之处，第二个优化目标则是让$H_A B$、$A H_B$都尽可能逼近完整的梯度$G$。以$l=\Vert H_A B - A H_B\Vert_F^2$为例，直接求导得<br />
 \begin{equation}\frac{\partial l}{\partial C} = 4A^{\top}(H_A B - A H_B)B^{\top}=4A^{\top}\left[G_A (BB^{\top})^{-1}B + 2ACB\right]B^{\top}\end{equation}<br />
@@ -210,20 +214,20 @@ H_B =&amp;\, (A^{\top} A)^{-1}G_B\left[I - \frac{1}{2}B^{\top}(B B^{\top})^{-1}B
 <p>我们来捋一捋到目前为止我们所得到的结果。我们的模型还是常规的LoRA，目标则是希望每一步更新都能逼近全量微调的结果。为此，我们假设优化器是SGD，然后对比了同样$W_t$下全量微调和LoRA所得的$W_{t+1}$，发现要实现这个目标，需要把更新过程中$A,B$的梯度$G_A, G_B$换成上面求出的$H_A,H_B$。</p>
 <p>接下来就又回到优化分析中老生常谈的问题：前面的分析都是基于SGD优化器的，但实践中我们更常用的是Adam，此时要怎么改呢？如果对Adam优化器重复前面的推导，结果就是$H_A,H_B$中的梯度$G$要换成全量微调下Adam的更新方向$U$。然而，$U$需要用全量微调的梯度$G$按照Adam的更新规则计算而来，而我们的场景是LoRA，无法获得全量微调的梯度，只有$A,B$的梯度$G_A,G_B$。</p>
 <p>不过我们也可以考虑一个近似的方案，前述$H_A B + A H_B$的优化目标就是在逼近$G$，所以我们可以用它来作为$G$的近似来执行Adam，这样一来整个流程就可以走通了。于是我们可以写出如下更新规则<br />
-\begin{equation}\begin{array}{l}<br />
+\begin{equation}\begin{array}{l}
 \begin{array}{l}G_A = \frac{\partial\mathcal{L}}{\partial A_{t-1}},\,\,G_B = \frac{\partial\mathcal{L}}{\partial B_{t-1}}\end{array} \\<br />
-\color{green}{\left.\begin{array}{l}H_A = G_A (B B^{\top})^{-1} \\<br />
-H_B = (A^{\top} A)^{-1}G_B(I - B^{\top}(B B^{\top})^{-1}B) \\<br />
+\color{green}{\left.\begin{array}{l}H_A = G_A (B B^{\top})^{-1} \\
+H_B = (A^{\top} A)^{-1}G_B(I - B^{\top}(B B^{\top})^{-1}B) \\
 \tilde{G} = H_A B + A H_B \end{array}\quad\right\} \text{估计梯度}} \\<br />
-\color{red}{\left.\begin{array}{l}M_t = \beta_1 M_{t-1} + (1 - \beta_1) \tilde{G} \\<br />
-V_t = \beta_2 V_{t-1} + (1 - \beta_2) \tilde{G}^2 \\<br />
+\color{red}{\left.\begin{array}{l}M_t = \beta_1 M_{t-1} + (1 - \beta_1) \tilde{G} \\
+V_t = \beta_2 V_{t-1} + (1 - \beta_2) \tilde{G}^2 \\
 \hat{M}<em t-1="t-1">t = \frac{M_t}{1-\beta_1^t},\,\,\hat{V}_t = \frac{V_t}{1-\beta_2^t},\,\,U = \frac{\hat{M}_t}{\sqrt{\hat{V}_t + \epsilon}}\end{array}\quad\right\} \text{Adam更新}} \\<br />
-\color{purple}{\left.\begin{array}{l}U_A = UB^{\top},\,\, U_B = A^{\top} U \\<br />
-\tilde{H}_A = U_A (B B^{\top})^{-1} + AC \\<br />
-\tilde{H}_B = (A^{\top} A)^{-1}U_B(I - B^{\top}(B B^{\top})^{-1}B) - CB<br />
+\color{purple}{\left.\begin{array}{l}U_A = UB^{\top},\,\, U_B = A^{\top} U \\
+\tilde{H}_A = U_A (B B^{\top})^{-1} + AC \\
+\tilde{H}_B = (A^{\top} A)^{-1}U_B(I - B^{\top}(B B^{\top})^{-1}B) - CB
 \end{array}\quad\right\} \text{投影到}A,B} \\<br />
-\begin{array}{l}A_t = A</em>} - \eta \tilde{H<em t-1="t-1">A \\<br />
-B_t = B</em>_B \\} - \eta \tilde{H<br />
+\begin{array}{l}A_t = A</em>} - \eta \tilde{H<em t-1="t-1">A \\
+B_t = B</em>_B \\} - \eta \tilde{H
 \end{array} \\<br />
 \end{array}\end{equation}<br />
 这也是LoRA-Pro最终所用的更新算法（更准确地说，LoRA-Pro用的是AdamW，结果稍复杂一些，但并无实质不同）。然而，且不说如此改动引入的额外复杂度如何，这个算法最大的问题就是它里边的滑动更新变量$M,V$跟全量微调一样都是满秩的，也就是说它的优化器相比全量微调并不省显存，仅仅是通过低秩分解节省了参数和梯度的部分显存，这相比常规LoRA的显存消耗还是会有明显增加的。</p>
@@ -279,7 +283,7 @@ url={\url{https://spaces.ac.cn/archives/10266}},<br />
 <p><strong>注释</strong>：这是一个巧妙的想法——在不改变模型架构的情况下，通过修改优化器来改善效果。</p>
 <p><strong>推导1.3：修改后的更新规则</strong></p>
 <p>定义新的更新方向：</p>
-<p>$$A_{t+1} = A_t - \eta H_{A,t}$$<br />
+<p>$$A_{t+1} = A_t - \eta H_{A,t}$$
 $$B_{t+1} = B_t - \eta H_{B,t}$$</p>
 <p>一阶近似下：</p>
 <p>$$W_{t+1}^{\text{LoRA}} \approx W_t - \eta (H_{A,t} B_t + A_t H_{B,t})$$</p>
@@ -533,8 +537,8 @@ $$B_{t+1} = B_t - \eta H_{B,t}$$</p>
 <p>这是一个离散优化问题，需要启发式搜索。</p>
 <p>LoRA-Pro保持固定秩 $r$，但优化更新方向：</p>
 <p>$$H_{A,t}, H_{B,t} = f(G_t, A_t, B_t)$$</p>
-<p><strong>理论对比</strong>：<br />
-- AdaLoRA：自适应模型容量<br />
+<p><strong>理论对比</strong>：
+- AdaLoRA：自适应模型容量
 - LoRA-Pro：自适应优化方向</p>
 <p><strong>注释</strong>：两者可以结合——先用AdaLoRA确定最优秩，再用LoRA-Pro优化更新。</p>
 <p><strong>推导9.3：与DoRA的对比</strong></p>
@@ -543,8 +547,8 @@ $$B_{t+1} = B_t - \eta H_{B,t}$$</p>
 <p>分别优化 $m$ 和 $d$。</p>
 <p>LoRA-Pro保持标准的权重参数化，但修改梯度：</p>
 <p>$$\nabla_A \to H_A, \quad \nabla_B \to H_B$$</p>
-<p><strong>理论对比</strong>：<br />
-- DoRA：改变参数空间的几何<br />
+<p><strong>理论对比</strong>：
+- DoRA：改变参数空间的几何
 - LoRA-Pro：改变优化轨迹</p>
 <p><strong>注释</strong>：DoRA关注权重的表示，LoRA-Pro关注优化的过程。</p>
 <h3 id="10-sylvester">10. Sylvester方程的数值求解<a class="toc-link" href="#10-sylvester" title="Permanent link">&para;</a></h3>
@@ -614,9 +618,9 @@ $$B_{t+1} = B_t - \eta H_{B,t}$$</p>
 <p>LoRA-GA + LoRA-Pro的组合效果：</p>
 <p>$$\text{Performance}<em _text_GA="\text{GA">{\text{GA+Pro}} &gt; \text{Performance}</em>$$}} + \text{Performance}_{\text{Pro}} - \text{Baseline</p>
 <p>即存在超线性的增益。</p>
-<p>理论解释：<br />
-- LoRA-GA提供好的初始子空间<br />
-- LoRA-Pro确保在该子空间中沿最优方向移动<br />
+<p>理论解释：
+- LoRA-GA提供好的初始子空间
+- LoRA-Pro确保在该子空间中沿最优方向移动
 - 两者相辅相成</p>
 <p><strong>注释</strong>：这个协同效应在实验中得到了验证，两者结合的效果最好。</p>
 <h3 id="13">13. 扩展与变体<a class="toc-link" href="#13" title="Permanent link">&para;</a></h3>
@@ -661,7 +665,7 @@ $$B_{t+1} = B_t - \eta H_{B,t}$$</p>
                             
                             <a href="monarch矩阵计算高效的稀疏型矩阵分解.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#151 Monarch矩阵：计算高效的稀疏型矩阵分解</div>
+                                <div class="nav-title">#138 Monarch矩阵：计算高效的稀疏型矩阵分解</div>
                             </a>
                             
                         </div>
@@ -669,7 +673,7 @@ $$B_{t+1} = B_t - \eta H_{B,t}$$</p>
                             
                             <a href="通向最优分布之路概率空间的最小化.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#153 通向最优分布之路：概率空间的最小化</div>
+                                <div class="nav-title">#140 通向最优分布之路：概率空间的最小化</div>
                             </a>
                             
                         </div>

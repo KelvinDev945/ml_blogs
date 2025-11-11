@@ -27,14 +27,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -78,7 +82,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=attention">attention</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #158 “闭门造车”之多模态思路浅谈（三）：位置编码
+                    #142 “闭门造车”之多模态思路浅谈（三）：位置编码
                 </li>
             </ol>
         </nav>
@@ -86,7 +90,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#158</span>
+                <span class="post-number">#142</span>
                 “闭门造车”之多模态思路浅谈（三）：位置编码
             </h1>
             <div class="post-meta">
@@ -141,45 +145,45 @@
 <p>所以，我们希望设计一种多模态位置编码，它既可以多模态混合使用，在单模态下又能退化为对应的RoPE-1D/2D/3D，以充分解锁每个模态的能力。</p>
 <p>刚才我们说，多模态位置编码的主要困难是不同大小的位置向量无法作差，既要保留完整的位置信息又要允许作差，那么我们就只能统一升维到最高维度。下面我们以 <em>图文混合模态</em> 为例，由于图像是2D的，所以我们将文本的位置编码也提升到二维，然后统一用RoPE-2D。怎么升维都可以吗？并不是，我们希望它具有向后的<strong>兼容性</strong> ，即当输入是纯文本时，它跟RoPE-1D完全等价。</p>
 <p>为此，我们对比一下RoPE-1D与RoPE-2D：<br />
-$$\scriptsize{\begin{array}{c}\begin{array}{c}\text{RoPE-1D}\\ (\boldsymbol{\mathcal{R}}<em d_2-2="d/2-2">n)\end{array}= \begin{pmatrix}<br />
-\cos \bbox[yellow]{n}\theta_0 &amp; -\sin \bbox[yellow]{n}\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\<br />
-\sin \bbox[yellow]{n}\theta_0 &amp; \cos \bbox[yellow]{n}\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\<br />
-0 &amp; 0 &amp; \cos \bbox[yellow]{n}\theta_1 &amp; -\sin \bbox[yellow]{n}\theta_1 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\<br />
-0 &amp; 0 &amp; \sin \bbox[yellow]{n}\theta_1 &amp; \cos \bbox[yellow]{n}\theta_1 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\<br />
-\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \ddots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\<br />
-0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \cos \bbox[yellow]{n}\theta</em> &amp; 0 &amp; 0 \\} &amp; -\sin \bbox[yellow]{n}\theta_{d/2-2<br />
-0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \sin \bbox[yellow]{n}\theta_{d/2-2} &amp; \cos \bbox[yellow]{n}\theta_{d/2-2} &amp; 0 &amp; 0 \\<br />
-0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; \cos \bbox[yellow]{n}\theta_{d/2-1} &amp; -\sin \bbox[yellow]{n}\theta_{d/2-1} \\<br />
-0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; \sin \bbox[yellow]{n}\theta_{d/2-1} &amp; \cos \bbox[yellow]{n}\theta_{d/2-1} \\<br />
-\end{pmatrix} \\[16pt]<br />
-\begin{array}{c}\text{RoPE-2D}\\ (\boldsymbol{\mathcal{R}}<em d_2-2="d/2-2">{x,y})\end{array}= \begin{pmatrix}<br />
-\cos \bbox[yellow]{x}\theta_0 &amp; -\sin \bbox[yellow]{x}\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\<br />
-\sin \bbox[yellow]{x}\theta_0 &amp; \cos \bbox[yellow]{x}\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\<br />
-0 &amp; 0 &amp; \cos \bbox[yellow]{y}\theta_1 &amp; -\sin \bbox[yellow]{y}\theta_1 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\<br />
-0 &amp; 0 &amp; \sin \bbox[yellow]{y}\theta_1 &amp; \cos \bbox[yellow]{y}\theta_1 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\<br />
-\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \ddots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\<br />
-0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \cos \bbox[yellow]{x}\theta</em> &amp; 0 &amp; 0 \\} &amp; -\sin \bbox[yellow]{x}\theta_{d/2-2<br />
-0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \sin \bbox[yellow]{x}\theta_{d/2-2} &amp; \cos \bbox[yellow]{x}\theta_{d/2-2} &amp; 0 &amp; 0 \\<br />
-0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; \cos \bbox[yellow]{y}\theta_{d/2-1} &amp; -\sin \bbox[yellow]{y}\theta_{d/2-1} \\<br />
-0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; \sin \bbox[yellow]{y}\theta_{d/2-1} &amp; \cos \bbox[yellow]{y}\theta_{d/2-1} \\<br />
+$$\scriptsize{\begin{array}{c}\begin{array}{c}\text{RoPE-1D}\\ (\boldsymbol{\mathcal{R}}<em d_2-2="d/2-2">n)\end{array}= \begin{pmatrix}
+\cos \bbox[yellow]{n}\theta_0 &amp; -\sin \bbox[yellow]{n}\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\
+\sin \bbox[yellow]{n}\theta_0 &amp; \cos \bbox[yellow]{n}\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\
+0 &amp; 0 &amp; \cos \bbox[yellow]{n}\theta_1 &amp; -\sin \bbox[yellow]{n}\theta_1 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\
+0 &amp; 0 &amp; \sin \bbox[yellow]{n}\theta_1 &amp; \cos \bbox[yellow]{n}\theta_1 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \ddots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \cos \bbox[yellow]{n}\theta</em> &amp; 0 &amp; 0 \\} &amp; -\sin \bbox[yellow]{n}\theta_{d/2-2
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \sin \bbox[yellow]{n}\theta_{d/2-2} &amp; \cos \bbox[yellow]{n}\theta_{d/2-2} &amp; 0 &amp; 0 \\
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; \cos \bbox[yellow]{n}\theta_{d/2-1} &amp; -\sin \bbox[yellow]{n}\theta_{d/2-1} \\
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; \sin \bbox[yellow]{n}\theta_{d/2-1} &amp; \cos \bbox[yellow]{n}\theta_{d/2-1} \\
+\end{pmatrix} \\[16pt]
+\begin{array}{c}\text{RoPE-2D}\\ (\boldsymbol{\mathcal{R}}<em d_2-2="d/2-2">{x,y})\end{array}= \begin{pmatrix}
+\cos \bbox[yellow]{x}\theta_0 &amp; -\sin \bbox[yellow]{x}\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\
+\sin \bbox[yellow]{x}\theta_0 &amp; \cos \bbox[yellow]{x}\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\
+0 &amp; 0 &amp; \cos \bbox[yellow]{y}\theta_1 &amp; -\sin \bbox[yellow]{y}\theta_1 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\
+0 &amp; 0 &amp; \sin \bbox[yellow]{y}\theta_1 &amp; \cos \bbox[yellow]{y}\theta_1 &amp; \cdots &amp; 0 &amp; 0 &amp; 0 &amp; 0 \\
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \ddots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \cos \bbox[yellow]{x}\theta</em> &amp; 0 &amp; 0 \\} &amp; -\sin \bbox[yellow]{x}\theta_{d/2-2
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \sin \bbox[yellow]{x}\theta_{d/2-2} &amp; \cos \bbox[yellow]{x}\theta_{d/2-2} &amp; 0 &amp; 0 \\
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; \cos \bbox[yellow]{y}\theta_{d/2-1} &amp; -\sin \bbox[yellow]{y}\theta_{d/2-1} \\
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 &amp; \sin \bbox[yellow]{y}\theta_{d/2-1} &amp; \cos \bbox[yellow]{y}\theta_{d/2-1} \\
 \end{pmatrix}\end{array}}$$</p>
 <p>发现什么共同点了吗？如果单看这个形式，可以发现其实有$\boldsymbol{\mathcal{R}}<em n_n="n,n">n=\boldsymbol{\mathcal{R}}</em>$，即位置为$n$的RoPE-1D跟位置为$(n,n)$的RoPE-2D其实是等价的，所以要想在图文混合中统一用RoPE-2D，并且对于纯文本能退化为RoPE-1D，那么就要将文本部分的位置坐标取为$(n,n)$的形式。</p>
 <p>当然，实际上它们还是有少许不同的，我们知道对于RoPE-1D有$\theta_i = b^{-2i/d}$，也就是$\theta_{2j}$跟$\theta_{2j+1}$是不同的，但对于RoPE-2D来说，为了确保$x,y$的对称性，通常的选择是确保$\theta_{2j}=\theta_{2j+1}$，这就产生了矛盾之处。对此，我们有两种选择：一是放弃RoPE-2D中$x,y$的对称性，依旧取$\theta_i = b^{-2i/d}$；二是取$\theta_{2j}=\theta_{2j+1}=b^{-4j/d}$，此时纯文本部分的位置编码就跟已有RoPE-1D略有不同。对于$\theta_i = b^{-2i/d}$来说，$\theta_i$与$\theta_{i+1}$差别不大，所以两种方案其实都差不多，选哪一种取决于个人的审美，笔者倾向于选择第一种。</p>
 <h2 id="_4">等价对称<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>通过上述分析，我们确定了图文混合模态统一用RoPE-2D的方案，并且由向后兼容性确定了位置$n$的文本Token的二维位置应该取$(n,n)$，从而完成了文本部分的位置编码设计。接下来，我们需要构思的是图像部分的位置编码。</p>
 <p>如果输入只有一张$w\times h$个Patch的图像，那么它的位置坐标自然就是各个Patch本身的坐标，即<br />
-\begin{equation}\left[\begin{matrix}<br />
-(1,1) &amp; (1,2) &amp; \cdots &amp; (1, w) \\<br />
-(2,1) &amp; (2,2) &amp; \cdots &amp; (2, w) \\<br />
-\vdots &amp; \vdots &amp; \ddots &amp; \vdots \\<br />
-(h,1) &amp; (h,2) &amp; \cdots &amp; (h, w) \\<br />
+\begin{equation}\left[\begin{matrix}
+(1,1) &amp; (1,2) &amp; \cdots &amp; (1, w) \\
+(2,1) &amp; (2,2) &amp; \cdots &amp; (2, w) \\
+\vdots &amp; \vdots &amp; \ddots &amp; \vdots \\
+(h,1) &amp; (h,2) &amp; \cdots &amp; (h, w) \\
 \end{matrix}\right]\label{eq:rope2d}\end{equation}<br />
 我们这展示的是绝对位置，但实际的效果是相对位置，相对位置的特点是跟位置偏置无关，所以我们可以给每个坐标都加上$(\beta_1,\beta_2)$而不改变效果；其次，我们可以给每个坐标都乘以$(\gamma_1,\gamma_2)$，这样允许我们按需调整相邻位置的间隔。将这两点结合起来，我们可以得到图像的一般化二维位置为<br />
-\begin{equation}\left[\begin{matrix}<br />
-(\beta_1 + \gamma_1,\beta_2 + \gamma_2) &amp; (\beta_1 + \gamma_1,\beta_2 + 2\gamma_2) &amp; \cdots &amp; (\beta_1 + \gamma_1,\beta_2 + w\gamma_2) \\[8pt]<br />
-(\beta_1 + 2\gamma_1,\beta_2 + \gamma_2) &amp; (\beta_1 + 2\gamma_1,\beta_2 + 2\gamma_2) &amp; \cdots &amp; (\beta_1 + 2\gamma_1,\beta_2 + w\gamma_2) \\[8pt]<br />
-\vdots &amp; \vdots &amp; \ddots &amp; \vdots \\[8pt]<br />
-(\beta_1 + h\gamma_1,\beta_2 + \gamma_2) &amp; (\beta_1 + h\gamma_1,\beta_2 + 2\gamma_2) &amp; \cdots &amp; (\beta_1 + h\gamma_1,\beta_2 + w\gamma_2)<br />
+\begin{equation}\left[\begin{matrix}
+(\beta_1 + \gamma_1,\beta_2 + \gamma_2) &amp; (\beta_1 + \gamma_1,\beta_2 + 2\gamma_2) &amp; \cdots &amp; (\beta_1 + \gamma_1,\beta_2 + w\gamma_2) \\[8pt]
+(\beta_1 + 2\gamma_1,\beta_2 + \gamma_2) &amp; (\beta_1 + 2\gamma_1,\beta_2 + 2\gamma_2) &amp; \cdots &amp; (\beta_1 + 2\gamma_1,\beta_2 + w\gamma_2) \\[8pt]
+\vdots &amp; \vdots &amp; \ddots &amp; \vdots \\[8pt]
+(\beta_1 + h\gamma_1,\beta_2 + \gamma_2) &amp; (\beta_1 + h\gamma_1,\beta_2 + 2\gamma_2) &amp; \cdots &amp; (\beta_1 + h\gamma_1,\beta_2 + w\gamma_2)
 \end{matrix}\right]\end{equation}<br />
 现在我们考虑左右两段文本夹着中间一张图像时，$\beta_1,\beta_2,\gamma_1,\gamma_2$该怎么选取。</p>
 <p>首先，我们假设文本的Token和Patch具有一定的<strong>等价性</strong> ：经过合理的<a href="/archives/10197">Patchify</a>后每个Patch的地位跟Token等价（An Image is Worth xxx Tokens），这意味着对于两段文本来说，它们相当于夹着一个$wh$个Token的句子，所以如果左段文本最后一个Token的位置是$(L,L)$，那么右段文本第一个Token的位置就是$(L+wh+1, L + wh + 1)$。</p>
@@ -253,7 +257,7 @@ url={\url{https://spaces.ac.cn/archives/10352}},<br />
                             
                             <a href="decoder-only的llm为什么需要位置编码.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#157 Decoder-only的LLM为什么需要位置编码？</div>
+                                <div class="nav-title">#141 Decoder-only的LLM为什么需要位置编码？</div>
                             </a>
                             
                         </div>
@@ -261,7 +265,7 @@ url={\url{https://spaces.ac.cn/archives/10352}},<br />
                             
                             <a href="低秩近似之路一伪逆.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#159 低秩近似之路（一）：伪逆</div>
+                                <div class="nav-title">#143 低秩近似之路（一）：伪逆</div>
                             </a>
                             
                         </div>

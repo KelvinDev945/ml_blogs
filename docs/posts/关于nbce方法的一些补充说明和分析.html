@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=语言模型">语言模型</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #94 关于NBCE方法的一些补充说明和分析
+                    #88 关于NBCE方法的一些补充说明和分析
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#94</span>
+                <span class="post-number">#88</span>
                 关于NBCE方法的一些补充说明和分析
             </h1>
             <div class="post-meta">
@@ -136,10 +140,10 @@
 其中$\beta = n - 1$，$\overline{\log p(T|S)} = \frac{1}{n}\sum\limits_{k=1}^n \log p(T|S_k)$，细节请参考上一篇文章。NBCE做了两点改动：1、将$\beta$作为超参数来调；2、将$\overline{\log p(T|S)}$换成一般的Pooling方法$\mathcal{P}$。结果变为<br />
 \begin{equation}\log p(T|S_1, S_2,\cdots,S_n) = \color{red}{(\beta + 1)\mathcal{P}[\log p(T|S)]} - \color{green}{\beta\log p(T)} + \color{skyblue}{\text{常数}}\label{eq:nbce-3}\end{equation}<br />
 最后，NBCE选取的Pooling方案为“取最小熵者”：<br />
-\begin{equation}\begin{aligned}<br />
-&amp;\mathcal{P}[\log p(T|S)] = \log p(T|S_{\color{red}{k}}) \\[5pt]<br />
-&amp;\color{red}{k} = \mathop{\text{argmin}} \big\{H_1,H_2,\cdots,H_n\big\} \\[5pt]<br />
-&amp;H_i = -\sum_T p(T|S_i)\log p(T|S_i)<br />
+\begin{equation}\begin{aligned}
+&amp;\mathcal{P}[\log p(T|S)] = \log p(T|S_{\color{red}{k}}) \\[5pt]
+&amp;\color{red}{k} = \mathop{\text{argmin}} \big\{H_1,H_2,\cdots,H_n\big\} \\[5pt]
+&amp;H_i = -\sum_T p(T|S_i)\log p(T|S_i)
 \end{aligned}\label{eq:min-h}\end{equation}</p>
 <h2 id="_2">截断预测<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>式$\eqref{eq:nbce-2}$是标准的朴素贝叶斯结果，但笔者按照它实现时，发现随着$n$的增大，式$\eqref{eq:nbce-2}$的效果慢慢变差直至完全乱码，所以反复调整后，最终选取“取最小熵者”作为NBCE的Pooling方案。但后来仔细一想，式$\eqref{eq:nbce-2}$的这个表现是不正常的，因为朴素贝叶斯的唯一假设是Context之间相互独立，而我所测试的Context是随机找的若干篇新闻，一定程度上满足这个假设的，所以式$\eqref{eq:nbce-2}$再怎么差也不至于完全乱码才对。</p>
@@ -147,21 +151,21 @@
 <p>有了这个线索，解决方法也就很明显了，给每个预测结果都加上Top-P或者Top-K截断就行，在Github的代码中，笔者选的是Top-P截断。</p>
 <h2 id="_3">无穷处理<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>然而，事情还没完，经过截断后，$\log p(T|S_k)$和$\log p(T)$的尾部都变成了$-\infty$，这时候式$\eqref{eq:nbce-2}$或式$\eqref{eq:nbce-3}$都有可能出现$(-\infty)-(-\infty)$的无意义运算。总的来说，有下面几种情况：<br />
-\begin{array}{c|cc|c}<br />
-\hline<br />
-&amp; \log p(T|S_k) &amp; \log p(T) &amp; \log p(T|S_k) - \log p(T) \\<br />
-\hline<br />
-\text{情况一} &amp; &gt; -\infty &amp; &gt; -\infty &amp; &gt; -\infty\\<br />
-\text{情况二} &amp; &gt; -\infty &amp; = -\infty &amp; = +\infty \\<br />
-\text{情况三} &amp; = -\infty &amp; &gt; -\infty &amp; = -\infty \\<br />
-\text{情况四} &amp; = -\infty &amp; = -\infty &amp; \text{NaN}\\<br />
-\hline<br />
+\begin{array}{c|cc|c}
+\hline
+&amp; \log p(T|S_k) &amp; \log p(T) &amp; \log p(T|S_k) - \log p(T) \\
+\hline
+\text{情况一} &amp; &gt; -\infty &amp; &gt; -\infty &amp; &gt; -\infty\\
+\text{情况二} &amp; &gt; -\infty &amp; = -\infty &amp; = +\infty \\
+\text{情况三} &amp; = -\infty &amp; &gt; -\infty &amp; = -\infty \\
+\text{情况四} &amp; = -\infty &amp; = -\infty &amp; \text{NaN}\\
+\hline
 \end{array}<br />
 其中，“情况一”和“情况三”能正常运算，“情况二”虽然也能正常运算，但其结果正无穷是不合理的，“情况四”则是非良定的无意义运算，也就是说，我们需要想办法修正“情况二”和“情况四”，这两种情况正好对应$\log p(T)=-\infty$，所以我们将式$\eqref{eq:nbce-3}$改为：<br />
-\begin{equation}\log p(T|S_1, S_2,\cdots,S_n) =\left\{<br />
-\begin{aligned}<br />
-&amp;\color{red}{\mathcal{P}[\log p(T|S)]}, \quad \text{如果}\color{green}{\log p(T) = -\infty} \\[5pt]<br />
-&amp;\color{red}{(\beta + 1)\mathcal{P}[\log p(T|S)]} - \color{green}{\beta\log p(T)}, \quad \text{其他}\\<br />
+\begin{equation}\log p(T|S_1, S_2,\cdots,S_n) =\left\{
+\begin{aligned}
+&amp;\color{red}{\mathcal{P}[\log p(T|S)]}, \quad \text{如果}\color{green}{\log p(T) = -\infty} \\[5pt]
+&amp;\color{red}{(\beta + 1)\mathcal{P}[\log p(T|S)]} - \color{green}{\beta\log p(T)}, \quad \text{其他}\\
 \end{aligned}\right\} + \color{skyblue}{\text{常数}}\label{eq:nbce-4}\end{equation}<br />
 经过上述处理后，标准的朴素贝叶斯式$\eqref{eq:nbce-2}$也能输出正常结果了（虽然最终效果还是不如取最小熵，但至少不会乱码了），并且修改后的代码对Pooling方式和$\beta$都更加鲁棒。</p>
 <h2 id="_4">转移概率<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
@@ -216,7 +220,7 @@ url={\url{https://spaces.ac.cn/archives/9632}},<br />
                             
                             <a href="nbce使用朴素贝叶斯扩展llm的context处理长度.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#93 NBCE：使用朴素贝叶斯扩展LLM的Context处理长度</div>
+                                <div class="nav-title">#87 NBCE：使用朴素贝叶斯扩展LLM的Context处理长度</div>
                             </a>
                             
                         </div>
@@ -224,7 +228,7 @@ url={\url{https://spaces.ac.cn/archives/9632}},<br />
                             
                             <a href="naive-bayes-is-all-you-need.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#95 Naive Bayes is all you need ?</div>
+                                <div class="nav-title">#89 Naive Bayes is all you need ?</div>
                             </a>
                             
                         </div>

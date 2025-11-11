@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #232 低精度Attention可能存在有偏的舍入误差
+                    #208 低精度Attention可能存在有偏的舍入误差
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#232</span>
+                <span class="post-number">#208</span>
                 低精度Attention可能存在有偏的舍入误差
             </h1>
             <div class="post-meta">
@@ -131,222 +135,222 @@
 <h3 id="1">1. 浮点数表示的基础理论<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
 <p><strong>IEEE 754标准浮点数表示</strong>：</p>
 <p>一个浮点数 $x$ 可以表示为：</p>
-<p>$$<br />
-x = (-1)^s \times m \times 2^{e}<br />
+<p>$$
+x = (-1)^s \times m \times 2^{e}
 $$</p>
-<p>其中：<br />
-- $s \in {0, 1}$ 是符号位<br />
-- $m \in [1, 2)$ 是尾数（mantissa），也称有效数字<br />
+<p>其中：
+- $s \in {0, 1}$ 是符号位
+- $m \in [1, 2)$ 是尾数（mantissa），也称有效数字
 - $e$ 是指数</p>
 <p><strong>注释</strong>：不同精度的浮点数使用不同的位宽来表示这些部分。</p>
 <h3 id="2">2. 常见浮点数格式的精度<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
-<p><strong>FP32（单精度浮点数）</strong>：<br />
-- 1位符号位<br />
-- 8位指数位<br />
-- 23位尾数位<br />
+<p><strong>FP32（单精度浮点数）</strong>：
+- 1位符号位
+- 8位指数位
+- 23位尾数位
 - 有效精度约为 $2^{-23} \approx 1.19 \times 10^{-7}$</p>
-<p><strong>FP16（半精度浮点数）</strong>：<br />
-- 1位符号位<br />
-- 5位指数位<br />
-- 10位尾数位<br />
+<p><strong>FP16（半精度浮点数）</strong>：
+- 1位符号位
+- 5位指数位
+- 10位尾数位
 - 有效精度约为 $2^{-10} \approx 9.77 \times 10^{-4}$</p>
-<p><strong>BF16（Brain Float 16）</strong>：<br />
-- 1位符号位<br />
-- 8位指数位（与FP32相同）<br />
-- 7位尾数位<br />
+<p><strong>BF16（Brain Float 16）</strong>：
+- 1位符号位
+- 8位指数位（与FP32相同）
+- 7位尾数位
 - 有效精度约为 $2^{-7} \approx 7.81 \times 10^{-3}$</p>
 <p><strong>精度比较</strong>：</p>
-<p>$$<br />
-\epsilon_{\text{FP32}} : \epsilon_{\text{FP16}} : \epsilon_{\text{BF16}} \approx 1 : 2^{13} : 2^{16}<br />
+<p>$$
+\epsilon_{\text{FP32}} : \epsilon_{\text{FP16}} : \epsilon_{\text{BF16}} \approx 1 : 2^{13} : 2^{16}
 $$</p>
 <p><strong>注释</strong>：精度差异巨大，从FP32降到FP16精度降低了约8000倍，到BF16降低了约65000倍。</p>
 <h3 id="3">3. 舍入误差的数学模型<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
 <p><strong>舍入函数</strong>：</p>
 <p>对于真实值 $x$，其浮点表示 $\text{fl}(x)$ 满足：</p>
-<p>$$<br />
-\text{fl}(x) = x(1 + \delta), \quad |\delta| \leq \epsilon_{\text{mach}}<br />
+<p>$$
+\text{fl}(x) = x(1 + \delta), \quad |\delta| \leq \epsilon_{\text{mach}}
 $$</p>
 <p>其中 $\epsilon_{\text{mach}}$ 是机器精度（machine epsilon），定义为最小的满足 $\text{fl}(1 + \epsilon) &gt; 1$ 的正数。</p>
 <p><strong>舍入到最近（Round to Nearest）</strong>：</p>
-<p>$$<br />
-\epsilon_{\text{mach}} = \frac{1}{2} \cdot 2^{-p}<br />
+<p>$$
+\epsilon_{\text{mach}} = \frac{1}{2} \cdot 2^{-p}
 $$</p>
 <p>其中 $p$ 是尾数位数。</p>
 <p><strong>注释</strong>：这是最常用的舍入模式，舍入到最接近的可表示数。</p>
 <h3 id="4">4. 浮点数运算的误差传播<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
 <p><strong>加法的误差传播</strong>：</p>
 <p>对于两个浮点数 $a, b$ 的加法：</p>
-<p>$$<br />
-\text{fl}(a + b) = (a + b)(1 + \delta_1), \quad |\delta_1| \leq \epsilon_{\text{mach}}<br />
+<p>$$
+\text{fl}(a + b) = (a + b)(1 + \delta_1), \quad |\delta_1| \leq \epsilon_{\text{mach}}
 $$</p>
 <p><strong>乘法的误差传播</strong>：</p>
-<p>$$<br />
-\text{fl}(a \times b) = (a \times b)(1 + \delta_2), \quad |\delta_2| \leq \epsilon_{\text{mach}}<br />
+<p>$$
+\text{fl}(a \times b) = (a \times b)(1 + \delta_2), \quad |\delta_2| \leq \epsilon_{\text{mach}}
 $$</p>
 <p><strong>除法的误差传播</strong>：</p>
-<p>$$<br />
-\text{fl}(a / b) = (a / b)(1 + \delta_3), \quad |\delta_3| \leq \epsilon_{\text{mach}}<br />
+<p>$$
+\text{fl}(a / b) = (a / b)(1 + \delta_3), \quad |\delta_3| \leq \epsilon_{\text{mach}}
 $$</p>
 <p><strong>注释</strong>：每次基本运算都会引入一个独立的舍入误差，误差会在复杂计算中累积。</p>
 <h3 id="5-softmax">5. Softmax的数学定义与标准实现<a class="toc-link" href="#5-softmax" title="Permanent link">&para;</a></h3>
 <p><strong>Softmax函数</strong>：</p>
 <p>对于输入向量 $\boldsymbol{x} = [x_1, x_2, \ldots, x_n]^T \in \mathbb{R}^n$，Softmax定义为：</p>
-<p>$$<br />
-\text{softmax}(\boldsymbol{x})<em j="1">i = \frac{e^{x_i}}{\sum</em>}^n e^{x_j}<br />
-$$</p>
+<p>$$
+\text{softmax}(\boldsymbol{x})<em j="1">i = \frac{e^{x_i}}{\sum</em>
+$$}^n e^{x_j}</p>
 <p><strong>数值稳定的Softmax实现</strong>：</p>
 <p>为了避免数值溢出，标准实现使用：</p>
-<p>$$<br />
-\text{softmax}(\boldsymbol{x})<em _max="\max">i = \frac{e^{x_i - x</em>}}}{\sum_{j=1}^n e^{x_j - x_{\max}}<br />
-$$</p>
+<p>$$
+\text{softmax}(\boldsymbol{x})<em _max="\max">i = \frac{e^{x_i - x</em>
+$$}}}{\sum_{j=1}^n e^{x_j - x_{\max}}</p>
 <p>其中 $x_{\max} = \max_j x_j$。</p>
 <p><strong>数学等价性证明</strong>：</p>
-<p>$$<br />
-\begin{aligned}<br />
-\frac{e^{x_i - x_{\max}}}{\sum_{j=1}^n e^{x_j - x_{\max}}} &amp;= \frac{e^{x_i} e^{-x_{\max}}}{\sum_{j=1}^n e^{x_j} e^{-x_{\max}}} \<br />
-&amp;= \frac{e^{x_i} e^{-x_{\max}}}{e^{-x_{\max}} \sum_{j=1}^n e^{x_j}} \<br />
-&amp;= \frac{e^{x_i}}{\sum_{j=1}^n e^{x_j}}<br />
-\end{aligned}<br />
+<p>$$
+\begin{aligned}
+\frac{e^{x_i - x_{\max}}}{\sum_{j=1}^n e^{x_j - x_{\max}}} &amp;= \frac{e^{x_i} e^{-x_{\max}}}{\sum_{j=1}^n e^{x_j} e^{-x_{\max}}} \
+&amp;= \frac{e^{x_i} e^{-x_{\max}}}{e^{-x_{\max}} \sum_{j=1}^n e^{x_j}} \
+&amp;= \frac{e^{x_i}}{\sum_{j=1}^n e^{x_j}}
+\end{aligned}
 $$</p>
 <p><strong>注释</strong>：减去最大值确保所有指数项 $e^{x_i - x_{\max}} \leq 1$，避免溢出。</p>
 <h3 id="6-softmax">6. Softmax在低精度计算中的挑战<a class="toc-link" href="#6-softmax" title="Permanent link">&para;</a></h3>
 <p><strong>指数函数的动态范围</strong>：</p>
 <p>对于FP16，可表示的最大值约为 $2^{15} \approx 65504$。考虑指数函数：</p>
-<p>$$<br />
-e^{x_{\max}} \leq 65504 \Rightarrow x_{\max} \leq \ln(65504) \approx 11.09<br />
+<p>$$
+e^{x_{\max}} \leq 65504 \Rightarrow x_{\max} \leq \ln(65504) \approx 11.09
 $$</p>
 <p><strong>问题</strong>：如果输入 $x_i$ 的值较大（如在注意力得分中常见），即使减去最大值后，某些 $e^{x_i - x_{\max}}$ 仍可能非常小，导致下溢（underflow）。</p>
 <p><strong>分母计算的精度问题</strong>：</p>
-<p>$$<br />
-\sum_{j=1}^n e^{x_j - x_{\max}} = e^{x_1 - x_{\max}} + e^{x_2 - x_{\max}} + \cdots + e^{x_n - x_{\max}}<br />
+<p>$$
+\sum_{j=1}^n e^{x_j - x_{\max}} = e^{x_1 - x_{\max}} + e^{x_2 - x_{\max}} + \cdots + e^{x_n - x_{\max}}
 $$</p>
 <p>当 $n$ 很大时，累加误差会显著增加。</p>
 <h3 id="7-attention">7. Attention机制的标准流程<a class="toc-link" href="#7-attention" title="Permanent link">&para;</a></h3>
 <p><strong>Attention计算流程</strong>：</p>
-<p>$$<br />
-\begin{aligned}<br />
-\boldsymbol{S} &amp;= \frac{\boldsymbol{Q}\boldsymbol{K}^T}{\sqrt{d_k}} \in \mathbb{R}^{n \times n} \<br />
-\boldsymbol{A} &amp;= \text{softmax}(\boldsymbol{S}) \in \mathbb{R}^{n \times n} \<br />
-\boldsymbol{O} &amp;= \boldsymbol{A}\boldsymbol{V} \in \mathbb{R}^{n \times d_v}<br />
-\end{aligned}<br />
+<p>$$
+\begin{aligned}
+\boldsymbol{S} &amp;= \frac{\boldsymbol{Q}\boldsymbol{K}^T}{\sqrt{d_k}} \in \mathbb{R}^{n \times n} \
+\boldsymbol{A} &amp;= \text{softmax}(\boldsymbol{S}) \in \mathbb{R}^{n \times n} \
+\boldsymbol{O} &amp;= \boldsymbol{A}\boldsymbol{V} \in \mathbb{R}^{n \times d_v}
+\end{aligned}
 $$</p>
 <p><strong>逐行Softmax</strong>：</p>
 <p>对于第 $i$ 行：</p>
-<p>$$<br />
-\boldsymbol{A}<em i_j="i,j">{i,j} = \frac{e^{\boldsymbol{S}</em>}}}{\sum_{k=1}^n e^{\boldsymbol{S}_{i,k}}<br />
-$$</p>
+<p>$$
+\boldsymbol{A}<em i_j="i,j">{i,j} = \frac{e^{\boldsymbol{S}</em>
+$$}}}{\sum_{k=1}^n e^{\boldsymbol{S}_{i,k}}</p>
 <p><strong>注释</strong>：每一行独立计算Softmax，总共需要计算 $n$ 次Softmax。</p>
 <h3 id="8-attention">8. 低精度Attention的误差来源<a class="toc-link" href="#8-attention" title="Permanent link">&para;</a></h3>
 <p><strong>第一阶段：计算注意力得分矩阵的误差</strong>：</p>
-<p>$$<br />
-\text{fl}(\boldsymbol{S}) = \text{fl}\left(\frac{\boldsymbol{Q}\boldsymbol{K}^T}{\sqrt{d_k}}\right)<br />
+<p>$$
+\text{fl}(\boldsymbol{S}) = \text{fl}\left(\frac{\boldsymbol{Q}\boldsymbol{K}^T}{\sqrt{d_k}}\right)
 $$</p>
 <p>每个元素的误差：</p>
-<p>$$<br />
-\text{fl}(\boldsymbol{S}<em i_j="i,j">{i,j}) = \boldsymbol{S}</em>)}(1 + \delta_{i,j}^{(1)}), \quad |\delta_{i,j}^{(1)}| \leq O(d_k \epsilon_{\text{mach}<br />
-$$</p>
+<p>$$
+\text{fl}(\boldsymbol{S}<em i_j="i,j">{i,j}) = \boldsymbol{S}</em>)
+$$}(1 + \delta_{i,j}^{(1)}), \quad |\delta_{i,j}^{(1)}| \leq O(d_k \epsilon_{\text{mach}</p>
 <p><strong>注释</strong>：内积计算涉及 $d_k$ 次乘法和加法，误差随 $d_k$ 线性增长。</p>
 <p><strong>第二阶段：Softmax计算的误差</strong>：</p>
-<p>$$<br />
-\text{fl}(\boldsymbol{A}<em i_j="i,j">{i,j}) = \frac{\text{fl}(e^{\text{fl}(\boldsymbol{S}</em>})})}{\text{fl}\left(\sum_{k=1}^n e^{\text{fl}(\boldsymbol{S}_{i,k})}\right)<br />
-$$</p>
-<p>这个过程包含：<br />
-1. 指数函数计算的误差<br />
-2. 求和的累积误差<br />
+<p>$$
+\text{fl}(\boldsymbol{A}<em i_j="i,j">{i,j}) = \frac{\text{fl}(e^{\text{fl}(\boldsymbol{S}</em>
+$$})})}{\text{fl}\left(\sum_{k=1}^n e^{\text{fl}(\boldsymbol{S}_{i,k})}\right)</p>
+<p>这个过程包含：
+1. 指数函数计算的误差
+2. 求和的累积误差
 3. 除法的误差</p>
 <p><strong>第三阶段：矩阵乘法的误差</strong>：</p>
-<p>$$<br />
-\text{fl}(\boldsymbol{O}<em k="1">{i,j}) = \text{fl}\left(\sum</em>}^n \text{fl}(\boldsymbol{A<em k_j="k,j">{i,k}) \boldsymbol{V}</em>\right)<br />
+<p>$$
+\text{fl}(\boldsymbol{O}<em k="1">{i,j}) = \text{fl}\left(\sum</em>}^n \text{fl}(\boldsymbol{A<em k_j="k,j">{i,k}) \boldsymbol{V}</em>\right)
 $$</p>
 <h3 id="9">9. 有偏舍入误差的数学定义<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
 <p><strong>无偏舍入误差</strong>：</p>
 <p>如果舍入误差 $\delta$ 满足：</p>
-<p>$$<br />
-\mathbb{E}[\delta] = 0<br />
+<p>$$
+\mathbb{E}[\delta] = 0
 $$</p>
 <p>则称该误差是无偏的。</p>
 <p><strong>有偏舍入误差</strong>：</p>
 <p>如果存在系统性偏差：</p>
-<p>$$<br />
-\mathbb{E}[\delta] \neq 0<br />
+<p>$$
+\mathbb{E}[\delta] \neq 0
 $$</p>
 <p>则称该误差是有偏的。</p>
 <p><strong>注释</strong>：无偏误差在大量运算中可能相互抵消，而有偏误差会系统性累积。</p>
 <h3 id="10-softmax">10. Softmax中有偏误差的产生机制<a class="toc-link" href="#10-softmax" title="Permanent link">&para;</a></h3>
 <p><strong>关键观察</strong>：Softmax的分母是所有指数项的和：</p>
-<p>$$<br />
-Z_i = \sum_{j=1}^n e^{S_{i,j}}<br />
+<p>$$
+Z_i = \sum_{j=1}^n e^{S_{i,j}}
 $$</p>
 <p><strong>低精度计算的分母</strong>：</p>
-<p>$$<br />
-\text{fl}(Z_i) = \sum_{j=1}^n \text{fl}(e^{S_{i,j}})<br />
+<p>$$
+\text{fl}(Z_i) = \sum_{j=1}^n \text{fl}(e^{S_{i,j}})
 $$</p>
 <p><strong>偏差产生的原因</strong>：</p>
 <p>当使用舍入到最近（round-to-nearest）时，对于正数：</p>
-<p>$$<br />
-\text{fl}(x) = x(1 + \delta), \quad \mathbb{E}[\delta] \approx 0 \text{ （在随机假设下）}<br />
+<p>$$
+\text{fl}(x) = x(1 + \delta), \quad \mathbb{E}[\delta] \approx 0 \text{ （在随机假设下）}
 $$</p>
 <p>但对于和：</p>
-<p>$$<br />
-\text{fl}\left(\sum_{j=1}^n x_j\right) \neq \sum_{j=1}^n \text{fl}(x_j)<br />
+<p>$$
+\text{fl}\left(\sum_{j=1}^n x_j\right) \neq \sum_{j=1}^n \text{fl}(x_j)
 $$</p>
 <p><strong>有偏性的数学证明</strong>：</p>
 <p>考虑两个正数 $a, b$ 的加法，其中 $a \gg b$：</p>
-<p>$$<br />
-\text{fl}(a + b) = a + b' + \epsilon<br />
+<p>$$
+\text{fl}(a + b) = a + b' + \epsilon
 $$</p>
 <p>其中 $b'$ 是 $b$ 舍入到 $a$ 的精度级别的结果。当 $b$ 远小于 $a$ 的最小可表示增量时，$b'$ 可能为0，导致：</p>
-<p>$$<br />
-\text{fl}(a + b) = a \neq a + b<br />
+<p>$$
+\text{fl}(a + b) = a \neq a + b
 $$</p>
 <p>这种小数被"吞噬"的现象是系统性的，产生有偏误差。</p>
 <h3 id="11-softmax">11. 量化Softmax分母的有偏误差<a class="toc-link" href="#11-softmax" title="Permanent link">&para;</a></h3>
 <p><strong>定理（Softmax分母的有偏低估）</strong>：</p>
 <p>在低精度浮点运算中，Softmax的分母存在系统性低估：</p>
-<p>$$<br />
-\mathbb{E}[\text{fl}(Z_i)] &lt; Z_i<br />
+<p>$$
+\mathbb{E}[\text{fl}(Z_i)] &lt; Z_i
 $$</p>
 <p><strong>证明思路</strong>：</p>
 <p>设 $e^{S_{i,1}} \geq e^{S_{i,2}} \geq \cdots \geq e^{S_{i,n}}$（不失一般性）。</p>
 <p>累积求和过程：</p>
-<p>$$<br />
-\begin{aligned}<br />
-Z_i^{(1)} &amp;= e^{S_{i,1}} \<br />
-Z_i^{(k)} &amp;= \text{fl}(Z_i^{(k-1)} + e^{S_{i,k}})<br />
-\end{aligned}<br />
+<p>$$
+\begin{aligned}
+Z_i^{(1)} &amp;= e^{S_{i,1}} \
+Z_i^{(k)} &amp;= \text{fl}(Z_i^{(k-1)} + e^{S_{i,k}})
+\end{aligned}
 $$</p>
 <p>对于 $k &gt; 1$，当 $e^{S_{i,k}} \ll Z_i^{(k-1)}$ 时：</p>
-<p>$$<br />
-\text{fl}(Z_i^{(k-1)} + e^{S_{i,k}}) \approx Z_i^{(k-1)}<br />
+<p>$$
+\text{fl}(Z_i^{(k-1)} + e^{S_{i,k}}) \approx Z_i^{(k-1)}
 $$</p>
 <p>即小项被舍入掉，导致：</p>
-<p>$$<br />
-Z_i^{(n)} &lt; \sum_{j=1}^n e^{S_{i,j}} = Z_i<br />
+<p>$$
+Z_i^{(n)} &lt; \sum_{j=1}^n e^{S_{i,j}} = Z_i
 $$</p>
 <p><strong>注释</strong>：这个低估是系统性的，不是随机误差，因此是有偏的。</p>
 <h3 id="12-attention">12. 有偏误差对Attention权重的影响<a class="toc-link" href="#12-attention" title="Permanent link">&para;</a></h3>
 <p><strong>理想的Attention权重</strong>：</p>
-<p>$$<br />
-A_{i,j} = \frac{e^{S_{i,j}}}{Z_i}<br />
+<p>$$
+A_{i,j} = \frac{e^{S_{i,j}}}{Z_i}
 $$</p>
 <p><strong>低精度计算的权重</strong>：</p>
-<p>$$<br />
-\tilde{A}<em i_j="i,j">{i,j} = \frac{\text{fl}(e^{S</em>}})}{\text{fl}(Z_i)<br />
-$$</p>
+<p>$$
+\tilde{A}<em i_j="i,j">{i,j} = \frac{\text{fl}(e^{S</em>
+$$}})}{\text{fl}(Z_i)</p>
 <p><strong>误差分析</strong>：</p>
 <p>如果 $\text{fl}(Z_i) &lt; Z_i$（分母被低估），则：</p>
-<p>$$<br />
-\tilde{A}<em i_j="i,j">{i,j} = \frac{\text{fl}(e^{S</em>}})}{\text{fl}(Z_i)} &gt; \frac{\text{fl}(e^{S_{i,j}})}{Z_i} \approx A_{i,j<br />
-$$</p>
+<p>$$
+\tilde{A}<em i_j="i,j">{i,j} = \frac{\text{fl}(e^{S</em>
+$$}})}{\text{fl}(Z_i)} &gt; \frac{\text{fl}(e^{S_{i,j}})}{Z_i} \approx A_{i,j</p>
 <p><strong>系统性偏差</strong>：所有的Attention权重都被系统性放大。</p>
 <p><strong>归一化性的破坏</strong>：</p>
 <p>理想情况下：</p>
-<p>$$<br />
-\sum_{j=1}^n A_{i,j} = 1<br />
+<p>$$
+\sum_{j=1}^n A_{i,j} = 1
 $$</p>
 <p>但在低精度下：</p>
-<p>$$<br />
-\sum_{j=1}^n \tilde{A}_{i,j} \neq 1<br />
+<p>$$
+\sum_{j=1}^n \tilde{A}_{i,j} \neq 1
 $$</p>
 <p>可能大于或小于1，取决于具体的舍入方式。</p>
 <h3 id="13-flash-attention">13. Flash Attention的分块计算<a class="toc-link" href="#13-flash-attention" title="Permanent link">&para;</a></h3>
@@ -354,16 +358,16 @@ $$</p>
 <p>将序列分成块（block），每次只计算一个块的Attention，减少显存占用。</p>
 <p><strong>分块Softmax</strong>：</p>
 <p>假设将序列分为 $B$ 个块，每块大小为 $b = n/B$。对于第 $i$ 行：</p>
-<p>$$<br />
-\boldsymbol{S}_i = [\boldsymbol{S}_i^{(1)}, \boldsymbol{S}_i^{(2)}, \ldots, \boldsymbol{S}_i^{(B)}]<br />
+<p>$$
+\boldsymbol{S}_i = [\boldsymbol{S}_i^{(1)}, \boldsymbol{S}_i^{(2)}, \ldots, \boldsymbol{S}_i^{(B)}]
 $$</p>
 <p><strong>在线Softmax算法</strong>：</p>
 <p>维护累积的最大值和指数和：</p>
-<p>$$<br />
-\begin{aligned}<br />
-m_i^{(k)} &amp;= \max(m_i^{(k-1)}, \max_j S_{i,j}^{(k)}) \<br />
-Z_i^{(k)} &amp;= e^{m_i^{(k-1)} - m_i^{(k)}} Z_i^{(k-1)} + \sum_{j} e^{S_{i,j}^{(k)} - m_i^{(k)}}<br />
-\end{aligned}<br />
+<p>$$
+\begin{aligned}
+m_i^{(k)} &amp;= \max(m_i^{(k-1)}, \max_j S_{i,j}^{(k)}) \
+Z_i^{(k)} &amp;= e^{m_i^{(k-1)} - m_i^{(k)}} Z_i^{(k-1)} + \sum_{j} e^{S_{i,j}^{(k)} - m_i^{(k)}}
+\end{aligned}
 $$</p>
 <p><strong>注释</strong>：这个在线算法允许流式计算Softmax，无需存储完整的注意力矩阵。</p>
 <h3 id="14-flash-attention">14. Flash Attention中的误差累积<a class="toc-link" href="#14-flash-attention" title="Permanent link">&para;</a></h3>
@@ -375,13 +379,13 @@ $$</p>
 </ol>
 <p><strong>重新归一化的误差</strong>：</p>
 <p>当最大值更新时，需要重新归一化之前的累积和：</p>
-<p>$$<br />
-\text{fl}\left(e^{m_i^{(k-1)} - m_i^{(k)}} Z_i^{(k-1)}\right) = e^{m_i^{(k-1)} - m_i^{(k)}} Z_i^{(k-1)} (1 + \delta_k)<br />
+<p>$$
+\text{fl}\left(e^{m_i^{(k-1)} - m_i^{(k)}} Z_i^{(k-1)}\right) = e^{m_i^{(k-1)} - m_i^{(k)}} Z_i^{(k-1)} (1 + \delta_k)
 $$</p>
 <p><strong>累积误差界</strong>：</p>
 <p>经过 $B$ 个块后，总误差界为：</p>
-<p>$$<br />
-|\delta_{\text{total}}| \leq B \cdot O(\epsilon_{\text{mach}})<br />
+<p>$$
+|\delta_{\text{total}}| \leq B \cdot O(\epsilon_{\text{mach}})
 $$</p>
 <p><strong>注释</strong>：块数 $B$ 越大，累积误差越大。但Flash Attention的主要误差仍来自Softmax本身，而非分块策略。</p>
 <h3 id="15">15. 论文中的关键实验观察<a class="toc-link" href="#15" title="Permanent link">&para;</a></h3>
@@ -395,98 +399,98 @@ $$</p>
 <p><strong>数学解释</strong>：</p>
 <p>第一层的输出作为第二层的输入，第一层的有偏误差会被第二层放大。</p>
 <p>设第一层的输出误差为 $\epsilon_1$，则第二层的输入为：</p>
-<p>$$<br />
-\boldsymbol{X}^{(2)} = \boldsymbol{X}^{(1)} + \epsilon_1<br />
+<p>$$
+\boldsymbol{X}^{(2)} = \boldsymbol{X}^{(1)} + \epsilon_1
 $$</p>
 <p>第二层的误差：</p>
-<p>$$<br />
-\epsilon_2 \approx \epsilon_1 + \text{误差}(\boldsymbol{X}^{(2)}) \approx \epsilon_1 + f(\epsilon_1) + \epsilon_{\text{local}}<br />
+<p>$$
+\epsilon_2 \approx \epsilon_1 + \text{误差}(\boldsymbol{X}^{(2)}) \approx \epsilon_1 + f(\epsilon_1) + \epsilon_{\text{local}}
 $$</p>
 <p>如果 $f(\epsilon_1) &gt; 0$（有偏误差），则误差会指数级增长。</p>
 <h3 id="16">16. 有偏误差的严格理论分析<a class="toc-link" href="#16" title="Permanent link">&para;</a></h3>
 <p><strong>定义累积有偏误差</strong>：</p>
 <p>对于 $L$ 层Transformer，定义第 $\ell$ 层的有偏误差为：</p>
-<p>$$<br />
-\beta_\ell = \mathbb{E}[\text{fl}(Z_i^{(\ell)})] - Z_i^{(\ell)}<br />
+<p>$$
+\beta_\ell = \mathbb{E}[\text{fl}(Z_i^{(\ell)})] - Z_i^{(\ell)}
 $$</p>
 <p><strong>递推关系</strong>：</p>
-<p>$$<br />
-\beta_{\ell+1} = \beta_\ell + g(\beta_\ell) + \xi_\ell<br />
+<p>$$
+\beta_{\ell+1} = \beta_\ell + g(\beta_\ell) + \xi_\ell
 $$</p>
 <p>其中 $g(\beta_\ell)$ 是误差的非线性放大项，$\xi_\ell$ 是局部误差。</p>
 <p><strong>稳定性条件</strong>：</p>
 <p>训练稳定当且仅当：</p>
-<p>$$<br />
-|\beta_\ell| &lt; C \quad \forall \ell \in [1, L]<br />
+<p>$$
+|\beta_\ell| &lt; C \quad \forall \ell \in [1, L]
 $$</p>
 <p>其中 $C$ 是某个常数。</p>
 <p><strong>不稳定的充分条件</strong>：</p>
 <p>如果存在 $\ell_0$ 使得：</p>
-<p>$$<br />
-|g'(\beta_{\ell_0})| &gt; 1<br />
+<p>$$
+|g'(\beta_{\ell_0})| &gt; 1
 $$</p>
 <p>则误差会指数增长，导致训练不稳定。</p>
 <h3 id="17">17. 误差放大的数学机制<a class="toc-link" href="#17" title="Permanent link">&para;</a></h3>
 <p><strong>Softmax的Jacobian矩阵</strong>：</p>
-<p>$$<br />
-\frac{\partial \text{softmax}(\boldsymbol{x})_i}{\partial x_j} = \begin{cases}<br />
-\text{softmax}(\boldsymbol{x})_i (1 - \text{softmax}(\boldsymbol{x})_i) &amp; \text{if } i = j \<br />
--\text{softmax}(\boldsymbol{x})_i \text{softmax}(\boldsymbol{x})_j &amp; \text{if } i \neq j<br />
-\end{cases}<br />
+<p>$$
+\frac{\partial \text{softmax}(\boldsymbol{x})_i}{\partial x_j} = \begin{cases}
+\text{softmax}(\boldsymbol{x})_i (1 - \text{softmax}(\boldsymbol{x})_i) &amp; \text{if } i = j \
+-\text{softmax}(\boldsymbol{x})_i \text{softmax}(\boldsymbol{x})_j &amp; \text{if } i \neq j
+\end{cases}
 $$</p>
 <p><strong>误差传播分析</strong>：</p>
 <p>对于分母误差 $\Delta Z$，其对Attention权重的影响：</p>
-<p>$$<br />
-\Delta A_{i,j} = -\frac{e^{S_{i,j}}}{Z_i^2} \Delta Z = -\frac{A_{i,j}}{Z_i} \Delta Z<br />
+<p>$$
+\Delta A_{i,j} = -\frac{e^{S_{i,j}}}{Z_i^2} \Delta Z = -\frac{A_{i,j}}{Z_i} \Delta Z
 $$</p>
 <p><strong>放大因子</strong>：</p>
-<p>$$<br />
-\left|\frac{\Delta A_{i,j}}{A_{i,j}}\right| = \left|\frac{\Delta Z}{Z_i}\right|<br />
+<p>$$
+\left|\frac{\Delta A_{i,j}}{A_{i,j}}\right| = \left|\frac{\Delta Z}{Z_i}\right|
 $$</p>
 <p>当 $Z_i$ 较小时，相对误差被放大。</p>
 <h3 id="18">18. 数值稳定性的条件数分析<a class="toc-link" href="#18" title="Permanent link">&para;</a></h3>
 <p><strong>条件数的定义</strong>：</p>
 <p>对于函数 $f: \mathbb{R}^n \to \mathbb{R}^m$，其条件数为：</p>
-<p>$$<br />
-\kappa(f) = \sup_{\boldsymbol{x}} \frac{|f(\boldsymbol{x} + \Delta\boldsymbol{x}) - f(\boldsymbol{x})|}{|f(\boldsymbol{x})|} \cdot \frac{|\boldsymbol{x}|}{|\Delta\boldsymbol{x}|}<br />
+<p>$$
+\kappa(f) = \sup_{\boldsymbol{x}} \frac{|f(\boldsymbol{x} + \Delta\boldsymbol{x}) - f(\boldsymbol{x})|}{|f(\boldsymbol{x})|} \cdot \frac{|\boldsymbol{x}|}{|\Delta\boldsymbol{x}|}
 $$</p>
 <p><strong>Softmax的条件数</strong>：</p>
 <p>对于输入 $\boldsymbol{S}_i$（第 $i$ 行注意力得分），Softmax的条件数为：</p>
-<p>$$<br />
-\kappa(\text{softmax}) \approx \frac{\max_j e^{S_{i,j}}}{\sum_k e^{S_{i,k}}}<br />
+<p>$$
+\kappa(\text{softmax}) \approx \frac{\max_j e^{S_{i,j}}}{\sum_k e^{S_{i,k}}}
 $$</p>
 <p><strong>注释</strong>：当注意力分布非常尖锐（某个位置的得分远大于其他位置）时，条件数很大，数值稳定性差。</p>
 <h3 id="19">19. 动态范围的影响<a class="toc-link" href="#19" title="Permanent link">&para;</a></h3>
 <p><strong>注意力得分的动态范围</strong>：</p>
 <p>定义第 $i$ 行的动态范围为：</p>
-<p>$$<br />
-R_i = \max_j S_{i,j} - \min_j S_{i,j}<br />
+<p>$$
+R_i = \max_j S_{i,j} - \min_j S_{i,j}
 $$</p>
 <p><strong>大动态范围的问题</strong>：</p>
 <p>当 $R_i$ 很大时：</p>
-<p>$$<br />
-\frac{e^{\max_j S_{i,j}}}{e^{\min_j S_{i,j}}} = e^{R_i}<br />
+<p>$$
+\frac{e^{\max_j S_{i,j}}}{e^{\min_j S_{i,j}}} = e^{R_i}
 $$</p>
 <p>对于FP16，如果 $R_i &gt; 10$，则：</p>
-<p>$$<br />
-e^{R_i} &gt; 22000<br />
+<p>$$
+e^{R_i} &gt; 22000
 $$</p>
 <p>最小的注意力权重将被舍入为0。</p>
 <p><strong>有效注意力位置数</strong>：</p>
 <p>定义有效位置数为：</p>
-<p>$$<br />
-N_{\text{eff}} = \sum_{j=1}^n \mathbb{1}[\tilde{A}<em _text_mach="\text{mach">{i,j} &gt; \epsilon</em>]}<br />
-$$</p>
+<p>$$
+N_{\text{eff}} = \sum_{j=1}^n \mathbb{1}[\tilde{A}<em _text_mach="\text{mach">{i,j} &gt; \epsilon</em>]
+$$}</p>
 <p>低精度会显著减少有效位置数，丢失长尾信息。</p>
 <h3 id="20">20. 累积误差的上界估计<a class="toc-link" href="#20" title="Permanent link">&para;</a></h3>
 <p><strong>定理（Attention输出的误差界）</strong>：</p>
 <p>对于低精度Attention，输出误差满足：</p>
-<p>$$<br />
-|\boldsymbol{O} - \tilde{\boldsymbol{O}}|<em _text_mach="\text{mach">F \leq C_1 n \epsilon</em> + C_2 |\beta|}<br />
-$$</p>
-<p>其中：<br />
-- $C_1$ 是与模型结构相关的常数<br />
-- $C_2$ 是与激活值相关的常数<br />
+<p>$$
+|\boldsymbol{O} - \tilde{\boldsymbol{O}}|<em _text_mach="\text{mach">F \leq C_1 n \epsilon</em> + C_2 |\beta|
+$$}</p>
+<p>其中：
+- $C_1$ 是与模型结构相关的常数
+- $C_2$ 是与激活值相关的常数
 - $\beta$ 是有偏误差向量</p>
 <p><strong>证明思路</strong>：</p>
 <ol>
@@ -498,85 +502,85 @@ $$</p>
 <p><strong>注释</strong>：第二项 $C_2 |\beta|$ 是主要的问题来源，因为它随层数累积增长。</p>
 <h3 id="21">21. 前向传播的误差累积模型<a class="toc-link" href="#21" title="Permanent link">&para;</a></h3>
 <p><strong>第 $\ell$ 层的输出误差</strong>：</p>
-<p>$$<br />
-\epsilon_{\text{out}}^{(\ell)} = \epsilon_{\text{in}}^{(\ell)} + \epsilon_{\text{attn}}^{(\ell)} + \epsilon_{\text{ffn}}^{(\ell)}<br />
+<p>$$
+\epsilon_{\text{out}}^{(\ell)} = \epsilon_{\text{in}}^{(\ell)} + \epsilon_{\text{attn}}^{(\ell)} + \epsilon_{\text{ffn}}^{(\ell)}
 $$</p>
-<p>其中：<br />
-- $\epsilon_{\text{in}}^{(\ell)}$ 是输入误差（来自前一层）<br />
-- $\epsilon_{\text{attn}}^{(\ell)}$ 是Attention层的误差<br />
+<p>其中：
+- $\epsilon_{\text{in}}^{(\ell)}$ 是输入误差（来自前一层）
+- $\epsilon_{\text{attn}}^{(\ell)}$ 是Attention层的误差
 - $\epsilon_{\text{ffn}}^{(\ell)}$ 是FFN层的误差</p>
 <p><strong>递推关系</strong>：</p>
-<p>$$<br />
-\epsilon_{\text{in}}^{(\ell+1)} = \epsilon_{\text{out}}^{(\ell)}<br />
+<p>$$
+\epsilon_{\text{in}}^{(\ell+1)} = \epsilon_{\text{out}}^{(\ell)}
 $$</p>
 <p><strong>总误差</strong>：</p>
-<p>$$<br />
-\epsilon_{\text{total}} = \sum_{\ell=1}^L \left(\epsilon_{\text{attn}}^{(\ell)} + \epsilon_{\text{ffn}}^{(\ell)}\right) + \text{交互项}<br />
+<p>$$
+\epsilon_{\text{total}} = \sum_{\ell=1}^L \left(\epsilon_{\text{attn}}^{(\ell)} + \epsilon_{\text{ffn}}^{(\ell)}\right) + \text{交互项}
 $$</p>
 <p><strong>有偏误差的指数增长</strong>：</p>
 <p>如果每层的有偏误差为 $\beta$，则 $L$ 层后：</p>
-<p>$$<br />
-\epsilon_{\text{total}} \geq L \beta + O(L^2 \beta^2)<br />
+<p>$$
+\epsilon_{\text{total}} \geq L \beta + O(L^2 \beta^2)
 $$</p>
 <p>当 $L$ 很大时，二次项不可忽略。</p>
 <h3 id="22">22. 反向传播的梯度误差<a class="toc-link" href="#22" title="Permanent link">&para;</a></h3>
 <p><strong>梯度计算中的误差</strong>：</p>
 <p>对于损失 $\mathcal{L}$，Attention权重的梯度为：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial \boldsymbol{A}} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{O}} \boldsymbol{V}^T<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{A}} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{O}} \boldsymbol{V}^T
 $$</p>
 <p><strong>低精度梯度</strong>：</p>
-<p>$$<br />
-\text{fl}\left(\frac{\partial \mathcal{L}}{\partial \boldsymbol{A}}\right) = \frac{\partial \mathcal{L}}{\partial \boldsymbol{A}} + \delta_{\text{grad}}<br />
+<p>$$
+\text{fl}\left(\frac{\partial \mathcal{L}}{\partial \boldsymbol{A}}\right) = \frac{\partial \mathcal{L}}{\partial \boldsymbol{A}} + \delta_{\text{grad}}
 $$</p>
 <p><strong>Softmax的梯度</strong>：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial \boldsymbol{S}<em i_k="i,k">{i,j}} = \sum_k \frac{\partial \mathcal{L}}{\partial A</em>}} \frac{\partial A_{i,k}}{\partial S_{i,j}<br />
-$$</p>
+<p>$$
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{S}<em i_k="i,k">{i,j}} = \sum_k \frac{\partial \mathcal{L}}{\partial A</em>
+$$}} \frac{\partial A_{i,k}}{\partial S_{i,j}</p>
 <p>使用Softmax的Jacobian：</p>
-<p>$$<br />
-\frac{\partial \mathcal{L}}{\partial S_{i,j}} = A_{i,j} \left(\frac{\partial \mathcal{L}}{\partial A_{i,j}} - \sum_k A_{i,k} \frac{\partial \mathcal{L}}{\partial A_{i,k}}\right)<br />
+<p>$$
+\frac{\partial \mathcal{L}}{\partial S_{i,j}} = A_{i,j} \left(\frac{\partial \mathcal{L}}{\partial A_{i,j}} - \sum_k A_{i,k} \frac{\partial \mathcal{L}}{\partial A_{i,k}}\right)
 $$</p>
 <p><strong>有偏误差对梯度的影响</strong>：</p>
 <p>如果前向传播中 $\tilde{A}<em i_j="i,j">{i,j} &gt; A</em>$，则梯度：</p>
-<p>$$<br />
-\tilde{\nabla} = \tilde{A}<em i_j="i,j">{i,j} \cdot (\cdots) &gt; A</em>} \cdot (\cdots) = \nabla_{\text{true}<br />
-$$</p>
+<p>$$
+\tilde{\nabla} = \tilde{A}<em i_j="i,j">{i,j} \cdot (\cdots) &gt; A</em>
+$$} \cdot (\cdots) = \nabla_{\text{true}</p>
 <p>梯度被系统性放大。</p>
 <h3 id="23">23. 梯度范数的膨胀<a class="toc-link" href="#23" title="Permanent link">&para;</a></h3>
 <p><strong>梯度范数的期望</strong>：</p>
-<p>$$<br />
-\mathbb{E}\left[\left|\frac{\partial \mathcal{L}}{\partial \boldsymbol{S}}\right|<em i_j="i,j">F^2\right] = \mathbb{E}\left[\sum</em>\right)^2\right]} \left(\frac{\partial \mathcal{L}}{\partial S_{i,j}<br />
-$$</p>
+<p>$$
+\mathbb{E}\left[\left|\frac{\partial \mathcal{L}}{\partial \boldsymbol{S}}\right|<em i_j="i,j">F^2\right] = \mathbb{E}\left[\sum</em>\right)^2\right]
+$$} \left(\frac{\partial \mathcal{L}}{\partial S_{i,j}</p>
 <p><strong>有偏误差的贡献</strong>：</p>
-<p>$$<br />
-\mathbb{E}\left[\left|\tilde{\nabla}\right|^2\right] = \mathbb{E}\left[|\nabla_{\text{true}}|^2\right] + 2\beta \mathbb{E}[\nabla_{\text{true}}^T \nabla_{\text{bias}}] + O(\beta^2)<br />
+<p>$$
+\mathbb{E}\left[\left|\tilde{\nabla}\right|^2\right] = \mathbb{E}\left[|\nabla_{\text{true}}|^2\right] + 2\beta \mathbb{E}[\nabla_{\text{true}}^T \nabla_{\text{bias}}] + O(\beta^2)
 $$</p>
 <p>如果 $\mathbb{E}[\nabla_{\text{true}}^T \nabla_{\text{bias}}] &gt; 0$，则梯度范数膨胀。</p>
 <p><strong>梯度爆炸的充分条件</strong>：</p>
 <p>如果：</p>
-<p>$$<br />
-\frac{|\tilde{\nabla}|}{|\nabla_{\text{true}}|} &gt; \frac{1}{\gamma}<br />
+<p>$$
+\frac{|\tilde{\nabla}|}{|\nabla_{\text{true}}|} &gt; \frac{1}{\gamma}
 $$</p>
 <p>其中 $\gamma &lt; 1$ 是学习率缩放因子，则可能导致训练不稳定。</p>
 <h3 id="24-kahan">24. 误差补偿策略：Kahan求和<a class="toc-link" href="#24-kahan" title="Permanent link">&para;</a></h3>
 <p><strong>Kahan求和算法</strong>：</p>
 <p>用于减少浮点加法的累积误差：</p>
-<p>$$<br />
-\begin{aligned}<br />
-c &amp;= 0 \<br />
-\text{for } i &amp;= 1 \text{ to } n: \<br />
-\quad y &amp;= x_i - c \<br />
-\quad t &amp;= s + y \<br />
-\quad c &amp;= (t - s) - y \<br />
-\quad s &amp;= t<br />
-\end{aligned}<br />
+<p>$$
+\begin{aligned}
+c &amp;= 0 \
+\text{for } i &amp;= 1 \text{ to } n: \
+\quad y &amp;= x_i - c \
+\quad t &amp;= s + y \
+\quad c &amp;= (t - s) - y \
+\quad s &amp;= t
+\end{aligned}
 $$</p>
 <p><strong>误差补偿原理</strong>：</p>
 <p>通过显式跟踪并补偿每次加法丢失的小数部分，减少累积误差。</p>
 <p><strong>应用到Softmax</strong>：</p>
-<p>$$<br />
-Z_i = \sum_{j=1}^n e^{S_{i,j}}<br />
+<p>$$
+Z_i = \sum_{j=1}^n e^{S_{i,j}}
 $$</p>
 <p>使用Kahan求和计算 $Z_i$ 可以显著提高精度。</p>
 <p><strong>误差界改进</strong>：</p>
@@ -586,8 +590,8 @@ $$</p>
 <h3 id="25">25. 误差补偿策略：双精度累加器<a class="toc-link" href="#25" title="Permanent link">&para;</a></h3>
 <p><strong>混合精度策略</strong>：</p>
 <p>在低精度计算中使用高精度累加器：</p>
-<p>$$<br />
-Z_i^{\text{FP32}} = \sum_{j=1}^n \text{FP16}(e^{S_{i,j}})<br />
+<p>$$
+Z_i^{\text{FP32}} = \sum_{j=1}^n \text{FP16}(e^{S_{i,j}})
 $$</p>
 <p><strong>实现方式</strong>：</p>
 <ol>
@@ -607,12 +611,12 @@ $$</p>
 <h3 id="26">26. 误差补偿策略：分块归一化<a class="toc-link" href="#26" title="Permanent link">&para;</a></h3>
 <p><strong>分块Softmax的改进算法</strong>：</p>
 <p>使用更精细的数值稳定技术：</p>
-<p>$$<br />
-\begin{aligned}<br />
-m_i^{(k)} &amp;= \max(m_i^{(k-1)}, \max_j S_{i,j}^{(k)}) \<br />
-\Delta m &amp;= m_i^{(k)} - m_i^{(k-1)} \<br />
-Z_i^{(k)} &amp;= e^{-\Delta m} Z_i^{(k-1)} + \sum_{j \in \text{block } k} e^{S_{i,j}^{(k)} - m_i^{(k)}}<br />
-\end{aligned}<br />
+<p>$$
+\begin{aligned}
+m_i^{(k)} &amp;= \max(m_i^{(k-1)}, \max_j S_{i,j}^{(k)}) \
+\Delta m &amp;= m_i^{(k)} - m_i^{(k-1)} \
+Z_i^{(k)} &amp;= e^{-\Delta m} Z_i^{(k-1)} + \sum_{j \in \text{block } k} e^{S_{i,j}^{(k)} - m_i^{(k)}}
+\end{aligned}
 $$</p>
 <p><strong>关键改进</strong>：</p>
 <ol>
@@ -620,15 +624,15 @@ $$</p>
 <li>使用更精确的指数计算（如范围缩减+泰勒展开）</li>
 </ol>
 <p><strong>误差界</strong>：</p>
-<p>$$<br />
-|\text{fl}(Z_i^{(k)}) - Z_i^{(k)}| \leq B \epsilon_{\text{mach}} + O(\epsilon_{\text{mach}}^2)<br />
+<p>$$
+|\text{fl}(Z_i^{(k)}) - Z_i^{(k)}| \leq B \epsilon_{\text{mach}} + O(\epsilon_{\text{mach}}^2)
 $$</p>
 <p>其中 $B$ 是块数，一次项系数减小。</p>
 <h3 id="27">27. 动态缩放技术<a class="toc-link" href="#27" title="Permanent link">&para;</a></h3>
 <p><strong>自适应温度缩放</strong>：</p>
 <p>调整注意力得分的缩放因子：</p>
-<p>$$<br />
-\boldsymbol{S} = \frac{\boldsymbol{Q}\boldsymbol{K}^T}{\tau \sqrt{d_k}}<br />
+<p>$$
+\boldsymbol{S} = \frac{\boldsymbol{Q}\boldsymbol{K}^T}{\tau \sqrt{d_k}}
 $$</p>
 <p>其中 $\tau &gt; 1$ 是温度参数。</p>
 <p><strong>作用机制</strong>：</p>
@@ -644,52 +648,52 @@ $$</p>
 <li>缺点：平滑注意力分布，可能损失尖锐的注意力模式</li>
 </ul>
 <p><strong>最优温度的选择</strong>：</p>
-<p>$$<br />
-\tau^* = \arg\min_\tau \left(\text{误差}(\tau) + \lambda \cdot \text{性能损失}(\tau)\right)<br />
+<p>$$
+\tau^* = \arg\min_\tau \left(\text{误差}(\tau) + \lambda \cdot \text{性能损失}(\tau)\right)
 $$</p>
 <p>需要在数值稳定性和模型性能之间权衡。</p>
 <h3 id="28">28. 层归一化的交互作用<a class="toc-link" href="#28" title="Permanent link">&para;</a></h3>
 <p><strong>层归一化（Layer Normalization）</strong>：</p>
-<p>$$<br />
-\text{LayerNorm}(\boldsymbol{x}) = \frac{\boldsymbol{x} - \mu}{\sigma} \cdot \boldsymbol{\gamma} + \boldsymbol{\beta}<br />
+<p>$$
+\text{LayerNorm}(\boldsymbol{x}) = \frac{\boldsymbol{x} - \mu}{\sigma} \cdot \boldsymbol{\gamma} + \boldsymbol{\beta}
 $$</p>
 <p>其中：</p>
-<p>$$<br />
-\mu = \frac{1}{d}\sum_{i=1}^d x_i, \quad \sigma = \sqrt{\frac{1}{d}\sum_{i=1}^d (x_i - \mu)^2}<br />
+<p>$$
+\mu = \frac{1}{d}\sum_{i=1}^d x_i, \quad \sigma = \sqrt{\frac{1}{d}\sum_{i=1}^d (x_i - \mu)^2}
 $$</p>
 <p><strong>与Attention误差的交互</strong>：</p>
 <p>Attention的有偏误差会影响输出的均值和方差：</p>
-<p>$$<br />
-\mathbb{E}[\tilde{\boldsymbol{O}}] \neq \mathbb{E}[\boldsymbol{O}], \quad \text{Var}[\tilde{\boldsymbol{O}}] \neq \text{Var}[\boldsymbol{O}]<br />
+<p>$$
+\mathbb{E}[\tilde{\boldsymbol{O}}] \neq \mathbb{E}[\boldsymbol{O}], \quad \text{Var}[\tilde{\boldsymbol{O}}] \neq \text{Var}[\boldsymbol{O}]
 $$</p>
 <p><strong>层归一化的部分修正</strong>：</p>
 <p>层归一化可以修正均值偏差：</p>
-<p>$$<br />
-\mu_{\text{norm}} = 0 \quad \text{无论输入如何}<br />
+<p>$$
+\mu_{\text{norm}} = 0 \quad \text{无论输入如何}
 $$</p>
 <p>但无法修正方差的高阶矩和相关性结构的偏差。</p>
 <h3 id="29">29. 残差连接的误差累积<a class="toc-link" href="#29" title="Permanent link">&para;</a></h3>
 <p><strong>残差连接</strong>：</p>
-<p>$$<br />
-\boldsymbol{X}^{(\ell+1)} = \boldsymbol{X}^{(\ell)} + \text{Attention}(\boldsymbol{X}^{(\ell)})<br />
+<p>$$
+\boldsymbol{X}^{(\ell+1)} = \boldsymbol{X}^{(\ell)} + \text{Attention}(\boldsymbol{X}^{(\ell)})
 $$</p>
 <p><strong>误差累积</strong>：</p>
-<p>$$<br />
-\epsilon^{(\ell+1)} = \epsilon^{(\ell)} + \epsilon_{\text{attn}}^{(\ell)}<br />
+<p>$$
+\epsilon^{(\ell+1)} = \epsilon^{(\ell)} + \epsilon_{\text{attn}}^{(\ell)}
 $$</p>
 <p>残差连接直接累加误差，导致误差随层数线性增长。</p>
 <p><strong>有偏误差的累积</strong>：</p>
-<p>$$<br />
-\beta^{(\ell+1)} = \beta^{(\ell)} + \beta_{\text{attn}}^{(\ell)}<br />
+<p>$$
+\beta^{(\ell+1)} = \beta^{(\ell)} + \beta_{\text{attn}}^{(\ell)}
 $$</p>
 <p>如果每层的有偏误差相同且为 $\beta$，则 $L$ 层后：</p>
-<p>$$<br />
-\beta^{(L)} = L \beta<br />
+<p>$$
+\beta^{(L)} = L \beta
 $$</p>
 <p><strong>缓解策略</strong>：</p>
 <p>在残差连接前使用投影：</p>
-<p>$$<br />
-\boldsymbol{X}^{(\ell+1)} = \boldsymbol{X}^{(\ell)} + \alpha \cdot \text{Projection}(\text{Attention}(\boldsymbol{X}^{(\ell)}))<br />
+<p>$$
+\boldsymbol{X}^{(\ell+1)} = \boldsymbol{X}^{(\ell)} + \alpha \cdot \text{Projection}(\text{Attention}(\boldsymbol{X}^{(\ell)}))
 $$</p>
 <p>其中 $\alpha &lt; 1$ 是缩放因子，投影可以是简单的线性层或更复杂的变换。</p>
 <h3 id="30">30. 实验验证与理论预测的对比<a class="toc-link" href="#30" title="Permanent link">&para;</a></h3>
@@ -759,27 +763,27 @@ $$</p>
 <p><strong>实践建议</strong>：</p>
 <ol>
 <li>
-<p><strong>混合精度训练</strong>：<br />
-   $$<br />
-   \text{计算使用FP16/BF16，累加使用FP32}<br />
+<p><strong>混合精度训练</strong>：
+   $$
+   \text{计算使用FP16/BF16，累加使用FP32}
    $$</p>
 </li>
 <li>
-<p><strong>数值稳定的Softmax实现</strong>：<br />
-   $$<br />
-   \text{使用Kahan求和或双精度累加器}<br />
+<p><strong>数值稳定的Softmax实现</strong>：
+   $$
+   \text{使用Kahan求和或双精度累加器}
    $$</p>
 </li>
 <li>
-<p><strong>动态监控</strong>：<br />
-   $$<br />
-   \text{监控 } \frac{|\tilde{\nabla}|}{|\nabla|} \text{ 和 } \frac{\text{fl}(Z)}{Z}<br />
+<p><strong>动态监控</strong>：
+   $$
+   \text{监控 } \frac{|\tilde{\nabla}|}{|\nabla|} \text{ 和 } \frac{\text{fl}(Z)}{Z}
    $$</p>
 </li>
 <li>
-<p><strong>自适应缩放</strong>：<br />
-   $$<br />
-   \text{根据误差动态调整温度参数 } \tau<br />
+<p><strong>自适应缩放</strong>：
+   $$
+   \text{根据误差动态调整温度参数 } \tau
    $$</p>
 </li>
 </ol>
@@ -794,7 +798,7 @@ $$</p>
                             
                             <a href="低精度attention可能存在有.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#231 低精度Attention可能存在有...</div>
+                                <div class="nav-title">#207 低精度Attention可能存在有...</div>
                             </a>
                             
                         </div>
@@ -802,7 +806,7 @@ $$</p>
                             
                             <a href="流形上的最速下降5-对偶梯度下降.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#233 流形上的最速下降：5. 对偶梯度下降</div>
+                                <div class="nav-title">#209 流形上的最速下降：5. 对偶梯度下降</div>
                             </a>
                             
                         </div>
