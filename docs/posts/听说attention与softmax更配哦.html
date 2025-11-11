@@ -27,14 +27,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -78,7 +82,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=熵">熵</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #34 听说Attention与Softmax更配哦～
+                    #30 听说Attention与Softmax更配哦～
                 </li>
             </ol>
         </nav>
@@ -86,7 +90,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#34</span>
+                <span class="post-number">#30</span>
                 听说Attention与Softmax更配哦～
             </h1>
             <div class="post-meta">
@@ -144,7 +148,7 @@
 <p>验证这个猜测很简单，笔者将GAU中Attention的归一化方式换回Softmax后重新训练一个GAU模型，然后微调测试不同长度的任务，发现其效果比$\frac{1}{n}\text{relu}^2(\cdot)$时明显要好。所以，我们得出结论：Attention还是与Softmax更配～</p>
 <h2 id="_3">原因分析<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>为什么更符合直觉的、自适应长度的$n$反而表现不如固定的$n$呢？既然我们已经以往用Softmax是没有这个问题的，所以我们不妨从Softmax出发找找灵感。Softmax的操作是：<br />
-\begin{equation}a_{i,j} = \frac{1}{Z_i}\exp\left(\frac{\boldsymbol{q}<em j="1">i\cdot\boldsymbol{k}_j}{\sqrt{d}}\right),\quad Z_i = \sum</em>}^n \exp\left(\frac{\boldsymbol{q}_i\cdot\boldsymbol{k}_j}{\sqrt{d}}\right)\end{equation<br />
+\begin{equation}a_{i,j} = \frac{1}{Z_i}\exp\left(\frac{\boldsymbol{q}<em j="1">i\cdot\boldsymbol{k}_j}{\sqrt{d}}\right),\quad Z_i = \sum</em>}^n \exp\left(\frac{\boldsymbol{q}_i\cdot\boldsymbol{k}_j}{\sqrt{d}}\right)\end{equation
 一个直接的问题就是：$Z_i$跟$n$的关系是怎样的呢？如果真有$Z_i=\mathcal{O}(n)$，那么理论上将$Z_i$换成$n$应该能取得相近的效果，至少不会是特别差的那种。</p>
 <p>然而，我们知道注意力的重点是“注意”，它应该有能力“聚焦”到它认为比较重要的几个token上。同时，以往关于高效Transformer的一些实验结果显示，把标准Attention换成Local Attention后结果并不会明显下降，所以我们可以预计位置为$i$的Attention基本上就聚焦在$i$附近的若干token上，超出一定距离后就基本为0了。事实上，也有很多事后的可视化结果显示训练好的Attention矩阵其实是很稀疏的。</p>
 <p>综合这些结果，我们可以得出，存在某个常数$k$，使得$|j-i|\geq k$时$\exp\left(\frac{\boldsymbol{q}_i\cdot\boldsymbol{k}_j}{\sqrt{d}}\right)$都相当接近于0，这样一来$Z_i$应该更接近$\mathcal{O}(k)$而不是$\mathcal{O}(n)$，这就意味着$Z_i$很可能跟$n$是无关的，或者说跟$n$的数量级关系至少是小于$\mathcal{O}(n)$的！因此，我们如果要将$Z_i$替换成别的东西，那应该是一个比$n$的一次方更低阶的函数，甚至是一个常数。</p>
@@ -157,7 +161,7 @@
 <p>GAU的squared_relu换成softmax效果是相近的</p>
 <p>有了这个基本保证之后，我们就可以看Softmax比$\text{relu}^2(\cdot)$好在哪里了。我们看刚才提到的GAU三个解决方案，方案一总让人感觉不够自适应，方案二必须用多种长度训练显得不够优雅，至于方案三补充了归一化因子后形式上相比Softmax反而显得“臃肿”了。所以，总体来说还是用Softmax显得更为优雅有效。</p>
 <p>此外，泛化能力可以简单分为“内插”和“外推”两种，在这里内插（外推）指的是测试长度小于（大于）训练长度。我们刚才说归一化因子是常数量级，更多是在内插范围内说的。对于外推来说，如果长度足够长，$\boldsymbol{q}<em 512="512">i,\boldsymbol{k}_j$都“挤”在一起，所以很难保持距离超过某个范围就很接近于0的特性。而如果我们用Softmax的话，就是它可以推导出一个“熵不变性”的版本，来增强模型的外推能力：<br />
-\begin{equation}Attention(Q,K,V) = softmax\left(\frac{\log</em>} n}{\sqrt{d}}QK^{\top}\right)V\end{equation<br />
+\begin{equation}Attention(Q,K,V) = softmax\left(\frac{\log</em>} n}{\sqrt{d}}QK^{\top}\right)V\end{equation
 在<a href="/archives/8823">《从熵不变性看Attention的Scale操作》</a>中我们做过简单的对比实验，显示该版本确实能提高模型在超出训练长度外的效果。</p>
 <p>那么，$\text{relu}^2(\cdot)$能否推一个“熵不变性”的版本呢？答案是不能，因为它相当于是通过温度参数来调节分布的熵，这要求激活函数不能是具备正齐次性，比如对于幂函数有$(\lambda \boldsymbol{q}_i\cdot\boldsymbol{k}_j)^n=\lambda^n (\boldsymbol{q}_i\cdot\boldsymbol{k}_j)^n$，归一化后$\lambda^n$就抵消了，不起作用。激活函数最好比幂函数高一阶，才比较好实现这个调控，而比幂函数高阶的函数，最常见就是指数函数了，而指数归一化正好就是Softmax。</p>
 <h2 id="_5">本文小结<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
@@ -193,7 +197,7 @@ url={\url{https://spaces.ac.cn/archives/9019}},<br />
                             
                             <a href="为什么pre-norm的效果不如post-norm.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#33 为什么Pre Norm的效果不如Post Norm？</div>
+                                <div class="nav-title">#29 为什么Pre Norm的效果不如Post Norm？</div>
                             </a>
                             
                         </div>
@@ -201,7 +205,7 @@ url={\url{https://spaces.ac.cn/archives/9019}},<br />
                             
                             <a href="熵不变性softmax的一个快速推导.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#35 熵不变性Softmax的一个快速推导</div>
+                                <div class="nav-title">#31 熵不变性Softmax的一个快速推导</div>
                             </a>
                             
                         </div>

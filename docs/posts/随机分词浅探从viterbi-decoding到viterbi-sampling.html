@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=概率">概率</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #109 随机分词浅探：从Viterbi Decoding到Viterbi Sampling
+                    #103 随机分词浅探：从Viterbi Decoding到Viterbi Sampling
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#109</span>
+                <span class="post-number">#103</span>
                 随机分词浅探：从Viterbi Decoding到Viterbi Sampling
             </h1>
             <div class="post-meta">
@@ -138,7 +142,7 @@
 <h2 id="_2">已有方案<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>由于一时半会没有新想法，所以笔者决定去翻翻“参考答案”——看看Subword Regularization的原始论文<a href="https://papers.cool/arxiv/1804.10959">《Subword Regularization: Improving Neural Network Translation Models with Multiple Subword Candidates》</a>是怎么做的。</p>
 <p>然而，这个“标准答案”却让笔者有点哭笑不得。原来Subword Regularization的思路非常简单直接：先搜索出$P(\boldsymbol{w})$最大的$n$个分词方案$\boldsymbol{w}^<em>_1,\boldsymbol{w}^</em><em j="1">2,\cdots,\boldsymbol{w}^<em>_n$（$n$-best segmentations），然后构建如下分布<br />
-\begin{equation}p_i = \frac{P(\boldsymbol{w}^</em>_i)^{\alpha}}{\sum\limits</em>}^n P(\boldsymbol{w}^*_j)^{\alpha}}\end{equation<br />
+\begin{equation}p_i = \frac{P(\boldsymbol{w}^</em>_i)^{\alpha}}{\sum\limits</em>}^n P(\boldsymbol{w}^*_j)^{\alpha}}\end{equation
 对这$n$个方案进行依概率采样，其中$\alpha &gt; 0$是一个超参数。该算法已经集成在SentencePiece中，读者可以自行测试（使用方法参考<a href="https://github.com/google/sentencepiece/tree/master#subword-regularization-and-bpe-dropout">这里</a>）。</p>
 <p>问题是，“简单直接”不代表着“高效”，尽管搜索top-$n$个分词方案最优方案的复杂度也是线性的（有兴趣的读者可以自行找找N-best Viterbi的资料)，但明显比只找top1的Viterbi Decoding要大很多（理论上是$n$倍复杂度），所以直接的后果是开启了随机采样后，会比确定性的分词要慢很多，所以这并非是笔者心中的理想采样方法。</p>
 <h2 id="_3">个人思路<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
@@ -162,10 +166,10 @@
 
 <p>反复读了几遍，总算有了灵感：Viterbi Decoding的关键是<code>if score &gt; routes[e][0]:</code>这一句，它代表保留截止到当前位置的最优切分方案，其中<code>score</code>是新切分方案分数（概率对数），<code>routes[e][0]</code>是历史最优分数，如果新方案更优则覆盖。这让笔者联想到了<a href="/archives/8084">MCMC算法</a>的接受率设计，如果在这里引入随机采样，不就可以将分词结果随机化了？</p>
 <p>我们用$r\in \{1, 0\}$表示接受/拒绝新方案，由于这一步只是一个二元选择，所以将它概率化也非常简单：<br />
-\begin{equation}<br />
-r_i = \left\{\begin{aligned}&amp;\,1\,, \,\, s_i &gt; s_{i-1} \\<br />
+\begin{equation}
+r_i = \left\{\begin{aligned}&amp;\,1\,, \,\, s_i &gt; s_{i-1} \\
 &amp;\,0\,, \,\, \text{else}\end{aligned}\right.\qquad\longrightarrow\qquad<br />
-r_i = \left\{\begin{aligned}&amp;\,1\,, \,\, \varepsilon &lt; \sigma(\alpha(s_i - s_{i-1})) \\<br />
+r_i = \left\{\begin{aligned}&amp;\,1\,, \,\, \varepsilon &lt; \sigma(\alpha(s_i - s_{i-1})) \\
 &amp;\,0\,, \,\, \text{else}\end{aligned}\right.<br />
 \end{equation}<br />
 这里$\varepsilon\sim U[0,1]$是均匀随机数，$\alpha &gt; 0$是超参数，$\sigma(t)=1/(1+e^{-t})$是Sigmoid函数，$s_i,s_{i-1}$分别是新旧方案的得分（概率对数）。不难发现，左端的确定性采样对应$\alpha\to\infty$的随机性采样。</p>
@@ -190,14 +194,14 @@ for i in range(5):
 </code></pre>
 
 <p>下面对比一下SentencePiece的Subword Regularization和BytePiece的Viterbi Sampling的速度（随机性分词时都设$\alpha=0.1$）：<br />
-\begin{array}{c|cc}<br />
-\hline<br />
-&amp; \text{确定性分词} &amp; \text{随机性分词} &amp; \\<br />
-\hline<br />
-\text{SP-BPE} &amp; \text{1.36M bytes/sec} &amp; \text{1.25M bytes/sec} \\<br />
-\text{SP-Unigram} &amp; \text{5.65M bytes/sec} &amp; \text{1.28M bytes/sec} \\<br />
-\text{BytePiece} &amp; \text{1.95M bytes/sec} &amp; \text{1.36M bytes/sec}\\<br />
-\hline<br />
+\begin{array}{c|cc}
+\hline
+&amp; \text{确定性分词} &amp; \text{随机性分词} &amp; \\
+\hline
+\text{SP-BPE} &amp; \text{1.36M bytes/sec} &amp; \text{1.25M bytes/sec} \\
+\text{SP-Unigram} &amp; \text{5.65M bytes/sec} &amp; \text{1.28M bytes/sec} \\
+\text{BytePiece} &amp; \text{1.95M bytes/sec} &amp; \text{1.36M bytes/sec}\\
+\hline
 \end{array}<br />
 可以看到，Subword Regularization（“SP-Unigram”这一行）开启之后，分词速度不到原来的1/4，这表明Subword Regularization的采样算法是相当低效的。相比之下，本文提出的Viterbi Sampling只下降了30%左右，效率显然更高，下降的部分在于随机数的生成和Sigmoid函数的计算，如果能进一步优化这两部分，速度还能进一步提升。至于BPE模型，它的随机分词叫做<a href="https://papers.cool/arxiv/1910.13267">BPE Dropout</a>，这是专属于BPE模型的方法，有兴趣的读者自行了解，这里就不介绍了。</p>
 <h2 id="_5">文章小结<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
@@ -233,7 +237,7 @@ url={\url{https://spaces.ac.cn/archives/9768}},<br />
                             
                             <a href="大词表语言模型在续写任务上的一个问题及对策.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#108 大词表语言模型在续写任务上的一个问题及对策</div>
+                                <div class="nav-title">#102 大词表语言模型在续写任务上的一个问题及对策</div>
                             </a>
                             
                         </div>
@@ -241,7 +245,7 @@ url={\url{https://spaces.ac.cn/archives/9768}},<br />
                             
                             <a href="自然数集中-n-ab-c-时-a-b-c-的最小值.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#110 自然数集中 N = ab + c 时 a + b + c 的最小值</div>
+                                <div class="nav-title">#104 自然数集中 N = ab + c 时 a + b + c 的最小值</div>
                             </a>
                             
                         </div>

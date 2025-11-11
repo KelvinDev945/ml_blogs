@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #104 Transformer升级之路：13、逆用Leaky ReRoPE
+                    #98 Transformer升级之路：13、逆用Leaky ReRoPE
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#104</span>
+                <span class="post-number">#98</span>
                 Transformer升级之路：13、逆用Leaky ReRoPE
             </h1>
             <div class="post-meta">
@@ -136,45 +140,45 @@
 <p>总之，ReRoPE看起来相当让人满意，但美中不足的是会增加推理成本，具体表现为第一步推理需要算两次Attention，以及后续每步推理需要重新计算位置编码。本文试图通过在训练中逆用Leaky ReRoPE的方法来解决这个问题。</p>
 <h2 id="_1">回顾<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>让我们不厌其烦地重温一下：RoPE形式上是一种绝对位置编码，但实际达到的效果是相对位置编码，对应的相对位置矩阵是：<br />
-\begin{equation}\begin{pmatrix}0 &amp; \\<br />
-1 &amp; 0 &amp; \\<br />
-2 &amp; 1 &amp; 0 &amp;\\<br />
-3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
-\ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
-\ddots &amp; \ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
-\ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\<br />
-\small{L - 2} &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\<br />
-\small{L - 1} &amp; \small{L - 2} &amp; \ddots &amp; \ddots &amp; \ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
+\begin{equation}\begin{pmatrix}0 &amp; \\
+1 &amp; 0 &amp; \\
+2 &amp; 1 &amp; 0 &amp;\\
+3 &amp; 2 &amp; 1 &amp; 0 &amp; \\
+\ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\
+\ddots &amp; \ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\
+\ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\
+\small{L - 2} &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\
+\small{L - 1} &amp; \small{L - 2} &amp; \ddots &amp; \ddots &amp; \ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\
 \end{pmatrix}\label{eq:rope}\end{equation}<br />
 为了在保留局域性的同时避免Long Context导致位置越界问题，Leaky ReRoPE将推理阶段的相对位置矩阵改为：<br />
-\begin{equation}\begin{pmatrix}<br />
-\color{red}{0} &amp; \\<br />
-\color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\small{w + \frac{L-1-w}{k}}} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\begin{equation}\begin{pmatrix}
+\color{red}{0} &amp; \\
+\color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\small{w + \frac{L-1-w}{k}}} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
 \end{pmatrix}\label{eq:leaky-rerope}\end{equation}<br />
 其中$w$是窗口宽度，大概取训练长度的$\frac{1}{4}$到$\frac{1}{2}$，$k$用来调节可处理的最大长度，一般使得$w + \frac{L-1-w}{k}$不超过训练长度的一半为佳。至于ReRoPE，则是直接取了$k\to\infty$的极限：<br />
-\begin{equation}\begin{pmatrix}<br />
-\color{red}{0} &amp; \\<br />
-\color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{w} &amp; \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\begin{equation}\begin{pmatrix}
+\color{red}{0} &amp; \\
+\color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{w} &amp; \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
 \end{pmatrix}\label{eq:rerope}\end{equation}</p>
 <h2 id="_2">反转<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>从上一篇的评测结果来看，作为一种免训练的外推方案，ReRoPE和Leaky ReRoPE的效果都是相当让人满意的，既没有损失训练长度内的效果，又实现了“Longer Context, Lower Loss”。唯一美中不足的是，它们的推理速度相比原本的Attention来说是变慢的，并且目前尚不兼容Flash Attention等加速技术。</p>
@@ -183,29 +187,29 @@
 <p>笔者将以上想法称之为“InvLeaky ReRoPE（Inverse Leaky ReRoPE）”。事不宜迟，我们马上做实验测试。</p>
 <h2 id="_3">实验<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>继续之前的“<a href="/archives/8934">GAU</a> + <a href="/archives/8978">Deep Norm</a> + <a href="/archives/9512">Tiger</a> + 语言模型”实验组合，在训练阶段使用$k=1/16, w=128$的Leaky ReRoPE，在推理阶段使用正常的RoPE，测试结果如下：</p>
-<p>\begin{array}{c|cc}<br />
-\hline<br />
-\text{测试长度} &amp; 512(\text{训练}) &amp; 4096(\text{重复}) &amp; 4096(\text{不重复})\\<br />
-\hline<br />
-\text{Baseline} &amp; 49.41\% &amp; 24.17\% &amp; 23.16\% \\<br />
-\text{Baseline-}\log n &amp; 49.40\% &amp; 24.60\% &amp; 24.02\% \\<br />
-\hline<br />
-\text{NTK-RoPE-fixed} &amp; 49.41\% &amp; 51.86\% &amp; 39.61\% \\<br />
-\text{NTK-RoPE-}\log n^{\color{red}{\dagger}}\text{-fixed} &amp; 49.41\% &amp; 55.94\% &amp; 41.11\% \\<br />
-\text{NTK-RoPE-}\log n\text{-fixed} &amp; 49.40\% &amp; 62.85\% &amp; 44.14\% \\<br />
-\text{NTK-RoPE-mixed} &amp; 49.41\% &amp; 53.09\% &amp; 40.12\% \\<br />
-\text{NTK-RoPE-}\log n^{\color{red}{\dagger}}\text{-mixed} &amp; 49.41\% &amp; 59.11\% &amp; 42.38\% \\<br />
-\text{NTK-RoPE-}\log n\text{-mixed} &amp; 49.40\% &amp; 68.91\% &amp; 45.41\% \\<br />
-\hline<br />
-\text{ReRoPE-w256} &amp; 49.41\% &amp; 77.90\% &amp; 48.48\% \\<br />
-\text{ReRoPE-w256-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 82.40\% &amp; 48.85\% \\<br />
-\text{ReRoPE-w256-}\log n &amp; 49.40\% &amp; \boldsymbol{85.12\%} &amp; \boldsymbol{49.07\%} \\<br />
-\hline<br />
-\text{InvLeaky ReRoPE-w128-}\log n &amp; 49.38\% &amp; 82.25\% &amp; 48.32\% \\<br />
-\text{InvLeaky ReRoPE-w128-b8-}\log n &amp; 49.62\% &amp; 81.15\% &amp; 48.85\% \\<br />
-\hline<br />
-\text{HFWA} &amp; 48.70\% &amp; 80.84\% &amp; 48.15\% \\<br />
-\hline<br />
+<p>\begin{array}{c|cc}
+\hline
+\text{测试长度} &amp; 512(\text{训练}) &amp; 4096(\text{重复}) &amp; 4096(\text{不重复})\\
+\hline
+\text{Baseline} &amp; 49.41\% &amp; 24.17\% &amp; 23.16\% \\
+\text{Baseline-}\log n &amp; 49.40\% &amp; 24.60\% &amp; 24.02\% \\
+\hline
+\text{NTK-RoPE-fixed} &amp; 49.41\% &amp; 51.86\% &amp; 39.61\% \\
+\text{NTK-RoPE-}\log n^{\color{red}{\dagger}}\text{-fixed} &amp; 49.41\% &amp; 55.94\% &amp; 41.11\% \\
+\text{NTK-RoPE-}\log n\text{-fixed} &amp; 49.40\% &amp; 62.85\% &amp; 44.14\% \\
+\text{NTK-RoPE-mixed} &amp; 49.41\% &amp; 53.09\% &amp; 40.12\% \\
+\text{NTK-RoPE-}\log n^{\color{red}{\dagger}}\text{-mixed} &amp; 49.41\% &amp; 59.11\% &amp; 42.38\% \\
+\text{NTK-RoPE-}\log n\text{-mixed} &amp; 49.40\% &amp; 68.91\% &amp; 45.41\% \\
+\hline
+\text{ReRoPE-w256} &amp; 49.41\% &amp; 77.90\% &amp; 48.48\% \\
+\text{ReRoPE-w256-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 82.40\% &amp; 48.85\% \\
+\text{ReRoPE-w256-}\log n &amp; 49.40\% &amp; \boldsymbol{85.12\%} &amp; \boldsymbol{49.07\%} \\
+\hline
+\text{InvLeaky ReRoPE-w128-}\log n &amp; 49.38\% &amp; 82.25\% &amp; 48.32\% \\
+\text{InvLeaky ReRoPE-w128-b8-}\log n &amp; 49.62\% &amp; 81.15\% &amp; 48.85\% \\
+\hline
+\text{HFWA} &amp; 48.70\% &amp; 80.84\% &amp; 48.15\% \\
+\hline
 \end{array}</p>
 <p>其中$\text{b8}$是指RoPE的频率底数从10000换成了80000。可以看到，“Leaky ReRoPE → RoPE”的InvLeaky ReRoPE虽然效果上不如“RoPE → ReRoPE/Leaky ReRoPE”，但依然胜过了HFWA，并且由于推理阶段是常规的RoPE，可以套用现成的加速技术，因此依然是有相当竞争力的。此外，笔者对$k,w,b$等参数做了一些简单的调参，发现最优解基本上就是以上两个组合了，即“$k$设置为‘扩展倍数的2倍的倒数’、$w$设置为训练长度的$\frac{1}{4}$、$b$可选乘以扩展倍数”。</p>
 <p>那么，InvLeaky ReRoPE对训练速度有多大影响呢？在上述实验中，模型是1亿参数量，训练长度是512，每1000步的训练时间从330秒增加到了350秒，增加不到10%，当然这里边有GAU的原因，因为GAU是单头的注意力，本就比多头注意力快。如果多头注意力或者训练长度更长的话，增加幅度应该会大一些，但目测应该不超过50%都是可以接受的。</p>
@@ -239,9 +243,9 @@ url={\url{https://spaces.ac.cn/archives/9728}},<br />
 <p>这表示窗口外的位置以$1/k$的速率增长，相比窗口内的单位速率慢了$k$倍。</p>
 <p><strong>推导1.2（Leaky ReRoPE的完整形式）</strong></p>
 <p>完整的Leaky ReRoPE相对位置函数为：</p>
-<p>$$f_{\text{Leaky}}(m; w, k) = \begin{cases}<br />
-m, &amp; 0 \leq m &lt; w \<br />
-w + \frac{m - w}{k}, &amp; m \geq w<br />
+<p>$$f_{\text{Leaky}}(m; w, k) = \begin{cases}
+m, &amp; 0 \leq m &lt; w \
+w + \frac{m - w}{k}, &amp; m \geq w
 \end{cases}$$</p>
 <p>展开第二个分支：</p>
 <p>$$f_{\text{Leaky}}(m; w, k) = w + \frac{m - w}{k} = w\left(1 - \frac{1}{k}\right) + \frac{m}{k} = w \cdot \frac{k-1}{k} + \frac{m}{k}$$</p>
@@ -269,10 +273,10 @@ w + \frac{m - w}{k}, &amp; m \geq w<br />
 <h3 id="2">2. 窗口边界的平滑处理<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
 <p><strong>定义2.1（平滑窗口函数）</strong></p>
 <p>为了避免在$m = w$处的不可导问题，可以引入平滑窗口函数。定义平滑参数$\sigma &gt; 0$，平滑Leaky ReRoPE为：</p>
-<p>$$f_{\text{smooth}}(m; w, k, \sigma) = \begin{cases}<br />
-m, &amp; m \leq w - \sigma \<br />
-h(m; w, k, \sigma), &amp; w - \sigma &lt; m &lt; w + \sigma \<br />
-w + \frac{m - w}{k}, &amp; m \geq w + \sigma<br />
+<p>$$f_{\text{smooth}}(m; w, k, \sigma) = \begin{cases}
+m, &amp; m \leq w - \sigma \
+h(m; w, k, \sigma), &amp; w - \sigma &lt; m &lt; w + \sigma \
+w + \frac{m - w}{k}, &amp; m \geq w + \sigma
 \end{cases}$$</p>
 <p>其中$h$是过渡函数，需要满足：</p>
 <ol>
@@ -307,9 +311,9 @@ w + \frac{m - w}{k}, &amp; m \geq w + \sigma<br />
 <p><strong>逆向应用</strong>（InvLeaky ReRoPE）：训练时使用Leaky ReRoPE且$k &lt; 1$（等价于窗口外扩展），推理时使用标准RoPE。</p>
 <p><strong>推导3.2（逆向应用的位置编码映射）</strong></p>
 <p>对于逆向应用，设训练时的泄漏系数为$k_{\text{train}} = 1/r$，其中$r &gt; 1$是扩展倍数。训练阶段的相对位置函数为：</p>
-<p>$$f_{\text{train}}(m; w, r) = \begin{cases}<br />
-m, &amp; m &lt; w \<br />
-w + r(m - w), &amp; m \geq w<br />
+<p>$$f_{\text{train}}(m; w, r) = \begin{cases}
+m, &amp; m &lt; w \
+w + r(m - w), &amp; m \geq w
 \end{cases}$$</p>
 <p>这相当于窗口外的位置以$r$倍速率增长。对于训练长度$L_{\text{train}}$，最大相对位置为：</p>
 <p>$$f_{\text{train}}(L_{\text{train}} - 1; w, r) = w + r(L_{\text{train}} - 1 - w) = w(1 - r) + r(L_{\text{train}} - 1)$$</p>
@@ -357,14 +361,14 @@ w + r(m - w), &amp; m \geq w<br />
 <p>其中$a_{i,j}$是Attention分数。</p>
 <p><strong>推导5.2（Leaky ReRoPE的梯度分析）</strong></p>
 <p>对于Leaky ReRoPE，位置$m$处的导数为：</p>
-<p>$$f'(m; w, k) = \begin{cases}<br />
-1, &amp; m &lt; w \<br />
-1/k, &amp; m &gt; w<br />
+<p>$$f'(m; w, k) = \begin{cases}
+1, &amp; m &lt; w \
+1/k, &amp; m &gt; w
 \end{cases}$$</p>
 <p>因此梯度为：</p>
-<p>$$\frac{\partial \mathcal{L}}{\partial m} = \frac{\partial \mathcal{L}}{\partial f(m)} \cdot f'(m) = \begin{cases}<br />
-\frac{\partial \mathcal{L}}{\partial f(m)}, &amp; m &lt; w \<br />
-\frac{1}{k} \frac{\partial \mathcal{L}}{\partial f(m)}, &amp; m &gt; w<br />
+<p>$$\frac{\partial \mathcal{L}}{\partial m} = \frac{\partial \mathcal{L}}{\partial f(m)} \cdot f'(m) = \begin{cases}
+\frac{\partial \mathcal{L}}{\partial f(m)}, &amp; m &lt; w \
+\frac{1}{k} \frac{\partial \mathcal{L}}{\partial f(m)}, &amp; m &gt; w
 \end{cases}$$</p>
 <p>窗口外的梯度被缩放了$1/k$倍。</p>
 <p><strong>定理5.3（梯度缩放的稳定效应）</strong></p>
@@ -386,14 +390,14 @@ w + r(m - w), &amp; m \geq w<br />
 <p>$$\eta_{\text{eff}}(m) = \eta \cdot |f'(m)|$$</p>
 <p>其中$\eta$是基础学习率。</p>
 <p>对于逆向Leaky ReRoPE（$k = 1/r$）：</p>
-<p>$$\eta_{\text{eff}}(m) = \begin{cases}<br />
-\eta, &amp; m &lt; w \<br />
-r\eta, &amp; m &gt; w<br />
+<p>$$\eta_{\text{eff}}(m) = \begin{cases}
+\eta, &amp; m &lt; w \
+r\eta, &amp; m &gt; w
 \end{cases}$$</p>
 <p>这意味着窗口外位置的学习速度是窗口内的$r$倍。为了平衡，可以使用位置相关的学习率：</p>
-<p>$$\eta(m) = \begin{cases}<br />
-\eta_0, &amp; m &lt; w \<br />
-\eta_0/r, &amp; m &gt; w<br />
+<p>$$\eta(m) = \begin{cases}
+\eta_0, &amp; m &lt; w \
+\eta_0/r, &amp; m &gt; w
 \end{cases}$$</p>
 <h3 id="6">6. 参数敏感性分析<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
 <p><strong>定义6.1（性能关于参数的导数）</strong></p>
@@ -447,9 +451,9 @@ r\eta, &amp; m &gt; w<br />
 <p>定义训练和推理阶段的位置编码差异为：</p>
 <p>$$\Delta f(m) = |f_{\text{train}}(m) - f_{\text{test}}(m)|$$</p>
 <p>对于逆向Leaky ReRoPE：</p>
-<p>$$\Delta f(m) = \begin{cases}<br />
-0, &amp; m &lt; w \<br />
-|w + r(m - w) - m| = |(r - 1)(m - w)|, &amp; m \geq w<br />
+<p>$$\Delta f(m) = \begin{cases}
+0, &amp; m &lt; w \
+|w + r(m - w) - m| = |(r - 1)(m - w)|, &amp; m \geq w
 \end{cases}$$</p>
 <p><strong>推导8.2（差异对性能的影响）</strong></p>
 <p>训练-推理不一致会导致性能下降。定义性能损失为：</p>
@@ -623,7 +627,7 @@ r\eta, &amp; m &gt; w<br />
                             
                             <a href="transformer升级之路12无限外推的rerope.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#103 Transformer升级之路：12、无限外推的ReRoPE？</div>
+                                <div class="nav-title">#97 Transformer升级之路：12、无限外推的ReRoPE？</div>
                             </a>
                             
                         </div>
@@ -631,7 +635,7 @@ r\eta, &amp; m &gt; w<br />
                             
                             <a href="transformer升级之路14当hwfa遇见rerope.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#105 Transformer升级之路：14、当HWFA遇见ReRoPE</div>
+                                <div class="nav-title">#99 Transformer升级之路：14、当HWFA遇见ReRoPE</div>
                             </a>
                             
                         </div>

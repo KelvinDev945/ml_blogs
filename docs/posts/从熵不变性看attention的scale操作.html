@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=概率">概率</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #16 从熵不变性看Attention的Scale操作
+                    #12 从熵不变性看Attention的Scale操作
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#16</span>
+                <span class="post-number">#12</span>
                 从熵不变性看Attention的Scale操作
             </h1>
             <div class="post-meta">
@@ -133,7 +137,7 @@
 <p>在<a href="/archives/8620">《浅谈Transformer的初始化、参数化与标准化》</a>中，我们已经初步解释了除以$\sqrt{d}$的缘由。而在这篇文章中，笔者将从“熵不变性”的角度来理解这个缩放操作，并且得到 <em>一个新的缩放因子</em> 。在MLM的实验显示，新的缩放因子具有 <em>更好的长度外推性能</em> 。</p>
 <h2 id="_1">熵不变性<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>我们将一般的Scaled Dot-Product Attention改写成<br />
-\begin{equation}\boldsymbol{o}<em j="1">i = \sum</em>}^n a_{i,j}\boldsymbol{v<em i_j="i,j">j,\quad a</em>}=\frac{e^{\lambda \boldsymbol{q<em j="1">i\cdot \boldsymbol{k}_j}}{\sum\limits</em>}^n e^{\lambda \boldsymbol{q}_i\cdot \boldsymbol{k}_j}}\end{equation<br />
+\begin{equation}\boldsymbol{o}<em j="1">i = \sum</em>}^n a_{i,j}\boldsymbol{v<em i_j="i,j">j,\quad a</em>}=\frac{e^{\lambda \boldsymbol{q<em j="1">i\cdot \boldsymbol{k}_j}}{\sum\limits</em>}^n e^{\lambda \boldsymbol{q}_i\cdot \boldsymbol{k}_j}}\end{equation
 其中$\lambda$是缩放因子，它跟$\boldsymbol{q}_i,\boldsymbol{k}_j$无关，但原则上可以跟长度$n$、维度$d$等参数有关，目前主流的就是$\lambda=1/\sqrt{d}$。</p>
 <p>本文提出一个观点：</p>
 <blockquote>
@@ -141,7 +145,7 @@
 </blockquote>
 <p>怎么理解这句话呢？首先，泛化到未知长度，指的是预测长度和训练不一致时也能有不错的效果，比如$n=64$训练然后外推到$n=128,256$测试。我们知道，使用<a href="/archives/8265">RoPE</a>之类的相对位置编码的模型，对长度具有比较好的外推性，但我们依然可以通过更好的设计来增强这种外推性，比如熵不变性就是其中之一。</p>
 <p>具体来说，$a_{i,j}$可以视为$i$为条件、$j$为随机变量的条件分布，它的熵为<br />
-\begin{equation}\mathcal{H}<em j="1">i = -\sum</em>}^n a_{i,j}\log a_{i,j}\end{equation<br />
+\begin{equation}\mathcal{H}<em j="1">i = -\sum</em>}^n a_{i,j}\log a_{i,j}\end{equation
 熵不变性是指，$\mathcal{H}<em i_j="i,j">i$应该对长度$n$不敏感。更具体一点，就是如果在已有的token基础上，再补充几个token，那么新算出来各个$a</em>_i$不要有太大改变。}$自然也会有所改变，但我们希望$\mathcal{H</p>
 <p>为什么希望熵不变呢？我们知道，熵是不确定性的度量（参考<a href="/archives/3534">《“熵”不起：从熵、最大熵原理到最大熵模型（一）》</a>），换个角度想，我们可以将不确定性视为注意力的“聚焦程度”：如果熵为0，那么注意力将聚焦到某一个token上，如果熵为$\log n$，那么注意力均匀分布到所有token上。我们希望熵不变，是希望引入新的token后，已有的token依旧能同样地聚焦到原来的token上，而不希望新token的引入过多地“分摊”了原有的注意力，导致求和结果显著发生变化。</p>
 <h2 id="_2">新的因子<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
@@ -152,15 +156,15 @@
 \begin{equation}Attention(Q,K,V) = softmax\left(\frac{\log_{512} n}{\sqrt{d}}QK^{\top}\right)V\label{eq:ei2}\end{equation}<br />
 这就去掉了超参数$\lambda$，下面的实验也是用这个版本。</p>
 <p>为了验证该改动是否真如预期那样能提高Transformer的外推效果，笔者分别用Attention-O和Attention-E分别训练了一个RoFormer small版本，训练任务为MLM，训练长度为64，然后在不同长度的验证集下比较MLM的准确率，结果如下：<br />
-\begin{array}{c}<br />
-\text{Attention的长度外推实验} \\<br />
-{\begin{array}{c|ccccc}<br />
-\hline<br />
-&amp; n=64 &amp; n=128 &amp; n=256 &amp; n=512 &amp; 1024 \\<br />
-\hline<br />
-\text{Attention-O} &amp; 43.27 &amp; 36.53 &amp; 23.02 &amp; 15.12 &amp; 11.54\\<br />
-\text{Attention-E} &amp; 43.11 &amp; 41.17 &amp; 34.04 &amp; 20.15 &amp; 13.58\\<br />
-\hline<br />
+\begin{array}{c}
+\text{Attention的长度外推实验} \\
+{\begin{array}{c|ccccc}
+\hline
+&amp; n=64 &amp; n=128 &amp; n=256 &amp; n=512 &amp; 1024 \\
+\hline
+\text{Attention-O} &amp; 43.27 &amp; 36.53 &amp; 23.02 &amp; 15.12 &amp; 11.54\\
+\text{Attention-E} &amp; 43.11 &amp; 41.17 &amp; 34.04 &amp; 20.15 &amp; 13.58\\
+\hline
 \end{array}}<br />
 \end{array}<br />
 从实验结果可以看出，在与训练长度一致$n=64$的情况下，Attention-O和Attention-E的效果是很接近的，但是外推到更大的测试长度时，则明显拉开了差距，比如$n=256$时Attention-E要比Attention-O高10个百分点以上的准确率，可真不是一星半点了。</p>
@@ -173,8 +177,8 @@
 将所有求和都用同样的近似代替，我们得到<br />
 \begin{equation}\mathcal{H}_i \approx \log n + \log \mathbb{E}_j[e^{\lambda \boldsymbol{q}_i\cdot \boldsymbol{k}_j}] - \frac{\lambda\,\mathbb{E}_j[e^{\lambda \boldsymbol{q}_i\cdot \boldsymbol{k}_j}(\boldsymbol{q}_i\cdot \boldsymbol{k}_j)]}{\mathbb{E}_j[e^{\lambda \boldsymbol{q}_i\cdot \boldsymbol{k}_j}]} \end{equation}<br />
 留意到一般情况下$\boldsymbol{q}_i,\boldsymbol{k}_j$都是Layer Norm出来之后再接一个Dense层，而Dense层接近正交变换（参考<a href="/archives/7180">《从几何视角来理解模型参数的初始化策略》</a>），所以我们近似地假设$\boldsymbol{q}_i,\boldsymbol{k}_j$都是模长为$\sqrt{d}$的向量，所以$\boldsymbol{q}_i\cdot \boldsymbol{k}_j=d\cos(\boldsymbol{q}_i,\boldsymbol{k}_j)$；然后进一步假设$\boldsymbol{k}_j$均匀地分布在半径为$\sqrt{d}$的球面上，那么对$\boldsymbol{k}_j$的期望可以转化为对$\boldsymbol{q}_i,\boldsymbol{k}_j$夹角的期望，即<br />
-\begin{equation}\mathcal{H}_i \approx \log n + \log \mathbb{E}</em>}[e^{\lambda d \cos\theta}] - \frac{\lambda d\,\mathbb{E<em _theta="\theta">{\theta}[e^{\lambda d \cos\theta}\cos\theta]}{\mathbb{E}</em>}[e^{\lambda d \cos\theta}]} \end{equation<br />
-其中$\theta$服从的分布就是球面上任意两个向量之间的夹角分布，我们在<a href="/archives/7076">《n维空间下两个随机向量的夹角分布》</a>讨论过。接下来可以像<a href="/archives/7695">《最小熵原理（六）：词向量的维度应该怎么选择？》</a>的“<a href="/archives/7695#%E8%BF%91%E4%BC%BC%E4%BC%B0%E8%AE%A1">近似估计</a>”一样，用拉普拉斯近似得到<br />
+\begin{equation}\mathcal{H}_i \approx \log n + \log \mathbb{E}</em>}[e^{\lambda d \cos\theta}] - \frac{\lambda d\,\mathbb{E<em _theta="\theta">{\theta}[e^{\lambda d \cos\theta}\cos\theta]}{\mathbb{E}</em>}[e^{\lambda d \cos\theta}]} \end{equation
+其中$\theta$服从的分布就是球面上任意两个向量之间的夹角分布，我们在<a href="/archives/7076">《n维空间下两个随机向量的夹角分布》</a>讨论过。接下来可以像<a href="/archives/7695">《最小熵原理（六）：词向量的维度应该怎么选择？》</a>的“<a href="/archives/7695#%E8%BF%91%E4%BC%BC%E4%BC%B0%E8%AE%A1">近似估计</a>”一样，用拉普拉斯近似得到
 \begin{equation}\mathcal{H}_i \approx \log n - 0.24\lambda d + \mathcal{O}(1) \end{equation}<br />
 因此，为了抵消长度$n$的影响，我们让$\log n - 0.24\lambda d = 0$，从而得出$\lambda = \log n / (0.24 d)$。当然，我们知道这只是估计，所以没必要保留系数$0.24$了，倒不如直接引入超参数$\kappa$，使得<br />
 \begin{equation}\lambda = \frac{\kappa\log n}{d}\end{equation}<br />
@@ -217,7 +221,7 @@ url={\url{https://spaces.ac.cn/archives/8823}},<br />
                             
                             <a href="seq2seq前缀树检索任务新范式以kgclue为例.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#15 Seq2Seq+前缀树：检索任务新范式（以KgCLUE为例）</div>
+                                <div class="nav-title">#11 Seq2Seq+前缀树：检索任务新范式（以KgCLUE为例）</div>
                             </a>
                             
                         </div>
@@ -225,7 +229,7 @@ url={\url{https://spaces.ac.cn/archives/8823}},<br />
                             
                             <a href="概率分布的熵归一化entropy-normalization.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#17 概率分布的熵归一化（Entropy Normalization）</div>
+                                <div class="nav-title">#13 概率分布的熵归一化（Entropy Normalization）</div>
                             </a>
                             
                         </div>

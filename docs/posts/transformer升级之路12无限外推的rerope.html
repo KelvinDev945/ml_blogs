@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #103 Transformer升级之路：12、无限外推的ReRoPE？
+                    #97 Transformer升级之路：12、无限外推的ReRoPE？
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#103</span>
+                <span class="post-number">#97</span>
                 Transformer升级之路：12、无限外推的ReRoPE？
             </h1>
             <div class="post-meta">
@@ -136,62 +140,62 @@
 <p>万万没想到的是，尽管该方法增加了一些推理复杂度，但它的实验效果却惊人地好——甚至隐约有无限的长度外推能力！因此，笔者迫不及待地撰写了本文来分享该方法。由于形式上跟ReLU激活函数的相似性，所以笔者将该方法命名为“ReRoPE (Rectified Rotary Position Embeddings)”。</p>
 <h2 id="_1">重温<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
 <p>我们知道，<a href="/archives/8265">RoPE</a>形式上是一种绝对位置编码，但实际上给Attention带来的是相对位置信息，即如下的<a href="https://en.wikipedia.org/wiki/Toeplitz_matrix">Toeplitz矩阵</a>：<br />
-\begin{equation}\begin{pmatrix}0 &amp; \\<br />
-1 &amp; 0 &amp; \\<br />
-2 &amp; 1 &amp; 0 &amp;\\<br />
-3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
-\ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
-\ddots &amp; \ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
-\ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\<br />
-\small{L - 2} &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\<br />
-\small{L - 1} &amp; \small{L - 2} &amp; \ddots &amp; \ddots &amp; \ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\<br />
+\begin{equation}\begin{pmatrix}0 &amp; \\
+1 &amp; 0 &amp; \\
+2 &amp; 1 &amp; 0 &amp;\\
+3 &amp; 2 &amp; 1 &amp; 0 &amp; \\
+\ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\
+\ddots &amp; \ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\
+\ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\
+\small{L - 2} &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\
+\small{L - 1} &amp; \small{L - 2} &amp; \ddots &amp; \ddots &amp; \ddots &amp; 3 &amp; 2 &amp; 1 &amp; 0 &amp; \\
 \end{pmatrix}\label{eq:rope}\end{equation}<br />
 这里的$L$是当前样本长度。当$L$明显超出了训练长度时，多出来的位置由于没有被训练过，所以无法保证效果，这就是直接外推（Length Extrapolation）表现通常比较差的原因。</p>
 <p>后来，研究人员提出了位置内插（Position Interpolation），它相当于将相对位置矩阵改为：<br />
-\begin{equation}\begin{pmatrix}0 &amp; \\<br />
-\frac{1}{k} &amp; 0 &amp; \\<br />
-\frac{2}{k} &amp; \frac{1}{k} &amp; 0 &amp;\\<br />
-\frac{3}{k} &amp; \frac{2}{k} &amp; \frac{1}{k} &amp; 0 &amp; \\<br />
-\ddots &amp; \frac{3}{k} &amp; \frac{2}{k} &amp; \frac{1}{k} &amp; 0 &amp; \\<br />
-\ddots &amp; \ddots &amp; \frac{3}{k} &amp; \frac{2}{k} &amp; \frac{1}{k} &amp; 0 &amp; \\<br />
-\ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\<br />
-\small{\frac{L-2}{k}} &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\<br />
-\small{\frac{L-1}{k}} &amp; \small{\frac{L-1}{k}} &amp; \ddots &amp; \ddots &amp; \ddots &amp; \frac{3}{k} &amp; \frac{2}{k} &amp; \frac{1}{k} &amp; 0 &amp; \\<br />
+\begin{equation}\begin{pmatrix}0 &amp; \\
+\frac{1}{k} &amp; 0 &amp; \\
+\frac{2}{k} &amp; \frac{1}{k} &amp; 0 &amp;\\
+\frac{3}{k} &amp; \frac{2}{k} &amp; \frac{1}{k} &amp; 0 &amp; \\
+\ddots &amp; \frac{3}{k} &amp; \frac{2}{k} &amp; \frac{1}{k} &amp; 0 &amp; \\
+\ddots &amp; \ddots &amp; \frac{3}{k} &amp; \frac{2}{k} &amp; \frac{1}{k} &amp; 0 &amp; \\
+\ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\
+\small{\frac{L-2}{k}} &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots &amp; \ddots \\
+\small{\frac{L-1}{k}} &amp; \small{\frac{L-1}{k}} &amp; \ddots &amp; \ddots &amp; \ddots &amp; \frac{3}{k} &amp; \frac{2}{k} &amp; \frac{1}{k} &amp; 0 &amp; \\
 \end{pmatrix}\end{equation}<br />
 这样一来，只要调整$k$，就可以保证最大的相对位置也不超过训练长度，因此避免了外推。然而，它使得位置信息更加“拥挤”了，所以还需要进行一定步数的微调才能让模型重新工作。而也正因为避免了外推，所以它所需要的微调步数相比直接外推要少得多（神经网络往往更擅长内插而不是外推）。</p>
 <p>至于后面提出的NTK-aware Scaled RoPE，则是“剑走偏锋”，巧妙地将外推压力平摊到每一个维度上，所以它不微调也能有不错的效果，但它终究还是依赖外推，这是神经网络不擅长的事情，所以效果存在上限，在笔者的实验中，它的Long Context表现还无法很接近训练效果。</p>
 <h2 id="_2">融合<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>我们也可以从语言模型的局域性来考察这些方法。所谓局域性，是指语言模型在推断下一个token时，明显更依赖于邻近的token。直接外推保持了局域性（0附近位置编码不变），效果差是因为引入了超出训练长度的位置编码；位置内插虽然没有外推位置编码，但扰乱了局域性（0附近位置编码被压缩为$1/k$），所以不微调效果也不好；而NTK-aware Scaled RoPE通过“高频外推、低频内插”隐含了两者优点，保证了局域性，又没有明显外推位置编码，所以不微调也有不错的效果。</p>
 <p>有没有能更直接地结合外推和内插的方法呢？有，我们可以设定一个窗口大小$w$，在窗口内我们使用大小为$1$的位置间隔，在窗口外我们使用大小为$1/k$的位置间隔，整个相对位置矩阵如下：<br />
-\begin{equation}\begin{pmatrix}<br />
-\color{red}{0} &amp; \\<br />
-\color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\small{w + \frac{L-1-w}{k}}} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\begin{equation}\begin{pmatrix}
+\color{red}{0} &amp; \\
+\color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\small{w + \frac{L-1-w}{k}}} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\small{w + \frac{2}{k}}} &amp; \color{green}{\small{w + \frac{1}{k}}} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
 \end{pmatrix}\label{eq:leaky-rerope}\end{equation}<br />
 只要$w$小于训练长度，那么通过控制$k$，我们就可以在精确保持了局域性的前提下，使得所有位置编码不超过训练长度，简单直接地结合了直接外推和位置内插。</p>
 <p>特别地，矩阵$\eqref{eq:leaky-rerope}$还有一个特别的case：当$k\to\infty$时，它简化为<br />
-\begin{equation}\begin{pmatrix}<br />
-\color{red}{0} &amp; \\<br />
-\color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{w} &amp; \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \\<br />
-\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
-\color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\<br />
+\begin{equation}\begin{pmatrix}
+\color{red}{0} &amp; \\
+\color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{w} &amp; \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \color{red}{\ddots} &amp; \\
+\color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
+\color{green}{w} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{\ddots} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{green}{w} &amp; \color{red}{\small{w - 1}} &amp; \color{red}{\ddots} &amp; \color{red}{2} &amp; \color{red}{1} &amp; \color{red}{0} &amp; \\
 \end{pmatrix}\label{eq:rerope}\end{equation}<br />
 在这个case下，不管输入长度是多少，它的位置编码范围都不超过$w$，所以这是一种有可能支持任意长度的Context的方案！</p>
 <p>形式上，矩阵$\eqref{eq:rerope}$、$\eqref{eq:leaky-rerope}$与标准RoPE矩阵$\eqref{eq:rope}$的关系，就相当于ReLU、Leaky ReLU与Linear的关系，所以笔者将$\eqref{eq:rerope}$称为“ReRoPE（Rectified RoPE）”，将$\eqref{eq:leaky-rerope}$称为“Leaky ReRoPE”。</p>
@@ -204,99 +208,99 @@
 如果是ReRoPE，那么简单一些：<br />
 \begin{equation}a</em>}^{(2)} = \left(\boldsymbol{\mathcal{R}}^w\boldsymbol{q<em i_j="i,j">i\right)^{\top}\boldsymbol{k}_j = \boldsymbol{q}_i^{\top}\boldsymbol{\mathcal{R}}^w\boldsymbol{k}_j\end{equation}<br />
 最后，根据$i - j &lt; w$这个条件，将它们合并起来：<br />
-\begin{equation}a</em>} = \left\{\begin{aligned<br />
-&amp;a_{i,j}^{(1)},\quad (i - j &lt; w) \\[8pt] &amp;a_{i,j}^{(2)}, \quad (i - j \geq w)<br />
+\begin{equation}a</em>} = \left\{\begin{aligned
+&amp;a_{i,j}^{(1)},\quad (i - j &lt; w) \\[8pt] &amp;a_{i,j}^{(2)}, \quad (i - j \geq w)
 \end{aligned}\right.\end{equation}<br />
 不管是ReRoPE还是Leaky ReRoPE，都不可避免地计算两次Attention矩阵（如果有更高效的实现方法，请赐教），这便是增加的计算量之一。此外，需要自定义计算Attention矩阵也导致了不能直接套用现成的flash attention实现，因此相对之下又增加了计算成本。</p>
 <p>另一方面，同样是由于非线性的相对位置，所以在自回归解码时，Key序列的cache只能存RoPE之前的，然后在每步解码时给整个Key序列补上对应的RoPE，这样的改动也会增加推理计算量。唯一的好消息是，在token by token解码时，从第二步开始Query序列的长度就为1，此时只需要为Key序列定制RoPE，那么可以只算一次Attention矩阵：<br />
-\begin{equation}a_{i,j} = \left\{\begin{aligned}<br />
-&amp;\boldsymbol{q}_i^{\top}\left(\boldsymbol{\mathcal{R}}^{\max(j-i,-w)}\boldsymbol{k}_j\right), \quad(\text{ReRoPE})\\[8pt]<br />
-&amp;\boldsymbol{q}_i^{\top}\left(\boldsymbol{\mathcal{R}}^{\max(j-i,(j-i+w)/k-w)}\boldsymbol{k}_j\right), \quad(\text{Leaky ReRoPE})<br />
+\begin{equation}a_{i,j} = \left\{\begin{aligned}
+&amp;\boldsymbol{q}_i^{\top}\left(\boldsymbol{\mathcal{R}}^{\max(j-i,-w)}\boldsymbol{k}_j\right), \quad(\text{ReRoPE})\\[8pt]
+&amp;\boldsymbol{q}_i^{\top}\left(\boldsymbol{\mathcal{R}}^{\max(j-i,(j-i+w)/k-w)}\boldsymbol{k}_j\right), \quad(\text{Leaky ReRoPE})
 \end{aligned}\right.\end{equation}</p>
 <h2 id="_4">实验<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>继续沿着<a href="/archives/9706">《Transformer升级之路：11、将β进制位置进行到底》</a>的设置，我们对ReRoPE进行了实验，效果如下表：<br />
-\begin{array}{c|cc}<br />
-\hline<br />
-\text{测试长度} &amp; 512(\text{训练}) &amp; 4096(\text{重复}) &amp; 4096(\text{不重复})\\<br />
-\hline<br />
-\text{Baseline} &amp; 49.41\% &amp; 24.17\% &amp; 23.16\% \\<br />
-\text{Baseline-}\log n &amp; 49.40\% &amp; 24.60\% &amp; 24.02\% \\<br />
-\hline<br />
-\text{PI-RoPE} &amp; 49.41\% &amp; 15.04\% &amp; 13.54\% \\<br />
-\text{PI-RoPE-}\log n &amp; 49.40\% &amp; 14.99\% &amp; 16.51\% \\<br />
-\hline<br />
-\text{NTK-RoPE-old} &amp; 49.41\% &amp; 51.28\% &amp; 39.27\% \\<br />
-\text{NTK-RoPE-}\log n\text{-old} &amp; 49.40\% &amp; 61.71\% &amp; 43.75\% \\<br />
-\hline<br />
-\text{NTK-RoPE-fixed} &amp; 49.41\% &amp; 51.86\% &amp; 39.61\% \\<br />
-\text{NTK-RoPE-}\log n^{\color{red}{\dagger}}\text{-fixed} &amp; 49.41\% &amp; 55.94\% &amp; 41.11\% \\<br />
-\text{NTK-RoPE-}\log n\text{-fixed} &amp; 49.40\% &amp; 62.85\% &amp; 44.14\% \\<br />
-\text{NTK-RoPE-mixed} &amp; 49.41\% &amp; 53.09\% &amp; 40.12\% \\<br />
-\text{NTK-RoPE-}\log n^{\color{red}{\dagger}}\text{-mixed} &amp; 49.41\% &amp; 59.11\% &amp; 42.38\% \\<br />
-\text{NTK-RoPE-}\log n\text{-mixed} &amp; 49.40\% &amp; 68.91\% &amp; 45.41\% \\<br />
-\hline<br />
-\text{ReRoPE-w256} &amp; 49.41\% &amp; 77.90\% &amp; 48.48\% \\<br />
-\text{ReRoPE-w256-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 82.40\% &amp; 48.85\% \\<br />
-\text{ReRoPE-w256-}\log n &amp; 49.40\% &amp; \boldsymbol{85.12\%} &amp; \boldsymbol{49.07\%} \\<br />
-\hline<br />
-\text{HFWA} &amp; 48.70\% &amp; 80.84\% &amp; 48.15\% \\<br />
-\hline<br />
+\begin{array}{c|cc}
+\hline
+\text{测试长度} &amp; 512(\text{训练}) &amp; 4096(\text{重复}) &amp; 4096(\text{不重复})\\
+\hline
+\text{Baseline} &amp; 49.41\% &amp; 24.17\% &amp; 23.16\% \\
+\text{Baseline-}\log n &amp; 49.40\% &amp; 24.60\% &amp; 24.02\% \\
+\hline
+\text{PI-RoPE} &amp; 49.41\% &amp; 15.04\% &amp; 13.54\% \\
+\text{PI-RoPE-}\log n &amp; 49.40\% &amp; 14.99\% &amp; 16.51\% \\
+\hline
+\text{NTK-RoPE-old} &amp; 49.41\% &amp; 51.28\% &amp; 39.27\% \\
+\text{NTK-RoPE-}\log n\text{-old} &amp; 49.40\% &amp; 61.71\% &amp; 43.75\% \\
+\hline
+\text{NTK-RoPE-fixed} &amp; 49.41\% &amp; 51.86\% &amp; 39.61\% \\
+\text{NTK-RoPE-}\log n^{\color{red}{\dagger}}\text{-fixed} &amp; 49.41\% &amp; 55.94\% &amp; 41.11\% \\
+\text{NTK-RoPE-}\log n\text{-fixed} &amp; 49.40\% &amp; 62.85\% &amp; 44.14\% \\
+\text{NTK-RoPE-mixed} &amp; 49.41\% &amp; 53.09\% &amp; 40.12\% \\
+\text{NTK-RoPE-}\log n^{\color{red}{\dagger}}\text{-mixed} &amp; 49.41\% &amp; 59.11\% &amp; 42.38\% \\
+\text{NTK-RoPE-}\log n\text{-mixed} &amp; 49.40\% &amp; 68.91\% &amp; 45.41\% \\
+\hline
+\text{ReRoPE-w256} &amp; 49.41\% &amp; 77.90\% &amp; 48.48\% \\
+\text{ReRoPE-w256-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 82.40\% &amp; 48.85\% \\
+\text{ReRoPE-w256-}\log n &amp; 49.40\% &amp; \boldsymbol{85.12\%} &amp; \boldsymbol{49.07\%} \\
+\hline
+\text{HFWA} &amp; 48.70\% &amp; 80.84\% &amp; 48.15\% \\
+\hline
 \end{array}<br />
 正如文章开头所说，ReRoPE不微调外推的效果可谓出奇地好，不仅明显超越了此前最优的NTK-RoPE-mixed，还明显超过了从零预训练的<a href="/archives/9603">HFWA</a>！这里的$\text{w256}$指的$w=256$，$\log n^{\color{red}{\dagger}}$是指预训练没有加入$\log n$缩放（比如LLAMA），测试阶段每个$\boldsymbol{q}<em _text_maxlen="\text{maxlen">n$都乘上$\max(1, \log</em> n)$，$\log n$则是指预训练就加入了$\log n$缩放因子。}</p>
 <p>以下是一些消融实验，显示出ReRoPE关于$w$还是很鲁棒的，最优值大致是训练长度的$1/4\sim 1/2$左右：<br />
-\begin{array}{c|cc}<br />
-\hline<br />
-\text{测试长度} &amp; 512(\text{训练}) &amp; 4096(\text{重复}) &amp; 4096(\text{不重复})\\<br />
-\hline<br />
-\text{ReRoPE-w64} &amp; 49.41\% &amp; 69.39\% &amp; 45.19\% \\<br />
-\text{ReRoPE-w64-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 78.58\% &amp; 47.42\% \\<br />
-\text{ReRoPE-w64-}\log n &amp; 49.40\% &amp; 84.38\% &amp; 48.14\% \\<br />
-\hline<br />
-\text{ReRoPE-w128} &amp; 49.41\% &amp; 76.11\% &amp; 47.82\% \\<br />
-\text{ReRoPE-w128-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 82.28\% &amp; 48.78\% \\<br />
-\text{ReRoPE-w128-}\log n &amp; 49.40\% &amp; \boldsymbol{85.47\%} &amp; 48.87\% \\<br />
-\hline<br />
-\text{ReRoPE-w256} &amp; 49.41\% &amp; 77.90\% &amp; 48.48\% \\<br />
-\text{ReRoPE-w256-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 82.40\% &amp; 48.85\% \\<br />
-\text{ReRoPE-w256-}\log n &amp; 49.40\% &amp; 85.12\% &amp; \boldsymbol{49.07\%} \\<br />
-\hline<br />
-\text{ReRoPE-w384} &amp; 49.41\% &amp; 70.72\% &amp; 48.15\% \\<br />
-\text{ReRoPE-w384-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 76.42\% &amp; 48.31\% \\<br />
-\text{ReRoPE-w384-}\log n &amp; 49.40\% &amp; 83.24\% &amp; 48.62\% \\<br />
-\hline<br />
-\text{ReRoPE-w512} &amp; 49.41\% &amp; 7.09\% &amp; 8.25\% \\<br />
-\text{ReRoPE-w512-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 7.08\% &amp; 8.25\% \\<br />
-\text{ReRoPE-w512-}\log n &amp; 49.40\% &amp; 15.84\% &amp; 10.83\% \\<br />
-\hline<br />
+\begin{array}{c|cc}
+\hline
+\text{测试长度} &amp; 512(\text{训练}) &amp; 4096(\text{重复}) &amp; 4096(\text{不重复})\\
+\hline
+\text{ReRoPE-w64} &amp; 49.41\% &amp; 69.39\% &amp; 45.19\% \\
+\text{ReRoPE-w64-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 78.58\% &amp; 47.42\% \\
+\text{ReRoPE-w64-}\log n &amp; 49.40\% &amp; 84.38\% &amp; 48.14\% \\
+\hline
+\text{ReRoPE-w128} &amp; 49.41\% &amp; 76.11\% &amp; 47.82\% \\
+\text{ReRoPE-w128-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 82.28\% &amp; 48.78\% \\
+\text{ReRoPE-w128-}\log n &amp; 49.40\% &amp; \boldsymbol{85.47\%} &amp; 48.87\% \\
+\hline
+\text{ReRoPE-w256} &amp; 49.41\% &amp; 77.90\% &amp; 48.48\% \\
+\text{ReRoPE-w256-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 82.40\% &amp; 48.85\% \\
+\text{ReRoPE-w256-}\log n &amp; 49.40\% &amp; 85.12\% &amp; \boldsymbol{49.07\%} \\
+\hline
+\text{ReRoPE-w384} &amp; 49.41\% &amp; 70.72\% &amp; 48.15\% \\
+\text{ReRoPE-w384-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 76.42\% &amp; 48.31\% \\
+\text{ReRoPE-w384-}\log n &amp; 49.40\% &amp; 83.24\% &amp; 48.62\% \\
+\hline
+\text{ReRoPE-w512} &amp; 49.41\% &amp; 7.09\% &amp; 8.25\% \\
+\text{ReRoPE-w512-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 7.08\% &amp; 8.25\% \\
+\text{ReRoPE-w512-}\log n &amp; 49.40\% &amp; 15.84\% &amp; 10.83\% \\
+\hline
 \end{array}</p>
 <p>下表则对比了ReRoPE和Leaky ReRoPE：<br />
-\begin{array}{c|cc}<br />
-\hline<br />
-\text{测试长度} &amp; 512(\text{训练}) &amp; 4096(\text{重复}) &amp; 4096(\text{不重复})\\<br />
-\hline<br />
-\text{ReRoPE-w128-}\log n &amp; 49.40\% &amp; \boldsymbol{85.47\%} &amp; 48.87\% \\<br />
-\text{Leaky ReRoPE-w128-k64-}\log n &amp; 49.40\% &amp; 85.29\% &amp; 48.96\% \\<br />
-\text{Leaky ReRoPE-w128-k32-}\log n &amp; 49.40\% &amp; 85.31\% &amp; 49.03\% \\<br />
-\text{Leaky ReRoPE-w128-k16-}\log n &amp; 49.40\% &amp; 85.15\% &amp; \boldsymbol{49.10\%} \\<br />
-\text{Leaky ReRoPE-w128-k8-}\log n &amp; 49.40\% &amp; 80.00\% &amp; 48.11\% \\<br />
-\hline<br />
-\text{ReRoPE-w256-}\log n &amp; 49.40\% &amp; 85.12\% &amp; 49.07\% \\<br />
-\text{Leaky ReRoPE-w256-k64-}\log n &amp; 49.40\% &amp; 84.60\% &amp; 49.03\% \\<br />
-\text{Leaky ReRoPE-w256-k32-}\log n &amp; 49.40\% &amp; 84.30\% &amp; 48.97\% \\<br />
-\text{Leaky ReRoPE-w256-k16-}\log n &amp; 49.40\% &amp; 83.59\% &amp; 48.87\% \\<br />
-\text{Leaky ReRoPE-w256-k8-}\log n &amp; 49.40\% &amp; 69.80\% &amp; 45.72\% \\<br />
-\hline<br />
+\begin{array}{c|cc}
+\hline
+\text{测试长度} &amp; 512(\text{训练}) &amp; 4096(\text{重复}) &amp; 4096(\text{不重复})\\
+\hline
+\text{ReRoPE-w128-}\log n &amp; 49.40\% &amp; \boldsymbol{85.47\%} &amp; 48.87\% \\
+\text{Leaky ReRoPE-w128-k64-}\log n &amp; 49.40\% &amp; 85.29\% &amp; 48.96\% \\
+\text{Leaky ReRoPE-w128-k32-}\log n &amp; 49.40\% &amp; 85.31\% &amp; 49.03\% \\
+\text{Leaky ReRoPE-w128-k16-}\log n &amp; 49.40\% &amp; 85.15\% &amp; \boldsymbol{49.10\%} \\
+\text{Leaky ReRoPE-w128-k8-}\log n &amp; 49.40\% &amp; 80.00\% &amp; 48.11\% \\
+\hline
+\text{ReRoPE-w256-}\log n &amp; 49.40\% &amp; 85.12\% &amp; 49.07\% \\
+\text{Leaky ReRoPE-w256-k64-}\log n &amp; 49.40\% &amp; 84.60\% &amp; 49.03\% \\
+\text{Leaky ReRoPE-w256-k32-}\log n &amp; 49.40\% &amp; 84.30\% &amp; 48.97\% \\
+\text{Leaky ReRoPE-w256-k16-}\log n &amp; 49.40\% &amp; 83.59\% &amp; 48.87\% \\
+\text{Leaky ReRoPE-w256-k8-}\log n &amp; 49.40\% &amp; 69.80\% &amp; 45.72\% \\
+\hline
 \end{array}</p>
 <p>作为ReRoPE的一般化，经过精调的Leaky ReRoPE是有机会超过ReRoPE的，但提升很微弱。此外，当$k$取有限值时，能处理的最大长度也是有限的，因为我们不能提前知道要生成的总长度，所以只能预设一个足够大的$k$，但设定为有限值之后，当输入足够长时，就会因为位置编码超出训练长度而效果大幅下降，相比之下ReRoPE则不会有这个风险。总的来说，精调Leaky ReRoPE相比ReRoPE的价值似乎不大。</p>
 <p>以上实验结果都只是在1亿参数的GAU模型上测试的，下面给出基于llama2-13b的测试结果（指标是loss，越小越好），它代表了在真正的LLM表现：<br />
-\begin{array}{c|cc}<br />
-\hline<br />
-\text{测试长度} &amp; 4096(\text{训练}) &amp; 8192 &amp; 16384\\<br />
-\hline<br />
-\text{RoPE} &amp; 1.4967 &amp; 8.8615 &amp; \text{-} \\<br />
-\text{NTK-RoPE} &amp; 1.6081 &amp; 1.5417 &amp; 1.5163 \\<br />
-\text{ReRoPE} &amp; 1.4996 &amp; 1.4267 &amp; 1.4001 \\<br />
-\hline<br />
+\begin{array}{c|cc}
+\hline
+\text{测试长度} &amp; 4096(\text{训练}) &amp; 8192 &amp; 16384\\
+\hline
+\text{RoPE} &amp; 1.4967 &amp; 8.8615 &amp; \text{-} \\
+\text{NTK-RoPE} &amp; 1.6081 &amp; 1.5417 &amp; 1.5163 \\
+\text{ReRoPE} &amp; 1.4996 &amp; 1.4267 &amp; 1.4001 \\
+\hline
 \end{array}<br />
 可以看到，ReRoPE真正做到了几乎不损训练效果（RoPE-4096代表训练效果），并且满足“longer context, lower loss”的理想特点（更多的context应该更加有助于预测）。此外，笔者也在OpenBuddy开源的LLAMA2-13b微调模型上测试了chat的效果，自我感觉还不错（最多测试过20k tokens的Context）。</p>
 <p>最后，分享笔者在transformers的LLAMA模型基础上实现ReRoPE和Leaky ReRoPE的代码，读者也可以自行加载LLAMA系列模型进行测试：</p>
@@ -329,20 +333,20 @@ url={\url{https://spaces.ac.cn/archives/9708}},<br />
 <h3 id="1-rope">1. RoPE的数学基础回顾<a class="toc-link" href="#1-rope" title="Permanent link">&para;</a></h3>
 <p><strong>定义1.1（旋转位置编码矩阵）</strong></p>
 <p>RoPE的核心是旋转矩阵$\boldsymbol{\mathcal{R}}^m$，对于第$m$个位置，其旋转矩阵定义为：</p>
-<p>$$\boldsymbol{\mathcal{R}}^m = \begin{pmatrix}<br />
-\cos(m\theta_1) &amp; -\sin(m\theta_1) &amp; 0 &amp; 0 &amp; \cdots \<br />
-\sin(m\theta_1) &amp; \cos(m\theta_1) &amp; 0 &amp; 0 &amp; \cdots \<br />
-0 &amp; 0 &amp; \cos(m\theta_2) &amp; -\sin(m\theta_2) &amp; \cdots \<br />
-0 &amp; 0 &amp; \sin(m\theta_2) &amp; \cos(m\theta_2) &amp; \cdots \<br />
-\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \ddots<br />
+<p>$$\boldsymbol{\mathcal{R}}^m = \begin{pmatrix}
+\cos(m\theta_1) &amp; -\sin(m\theta_1) &amp; 0 &amp; 0 &amp; \cdots \
+\sin(m\theta_1) &amp; \cos(m\theta_1) &amp; 0 &amp; 0 &amp; \cdots \
+0 &amp; 0 &amp; \cos(m\theta_2) &amp; -\sin(m\theta_2) &amp; \cdots \
+0 &amp; 0 &amp; \sin(m\theta_2) &amp; \cos(m\theta_2) &amp; \cdots \
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \ddots
 \end{pmatrix}$$</p>
 <p>其中$\theta_i = 10000^{-2i/d}$为第$i$个维度对的基础频率，$d$为嵌入维度。</p>
 <p><strong>推导1.2（相对位置的实现）</strong></p>
 <p>对于查询向量$\boldsymbol{q}_i$和键向量$\boldsymbol{k}_j$，应用RoPE后的内积为：</p>
-<p>$$\begin{aligned}<br />
-\text{score}_{i,j} &amp;= (\boldsymbol{\mathcal{R}}^i\boldsymbol{q}_i)^{\top}(\boldsymbol{\mathcal{R}}^j\boldsymbol{k}_j) \<br />
-&amp;= \boldsymbol{q}_i^{\top}(\boldsymbol{\mathcal{R}}^i)^{\top}\boldsymbol{\mathcal{R}}^j\boldsymbol{k}_j \<br />
-&amp;= \boldsymbol{q}_i^{\top}\boldsymbol{\mathcal{R}}^{j-i}\boldsymbol{k}_j<br />
+<p>$$\begin{aligned}
+\text{score}_{i,j} &amp;= (\boldsymbol{\mathcal{R}}^i\boldsymbol{q}_i)^{\top}(\boldsymbol{\mathcal{R}}^j\boldsymbol{k}_j) \
+&amp;= \boldsymbol{q}_i^{\top}(\boldsymbol{\mathcal{R}}^i)^{\top}\boldsymbol{\mathcal{R}}^j\boldsymbol{k}_j \
+&amp;= \boldsymbol{q}_i^{\top}\boldsymbol{\mathcal{R}}^{j-i}\boldsymbol{k}_j
 \end{aligned}$$</p>
 <p>最后一步利用了旋转矩阵的性质：$(\boldsymbol{\mathcal{R}}^i)^{\top}\boldsymbol{\mathcal{R}}^j = \boldsymbol{\mathcal{R}}^{j-i}$。</p>
 <p><strong>证明</strong>：由于旋转矩阵的正交性，我们有：</p>
@@ -383,10 +387,10 @@ url={\url{https://spaces.ac.cn/archives/9708}},<br />
 <li>对于高频维度（$i$较大）：$k_i \approx k$，进行充分内插，避免外推</li>
 </ul>
 <p>具体地，设$d=128$，$k=8$，则：</p>
-<p>$$\begin{aligned}<br />
-k_0 &amp;= 8^{0} = 1 \quad (\text{完全外推}) \<br />
-k_{d/4} &amp;= 8^{0.5} \approx 2.83 \quad (\text{轻度内插}) \<br />
-k_{d/2} &amp;= 8^{1} = 8 \quad (\text{完全内插})<br />
+<p>$$\begin{aligned}
+k_0 &amp;= 8^{0} = 1 \quad (\text{完全外推}) \
+k_{d/4} &amp;= 8^{0.5} \approx 2.83 \quad (\text{轻度内插}) \
+k_{d/2} &amp;= 8^{1} = 8 \quad (\text{完全内插})
 \end{aligned}$$</p>
 <p><strong>定理3.3（NTK-aware的局域性保持）</strong></p>
 <p>由于低频维度保持外推特性，NTK-aware Scaled RoPE能够维持局域性。</p>
@@ -397,9 +401,9 @@ k_{d/2} &amp;= 8^{1} = 8 \quad (\text{完全内插})<br />
 <h3 id="4-rerope">4. ReRoPE的数学定义与动机<a class="toc-link" href="#4-rerope" title="Permanent link">&para;</a></h3>
 <p><strong>定义4.1（ReRoPE相对位置函数）</strong></p>
 <p>ReRoPE定义了一个分段线性的相对位置函数：</p>
-<p>$$f_{\text{ReRoPE}}(m; w) = \begin{cases}<br />
-m, &amp; 0 \leq m &lt; w \<br />
-w, &amp; m \geq w<br />
+<p>$$f_{\text{ReRoPE}}(m; w) = \begin{cases}
+m, &amp; 0 \leq m &lt; w \
+w, &amp; m \geq w
 \end{cases}$$</p>
 <p>其中$w$是窗口大小。相应的相对位置矩阵为：</p>
 <p>$$[\mathcal{P}<em i_j="i,j">{\text{ReRoPE}}]</em>(i-j; w) = \min(i-j, w), \quad i \geq j$$} = f_{\text{ReRoPE}</p>
@@ -410,9 +414,9 @@ w, &amp; m \geq w<br />
 <p><strong>第二次计算</strong>（截断RoPE）：</p>
 <p>$$a_{i,j}^{(2)} = \boldsymbol{q}_i^{\top}\boldsymbol{\mathcal{R}}^w\boldsymbol{k}_j$$</p>
 <p><strong>组合</strong>：</p>
-<p>$$a_{i,j} = \begin{cases}<br />
-a_{i,j}^{(1)}, &amp; i - j &lt; w \<br />
-a_{i,j}^{(2)}, &amp; i - j \geq w<br />
+<p>$$a_{i,j} = \begin{cases}
+a_{i,j}^{(1)}, &amp; i - j &lt; w \
+a_{i,j}^{(2)}, &amp; i - j \geq w
 \end{cases}$$</p>
 <p><strong>引理4.3（ReRoPE的计算复杂度）</strong></p>
 <p>ReRoPE的计算复杂度为：</p>
@@ -421,9 +425,9 @@ a_{i,j}^{(2)}, &amp; i - j \geq w<br />
 <h3 id="5-leaky-rerope">5. Leaky ReRoPE的数学表述<a class="toc-link" href="#5-leaky-rerope" title="Permanent link">&para;</a></h3>
 <p><strong>定义5.1（Leaky ReRoPE相对位置函数）</strong></p>
 <p>Leaky ReRoPE是ReRoPE的推广，定义为：</p>
-<p>$$f_{\text{Leaky}}(m; w, k) = \begin{cases}<br />
-m, &amp; 0 \leq m &lt; w \<br />
-w + \frac{m - w}{k}, &amp; m \geq w<br />
+<p>$$f_{\text{Leaky}}(m; w, k) = \begin{cases}
+m, &amp; 0 \leq m &lt; w \
+w + \frac{m - w}{k}, &amp; m \geq w
 \end{cases}$$</p>
 <p>其中$k &gt; 1$是泄漏因子。这是一个分段线性函数，在$m=w$处连续。</p>
 <p><strong>推导5.2（连续性验证）</strong></p>
@@ -522,8 +526,8 @@ w + \frac{m - w}{k}, &amp; m \geq w<br />
 <p>$$\mathcal{L}(w) = \mathbb{E}<em _text_train="\text{train">{(x,y) \sim \mathcal{D}</em>_w(x), y)]$$}}}[\ell(\text{model</p>
 <p>我们可以将其分解为局部损失和全局损失：</p>
 <p>$$\mathcal{L}(w) = \alpha \mathcal{L}<em _text_global="\text{global">{\text{local}}(w) + (1-\alpha) \mathcal{L}</em>(w)$$}</p>
-<p>其中：<br />
-- $\mathcal{L}<em _text_global="\text{global">{\text{local}}$：短距离依赖的建模损失（受窗口内部影响）<br />
+<p>其中：
+- $\mathcal{L}<em _text_global="\text{global">{\text{local}}$：短距离依赖的建模损失（受窗口内部影响）
 - $\mathcal{L}</em>$：长距离依赖的建模损失（受窗口外部影响）}</p>
 <p>当$w &lt; \frac{L_{\text{train}}}{4}$时，$\mathcal{L}_{\text{global}}$会显著增加。</p>
 <p>当$w &gt; \frac{L_{\text{train}}}{2}$时，$\mathcal{L}_{\text{local}}$基本不变，但测试时的泛化性能会下降（因为训练数据中大相对位置的样本稀疏）。</p>
@@ -549,9 +553,9 @@ w + \frac{m - w}{k}, &amp; m \geq w<br />
 <p>对于RoPE：</p>
 <p>$$\frac{\partial f_{\text{RoPE}}(m)}{\partial m} = 1, \quad \forall m$$</p>
 <p>对于ReRoPE：</p>
-<p>$$\frac{\partial f_{\text{ReRoPE}}(m)}{\partial m} = \begin{cases}<br />
-1, &amp; m &lt; w \<br />
-0, &amp; m \geq w<br />
+<p>$$\frac{\partial f_{\text{ReRoPE}}(m)}{\partial m} = \begin{cases}
+1, &amp; m &lt; w \
+0, &amp; m \geq w
 \end{cases}$$</p>
 <p>在窗口外，梯度为0，这实际上起到了梯度裁剪的效果，有助于训练稳定性。</p>
 <h3 id="11-rerope">11. ReRoPE的信息论分析<a class="toc-link" href="#11-rerope" title="Permanent link">&para;</a></h3>
@@ -582,9 +586,9 @@ w + \frac{m - w}{k}, &amp; m \geq w<br />
 <p><strong>标准RoPE</strong>：可以缓存$\boldsymbol{\mathcal{R}}^j\boldsymbol{k}_j$</p>
 <p><strong>ReRoPE</strong>：只能缓存$\boldsymbol{k}_j$，然后在每步解码时重新计算旋转</p>
 <p>具体地，在第$t$步解码时（$t &gt; w$），对于位置$j$的Key：</p>
-<p>$$\boldsymbol{k}_j' = \begin{cases}<br />
-\boldsymbol{\mathcal{R}}^{t-j}\boldsymbol{k}_j, &amp; t - j &lt; w \<br />
-\boldsymbol{\mathcal{R}}^w\boldsymbol{k}_j, &amp; t - j \geq w<br />
+<p>$$\boldsymbol{k}_j' = \begin{cases}
+\boldsymbol{\mathcal{R}}^{t-j}\boldsymbol{k}_j, &amp; t - j &lt; w \
+\boldsymbol{\mathcal{R}}^w\boldsymbol{k}_j, &amp; t - j \geq w
 \end{cases}$$</p>
 <p><strong>命题12.3（解码阶段的计算复杂度）</strong></p>
 <p>对于第$t$步解码（$t &gt; w$），ReRoPE的额外计算量为：</p>
@@ -594,23 +598,23 @@ w + \frac{m - w}{k}, &amp; m \geq w<br />
 <p>当Query序列长度为1时（逐token解码），可以只计算一次Attention矩阵：</p>
 <p>$$a_{t,j} = \boldsymbol{q}_t^{\top}\left(\boldsymbol{\mathcal{R}}^{\max(j-t,-w)}\boldsymbol{k}_j\right)$$</p>
 <p>其中$\max(j-t, -w)$确保相对位置不超过$w$。注意这里$j \leq t$，所以$j-t \leq 0$，因此：</p>
-<p>$$\max(j-t, -w) = \begin{cases}<br />
-j-t, &amp; j &gt; t - w \<br />
--w, &amp; j \leq t - w<br />
+<p>$$\max(j-t, -w) = \begin{cases}
+j-t, &amp; j &gt; t - w \
+-w, &amp; j \leq t - w
 \end{cases}$$</p>
 <p>这样只需要对Key序列应用一次旋转即可。</p>
 <h3 id="13-rerope">13. ReRoPE与注意力掩码的关系<a class="toc-link" href="#13-rerope" title="Permanent link">&para;</a></h3>
 <p><strong>定义13.1（因果掩码）</strong></p>
 <p>在自回归语言模型中，因果掩码定义为：</p>
-<p>$$M_{i,j} = \begin{cases}<br />
-0, &amp; i \geq j \<br />
--\infty, &amp; i &lt; j<br />
+<p>$$M_{i,j} = \begin{cases}
+0, &amp; i \geq j \
+-\infty, &amp; i &lt; j
 \end{cases}$$</p>
 <p><strong>定义13.2（窗口掩码）</strong></p>
 <p>窗口注意力使用窗口掩码：</p>
-<p>$$M_{i,j}^{(w)} = \begin{cases}<br />
-0, &amp; i - w &lt; j \leq i \<br />
--\infty, &amp; \text{otherwise}<br />
+<p>$$M_{i,j}^{(w)} = \begin{cases}
+0, &amp; i - w &lt; j \leq i \
+-\infty, &amp; \text{otherwise}
 \end{cases}$$</p>
 <p><strong>推导13.3（ReRoPE的隐式掩码）</strong></p>
 <p>虽然ReRoPE不使用显式的窗口掩码，但其效果类似于软窗口掩码。对于$i - j \geq w$的位置对，ReRoPE使用相同的相对位置编码$w$，这使得Attention权重主要由内容相似度决定，而非位置信息。</p>
@@ -642,9 +646,9 @@ j-t, &amp; j &gt; t - w \<br />
 <p>ReRoPE对每个频率分量的影响可以分别分析。对于频率$\theta_i$，相对位置$m$对应的相位为：</p>
 <p>$$\phi_i(m) = m \cdot \theta_i$$</p>
 <p>ReRoPE后的相位为：</p>
-<p>$$\phi_i^{\text{ReRoPE}}(m) = \min(m, w) \cdot \theta_i = \begin{cases}<br />
-m \cdot \theta_i, &amp; m &lt; w \<br />
-w \cdot \theta_i, &amp; m \geq w<br />
+<p>$$\phi_i^{\text{ReRoPE}}(m) = \min(m, w) \cdot \theta_i = \begin{cases}
+m \cdot \theta_i, &amp; m &lt; w \
+w \cdot \theta_i, &amp; m \geq w
 \end{cases}$$</p>
 <p><strong>引理15.3（高频分量的截断效应）</strong></p>
 <p>对于高频分量（$\theta_i$较大），窗口$w$内可能包含多个完整的周期。设周期为$T_i = 2\pi/\theta_i$，则窗口内的周期数为：</p>
@@ -807,7 +811,7 @@ else:
                             
                             <a href="transformer升级之路11将β进制位置进行到底.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#102 Transformer升级之路：11、将β进制位置进行到底</div>
+                                <div class="nav-title">#96 Transformer升级之路：11、将β进制位置进行到底</div>
                             </a>
                             
                         </div>
@@ -815,7 +819,7 @@ else:
                             
                             <a href="transformer升级之路13逆用leaky-rerope.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#104 Transformer升级之路：13、逆用Leaky ReRoPE</div>
+                                <div class="nav-title">#98 Transformer升级之路：13、逆用Leaky ReRoPE</div>
                             </a>
                             
                         </div>

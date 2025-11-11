@@ -34,7 +34,7 @@ MD_EXTENSIONS = [
     'toc',             # Table of contents
     'tables',          # GFM tables
     'fenced_code',     # Fenced code blocks
-    'nl2br',           # Newline to <br>
+    # 'nl2br',         # Newline to <br> - REMOVED: breaks LaTeX formulas
     'attr_list',       # Add HTML attributes to elements
     'md_in_html',      # Allow Markdown inside HTML
     'def_list',        # Definition lists
@@ -103,6 +103,38 @@ def save_build_cache(cache):
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
+def clean_latex_br_tags(html):
+    """Remove <br /> tags that break LaTeX formulas
+
+    This function removes <br /> tags that appear within LaTeX delimiters.
+    These tags are inserted by markdown when it sees trailing spaces,
+    but they break LaTeX rendering.
+    """
+    import re
+
+    # Pattern to match LaTeX equations with <br /> inside
+    # Handle inline $...$ and display $$...$$ and \begin{...}\end{...}
+    patterns = [
+        # \begin{equation}...\end{equation} with <br /> tags
+        (r'(\\begin\{[^}]+\}.*?\\end\{[^}]+\})', re.DOTALL),
+        # $$...$$ with <br /> tags
+        (r'(\$\$.*?\$\$)', re.DOTALL),
+        # $...$ with <br /> tags (but not $$)
+        (r'(?<!\$)(\$[^\$]+?\$)(?!\$)', re.DOTALL),
+    ]
+
+    for pattern, flags in patterns:
+        def remove_br(match):
+            latex_block = match.group(1)
+            # Remove all <br />, <br/>, and <br> tags within LaTeX
+            cleaned = re.sub(r'<br\s*/?\s*>', '', latex_block)
+            return cleaned
+
+        html = re.sub(pattern, remove_br, html, flags=flags)
+
+    return html
+
+
 def convert_md_to_html(md_content):
     """Convert markdown to HTML with TOC support"""
     md = markdown.Markdown(
@@ -110,6 +142,9 @@ def convert_md_to_html(md_content):
         extension_configs=MD_EXTENSION_CONFIGS
     )
     html = md.convert(md_content)
+
+    # Clean up <br /> tags that break LaTeX formulas
+    html = clean_latex_br_tags(html)
 
     # Get TOC if available
     toc = getattr(md, 'toc', '')
@@ -346,10 +381,10 @@ def generate_all_posts(incremental=False, dry_run=False):
 
     # Generate blog_list.json
     if not dry_run:
-        # Sort by date for the JSON (oldest first, matching post numbers)
-        final_metadata.sort(key=lambda x: x.get('date', '9999-12-31'))
+        # Sort by date for the JSON (newest first for main page display)
+        final_metadata.sort(key=lambda x: x.get('date', '1900-01-01'), reverse=True)
 
-        # Ensure all posts have post_number
+        # Ensure all posts have post_number (assign based on original order)
         for i, post in enumerate(final_metadata, start=1):
             if 'post_number' not in post or post['post_number'] is None:
                 post['post_number'] = i

@@ -26,14 +26,18 @@
     <!-- Custom JS -->
     <script src="../assets/js/collapsible.js" defer></script>
 
-    <!-- MathJax for math rendering -->
+    <!-- MathJax for math rendering with equation numbering -->
     <script>
     MathJax = {
       tex: {
         inlineMath: [['$', '$'], ['\\(', '\\)']],
         displayMath: [['$$', '$$'], ['\\[', '\\]']],
         processEscapes: true,
-        processEnvironments: true
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
       },
       options: {
         skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
@@ -77,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #207 Transformer升级之路：21、MLA好在哪里?（下）
+                    #185 Transformer升级之路：21、MLA好在哪里?（下）
                 </li>
             </ol>
         </nav>
@@ -85,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#207</span>
+                <span class="post-number">#185</span>
                 Transformer升级之路：21、MLA好在哪里?（下）
             </h1>
             <div class="post-meta">
@@ -151,31 +155,31 @@
 <p><strong>一个head_dims等于KV Cache大小、K和V共享的MQA。</strong></p>
 </blockquote>
 <p>看上去是不是让人意外？其实不难理解。因为MHA、MQA都可以看成是GQA的一个特例，所以我们只需要分析GQA，我们在<a href="/archives/10091">《缓存与效果的极限拉扯：从MHA、MQA、GQA到MLA》</a>已经给出了，GQA可以重新表示成一个K、V拼接起来的模型：<br />
-\begin{equation}\underbrace{\left[\boldsymbol{k}<em _boldsymbol_c="\boldsymbol{c">i^{(1)},\cdots,\boldsymbol{k}_i^{(g)},\boldsymbol{v}_i^{(1)},\cdots,\boldsymbol{v}_i^{(g)}\right]}</em><em _boldsymbol_W="\boldsymbol{W">i\in\mathbb{R}^{g(d_k+d_v)}} = \boldsymbol{x}_i \underbrace{\left[\boldsymbol{W}_k^{(1)},\cdots,\boldsymbol{W}_k^{(g)},\boldsymbol{W}_v^{(1)},\cdots,\boldsymbol{W}_v^{(g)}\right]}</em>}_c\in\mathbb{R}^{d\times g(d_k+d_v)}}\end{equation<br />
+\begin{equation}\underbrace{\left[\boldsymbol{k}<em _boldsymbol_c="\boldsymbol{c">i^{(1)},\cdots,\boldsymbol{k}_i^{(g)},\boldsymbol{v}_i^{(1)},\cdots,\boldsymbol{v}_i^{(g)}\right]}</em><em _boldsymbol_W="\boldsymbol{W">i\in\mathbb{R}^{g(d_k+d_v)}} = \boldsymbol{x}_i \underbrace{\left[\boldsymbol{W}_k^{(1)},\cdots,\boldsymbol{W}_k^{(g)},\boldsymbol{W}_v^{(1)},\cdots,\boldsymbol{W}_v^{(g)}\right]}</em>}_c\in\mathbb{R}^{d\times g(d_k+d_v)}}\end{equation
 这里$g(d_k+d_v)$正是单个Token的KV Cache总大小。接着我们算Attention的时候，$\boldsymbol{c}$到$\boldsymbol{k},\boldsymbol{v}$的变换分别吸收到$\boldsymbol{W}_q$和$\boldsymbol{W}_o$那边去，那么就得到了一个K、V都是$\boldsymbol{c}$的MQA。所以说，“head_dims等于KV Cache大小、K和V共享的MQA”，实际上是给定KV Cache大小后MHA/GQA/MQA的“超集”，那么它自然是理论上效果最好的选择。</p>
 <h2 id="_3">双重投影<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
 <p>综上所述，如果我们想要在相同Decoding速度下效果最优，那么应该训练一个指定head_dims的、KV共享的MQA，比如约定KV Cache不超过512，那么head_dims=512的、KV共享的MQA就是最佳选择。事实上，MLA在Decoding阶段正是KV共享的MQA（NoPE部分），这就是它走在正确方向上的体现之一。</p>
 <p>然而，将head_dims升到512，Decoding是没问题，但训练和Prefill都很难接受，因为它们俩的瓶颈是计算，而影响计算速度的主要因素是num_heads和head_dims。为了保证效果，num_heads变动的空间不大，因此head_dims大小可以说是计算量的唯一指标，head_dims升到512意味着计算量要增加到原来的4倍（相比head_dims=128）。</p>
 <p>现在再来问大家一个问题：<strong>同样在NoPE背景下，给定num_heads和head_dims后，效果最好的Attention是什么呢？</strong> 这个问题的答案我相信大家都能接受，那就是<strong>MHA</strong> ，因为它限制最少。所以，单从训练和Prefill成本来看，我们希望的是训练一个head_dims=128的MHA。</p>
 <p>怎么调和Prefill与Decoding这两个不同的期望呢？这就是MLA的“大招”了，它通过两步投影得到K、V：先将输入投影到单个512维的向量，然后将该向量投影到多个128维的向量，然后利用“Attention + NoPE”固有的恒等变换性质，可以让模型在MHA-128和MQA-512间自由切换。</p>
-<p>$$\require{cancel}\begin{array}{c|c}<br />
-\text{训练/Prefill} &amp; \text{Decoding} \\<br />
-\\<br />
-\begin{gathered}<br />
-\boldsymbol{o}<em i_leq="i\leq" t="t">t = \left[\boldsymbol{o}_t^{(1)}, \boldsymbol{o}_t^{(2)}, \cdots, \boldsymbol{o}_t^{(h)}\right] \\[10pt]<br />
-\boldsymbol{o}_t^{(s)} = \frac{\sum</em>}\exp\left(\boldsymbol{q<em i_leq="i\leq" t="t">t^{(s)} \boldsymbol{k}_i^{(s)}{}^{\top}\right)\boldsymbol{v}_i^{(s)}}{\sum</em>}\exp\left(\boldsymbol{q<em i_leq="i\leq" t="t">t^{(s)} \boldsymbol{k}_i^{(s)}{}^{\top}\right)} \\[15pt]<br />
-\boldsymbol{q}_i^{(s)} = \boldsymbol{x}_i\boldsymbol{W}_q^{(s)}\in\mathbb{R}^{d_k},\quad \boldsymbol{W}_q^{(s)}\in\mathbb{R}^{d\times d_k}\\<br />
-\boldsymbol{k}_i^{(s)} = \boldsymbol{c}_i\boldsymbol{W}_k^{(s)}\in\mathbb{R}^{d_k},\quad \boldsymbol{W}_k^{(s)}\in\mathbb{R}^{d_c\times d_k} \\<br />
-\boldsymbol{v}_i^{(s)} = \boldsymbol{c}_i\boldsymbol{W}_v^{(s)}\in\mathbb{R}^{d_v},\quad \boldsymbol{W}_v^{(s)}\in\mathbb{R}^{d_c\times d_v} \\[10pt]<br />
-\boldsymbol{c}_i = \boldsymbol{x}_i \boldsymbol{W}_c\in\mathbb{R}^{d_c},\quad \boldsymbol{W}_c\in\mathbb{R}^{d\times d_c}<br />
-\end{gathered}<br />
-&amp;<br />
-\begin{gathered}<br />
-\boldsymbol{o}_t = \left[\boldsymbol{o}_t^{(1)}\boldsymbol{W}_v^{(1)}, \boldsymbol{o}_t^{(2)}\boldsymbol{W}_v^{(2)}, \cdots, \boldsymbol{o}_t^{(h)}\boldsymbol{W}_v^{(h)}\right] \\[10pt]<br />
-\boldsymbol{o}_t^{(s)} = \frac{\sum</em>}\exp\left(\boldsymbol{q<em i_leq="i\leq" t="t">t^{(s)} \boldsymbol{k}_i^{\color{#ccc}{\smash{\bcancel{(s)}}}}{}^{\top}\right)\boldsymbol{v}_i^{\color{#ccc}{\smash{\bcancel{(s)}}}} }{\sum</em> \\[15pt]}\exp\left(\boldsymbol{q}_t^{(s)} \boldsymbol{k}_i^{\color{#ccc}{\smash{\bcancel{(s)}}}}{}^{\top}\right)<br />
-\boldsymbol{q}_i^{(s)} = \boldsymbol{x}_i\boldsymbol{W}_q^{(s)}\boldsymbol{W}_k^{(s)}{}^{\top}\in\mathbb{R}^{d_c}\\<br />
-\boldsymbol{k}_i^{\color{#ccc}{\smash{\bcancel{(s)}}}} = \boldsymbol{v}_i^{\color{#ccc}{\smash{\bcancel{(s)}}}} = \boldsymbol{c}_i= \boldsymbol{x}_i \boldsymbol{W}_c\in\mathbb{R}^{d_c}<br />
-\end{gathered}<br />
+<p>$$\require{cancel}\begin{array}{c|c}
+\text{训练/Prefill} &amp; \text{Decoding} \\
+\\
+\begin{gathered}
+\boldsymbol{o}<em i_leq="i\leq" t="t">t = \left[\boldsymbol{o}_t^{(1)}, \boldsymbol{o}_t^{(2)}, \cdots, \boldsymbol{o}_t^{(h)}\right] \\[10pt]
+\boldsymbol{o}_t^{(s)} = \frac{\sum</em>}\exp\left(\boldsymbol{q<em i_leq="i\leq" t="t">t^{(s)} \boldsymbol{k}_i^{(s)}{}^{\top}\right)\boldsymbol{v}_i^{(s)}}{\sum</em>}\exp\left(\boldsymbol{q<em i_leq="i\leq" t="t">t^{(s)} \boldsymbol{k}_i^{(s)}{}^{\top}\right)} \\[15pt]
+\boldsymbol{q}_i^{(s)} = \boldsymbol{x}_i\boldsymbol{W}_q^{(s)}\in\mathbb{R}^{d_k},\quad \boldsymbol{W}_q^{(s)}\in\mathbb{R}^{d\times d_k}\\
+\boldsymbol{k}_i^{(s)} = \boldsymbol{c}_i\boldsymbol{W}_k^{(s)}\in\mathbb{R}^{d_k},\quad \boldsymbol{W}_k^{(s)}\in\mathbb{R}^{d_c\times d_k} \\
+\boldsymbol{v}_i^{(s)} = \boldsymbol{c}_i\boldsymbol{W}_v^{(s)}\in\mathbb{R}^{d_v},\quad \boldsymbol{W}_v^{(s)}\in\mathbb{R}^{d_c\times d_v} \\[10pt]
+\boldsymbol{c}_i = \boldsymbol{x}_i \boldsymbol{W}_c\in\mathbb{R}^{d_c},\quad \boldsymbol{W}_c\in\mathbb{R}^{d\times d_c}
+\end{gathered}
+&amp;
+\begin{gathered}
+\boldsymbol{o}_t = \left[\boldsymbol{o}_t^{(1)}\boldsymbol{W}_v^{(1)}, \boldsymbol{o}_t^{(2)}\boldsymbol{W}_v^{(2)}, \cdots, \boldsymbol{o}_t^{(h)}\boldsymbol{W}_v^{(h)}\right] \\[10pt]
+\boldsymbol{o}_t^{(s)} = \frac{\sum</em>}\exp\left(\boldsymbol{q<em i_leq="i\leq" t="t">t^{(s)} \boldsymbol{k}_i^{\color{#ccc}{\smash{\bcancel{(s)}}}}{}^{\top}\right)\boldsymbol{v}_i^{\color{#ccc}{\smash{\bcancel{(s)}}}} }{\sum</em> \\[15pt]}\exp\left(\boldsymbol{q}_t^{(s)} \boldsymbol{k}_i^{\color{#ccc}{\smash{\bcancel{(s)}}}}{}^{\top}\right)
+\boldsymbol{q}_i^{(s)} = \boldsymbol{x}_i\boldsymbol{W}_q^{(s)}\boldsymbol{W}_k^{(s)}{}^{\top}\in\mathbb{R}^{d_c}\\
+\boldsymbol{k}_i^{\color{#ccc}{\smash{\bcancel{(s)}}}} = \boldsymbol{v}_i^{\color{#ccc}{\smash{\bcancel{(s)}}}} = \boldsymbol{c}_i= \boldsymbol{x}_i \boldsymbol{W}_c\in\mathbb{R}^{d_c}
+\end{gathered}
 \end{array}$$</p>
 <h2 id="_4">总而言之<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
 <p>我们将前面的推理逻辑做个总结：</p>
@@ -222,566 +226,566 @@ url={\url{https://spaces.ac.cn/archives/11111}},<br />
 <h2 id="_7">公式推导与注释<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
 <h3 id="1-mla">1. MLA的完整数学框架<a class="toc-link" href="#1-mla" title="Permanent link">&para;</a></h3>
 <p><strong>推导1.1：训练阶段的MHA形式</strong></p>
-<p>在训练阶段，MLA表现为标准的Multi-Head Attention。给定输入序列${\boldsymbol{x}<em i="1">i}</em>^n$，首先进行压缩投影：<br />
-$$<br />
-\boldsymbol{c}_i = \boldsymbol{x}_i \boldsymbol{W}_c \in \mathbb{R}^{d_c}<br />
+<p>在训练阶段，MLA表现为标准的Multi-Head Attention。给定输入序列${\boldsymbol{x}<em i="1">i}</em>^n$，首先进行压缩投影：
+$$
+\boldsymbol{c}_i = \boldsymbol{x}_i \boldsymbol{W}_c \in \mathbb{R}^{d_c}
 $$</p>
-<p>然后为每个head $s \in {1, \ldots, h}$生成QKV：<br />
-$$<br />
-\boldsymbol{q}_i^{(s)} = \boldsymbol{x}_i \boldsymbol{W}_q^{(s)} \in \mathbb{R}^{d_k}<br />
-$$<br />
-$$<br />
-\boldsymbol{k}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_k^{(s)} \in \mathbb{R}^{d_k}<br />
-$$<br />
-$$<br />
-\boldsymbol{v}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_v^{(s)} \in \mathbb{R}^{d_v}<br />
+<p>然后为每个head $s \in {1, \ldots, h}$生成QKV：
+$$
+\boldsymbol{q}_i^{(s)} = \boldsymbol{x}_i \boldsymbol{W}_q^{(s)} \in \mathbb{R}^{d_k}
+$$
+$$
+\boldsymbol{k}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_k^{(s)} \in \mathbb{R}^{d_k}
+$$
+$$
+\boldsymbol{v}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_v^{(s)} \in \mathbb{R}^{d_v}
 $$</p>
-<p>注意力输出：<br />
-$$<br />
-\boldsymbol{o}<em _leq="\leq" i="i" j="j">i^{(s)} = \text{Attention}(\boldsymbol{q}_i^{(s)}, {\boldsymbol{k}_j^{(s)}}</em>}, {\boldsymbol{v<em _leq="\leq" i="i" j="j">j^{(s)}}</em>)<br />
+<p>注意力输出：
+$$
+\boldsymbol{o}<em _leq="\leq" i="i" j="j">i^{(s)} = \text{Attention}(\boldsymbol{q}_i^{(s)}, {\boldsymbol{k}_j^{(s)}}</em>}, {\boldsymbol{v<em _leq="\leq" i="i" j="j">j^{(s)}}</em>)
 $$</p>
-<p>最终输出：<br />
-$$<br />
-\boldsymbol{o}_i = [\boldsymbol{o}_i^{(1)}, \ldots, \boldsymbol{o}_i^{(h)}] \boldsymbol{W}_o<br />
+<p>最终输出：
+$$
+\boldsymbol{o}_i = [\boldsymbol{o}_i^{(1)}, \ldots, \boldsymbol{o}_i^{(h)}] \boldsymbol{W}_o
 $$</p>
 <p><strong>推导1.2：推理阶段的MQA形式</strong></p>
-<p>在推理阶段，MLA可以重新组织为MQA形式。关键观察是：<br />
-$$<br />
-\boldsymbol{k}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_k^{(s)}, \quad \boldsymbol{v}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_v^{(s)}<br />
+<p>在推理阶段，MLA可以重新组织为MQA形式。关键观察是：
+$$
+\boldsymbol{k}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_k^{(s)}, \quad \boldsymbol{v}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_v^{(s)}
 $$</p>
-<p>在计算注意力时：<br />
-$$<br />
-\boldsymbol{o}<em _leq="\leq" i="i" j="j">i^{(s)} = \sum</em>} \alpha_{ij}^{(s)} \boldsymbol{v<em _leq="\leq" i="i" j="j">j^{(s)} = \sum</em>} \alpha_{ij}^{(s)} \boldsymbol{c<em _leq="\leq" i="i" j="j">j \boldsymbol{W}_v^{(s)} = \left(\sum</em>} \alpha_{ij}^{(s)} \boldsymbol{c}_j\right) \boldsymbol{W}_v^{(s)<br />
-$$</p>
-<p>定义：<br />
-$$<br />
-\tilde{\boldsymbol{o}}<em _leq="\leq" i="i" j="j">i^{(s)} = \sum</em>_j} \alpha_{ij}^{(s)} \boldsymbol{c<br />
-$$</p>
-<p>则：<br />
-$$<br />
-\boldsymbol{o}_i^{(s)} = \tilde{\boldsymbol{o}}_i^{(s)} \boldsymbol{W}_v^{(s)}<br />
+<p>在计算注意力时：
+$$
+\boldsymbol{o}<em _leq="\leq" i="i" j="j">i^{(s)} = \sum</em>} \alpha_{ij}^{(s)} \boldsymbol{v<em _leq="\leq" i="i" j="j">j^{(s)} = \sum</em>} \alpha_{ij}^{(s)} \boldsymbol{c<em _leq="\leq" i="i" j="j">j \boldsymbol{W}_v^{(s)} = \left(\sum</em>
+$$} \alpha_{ij}^{(s)} \boldsymbol{c}_j\right) \boldsymbol{W}_v^{(s)</p>
+<p>定义：
+$$
+\tilde{\boldsymbol{o}}<em _leq="\leq" i="i" j="j">i^{(s)} = \sum</em>_j
+$$} \alpha_{ij}^{(s)} \boldsymbol{c</p>
+<p>则：
+$$
+\boldsymbol{o}_i^{(s)} = \tilde{\boldsymbol{o}}_i^{(s)} \boldsymbol{W}_v^{(s)}
 $$</p>
 <p>将$\boldsymbol{W}_v^{(s)}$吸收到输出投影$\boldsymbol{W}_o$中。</p>
 <p><strong>推导1.3：等价变换的证明</strong></p>
-<p>需要证明训练和推理的等价性。定义综合投影矩阵：<br />
-$$<br />
-\tilde{\boldsymbol{W}}_o = \begin{bmatrix} \boldsymbol{W}_v^{(1)} \ \boldsymbol{W}_v^{(2)} \ \vdots \ \boldsymbol{W}_v^{(h)} \end{bmatrix} \boldsymbol{W}_o<br />
+<p>需要证明训练和推理的等价性。定义综合投影矩阵：
+$$
+\tilde{\boldsymbol{W}}_o = \begin{bmatrix} \boldsymbol{W}_v^{(1)} \ \boldsymbol{W}_v^{(2)} \ \vdots \ \boldsymbol{W}_v^{(h)} \end{bmatrix} \boldsymbol{W}_o
 $$</p>
-<p>则推理时的输出：<br />
-$$<br />
-\boldsymbol{o}_i^{\text{infer}} = [\tilde{\boldsymbol{o}}_i^{(1)}, \ldots, \tilde{\boldsymbol{o}}_i^{(h)}] \tilde{\boldsymbol{W}}_o<br />
+<p>则推理时的输出：
+$$
+\boldsymbol{o}_i^{\text{infer}} = [\tilde{\boldsymbol{o}}_i^{(1)}, \ldots, \tilde{\boldsymbol{o}}_i^{(h)}] \tilde{\boldsymbol{W}}_o
 $$</p>
-<p>训练时的输出：<br />
-$$<br />
-\boldsymbol{o}_i^{\text{train}} = [(\tilde{\boldsymbol{o}}_i^{(1)} \boldsymbol{W}_v^{(1)}), \ldots, (\tilde{\boldsymbol{o}}_i^{(h)} \boldsymbol{W}_v^{(h)})] \boldsymbol{W}_o<br />
+<p>训练时的输出：
+$$
+\boldsymbol{o}_i^{\text{train}} = [(\tilde{\boldsymbol{o}}_i^{(1)} \boldsymbol{W}_v^{(1)}), \ldots, (\tilde{\boldsymbol{o}}_i^{(h)} \boldsymbol{W}_v^{(h)})] \boldsymbol{W}_o
 $$</p>
-<p>由矩阵乘法的结合律：<br />
-$$<br />
-\boldsymbol{o}_i^{\text{train}} = [\tilde{\boldsymbol{o}}_i^{(1)}, \ldots, \tilde{\boldsymbol{o}}_i^{(h)}] \begin{bmatrix} \boldsymbol{W}_v^{(1)} \ \vdots \ \boldsymbol{W}_v^{(h)} \end{bmatrix} \boldsymbol{W}_o = \boldsymbol{o}_i^{\text{infer}}<br />
+<p>由矩阵乘法的结合律：
+$$
+\boldsymbol{o}_i^{\text{train}} = [\tilde{\boldsymbol{o}}_i^{(1)}, \ldots, \tilde{\boldsymbol{o}}_i^{(h)}] \begin{bmatrix} \boldsymbol{W}_v^{(1)} \ \vdots \ \boldsymbol{W}_v^{(h)} \end{bmatrix} \boldsymbol{W}_o = \boldsymbol{o}_i^{\text{infer}}
 $$</p>
 <p>证明了等价性。</p>
 <h3 id="2">2. 吸收归一化的数学等价性<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
 <p><strong>推导2.1：标准LayerNorm的定义</strong></p>
-<p>给定向量$\boldsymbol{x} \in \mathbb{R}^d$，LayerNorm计算：<br />
-$$<br />
-\text{LN}(\boldsymbol{x}) = \frac{\boldsymbol{x} - \mu}{\sigma} \odot \boldsymbol{\gamma} + \boldsymbol{\beta}<br />
+<p>给定向量$\boldsymbol{x} \in \mathbb{R}^d$，LayerNorm计算：
+$$
+\text{LN}(\boldsymbol{x}) = \frac{\boldsymbol{x} - \mu}{\sigma} \odot \boldsymbol{\gamma} + \boldsymbol{\beta}
 $$</p>
-<p>其中：<br />
-$$<br />
-\mu = \frac{1}{d}\sum_{i=1}^d x_i, \quad \sigma = \sqrt{\frac{1}{d}\sum_{i=1}^d (x_i - \mu)^2}<br />
+<p>其中：
+$$
+\mu = \frac{1}{d}\sum_{i=1}^d x_i, \quad \sigma = \sqrt{\frac{1}{d}\sum_{i=1}^d (x_i - \mu)^2}
 $$</p>
 <p>$\boldsymbol{\gamma}, \boldsymbol{\beta} \in \mathbb{R}^d$是可学习参数。</p>
 <p><strong>推导2.2：吸收到线性层的等价性</strong></p>
-<p>考虑LayerNorm后接线性变换：<br />
-$$<br />
-\boldsymbol{y} = \text{LN}(\boldsymbol{x}) \boldsymbol{W}<br />
+<p>考虑LayerNorm后接线性变换：
+$$
+\boldsymbol{y} = \text{LN}(\boldsymbol{x}) \boldsymbol{W}
 $$</p>
-<p>展开：<br />
-$$<br />
-\boldsymbol{y} = \left(\frac{\boldsymbol{x} - \mu}{\sigma} \odot \boldsymbol{\gamma} + \boldsymbol{\beta}\right) \boldsymbol{W}<br />
+<p>展开：
+$$
+\boldsymbol{y} = \left(\frac{\boldsymbol{x} - \mu}{\sigma} \odot \boldsymbol{\gamma} + \boldsymbol{\beta}\right) \boldsymbol{W}
 $$</p>
-<p>$$<br />
-= \frac{\boldsymbol{x} - \mu}{\sigma} \odot \boldsymbol{\gamma} \boldsymbol{W} + \boldsymbol{\beta} \boldsymbol{W}<br />
+<p>$$
+= \frac{\boldsymbol{x} - \mu}{\sigma} \odot \boldsymbol{\gamma} \boldsymbol{W} + \boldsymbol{\beta} \boldsymbol{W}
 $$</p>
-<p>定义：<br />
-$$<br />
-\tilde{\boldsymbol{W}} = \text{diag}(\boldsymbol{\gamma}) \boldsymbol{W}, \quad \tilde{\boldsymbol{b}} = \boldsymbol{\beta} \boldsymbol{W}<br />
+<p>定义：
+$$
+\tilde{\boldsymbol{W}} = \text{diag}(\boldsymbol{\gamma}) \boldsymbol{W}, \quad \tilde{\boldsymbol{b}} = \boldsymbol{\beta} \boldsymbol{W}
 $$</p>
-<p>则：<br />
-$$<br />
-\boldsymbol{y} = \frac{\boldsymbol{x} - \mu}{\sigma} \tilde{\boldsymbol{W}} + \tilde{\boldsymbol{b}}<br />
+<p>则：
+$$
+\boldsymbol{y} = \frac{\boldsymbol{x} - \mu}{\sigma} \tilde{\boldsymbol{W}} + \tilde{\boldsymbol{b}}
 $$</p>
 <p><strong>推导2.3：RMSNorm的吸收</strong></p>
-<p>MLA常用RMSNorm，定义为：<br />
-$$<br />
-\text{RMSNorm}(\boldsymbol{x}) = \frac{\boldsymbol{x}}{\text{RMS}(\boldsymbol{x})} \odot \boldsymbol{\gamma}<br />
+<p>MLA常用RMSNorm，定义为：
+$$
+\text{RMSNorm}(\boldsymbol{x}) = \frac{\boldsymbol{x}}{\text{RMS}(\boldsymbol{x})} \odot \boldsymbol{\gamma}
 $$</p>
-<p>其中：<br />
-$$<br />
-\text{RMS}(\boldsymbol{x}) = \sqrt{\frac{1}{d}\sum_{i=1}^d x_i^2}<br />
+<p>其中：
+$$
+\text{RMS}(\boldsymbol{x}) = \sqrt{\frac{1}{d}\sum_{i=1}^d x_i^2}
 $$</p>
-<p>吸收到线性层：<br />
-$$<br />
-\boldsymbol{y} = \text{RMSNorm}(\boldsymbol{x}) \boldsymbol{W} = \frac{\boldsymbol{x}}{\text{RMS}(\boldsymbol{x})} \odot \boldsymbol{\gamma} \boldsymbol{W} = \frac{\boldsymbol{x}}{\text{RMS}(\boldsymbol{x})} \tilde{\boldsymbol{W}}<br />
+<p>吸收到线性层：
+$$
+\boldsymbol{y} = \text{RMSNorm}(\boldsymbol{x}) \boldsymbol{W} = \frac{\boldsymbol{x}}{\text{RMS}(\boldsymbol{x})} \odot \boldsymbol{\gamma} \boldsymbol{W} = \frac{\boldsymbol{x}}{\text{RMS}(\boldsymbol{x})} \tilde{\boldsymbol{W}}
 $$</p>
 <p>在推理时，可以预先计算$\tilde{\boldsymbol{W}} = \text{diag}(\boldsymbol{\gamma}) \boldsymbol{W}$，减少计算量。</p>
 <h3 id="3-partial-rope">3. Partial RoPE的深入分析<a class="toc-link" href="#3-partial-rope" title="Permanent link">&para;</a></h3>
 <p><strong>推导3.1：完整RoPE vs Partial RoPE</strong></p>
-<p>完整RoPE对所有维度应用旋转：<br />
-$$<br />
-\tilde{\boldsymbol{q}}_i = \boldsymbol{\mathcal{R}}_i \boldsymbol{q}_i, \quad \tilde{\boldsymbol{k}}_j = \boldsymbol{\mathcal{R}}_j \boldsymbol{k}_j<br />
+<p>完整RoPE对所有维度应用旋转：
+$$
+\tilde{\boldsymbol{q}}_i = \boldsymbol{\mathcal{R}}_i \boldsymbol{q}_i, \quad \tilde{\boldsymbol{k}}_j = \boldsymbol{\mathcal{R}}_j \boldsymbol{k}_j
 $$</p>
-<p>注意力分数：<br />
-$$<br />
-\text{score}<em j-i="j-i">{ij} = \tilde{\boldsymbol{q}}_i^{\top} \tilde{\boldsymbol{k}}_j = \boldsymbol{q}_i^{\top} \boldsymbol{\mathcal{R}}_i^{\top} \boldsymbol{\mathcal{R}}_j \boldsymbol{k}_j = \boldsymbol{q}_i^{\top} \boldsymbol{\mathcal{R}}</em>_j} \boldsymbol{k<br />
-$$</p>
-<p>Partial RoPE将向量分为两部分：<br />
-$$<br />
-\boldsymbol{q}<em i_c="i,c">i = [\boldsymbol{q}</em>}, \boldsymbol{q<em j_c="j,c">{i,r}], \quad \boldsymbol{k}_j = [\boldsymbol{k}</em>]}, \boldsymbol{k}_{j,r<br />
-$$</p>
-<p>只对$\boldsymbol{q}<em j_r="j,r">{i,r}$和$\boldsymbol{k}</em>$应用旋转：<br />
-$$<br />
-\text{score}<em i_c="i,c">{ij} = \boldsymbol{q}</em>}^{\top} \boldsymbol{k<em i_r="i,r">{j,c} + (\boldsymbol{\mathcal{R}}_i \boldsymbol{q}</em>})^{\top} (\boldsymbol{\mathcal{R}<em j_r="j,r">j \boldsymbol{k}</em>}) = \boldsymbol{q<em j_c="j,c">{i,c}^{\top} \boldsymbol{k}</em>} + \boldsymbol{q<em j-i="j-i">{i,r}^{\top} \boldsymbol{\mathcal{R}}</em>} \boldsymbol{k}_{j,r<br />
-$$</p>
+<p>注意力分数：
+$$
+\text{score}<em j-i="j-i">{ij} = \tilde{\boldsymbol{q}}_i^{\top} \tilde{\boldsymbol{k}}_j = \boldsymbol{q}_i^{\top} \boldsymbol{\mathcal{R}}_i^{\top} \boldsymbol{\mathcal{R}}_j \boldsymbol{k}_j = \boldsymbol{q}_i^{\top} \boldsymbol{\mathcal{R}}</em>_j
+$$} \boldsymbol{k</p>
+<p>Partial RoPE将向量分为两部分：
+$$
+\boldsymbol{q}<em i_c="i,c">i = [\boldsymbol{q}</em>}, \boldsymbol{q<em j_c="j,c">{i,r}], \quad \boldsymbol{k}_j = [\boldsymbol{k}</em>]
+$$}, \boldsymbol{k}_{j,r</p>
+<p>只对$\boldsymbol{q}<em j_r="j,r">{i,r}$和$\boldsymbol{k}</em>$应用旋转：
+$$
+\text{score}<em i_c="i,c">{ij} = \boldsymbol{q}</em>}^{\top} \boldsymbol{k<em i_r="i,r">{j,c} + (\boldsymbol{\mathcal{R}}_i \boldsymbol{q}</em>})^{\top} (\boldsymbol{\mathcal{R}<em j_r="j,r">j \boldsymbol{k}</em>}) = \boldsymbol{q<em j_c="j,c">{i,c}^{\top} \boldsymbol{k}</em>} + \boldsymbol{q<em j-i="j-i">{i,r}^{\top} \boldsymbol{\mathcal{R}}</em>
+$$} \boldsymbol{k}_{j,r</p>
 <p><strong>推导3.2：语义与位置的解耦</strong></p>
-<p>定义content相似度和position相似度：<br />
-$$<br />
-S_{\text{content}}(i, j) = \boldsymbol{q}<em j_c="j,c">{i,c}^{\top} \boldsymbol{k}</em><br />
-$$<br />
-$$<br />
-S_{\text{position}}(i, j) = \boldsymbol{q}<em j-i="j-i">{i,r}^{\top} \boldsymbol{\mathcal{R}}</em>} \boldsymbol{k}_{j,r<br />
-$$</p>
-<p>则总的注意力分数：<br />
-$$<br />
-\text{score}<em _text_content="\text{content">{ij} = S</em>(i, j)}}(i, j) + S_{\text{position}<br />
-$$</p>
-<p>这种分解的好处是：<br />
-1. $S_{\text{content}}$不受位置影响，纯粹衡量语义相似度<br />
-2. $S_{\text{position}}$编码相对位置信息<br />
+<p>定义content相似度和position相似度：
+$$
+S_{\text{content}}(i, j) = \boldsymbol{q}<em j_c="j,c">{i,c}^{\top} \boldsymbol{k}</em>
+$$
+$$
+S_{\text{position}}(i, j) = \boldsymbol{q}<em j-i="j-i">{i,r}^{\top} \boldsymbol{\mathcal{R}}</em>
+$$} \boldsymbol{k}_{j,r</p>
+<p>则总的注意力分数：
+$$
+\text{score}<em _text_content="\text{content">{ij} = S</em>(i, j)
+$$}}(i, j) + S_{\text{position}</p>
+<p>这种分解的好处是：
+1. $S_{\text{content}}$不受位置影响，纯粹衡量语义相似度
+2. $S_{\text{position}}$编码相对位置信息
 3. 模型可以学习如何平衡两者</p>
 <p><strong>推导3.3：Partial RoPE的信息容量</strong></p>
 <p>假设总维度$d = d_c + d_r$，其中$d_c$是content维度，$d_r$是rotary维度。</p>
-<p>信息容量角度：<br />
-- Content部分可以编码$2^{d_c}$种不同的模式<br />
+<p>信息容量角度：
+- Content部分可以编码$2^{d_c}$种不同的模式
 - Rotary部分可以编码位置信息，范围由RoPE底数决定</p>
-<p>总的表达能力约为：<br />
-$$<br />
-\mathcal{C} \sim 2^{d_c} \times \text{Position_Range}<br />
+<p>总的表达能力约为：
+$$
+\mathcal{C} \sim 2^{d_c} \times \text{Position_Range}
 $$</p>
 <p>相比完全RoPE，Partial RoPE将维度资源更多分配给content，提升语义建模能力。</p>
 <h3 id="4-kv">4. KV共享的完整理论<a class="toc-link" href="#4-kv" title="Permanent link">&para;</a></h3>
 <p><strong>推导4.1：完全KV共享的数学形式</strong></p>
-<p>完全KV共享意味着$\boldsymbol{k}<em _leq="\leq" i="i" j="j">i = \boldsymbol{v}_i = \boldsymbol{c}_i$。注意力变为：<br />
-$$<br />
-\boldsymbol{o}_i^{(s)} = \sum</em>} \frac{\exp(\boldsymbol{q<em _leq="\leq" i="i" j_="j'">i^{(s)} \cdot \boldsymbol{c}_j)}{\sum</em>} \exp(\boldsymbol{q<em j_="j'">i^{(s)} \cdot \boldsymbol{c}</em>_j})} \boldsymbol{c<br />
-$$</p>
-<p>可以重写为：<br />
-$$<br />
-\boldsymbol{o}<em _leq="\leq" i="i" j="j">i^{(s)} = \sum</em>_j} \alpha_{ij}^{(s)} \boldsymbol{c<br />
-$$</p>
-<p>其中权重：<br />
-$$<br />
-\alpha_{ij}^{(s)} = \frac{\exp(\boldsymbol{q}<em _leq="\leq" i="i" j_="j'">i^{(s)} \cdot \boldsymbol{c}_j)}{\sum</em>} \exp(\boldsymbol{q<em j_="j'">i^{(s)} \cdot \boldsymbol{c}</em>})<br />
-$$</p>
+<p>完全KV共享意味着$\boldsymbol{k}<em _leq="\leq" i="i" j="j">i = \boldsymbol{v}_i = \boldsymbol{c}_i$。注意力变为：
+$$
+\boldsymbol{o}_i^{(s)} = \sum</em>} \frac{\exp(\boldsymbol{q<em _leq="\leq" i="i" j_="j'">i^{(s)} \cdot \boldsymbol{c}_j)}{\sum</em>} \exp(\boldsymbol{q<em j_="j'">i^{(s)} \cdot \boldsymbol{c}</em>_j
+$$})} \boldsymbol{c</p>
+<p>可以重写为：
+$$
+\boldsymbol{o}<em _leq="\leq" i="i" j="j">i^{(s)} = \sum</em>_j
+$$} \alpha_{ij}^{(s)} \boldsymbol{c</p>
+<p>其中权重：
+$$
+\alpha_{ij}^{(s)} = \frac{\exp(\boldsymbol{q}<em _leq="\leq" i="i" j_="j'">i^{(s)} \cdot \boldsymbol{c}_j)}{\sum</em>} \exp(\boldsymbol{q<em j_="j'">i^{(s)} \cdot \boldsymbol{c}</em>
+$$})</p>
 <p><strong>推导4.2：部分KV共享的设计</strong></p>
-<p>MLA采用部分共享：content部分共享，RoPE部分分离。设：<br />
-$$<br />
-\boldsymbol{k}<em i_r="i,r">i = [\boldsymbol{c}_i, \boldsymbol{k}</em>}], \quad \boldsymbol{v<em i_r="i,r">i = [\boldsymbol{c}_i, \boldsymbol{v}</em>]<br />
+<p>MLA采用部分共享：content部分共享，RoPE部分分离。设：
+$$
+\boldsymbol{k}<em i_r="i,r">i = [\boldsymbol{c}_i, \boldsymbol{k}</em>}], \quad \boldsymbol{v<em i_r="i,r">i = [\boldsymbol{c}_i, \boldsymbol{v}</em>]
 $$</p>
 <p>其中$\boldsymbol{c}<em i_r="i,r">i \in \mathbb{R}^{d_c}$是共享部分，$\boldsymbol{k}</em>$是独立部分。}, \boldsymbol{v}_{i,r} \in \mathbb{R}^{d_r</p>
-<p>注意力分数：<br />
-$$<br />
-\text{score}<em i_c="i,c">{ij} = \boldsymbol{q}</em>}^{\top} \boldsymbol{c<em i_r="i,r">j + \boldsymbol{q}</em>}^{\top} \boldsymbol{k}_{j,r<br />
-$$</p>
-<p>注意力输出：<br />
-$$<br />
-\boldsymbol{o}<em _leq="\leq" i="i" j="j">i = \sum</em>} \alpha_{ij} [\boldsymbol{c<em j_r="j,r">j, \boldsymbol{v}</em>]<br />
+<p>注意力分数：
+$$
+\text{score}<em i_c="i,c">{ij} = \boldsymbol{q}</em>}^{\top} \boldsymbol{c<em i_r="i,r">j + \boldsymbol{q}</em>
+$$}^{\top} \boldsymbol{k}_{j,r</p>
+<p>注意力输出：
+$$
+\boldsymbol{o}<em _leq="\leq" i="i" j="j">i = \sum</em>} \alpha_{ij} [\boldsymbol{c<em j_r="j,r">j, \boldsymbol{v}</em>]
 $$</p>
 <p><strong>推导4.3：KV共享的正则化效应</strong></p>
-<p>完全KV共享相当于施加约束：<br />
-$$<br />
-|\boldsymbol{k}_i - \boldsymbol{v}_i|_2 = 0<br />
+<p>完全KV共享相当于施加约束：
+$$
+|\boldsymbol{k}_i - \boldsymbol{v}_i|_2 = 0
 $$</p>
-<p>这是一个强正则化，减少了模型自由度。从贝叶斯角度，相当于在K和V上施加相等先验：<br />
-$$<br />
-p(\boldsymbol{k}_i, \boldsymbol{v}_i) \propto \delta(\boldsymbol{k}_i - \boldsymbol{v}_i)<br />
+<p>这是一个强正则化，减少了模型自由度。从贝叶斯角度，相当于在K和V上施加相等先验：
+$$
+p(\boldsymbol{k}_i, \boldsymbol{v}_i) \propto \delta(\boldsymbol{k}_i - \boldsymbol{v}_i)
 $$</p>
 <p>这种正则化可能有助于防止过拟合，提升泛化能力。</p>
 <h3 id="5">5. 软上限机制的理论分析<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
 <p><strong>推导5.1：注意力分数的软上限</strong></p>
-<p>标准Attention的注意力分数可以任意大，导致数值不稳定。DeepSeek-V2引入软上限：<br />
-$$<br />
-\text{score}_{ij} = s \cdot \tanh\left(\frac{\boldsymbol{q}_i^{\top} \boldsymbol{k}_j}{s}\right)<br />
+<p>标准Attention的注意力分数可以任意大，导致数值不稳定。DeepSeek-V2引入软上限：
+$$
+\text{score}_{ij} = s \cdot \tanh\left(\frac{\boldsymbol{q}_i^{\top} \boldsymbol{k}_j}{s}\right)
 $$</p>
 <p>其中$s &gt; 0$是可学习的上限参数。</p>
 <p><strong>推导5.2：软上限的梯度分析</strong></p>
-<p>计算梯度：<br />
-$$<br />
-\frac{\partial \text{score}_{ij}}{\partial (\boldsymbol{q}_i^{\top} \boldsymbol{k}_j)} = \tanh'\left(\frac{\boldsymbol{q}_i^{\top} \boldsymbol{k}_j}{s}\right) = 1 - \tanh^2\left(\frac{\boldsymbol{q}_i^{\top} \boldsymbol{k}_j}{s}\right)<br />
+<p>计算梯度：
+$$
+\frac{\partial \text{score}_{ij}}{\partial (\boldsymbol{q}_i^{\top} \boldsymbol{k}_j)} = \tanh'\left(\frac{\boldsymbol{q}_i^{\top} \boldsymbol{k}_j}{s}\right) = 1 - \tanh^2\left(\frac{\boldsymbol{q}_i^{\top} \boldsymbol{k}_j}{s}\right)
 $$</p>
-<p>当$|\boldsymbol{q}<em _pm_infty="\pm\infty" _to="\to" x="x">i^{\top} \boldsymbol{k}_j| \gg s$时，$\tanh$饱和，梯度趋于0：<br />
-$$<br />
-\lim</em> \tanh'(x) = 0<br />
+<p>当$|\boldsymbol{q}<em _pm_infty="\pm\infty" _to="\to" x="x">i^{\top} \boldsymbol{k}_j| \gg s$时，$\tanh$饱和，梯度趋于0：
+$$
+\lim</em> \tanh'(x) = 0
 $$</p>
 <p>这防止了极大的注意力分数主导梯度，提升训练稳定性。</p>
 <p><strong>推导5.3：软上限的信息论解释</strong></p>
 <p>从信息论角度，注意力分数$\text{score}_{ij}$的范围影响注意力分布的熵。</p>
 <p>无软上限时，分数范围$(-\infty, +\infty)$，可能导致极端的注意力分布（熵接近0）。</p>
-<p>软上限将分数限制在$(-s, s)$，保证注意力分布的熵有下界：<br />
-$$<br />
-H(\boldsymbol{\alpha}<em _leq="\leq" i="i" j="j">i) = -\sum</em>(s)} \alpha_{ij} \log \alpha_{ij} \geq H_{\min<br />
-$$</p>
+<p>软上限将分数限制在$(-s, s)$，保证注意力分布的熵有下界：
+$$
+H(\boldsymbol{\alpha}<em _leq="\leq" i="i" j="j">i) = -\sum</em>(s)
+$$} \alpha_{ij} \log \alpha_{ij} \geq H_{\min</p>
 <p>这鼓励模型使用更分散的注意力，避免过度集中。</p>
 <h3 id="6">6. 训练稳定性的数学保证<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
 <p><strong>推导6.1：梯度范数的界</strong></p>
-<p>在反向传播中，关键是控制梯度范数。对于Attention层：<br />
-$$<br />
-\frac{\partial \mathcal{L}}{\partial \boldsymbol{q}<em _leq="\leq" i="i" j="j">i} = \sum</em>} \frac{\partial \mathcal{L}}{\partial \text{score<em ij="ij">{ij}} \frac{\partial \text{score}</em>}}{\partial \boldsymbol{q}_i<br />
+<p>在反向传播中，关键是控制梯度范数。对于Attention层：
+$$
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{q}<em _leq="\leq" i="i" j="j">i} = \sum</em>} \frac{\partial \mathcal{L}}{\partial \text{score<em ij="ij">{ij}} \frac{\partial \text{score}</em>
+$$}}{\partial \boldsymbol{q}_i</p>
+<p>对于标准Attention：
+$$
+\frac{\partial \text{score}_{ij}}{\partial \boldsymbol{q}_i} = \boldsymbol{k}_j
 $$</p>
-<p>对于标准Attention：<br />
-$$<br />
-\frac{\partial \text{score}_{ij}}{\partial \boldsymbol{q}_i} = \boldsymbol{k}_j<br />
-$$</p>
-<p>梯度范数：<br />
-$$<br />
-\left|\frac{\partial \mathcal{L}}{\partial \boldsymbol{q}<em _leq="\leq" i="i" j="j">i}\right|_2 \leq \sum</em>_j|_2} \left|\frac{\partial \mathcal{L}}{\partial \text{score}_{ij}}\right| |\boldsymbol{k<br />
-$$</p>
+<p>梯度范数：
+$$
+\left|\frac{\partial \mathcal{L}}{\partial \boldsymbol{q}<em _leq="\leq" i="i" j="j">i}\right|_2 \leq \sum</em>_j|_2
+$$} \left|\frac{\partial \mathcal{L}}{\partial \text{score}_{ij}}\right| |\boldsymbol{k</p>
 <p>如果$|\boldsymbol{k}_j|_2$无界，梯度可能爆炸。</p>
 <p><strong>推导6.2：RMSNorm的稳定作用</strong></p>
-<p>RMSNorm归一化使得：<br />
-$$<br />
-|\text{RMSNorm}(\boldsymbol{x})|_2 = \sqrt{d}<br />
+<p>RMSNorm归一化使得：
+$$
+|\text{RMSNorm}(\boldsymbol{x})|_2 = \sqrt{d}
 $$</p>
-<p>证明：<br />
-$$<br />
-|\text{RMSNorm}(\boldsymbol{x})|<em i="1">2^2 = \sum</em>}^d \left(\frac{x_i \gamma_i}{\text{RMS}(\boldsymbol{x})}\right)^2 = \frac{\sum_{i=1}^d x_i^2 \gamma_i^2}{\text{RMS}(\boldsymbol{x})^2<br />
-$$</p>
-<p>假设$\gamma_i \approx 1$：<br />
-$$<br />
-\approx \frac{\sum_{i=1}^d x_i^2}{(1/d)\sum_{i=1}^d x_i^2} = d<br />
+<p>证明：
+$$
+|\text{RMSNorm}(\boldsymbol{x})|<em i="1">2^2 = \sum</em>
+$$}^d \left(\frac{x_i \gamma_i}{\text{RMS}(\boldsymbol{x})}\right)^2 = \frac{\sum_{i=1}^d x_i^2 \gamma_i^2}{\text{RMS}(\boldsymbol{x})^2</p>
+<p>假设$\gamma_i \approx 1$：
+$$
+\approx \frac{\sum_{i=1}^d x_i^2}{(1/d)\sum_{i=1}^d x_i^2} = d
 $$</p>
 <p>因此$|\text{RMSNorm}(\boldsymbol{x})|_2 = \sqrt{d}$。</p>
 <p>将RMSNorm应用于K和V，保证它们的范数有界，从而稳定梯度。</p>
 <p><strong>推导6.3：软上限与RMSNorm的协同</strong></p>
-<p>结合软上限和RMSNorm：<br />
-1. RMSNorm保证$|\boldsymbol{k}<em ij="ij">j|_2 = \sqrt{d_k}$<br />
+<p>结合软上限和RMSNorm：
+1. RMSNorm保证$|\boldsymbol{k}<em ij="ij">j|_2 = \sqrt{d_k}$
 2. 软上限保证$|\text{score}</em>| \leq s$</p>
-<p>梯度范数的界：<br />
-$$<br />
-\left|\frac{\partial \mathcal{L}}{\partial \boldsymbol{q}<em ij="ij">i}\right|_2 \leq n \cdot \max_j \left|\frac{\partial \mathcal{L}}{\partial \text{score}</em>}}\right| \cdot \sqrt{d_k<br />
-$$</p>
+<p>梯度范数的界：
+$$
+\left|\frac{\partial \mathcal{L}}{\partial \boldsymbol{q}<em ij="ij">i}\right|_2 \leq n \cdot \max_j \left|\frac{\partial \mathcal{L}}{\partial \text{score}</em>
+$$}}\right| \cdot \sqrt{d_k</p>
 <p>通过适当选择$s$和应用RMSNorm，可以保证梯度在可控范围内。</p>
 <h3 id="7-mha">7. 与标准MHA的理论对比<a class="toc-link" href="#7-mha" title="Permanent link">&para;</a></h3>
 <p><strong>推导7.1：参数效率对比</strong></p>
-<p>标准MHA（$h$个heads，每个head维度$d_h$）：<br />
-$$<br />
-P_{\text{MHA}} = 3hdd_h + hd_hd = hd(3d_h + d_h) = 4hdd_h<br />
+<p>标准MHA（$h$个heads，每个head维度$d_h$）：
+$$
+P_{\text{MHA}} = 3hdd_h + hd_hd = hd(3d_h + d_h) = 4hdd_h
 $$</p>
-<p>MLA（压缩维度$d_c$，head维度$d_h$）：<br />
-$$<br />
-P_{\text{MLA}} = dd_c + hdd_h + hd_c(2d_h) + hd_hd<br />
+<p>MLA（压缩维度$d_c$，head维度$d_h$）：
+$$
+P_{\text{MLA}} = dd_c + hdd_h + hd_c(2d_h) + hd_hd
 $$</p>
-<p>$$<br />
-= dd_c + hdd_h + 2hd_cd_h + hd_hd = dd_c + hd(d_h + d_h) + 2hd_cd_h<br />
+<p>$$
+= dd_c + hdd_h + 2hd_cd_h + hd_hd = dd_c + hd(d_h + d_h) + 2hd_cd_h
 $$</p>
 <p>对比：当$d_c \ll hd_h$时，MLA参数量更少。</p>
 <p><strong>推导7.2：计算效率对比（训练）</strong></p>
 <p>训练时的主要计算：注意力矩阵$\boldsymbol{Q}\boldsymbol{K}^{\top} \in \mathbb{R}^{n \times n}$。</p>
-<p>MHA：<br />
-$$<br />
-\mathcal{O}_{\text{MHA}} = n^2 \cdot h \cdot d_h<br />
+<p>MHA：
+$$
+\mathcal{O}_{\text{MHA}} = n^2 \cdot h \cdot d_h
 $$</p>
-<p>MLA：<br />
-$$<br />
-\mathcal{O}_{\text{MLA}} = n^2 \cdot h \cdot d_h<br />
+<p>MLA：
+$$
+\mathcal{O}_{\text{MLA}} = n^2 \cdot h \cdot d_h
 $$</p>
 <p>训练复杂度相同（都需要计算$n \times n$的注意力矩阵）。</p>
 <p><strong>推导7.3：内存效率对比（推理）</strong></p>
 <p>推理时的KV Cache：</p>
-<p>MHA：<br />
-$$<br />
-M_{\text{MHA}} = n \cdot h \cdot 2d_h<br />
+<p>MHA：
+$$
+M_{\text{MHA}} = n \cdot h \cdot 2d_h
 $$</p>
-<p>MLA：<br />
-$$<br />
-M_{\text{MLA}} = n \cdot (d_c + h \cdot d_r)<br />
+<p>MLA：
+$$
+M_{\text{MLA}} = n \cdot (d_c + h \cdot d_r)
 $$</p>
 <p>当$d_c + hd_r \ll 2hd_h$时，MLA内存显著更少。</p>
-<p>例如，$h=16$，$d_h=128$，$d_c=512$，$d_r=64$：<br />
-$$<br />
-M_{\text{MHA}} = n \cdot 16 \cdot 256 = 4096n<br />
-$$<br />
-$$<br />
-M_{\text{MLA}} = n \cdot (512 + 16 \cdot 64) = n \cdot 1536 = 1536n<br />
+<p>例如，$h=16$，$d_h=128$，$d_c=512$，$d_r=64$：
+$$
+M_{\text{MHA}} = n \cdot 16 \cdot 256 = 4096n
+$$
+$$
+M_{\text{MLA}} = n \cdot (512 + 16 \cdot 64) = n \cdot 1536 = 1536n
 $$</p>
 <p>MLA节省62.5%的内存。</p>
 <h3 id="8">8. 长序列建模的优势<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
 <p><strong>推导8.1：长序列的内存瓶颈</strong></p>
 <p>对于序列长度$n$，批大小$B$，层数$L$：</p>
-<p>MHA的总KV Cache：<br />
-$$<br />
-M_{\text{total}}^{\text{MHA}} = B \cdot L \cdot n \cdot 2hd_h<br />
+<p>MHA的总KV Cache：
+$$
+M_{\text{total}}^{\text{MHA}} = B \cdot L \cdot n \cdot 2hd_h
 $$</p>
-<p>对于$B=8$，$L=32$，$n=8192$，$h=16$，$d_h=128$：<br />
-$$<br />
-M_{\text{total}}^{\text{MHA}} = 8 \times 32 \times 8192 \times 4096 \approx 8.59 \times 10^9<br />
+<p>对于$B=8$，$L=32$，$n=8192$，$h=16$，$d_h=128$：
+$$
+M_{\text{total}}^{\text{MHA}} = 8 \times 32 \times 8192 \times 4096 \approx 8.59 \times 10^9
 $$</p>
 <p>以float16（2 bytes）存储，约17.2GB。</p>
-<p>MLA的总KV Cache：<br />
-$$<br />
-M_{\text{total}}^{\text{MLA}} = B \cdot L \cdot n \cdot (d_c + hd_r)<br />
+<p>MLA的总KV Cache：
+$$
+M_{\text{total}}^{\text{MLA}} = B \cdot L \cdot n \cdot (d_c + hd_r)
 $$</p>
-<p>$$<br />
-= 8 \times 32 \times 8192 \times 1536 \approx 3.22 \times 10^9<br />
+<p>$$
+= 8 \times 32 \times 8192 \times 1536 \approx 3.22 \times 10^9
 $$</p>
 <p>约6.4GB，节省约63%。</p>
 <p><strong>推导8.2：长序列的计算复杂度</strong></p>
 <p>训练长序列时，注意力计算的复杂度为$\mathcal{O}(n^2)$，这是瓶颈。</p>
-<p>但在推理阶段，MLA的优势体现在：<br />
-1. 更小的KV Cache减少内存带宽需求<br />
+<p>但在推理阶段，MLA的优势体现在：
+1. 更小的KV Cache减少内存带宽需求
 2. 可以用更大的批次或更长的序列</p>
-<p>设内存带宽为$B_w$（GB/s），每步推理需要读取KV Cache：<br />
-$$<br />
-t_{\text{memory}} = \frac{M_{\text{total}}}{B_w}<br />
+<p>设内存带宽为$B_w$（GB/s），每步推理需要读取KV Cache：
+$$
+t_{\text{memory}} = \frac{M_{\text{total}}}{B_w}
 $$</p>
-<p>MLA的内存访问时间：<br />
-$$<br />
-t_{\text{MLA}} \approx 0.37 \times t_{\text{MHA}}<br />
+<p>MLA的内存访问时间：
+$$
+t_{\text{MLA}} \approx 0.37 \times t_{\text{MHA}}
 $$</p>
 <p>推理速度提升约2.7倍。</p>
 <p><strong>推导8.3：超长上下文的可行性</strong></p>
 <p>假设GPU内存限制为$M_{\max}$，可支持的最大序列长度：</p>
-<p>MHA：<br />
-$$<br />
-n_{\max}^{\text{MHA}} = \frac{M_{\max}}{B \cdot L \cdot 2hd_h}<br />
+<p>MHA：
+$$
+n_{\max}^{\text{MHA}} = \frac{M_{\max}}{B \cdot L \cdot 2hd_h}
 $$</p>
-<p>MLA：<br />
-$$<br />
-n_{\max}^{\text{MLA}} = \frac{M_{\max}}{B \cdot L \cdot (d_c + hd_r)}<br />
+<p>MLA：
+$$
+n_{\max}^{\text{MLA}} = \frac{M_{\max}}{B \cdot L \cdot (d_c + hd_r)}
 $$</p>
-<p>比值：<br />
-$$<br />
-\frac{n_{\max}^{\text{MLA}}}{n_{\max}^{\text{MHA}}} = \frac{2hd_h}{d_c + hd_r} \approx 2.67<br />
+<p>比值：
+$$
+\frac{n_{\max}^{\text{MLA}}}{n_{\max}^{\text{MHA}}} = \frac{2hd_h}{d_c + hd_r} \approx 2.67
 $$</p>
 <p>MLA可以处理约2.67倍长的序列。</p>
 <h3 id="9">9. 低秩假设的验证<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
 <p><strong>推导9.1：注意力矩阵的秩分析</strong></p>
 <p>实验观察表明，Attention的KV矩阵通常是低秩的。我们从理论上分析。</p>
-<p>对于自然语言，相邻token通常语义相关，即：<br />
-$$<br />
-\boldsymbol{x}<em i_1="i+1">i \approx \boldsymbol{x}</em>_i} + \boldsymbol{\varepsilon<br />
-$$</p>
-<p>其中$\boldsymbol{\varepsilon}_i$是小扰动。因此K矩阵：<br />
-$$<br />
-\boldsymbol{K} = \begin{bmatrix} \boldsymbol{x}_1 \boldsymbol{W}_k \ \boldsymbol{x}_2 \boldsymbol{W}_k \ \vdots \ \boldsymbol{x}_n \boldsymbol{W}_k \end{bmatrix}<br />
+<p>对于自然语言，相邻token通常语义相关，即：
+$$
+\boldsymbol{x}<em i_1="i+1">i \approx \boldsymbol{x}</em>_i
+$$} + \boldsymbol{\varepsilon</p>
+<p>其中$\boldsymbol{\varepsilon}_i$是小扰动。因此K矩阵：
+$$
+\boldsymbol{K} = \begin{bmatrix} \boldsymbol{x}_1 \boldsymbol{W}_k \ \boldsymbol{x}_2 \boldsymbol{W}_k \ \vdots \ \boldsymbol{x}_n \boldsymbol{W}_k \end{bmatrix}
 $$</p>
 <p>相邻行高度相关，导致矩阵秩较低。</p>
 <p><strong>推导9.2：奇异值的衰减</strong></p>
-<p>对K矩阵进行SVD：<br />
-$$<br />
-\boldsymbol{K} = \boldsymbol{U} \boldsymbol{\Sigma} \boldsymbol{V}^{\top}<br />
+<p>对K矩阵进行SVD：
+$$
+\boldsymbol{K} = \boldsymbol{U} \boldsymbol{\Sigma} \boldsymbol{V}^{\top}
 $$</p>
-<p>实验显示，奇异值快速衰减：<br />
-$$<br />
-\sigma_i \approx \sigma_1 \cdot i^{-\alpha}, \quad \alpha \approx 1.5 \sim 2<br />
+<p>实验显示，奇异值快速衰减：
+$$
+\sigma_i \approx \sigma_1 \cdot i^{-\alpha}, \quad \alpha \approx 1.5 \sim 2
 $$</p>
-<p>这意味着用前$r$个奇异值近似，误差：<br />
-$$<br />
-|\boldsymbol{K} - \boldsymbol{K}<em i="r+1">r|_F = \sqrt{\sum</em>}^{\min(n,d)} \sigma_i^2} \approx \sigma_1 \sqrt{\sum_{i=r+1}^{\infty} i^{-2\alpha}<br />
-$$</p>
+<p>这意味着用前$r$个奇异值近似，误差：
+$$
+|\boldsymbol{K} - \boldsymbol{K}<em i="r+1">r|_F = \sqrt{\sum</em>
+$$}^{\min(n,d)} \sigma_i^2} \approx \sigma_1 \sqrt{\sum_{i=r+1}^{\infty} i^{-2\alpha}</p>
 <p>当$\alpha &gt; 1$时，级数收敛，误差有界。</p>
 <p><strong>推导9.3：MLA的低秩约束</strong></p>
-<p>MLA通过$\boldsymbol{K} = \boldsymbol{C}\boldsymbol{W}<em _text_MLA="\text{MLA">k$强制秩不超过$d_c$。这相当于：<br />
-$$<br />
-\boldsymbol{K}</em>}} = \sum_{i=1}^{d_c} \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top<br />
-$$</p>
+<p>MLA通过$\boldsymbol{K} = \boldsymbol{C}\boldsymbol{W}<em _text_MLA="\text{MLA">k$强制秩不超过$d_c$。这相当于：
+$$
+\boldsymbol{K}</em>
+$$}} = \sum_{i=1}^{d_c} \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top</p>
 <p>只要$d_c$选择适当（覆盖主要奇异值），近似误差很小。</p>
 <h3 id="10-mla">10. MLA与其他压缩方法的对比<a class="toc-link" href="#10-mla" title="Permanent link">&para;</a></h3>
 <p><strong>推导10.1：MQA的压缩机制</strong></p>
-<p>Multi-Query Attention (MQA) 使用单个K和V：<br />
-$$<br />
-\boldsymbol{k}_i = \boldsymbol{x}_i \boldsymbol{W}_k, \quad \boldsymbol{v}_i = \boldsymbol{x}_i \boldsymbol{W}_v<br />
+<p>Multi-Query Attention (MQA) 使用单个K和V：
+$$
+\boldsymbol{k}_i = \boldsymbol{x}_i \boldsymbol{W}_k, \quad \boldsymbol{v}_i = \boldsymbol{x}_i \boldsymbol{W}_v
 $$</p>
-<p>所有heads共享：<br />
-$$<br />
-\boldsymbol{o}_i^{(s)} = \text{Attention}(\boldsymbol{q}_i^{(s)}, {\boldsymbol{k}_j}, {\boldsymbol{v}_j})<br />
+<p>所有heads共享：
+$$
+\boldsymbol{o}_i^{(s)} = \text{Attention}(\boldsymbol{q}_i^{(s)}, {\boldsymbol{k}_j}, {\boldsymbol{v}_j})
 $$</p>
-<p>KV Cache：<br />
-$$<br />
-M_{\text{MQA}} = n \cdot 2d_h<br />
+<p>KV Cache：
+$$
+M_{\text{MQA}} = n \cdot 2d_h
 $$</p>
 <p><strong>推导10.2：GQA的压缩机制</strong></p>
-<p>Grouped Query Attention将heads分成$g$组：<br />
-$$<br />
-M_{\text{GQA}} = n \cdot g \cdot 2d_h<br />
+<p>Grouped Query Attention将heads分成$g$组：
+$$
+M_{\text{GQA}} = n \cdot g \cdot 2d_h
 $$</p>
-<p>压缩比：<br />
-$$<br />
-\rho_{\text{GQA}} = \frac{g}{h}<br />
+<p>压缩比：
+$$
+\rho_{\text{GQA}} = \frac{g}{h}
 $$</p>
-<p>例如$g=4$，$h=16$：<br />
-$$<br />
-\rho_{\text{GQA}} = \frac{4}{16} = 0.25<br />
+<p>例如$g=4$，$h=16$：
+$$
+\rho_{\text{GQA}} = \frac{4}{16} = 0.25
 $$</p>
 <p><strong>推导10.3：MLA vs GQA</strong></p>
-<p>MLA的压缩比：<br />
-$$<br />
-\rho_{\text{MLA}} = \frac{d_c + hd_r}{2hd_h}<br />
+<p>MLA的压缩比：
+$$
+\rho_{\text{MLA}} = \frac{d_c + hd_r}{2hd_h}
 $$</p>
-<p>对于典型配置（$d_c=512$，$d_r=64$，$h=16$，$d_h=128$）：<br />
-$$<br />
-\rho_{\text{MLA}} = \frac{512 + 16 \times 64}{2 \times 16 \times 128} = \frac{1536}{4096} = 0.375<br />
+<p>对于典型配置（$d_c=512$，$d_r=64$，$h=16$，$d_h=128$）：
+$$
+\rho_{\text{MLA}} = \frac{512 + 16 \times 64}{2 \times 16 \times 128} = \frac{1536}{4096} = 0.375
 $$</p>
 <p>MLA和GQA4的压缩比接近，但MLA通过低秩分解提供了更大的灵活性。</p>
 <h3 id="11-vo-rope">11. VO-RoPE的数学原理<a class="toc-link" href="#11-vo-rope" title="Permanent link">&para;</a></h3>
 <p><strong>推导11.1：VO-RoPE的定义</strong></p>
 <p>Value Output RoPE (VO-RoPE) 将RoPE应用于V，然后在输出时逆向旋转。</p>
-<p>前向：<br />
-$$<br />
-\tilde{\boldsymbol{v}}_i = \boldsymbol{\mathcal{R}}_i \boldsymbol{v}_i<br />
+<p>前向：
+$$
+\tilde{\boldsymbol{v}}_i = \boldsymbol{\mathcal{R}}_i \boldsymbol{v}_i
 $$</p>
-<p>注意力：<br />
-$$<br />
-\boldsymbol{o}<em _leq="\leq" i="i" j="j">i = \sum</em>} \alpha_{ij} \tilde{\boldsymbol{v}<em _leq="\leq" i="i" j="j">j = \sum</em>_j} \alpha_{ij} \boldsymbol{\mathcal{R}}_j \boldsymbol{v<br />
-$$</p>
-<p>输出时逆向旋转：<br />
-$$<br />
-\boldsymbol{o}<em _leq="\leq" i="i" j="j">i' = \boldsymbol{\mathcal{R}}_i^{\top} \boldsymbol{o}_i = \boldsymbol{\mathcal{R}}_i^{\top} \sum</em>} \alpha_{ij} \boldsymbol{\mathcal{R}<em _leq="\leq" i="i" j="j">j \boldsymbol{v}_j = \sum</em>_j} \alpha_{ij} \boldsymbol{\mathcal{R}}_{j-i} \boldsymbol{v<br />
-$$</p>
+<p>注意力：
+$$
+\boldsymbol{o}<em _leq="\leq" i="i" j="j">i = \sum</em>} \alpha_{ij} \tilde{\boldsymbol{v}<em _leq="\leq" i="i" j="j">j = \sum</em>_j
+$$} \alpha_{ij} \boldsymbol{\mathcal{R}}_j \boldsymbol{v</p>
+<p>输出时逆向旋转：
+$$
+\boldsymbol{o}<em _leq="\leq" i="i" j="j">i' = \boldsymbol{\mathcal{R}}_i^{\top} \boldsymbol{o}_i = \boldsymbol{\mathcal{R}}_i^{\top} \sum</em>} \alpha_{ij} \boldsymbol{\mathcal{R}<em _leq="\leq" i="i" j="j">j \boldsymbol{v}_j = \sum</em>_j
+$$} \alpha_{ij} \boldsymbol{\mathcal{R}}_{j-i} \boldsymbol{v</p>
 <p><strong>推导11.2：VO-RoPE的相对位置性质</strong></p>
 <p>注意到$\boldsymbol{o}<em j-i="j-i">i'$中，$\boldsymbol{v}_j$被旋转了$\boldsymbol{\mathcal{R}}</em>$，这编码了相对位置$j-i$。</p>
 <p>这与标准RoPE不同：标准RoPE在注意力分数中编码位置，VO-RoPE在输出值中编码位置。</p>
 <p><strong>推导11.3：VO-RoPE与KV共享的兼容性</strong></p>
-<p>VO-RoPE允许K和V完全共享：<br />
-$$<br />
-\boldsymbol{k}_i = \boldsymbol{v}_i = \boldsymbol{c}_i<br />
+<p>VO-RoPE允许K和V完全共享：
+$$
+\boldsymbol{k}_i = \boldsymbol{v}_i = \boldsymbol{c}_i
 $$</p>
-<p>在K上应用RoPE：<br />
-$$<br />
-\tilde{\boldsymbol{k}}_i = \boldsymbol{\mathcal{R}}_i \boldsymbol{c}_i<br />
+<p>在K上应用RoPE：
+$$
+\tilde{\boldsymbol{k}}_i = \boldsymbol{\mathcal{R}}_i \boldsymbol{c}_i
 $$</p>
-<p>在V上也应用RoPE（用于输出）：<br />
-$$<br />
-\tilde{\boldsymbol{v}}_i = \boldsymbol{\mathcal{R}}_i \boldsymbol{c}_i = \tilde{\boldsymbol{k}}_i<br />
+<p>在V上也应用RoPE（用于输出）：
+$$
+\tilde{\boldsymbol{v}}_i = \boldsymbol{\mathcal{R}}_i \boldsymbol{c}_i = \tilde{\boldsymbol{k}}_i
 $$</p>
 <p>这样K和V仍然相同，保持了完全共享，同时引入了位置信息。</p>
 <h3 id="12-mla">12. 多层MLA的累积效应<a class="toc-link" href="#12-mla" title="Permanent link">&para;</a></h3>
 <p><strong>推导12.1：单层MLA的输出</strong></p>
-<p>第$\ell$层的输出：<br />
-$$<br />
-\boldsymbol{h}_i^{(\ell)} = \boldsymbol{h}_i^{(\ell-1)} + \text{MLA}^{(\ell)}(\boldsymbol{h}_i^{(\ell-1)}) + \text{FFN}^{(\ell)}(\cdot)<br />
+<p>第$\ell$层的输出：
+$$
+\boldsymbol{h}_i^{(\ell)} = \boldsymbol{h}_i^{(\ell-1)} + \text{MLA}^{(\ell)}(\boldsymbol{h}_i^{(\ell-1)}) + \text{FFN}^{(\ell)}(\cdot)
 $$</p>
-<p>简化为：<br />
-$$<br />
-\boldsymbol{h}_i^{(\ell)} = \boldsymbol{h}_i^{(\ell-1)} + \Delta \boldsymbol{h}_i^{(\ell)}<br />
+<p>简化为：
+$$
+\boldsymbol{h}_i^{(\ell)} = \boldsymbol{h}_i^{(\ell-1)} + \Delta \boldsymbol{h}_i^{(\ell)}
 $$</p>
 <p><strong>推导12.2：跨层的信息流动</strong></p>
-<p>从输入$\boldsymbol{x}<em _ell="1">i$到第$L$层的输出：<br />
-$$<br />
-\boldsymbol{h}_i^{(L)} = \boldsymbol{x}_i + \sum</em>}^L \Delta \boldsymbol{h}_i^{(\ell)<br />
-$$</p>
+<p>从输入$\boldsymbol{x}<em _ell="1">i$到第$L$层的输出：
+$$
+\boldsymbol{h}_i^{(L)} = \boldsymbol{x}_i + \sum</em>
+$$}^L \Delta \boldsymbol{h}_i^{(\ell)</p>
 <p>每一层的贡献$\Delta \boldsymbol{h}_i^{(\ell)}$通过残差连接累加。</p>
 <p><strong>推导12.3：低秩约束的累积影响</strong></p>
-<p>每层MLA的输出受低秩约束影响：<br />
-$$<br />
-\Delta \boldsymbol{h}_i^{(\ell)} = f(\text{low-rank attention})<br />
+<p>每层MLA的输出受低秩约束影响：
+$$
+\Delta \boldsymbol{h}_i^{(\ell)} = f(\text{low-rank attention})
 $$</p>
-<p>跨层累积时，虽然每层是低秩的，但累加后：<br />
-$$<br />
-\boldsymbol{h}<em _ell="1">i^{(L)} = \boldsymbol{x}_i + \sum</em>}^L \Delta \boldsymbol{h}_i^{(\ell)<br />
-$$</p>
-<p>总的秩可以达到：<br />
-$$<br />
-\text{rank}(\boldsymbol{H}^{(L)}) \leq \min(n, d + L \cdot d_c)<br />
+<p>跨层累积时，虽然每层是低秩的，但累加后：
+$$
+\boldsymbol{h}<em _ell="1">i^{(L)} = \boldsymbol{x}_i + \sum</em>
+$$}^L \Delta \boldsymbol{h}_i^{(\ell)</p>
+<p>总的秩可以达到：
+$$
+\text{rank}(\boldsymbol{H}^{(L)}) \leq \min(n, d + L \cdot d_c)
 $$</p>
 <p>当$L$足够大时，累积秩可以很高，恢复了表达能力。</p>
 <h3 id="13">13. 训练动态与收敛性<a class="toc-link" href="#13" title="Permanent link">&para;</a></h3>
 <p><strong>推导13.1：MLA的损失函数</strong></p>
-<p>训练目标是最小化交叉熵损失：<br />
-$$<br />
-\mathcal{L} = -\sum_{i=1}^n \log p(x_{i+1} | \boldsymbol{x}_{\leq i})<br />
+<p>训练目标是最小化交叉熵损失：
+$$
+\mathcal{L} = -\sum_{i=1}^n \log p(x_{i+1} | \boldsymbol{x}_{\leq i})
 $$</p>
-<p>MLA引入低秩约束，相当于正则化：<br />
-$$<br />
-\mathcal{L}_{\text{MLA}} = \mathcal{L} + \lambda R(\boldsymbol{W}_c)<br />
+<p>MLA引入低秩约束，相当于正则化：
+$$
+\mathcal{L}_{\text{MLA}} = \mathcal{L} + \lambda R(\boldsymbol{W}_c)
 $$</p>
 <p>其中$R(\boldsymbol{W}_c)$惩罚高秩。</p>
 <p><strong>推导13.2：梯度下降的收敛速度</strong></p>
-<p>在凸优化假设下，梯度下降的收敛速度：<br />
-$$<br />
-\mathcal{L}(t) - \mathcal{L}^<em> \leq \frac{|\boldsymbol{W}_0 - \boldsymbol{W}^</em>|^2}{2\eta t}<br />
+<p>在凸优化假设下，梯度下降的收敛速度：
+$$
+\mathcal{L}(t) - \mathcal{L}^<em> \leq \frac{|\boldsymbol{W}_0 - \boldsymbol{W}^</em>|^2}{2\eta t}
 $$</p>
 <p>其中$\eta$是学习率，$t$是迭代次数。</p>
-<p>MLA的低秩约束减少了参数空间维度，可能加快收敛：<br />
-$$<br />
-\text{dim}(\mathcal{W}<em _text_MHA="\text{MHA">{\text{MLA}}) &lt; \text{dim}(\mathcal{W}</em>)}<br />
-$$</p>
+<p>MLA的低秩约束减少了参数空间维度，可能加快收敛：
+$$
+\text{dim}(\mathcal{W}<em _text_MHA="\text{MHA">{\text{MLA}}) &lt; \text{dim}(\mathcal{W}</em>)
+$$}</p>
 <p><strong>推导13.3：过拟合风险的降低</strong></p>
-<p>低秩约束相当于施加了归纳偏置，减少了模型复杂度。根据VC维理论：<br />
-$$<br />
-\text{VC-dim}(\text{MLA}) \leq \text{VC-dim}(\text{MHA})<br />
+<p>低秩约束相当于施加了归纳偏置，减少了模型复杂度。根据VC维理论：
+$$
+\text{VC-dim}(\text{MLA}) \leq \text{VC-dim}(\text{MHA})
 $$</p>
-<p>更小的VC维意味着更好的泛化界：<br />
-$$<br />
-\mathbb{E}[\mathcal{L}<em _text_train="\text{train">{\text{test}}] \leq \mathcal{L}</em>\right)}} + \mathcal{O}\left(\sqrt{\frac{\text{VC-dim}}{n}<br />
-$$</p>
+<p>更小的VC维意味着更好的泛化界：
+$$
+\mathbb{E}[\mathcal{L}<em _text_train="\text{train">{\text{test}}] \leq \mathcal{L}</em>\right)
+$$}} + \mathcal{O}\left(\sqrt{\frac{\text{VC-dim}}{n}</p>
 <p>MLA有更紧的泛化界。</p>
 <h3 id="14">14. 实验观察的理论解释<a class="toc-link" href="#14" title="Permanent link">&para;</a></h3>
 <p><strong>推导14.1：头数翻倍 vs head_dims翻倍</strong></p>
 <p>实验显示：head_dims翻倍（GQA1-256）优于heads翻倍（GQA2-128，32 heads）。</p>
-<p>理论解释：从表达能力看，head_dims决定了每个head的容量。设信息容量：<br />
-$$<br />
-I_{\text{head}} \sim d_h \log d_h<br />
+<p>理论解释：从表达能力看，head_dims决定了每个head的容量。设信息容量：
+$$
+I_{\text{head}} \sim d_h \log d_h
 $$</p>
-<p>总容量：<br />
-$$<br />
-I_{\text{total}} = h \cdot I_{\text{head}} \sim h \cdot d_h \log d_h<br />
+<p>总容量：
+$$
+I_{\text{total}} = h \cdot I_{\text{head}} \sim h \cdot d_h \log d_h
 $$</p>
-<p>比较两种配置（固定$h \cdot d_h = D$）：<br />
-- 配置A：$(h, d_h)$，容量$\sim h \cdot d_h \log d_h = D \log d_h$<br />
+<p>比较两种配置（固定$h \cdot d_h = D$）：
+- 配置A：$(h, d_h)$，容量$\sim h \cdot d_h \log d_h = D \log d_h$
 - 配置B：$(h/2, 2d_h)$，容量$\sim \frac{h}{2} \cdot 2d_h \log(2d_h) = D \log(2d_h) = D(\log d_h + \log 2)$</p>
 <p>配置B容量更大，因为$\log(2d_h) &gt; \log d_h$。</p>
 <p><strong>推导14.2：Partial RoPE的有效性</strong></p>
 <p>实验中GQA1-256-PR优于GQA1-256。从信息论角度：</p>
-<p>完全RoPE：所有$d_h$维都编码位置+内容混合信息<br />
+<p>完全RoPE：所有$d_h$维都编码位置+内容混合信息
 Partial RoPE：$d_c$维纯内容，$d_r$维纯位置</p>
-<p>信息分离提升了编码效率。根据信息分解：<br />
-$$<br />
-I(X; Y, Z) \leq I(X; Y) + I(X; Z)<br />
+<p>信息分离提升了编码效率。根据信息分解：
+$$
+I(X; Y, Z) \leq I(X; Y) + I(X; Z)
 $$</p>
 <p>当Y（内容）和Z（位置）独立时，等号成立，分离表示最优。</p>
 <p><strong>推导14.3：KV共享的后劲</strong></p>
 <p>实验中GQA2-(192+64)-S2后期超越GQA1-256-PR。理论上，KV共享施加了强正则化，初期可能限制表达，但长期有助于泛化。</p>
-<p>从正则化路径角度：<br />
-$$<br />
-\boldsymbol{W}(t) = \arg\min_{\boldsymbol{W}} \mathcal{L}(\boldsymbol{W}) + \lambda(t) R(\boldsymbol{W})<br />
+<p>从正则化路径角度：
+$$
+\boldsymbol{W}(t) = \arg\min_{\boldsymbol{W}} \mathcal{L}(\boldsymbol{W}) + \lambda(t) R(\boldsymbol{W})
 $$</p>
 <p>随着训练进行，$\lambda(t)$逐渐减小，正则化作用减弱，但已经学到的结构化表示保持，帮助泛化。</p>
 <h3 id="15-mfatpa">15. MFA和TPA的理论对比<a class="toc-link" href="#15-mfatpa" title="Permanent link">&para;</a></h3>
 <p><strong>推导15.1：MFA的数学形式</strong></p>
-<p>Multi-matrix Factorization Attention (MFA) 对Q使用LoRA：<br />
-$$<br />
-\boldsymbol{q}_i^{(s)} = \boldsymbol{x}_i (\boldsymbol{W}_q^{(s)} + \boldsymbol{A}^{(s)} \boldsymbol{B}^{(s)})<br />
+<p>Multi-matrix Factorization Attention (MFA) 对Q使用LoRA：
+$$
+\boldsymbol{q}_i^{(s)} = \boldsymbol{x}_i (\boldsymbol{W}_q^{(s)} + \boldsymbol{A}^{(s)} \boldsymbol{B}^{(s)})
 $$</p>
-<p>K和V保持标准形式（MQA）：<br />
-$$<br />
-\boldsymbol{k}_i = \boldsymbol{x}_i \boldsymbol{W}_k, \quad \boldsymbol{v}_i = \boldsymbol{x}_i \boldsymbol{W}_v<br />
+<p>K和V保持标准形式（MQA）：
+$$
+\boldsymbol{k}_i = \boldsymbol{x}_i \boldsymbol{W}_k, \quad \boldsymbol{v}_i = \boldsymbol{x}_i \boldsymbol{W}_v
 $$</p>
 <p><strong>推导15.2：TPA的数学形式</strong></p>
-<p>Tensor Product Attention将压缩向量reshape后投影：<br />
-$$<br />
-\boldsymbol{c}_i = \boldsymbol{x}_i \boldsymbol{W}_c \in \mathbb{R}^{g \times d'}<br />
+<p>Tensor Product Attention将压缩向量reshape后投影：
+$$
+\boldsymbol{c}_i = \boldsymbol{x}_i \boldsymbol{W}_c \in \mathbb{R}^{g \times d'}
 $$</p>
 <p>其中$g$是group数，$d'$是每组维度。</p>
-<p>每个head从对应组投影：<br />
-$$<br />
-\boldsymbol{k}<em g_s_="g(s)" i_="i,">i^{(s)} = \boldsymbol{c}</em>} \boldsymbol{W}_k^{(s)<br />
-$$</p>
+<p>每个head从对应组投影：
+$$
+\boldsymbol{k}<em g_s_="g(s)" i_="i,">i^{(s)} = \boldsymbol{c}</em>
+$$} \boldsymbol{W}_k^{(s)</p>
 <p><strong>推导15.3：MLA vs MFA vs TPA</strong></p>
-<p>从表达能力上界：<br />
-$$<br />
-\mathcal{C}<em _text_MFA="\text{MFA">{\text{TPA}} \leq \mathcal{C}</em>}} \leq \mathcal{C}_{\text{MLA}<br />
-$$</p>
+<p>从表达能力上界：
+$$
+\mathcal{C}<em _text_MFA="\text{MFA">{\text{TPA}} \leq \mathcal{C}</em>
+$$}} \leq \mathcal{C}_{\text{MLA}</p>
 <ul>
 <li>TPA受限于分组结构，每组独立投影</li>
 <li>MFA的Q有低秩约束，K和V无约束</li>
@@ -790,66 +794,66 @@ $$</p>
 <p>实践中MLA表现最好，验证了"对称压缩K和V"优于"只压缩Q"或"分组压缩"。</p>
 <h3 id="16">16. 大规模模型的扩展性<a class="toc-link" href="#16" title="Permanent link">&para;</a></h3>
 <p><strong>推导16.1：参数规模与性能的关系</strong></p>
-<p>根据Scaling Law：<br />
-$$<br />
-\mathcal{L}(N) \propto N^{-\alpha}<br />
+<p>根据Scaling Law：
+$$
+\mathcal{L}(N) \propto N^{-\alpha}
 $$</p>
 <p>其中$N$是参数量，$\alpha \approx 0.076$（GPT-3论文）。</p>
 <p>MLA在相同KV Cache下可以使用更大的head_dims，从而增加参数量。</p>
 <p><strong>推导16.2：计算效率的trade-off</strong></p>
-<p>增大head_dims从128到256，参数量增加：<br />
-$$<br />
-\Delta P = h \cdot d \cdot (256 - 128) = h \cdot d \cdot 128<br />
+<p>增大head_dims从128到256，参数量增加：
+$$
+\Delta P = h \cdot d \cdot (256 - 128) = h \cdot d \cdot 128
 $$</p>
-<p>训练计算增加：<br />
-$$<br />
-\Delta C = n^2 \cdot h \cdot 128<br />
+<p>训练计算增加：
+$$
+\Delta C = n^2 \cdot h \cdot 128
 $$</p>
 <p>但推理时，KV Cache通过MLA压缩，内存不增加（或增加很少）。</p>
 <p><strong>推导16.3：最优配置的选择</strong></p>
-<p>给定计算预算$C_{\max}$和内存预算$M_{\max}$，最优化问题：<br />
-$$<br />
-\max_{h, d_h, d_c} \text{Performance}(h, d_h, d_c)<br />
+<p>给定计算预算$C_{\max}$和内存预算$M_{\max}$，最优化问题：
+$$
+\max_{h, d_h, d_c} \text{Performance}(h, d_h, d_c)
 $$</p>
-<p>约束：<br />
-$$<br />
-\text{s.t.} \quad n^2 \cdot h \cdot d_h \leq C_{\max}, \quad n \cdot (d_c + h \cdot d_r) \leq M_{\max}<br />
+<p>约束：
+$$
+\text{s.t.} \quad n^2 \cdot h \cdot d_h \leq C_{\max}, \quad n \cdot (d_c + h \cdot d_r) \leq M_{\max}
 $$</p>
 <p>MLA提供了更大的设计空间，可以在约束下达到更高性能。</p>
 <h3 id="17">17. 未来改进方向<a class="toc-link" href="#17" title="Permanent link">&para;</a></h3>
 <p><strong>推导17.1：动态低秩分配</strong></p>
-<p>当前MLA使用固定的$d_c$。可以考虑动态调整：<br />
-$$<br />
-d_c^{(\ell)} = f(\ell, \text{complexity})<br />
+<p>当前MLA使用固定的$d_c$。可以考虑动态调整：
+$$
+d_c^{(\ell)} = f(\ell, \text{complexity})
 $$</p>
 <p>例如，浅层使用较小的$d_c$（捕捉局部模式），深层使用较大的$d_c$（捕捉全局依赖）。</p>
 <p><strong>推导17.2：非线性压缩</strong></p>
 <p>当前压缩是线性的：$\boldsymbol{c}_i = \boldsymbol{x}_i \boldsymbol{W}_c$。</p>
-<p>可以引入非线性：<br />
-$$<br />
-\boldsymbol{c}_i = \sigma(\boldsymbol{x}_i \boldsymbol{W}_c^{(1)}) \boldsymbol{W}_c^{(2)}<br />
+<p>可以引入非线性：
+$$
+\boldsymbol{c}_i = \sigma(\boldsymbol{x}_i \boldsymbol{W}_c^{(1)}) \boldsymbol{W}_c^{(2)}
 $$</p>
 <p>其中$\sigma$是激活函数（如ReLU、GELU）。这增加了表达能力，但也增加了计算成本。</p>
 <p><strong>推导17.3：自适应注意力机制</strong></p>
-<p>结合MLA和稀疏注意力：<br />
-$$<br />
-\text{score}_{ij} = \begin{cases}<br />
-\boldsymbol{q}_i^{\top} \boldsymbol{k}_j, &amp; \text{if } j \in \mathcal{N}(i) \<br />
--\infty, &amp; \text{otherwise}<br />
-\end{cases}<br />
+<p>结合MLA和稀疏注意力：
+$$
+\text{score}_{ij} = \begin{cases}
+\boldsymbol{q}_i^{\top} \boldsymbol{k}_j, &amp; \text{if } j \in \mathcal{N}(i) \
+-\infty, &amp; \text{otherwise}
+\end{cases}
 $$</p>
 <p>其中$\mathcal{N}(i)$是位置$i$的邻域（通过学习确定）。</p>
 <p>结合低秩压缩和稀疏性，进一步提升效率。</p>
 <h3 id="18-mla">18. 总结：MLA的理论优越性<a class="toc-link" href="#18-mla" title="Permanent link">&para;</a></h3>
 <p><strong>推导18.1：核心优势的数学表述</strong></p>
 <p>MLA的核心优势可以用一个统一框架表述：</p>
-<p>在训练阶段，最大化表达能力：<br />
-$$<br />
-\max_{\boldsymbol{W}} \mathcal{C}(\boldsymbol{W}) \quad \text{s.t.} \quad \mathcal{O}<em _max="\max">{\text{compute}} \leq C</em><br />
+<p>在训练阶段，最大化表达能力：
+$$
+\max_{\boldsymbol{W}} \mathcal{C}(\boldsymbol{W}) \quad \text{s.t.} \quad \mathcal{O}<em _max="\max">{\text{compute}} \leq C</em>
 $$</p>
-<p>在推理阶段，最小化内存占用：<br />
-$$<br />
-\min_{\boldsymbol{c}} M(\boldsymbol{c}) \quad \text{s.t.} \quad \mathcal{C}(\boldsymbol{c}) \geq \mathcal{C}_{\min}<br />
+<p>在推理阶段，最小化内存占用：
+$$
+\min_{\boldsymbol{c}} M(\boldsymbol{c}) \quad \text{s.t.} \quad \mathcal{C}(\boldsymbol{c}) \geq \mathcal{C}_{\min}
 $$</p>
 <p>MLA通过双重投影和吸收归一化，实现了两阶段的联合优化。</p>
 <p><strong>推导18.2：理论与实践的统一</strong></p>
@@ -876,7 +880,7 @@ $$</p>
                             
                             <a href="对角低秩三角阵的高效求逆方法.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#206 “对角+低秩”三角阵的高效求逆方法</div>
+                                <div class="nav-title">#184 “对角+低秩”三角阵的高效求逆方法</div>
                             </a>
                             
                         </div>
@@ -884,7 +888,7 @@ $$</p>
                             
                             <a href="qk-clip让muon在scaleup之路上更进一步.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#208 QK-Clip：让Muon在Scaleup之路上更进一步</div>
+                                <div class="nav-title">#186 QK-Clip：让Muon在Scaleup之路上更进一步</div>
                             </a>
                             
                         </div>
