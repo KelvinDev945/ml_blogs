@@ -111,5 +111,544 @@ url={\url{https://spaces.ac.cn/archives/9019}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 一、Softmax函数的数学基础
+
+#### 1.1 Softmax函数定义与性质
+
+**定义**: 给定向量 $\boldsymbol{x} = (x_1, x_2, \ldots, x_n) \in \mathbb{R}^n$，Softmax函数定义为：
+\begin{equation}
+\text{softmax}(\boldsymbol{x})_i = \frac{\exp(x_i)}{\sum_{j=1}^n \exp(x_j)} = \frac{e^{x_i}}{\sum_{j=1}^n e^{x_j}}
+\tag{1}
+\end{equation}
+
+**性质1（概率分布）**: Softmax输出满足概率分布的两个基本条件：
+\begin{equation}
+\text{softmax}(\boldsymbol{x})_i \in (0, 1), \quad \sum_{i=1}^n \text{softmax}(\boldsymbol{x})_i = 1
+\tag{2}
+\end{equation}
+
+**证明**:
+- 非负性显然成立：$\exp(x_i) > 0, \forall x_i \in \mathbb{R}$
+- 归一性：$\sum_{i=1}^n \frac{e^{x_i}}{\sum_j e^{x_j}} = \frac{\sum_i e^{x_i}}{\sum_j e^{x_j}} = 1$
+
+**性质2（平移不变性）**: 对任意常数 $c \in \mathbb{R}$，有：
+\begin{equation}
+\text{softmax}(\boldsymbol{x} + c\boldsymbol{1}) = \text{softmax}(\boldsymbol{x})
+\tag{3}
+\end{equation}
+
+**证明**:
+\begin{equation}
+\text{softmax}(\boldsymbol{x} + c\boldsymbol{1})_i = \frac{e^{x_i+c}}{\sum_j e^{x_j+c}} = \frac{e^c \cdot e^{x_i}}{e^c \cdot \sum_j e^{x_j}} = \frac{e^{x_i}}{\sum_j e^{x_j}} = \text{softmax}(\boldsymbol{x})_i
+\tag{4}
+\end{equation}
+
+这个性质对数值稳定性至关重要，实践中通常选择 $c = -\max_i x_i$ 以避免指数溢出。
+
+**性质3（单调性）**: Softmax保持输入的相对顺序，即：
+\begin{equation}
+x_i > x_j \Rightarrow \text{softmax}(\boldsymbol{x})_i > \text{softmax}(\boldsymbol{x})_j
+\tag{5}
+\end{equation}
+
+**性质4（温度参数）**: 引入温度参数 $\tau > 0$：
+\begin{equation}
+\text{softmax}_\tau(\boldsymbol{x})_i = \frac{\exp(x_i/\tau)}{\sum_{j=1}^n \exp(x_j/\tau)}
+\tag{6}
+\end{equation}
+
+当 $\tau \to 0$ 时，Softmax退化为one-hot编码（选择最大值）；当 $\tau \to \infty$ 时，Softmax趋向均匀分布。
+
+#### 1.2 Softmax梯度的完整推导
+
+**定理**: Softmax函数的Jacobian矩阵为：
+\begin{equation}
+\frac{\partial \text{softmax}(\boldsymbol{x})_i}{\partial x_j} = \text{softmax}(\boldsymbol{x})_i \cdot (\delta_{ij} - \text{softmax}(\boldsymbol{x})_j)
+\tag{7}
+\end{equation}
+其中 $\delta_{ij}$ 是Kronecker delta函数。
+
+**详细证明**:
+
+设 $s_i = \text{softmax}(\boldsymbol{x})_i = \frac{e^{x_i}}{Z}$，其中 $Z = \sum_{k=1}^n e^{x_k}$
+
+**情况1**: 当 $i = j$ 时：
+\begin{align}
+\frac{\partial s_i}{\partial x_i} &= \frac{\partial}{\partial x_i}\left(\frac{e^{x_i}}{Z}\right) \tag{8}\\
+&= \frac{e^{x_i} \cdot Z - e^{x_i} \cdot \frac{\partial Z}{\partial x_i}}{Z^2} \tag{9}\\
+&= \frac{e^{x_i} \cdot Z - e^{x_i} \cdot e^{x_i}}{Z^2} \tag{10}\\
+&= \frac{e^{x_i}}{Z} \cdot \frac{Z - e^{x_i}}{Z} \tag{11}\\
+&= s_i \cdot (1 - s_i) \tag{12}
+\end{align}
+
+**情况2**: 当 $i \neq j$ 时：
+\begin{align}
+\frac{\partial s_i}{\partial x_j} &= \frac{\partial}{\partial x_j}\left(\frac{e^{x_i}}{Z}\right) \tag{13}\\
+&= \frac{0 \cdot Z - e^{x_i} \cdot \frac{\partial Z}{\partial x_j}}{Z^2} \tag{14}\\
+&= \frac{-e^{x_i} \cdot e^{x_j}}{Z^2} \tag{15}\\
+&= -\frac{e^{x_i}}{Z} \cdot \frac{e^{x_j}}{Z} \tag{16}\\
+&= -s_i \cdot s_j \tag{17}
+\end{align}
+
+综合两种情况，得到：
+\begin{equation}
+\frac{\partial s_i}{\partial x_j} = s_i \cdot (\delta_{ij} - s_j)
+\tag{18}
+\end{equation}
+
+**矩阵形式**: 令 $\boldsymbol{s} = \text{softmax}(\boldsymbol{x})$，Jacobian矩阵为：
+\begin{equation}
+\boldsymbol{J} = \text{diag}(\boldsymbol{s}) - \boldsymbol{s}\boldsymbol{s}^{\top}
+\tag{19}
+\end{equation}
+
+这是一个对称矩阵，且半正定（所有特征值非负）。
+
+#### 1.3 反向传播中的梯度计算
+
+在神经网络中，设损失函数为 $\mathcal{L}$，则通过链式法则：
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial x_j} = \sum_{i=1}^n \frac{\partial \mathcal{L}}{\partial s_i} \cdot \frac{\partial s_i}{\partial x_j} = \sum_{i=1}^n \frac{\partial \mathcal{L}}{\partial s_i} \cdot s_i \cdot (\delta_{ij} - s_j)
+\tag{20}
+\end{equation}
+
+展开得：
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial x_j} = \frac{\partial \mathcal{L}}{\partial s_j} \cdot s_j - s_j \sum_{i=1}^n \frac{\partial \mathcal{L}}{\partial s_i} \cdot s_i
+\tag{21}
+\end{equation}
+
+**特殊情况（交叉熵损失）**: 当 $\mathcal{L} = -\log s_y$（$y$是真实类别）时：
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial s_i} = -\frac{\delta_{iy}}{s_y}
+\tag{22}
+\end{equation}
+
+代入得：
+\begin{align}
+\frac{\partial \mathcal{L}}{\partial x_j} &= -\frac{\delta_{jy}}{s_y} \cdot s_j - s_j \sum_{i=1}^n \left(-\frac{\delta_{iy}}{s_y}\right) \cdot s_i \tag{23}\\
+&= -\delta_{jy} + s_j \tag{24}\\
+&= s_j - \delta_{jy} \tag{25}
+\end{align}
+
+这个简洁的形式是Softmax与交叉熵搭配的一个重要优势。
+
+### 二、Attention机制中的Softmax分析
+
+#### 2.1 标准Attention的数学形式
+
+给定Query、Key、Value矩阵 $Q, K, V \in \mathbb{R}^{n \times d}$，标准的Scaled Dot-Product Attention定义为：
+\begin{equation}
+\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^{\top}}{\sqrt{d}}\right)V
+\tag{26}
+\end{equation}
+
+对于第 $i$ 个位置，注意力权重为：
+\begin{equation}
+a_{i,j} = \frac{\exp\left(\frac{q_i \cdot k_j}{\sqrt{d}}\right)}{\sum_{j'=1}^n \exp\left(\frac{q_i \cdot k_{j'}}{\sqrt{d}}\right)}, \quad j = 1, \ldots, n
+\tag{27}
+\end{equation}
+
+输出为：
+\begin{equation}
+o_i = \sum_{j=1}^n a_{i,j} v_j
+\tag{28}
+\end{equation}
+
+#### 2.2 归一化因子的量级分析
+
+**问题**: 归一化因子 $Z_i = \sum_{j=1}^n \exp\left(\frac{q_i \cdot k_j}{\sqrt{d}}\right)$ 与序列长度 $n$ 的关系？
+
+**分析**: 如果Attention具有"聚焦"特性（即只关注少数几个token），存在常数 $K$ 使得：
+\begin{equation}
+\exp\left(\frac{q_i \cdot k_j}{\sqrt{d}}\right) \approx 0, \quad \text{当 } |i-j| > K
+\tag{29}
+\end{equation}
+
+则：
+\begin{equation}
+Z_i \approx \sum_{j:|i-j|\leq K} \exp\left(\frac{q_i \cdot k_j}{\sqrt{d}}\right) = \mathcal{O}(K)
+\tag{30}
+\end{equation}
+
+因此 $Z_i$ 与 $n$ **无关**或弱相关，这是一个关键观察。
+
+**实证支持**:
+1. Local Attention的成功表明大部分权重集中在局部
+2. Attention矩阵的稀疏性可视化
+3. RoPE等位置编码的远程衰减特性
+
+#### 2.3 Softmax vs. 其他归一化方法
+
+**方案1**: GAU使用的归一化（原文提到）：
+\begin{equation}
+\boldsymbol{A} = \frac{1}{n}\text{relu}^2\left(\frac{QK^{\top}}{\sqrt{d}}\right)
+\tag{31}
+\end{equation}
+
+**问题分析**:
+- 归一化因子 $n$ 是序列长度，与位置无关
+- 但实际有效的注意力范围可能远小于 $n$
+- 导致长度泛化能力差
+
+**方案2**: 动态归一化：
+\begin{equation}
+a_{i,j} = \frac{\text{relu}^2\left(\frac{q_i \cdot k_j}{\sqrt{d}}\right)}{\sum_{j'=1}^n \text{relu}^2\left(\frac{q_i \cdot k_{j'}}{同\sqrt{d}}\right)}
+\tag{32}
+\end{equation}
+
+这与Softmax在形式上类似，但：
+- $\text{relu}^2$ 具有正齐次性：$\text{relu}^2(\lambda x) = \lambda^2 \text{relu}^2(x)$
+- 无法通过温度参数灵活调控
+
+**方案3**: Softmax（标准方案）：
+\begin{equation}
+a_{i,j} = \frac{\exp\left(\frac{q_i \cdot k_j}{\sqrt{d}}\right)}{\sum_{j'=1}^n \exp\left(\frac{q_i \cdot k_{j'}}{\sqrt{d}}\right)}
+\tag{33}
+\end{equation}
+
+优势：
+- 归一化因子自适应于有效注意力范围
+- 支持温度参数调控
+- 与位置编码配合良好
+
+### 三、熵不变性理论
+
+#### 3.1 信息熵的定义
+
+给定离散概率分布 $\boldsymbol{p} = (p_1, \ldots, p_n)$，Shannon熵定义为：
+\begin{equation}
+H(\boldsymbol{p}) = -\sum_{i=1}^n p_i \log p_i
+\tag{34}
+\end{equation}
+
+对于Softmax输出的分布：
+\begin{equation}
+H(\text{softmax}(\boldsymbol{x})) = -\sum_{i=1}^n \frac{e^{x_i}}{\sum_j e^{x_j}} \cdot \log\frac{e^{x_i}}{\sum_j e^{x_j}}
+\tag{35}
+\end{equation}
+
+化简：
+\begin{align}
+H &= -\sum_{i=1}^n \frac{e^{x_i}}{Z} \cdot \left(x_i - \log Z\right) \tag{36}\\
+&= -\frac{1}{Z}\sum_{i=1}^n e^{x_i} x_i + \log Z \cdot \frac{1}{Z}\sum_{i=1}^n e^{x_i} \tag{37}\\
+&= \log Z - \frac{1}{Z}\sum_{i=1}^n e^{x_i} x_i \tag{38}
+\end{align}
+
+其中 $Z = \sum_j e^{x_j}$ 是配分函数。
+
+#### 3.2 温度参数对熵的影响
+
+引入温度参数 $\tau$：
+\begin{equation}
+H_\tau = \log Z_\tau - \frac{1}{\tau Z_\tau}\sum_{i=1}^n e^{x_i/\tau} x_i
+\tag{39}
+\end{equation}
+
+其中 $Z_\tau = \sum_j e^{x_j/\tau}$。
+
+**定理（熵的单调性）**:
+\begin{equation}
+\frac{\partial H_\tau}{\partial \tau} > 0
+\tag{40}
+\end{equation}
+
+即温度越高，熵越大（分布越平滑）。
+
+**极限情况**:
+- $\tau \to 0$: $H \to 0$（one-hot分布，熵最小）
+- $\tau \to \infty$: $H \to \log n$（均匀分布，熵最大）
+
+#### 3.3 长度外推的熵不变性方案
+
+**问题**: 训练长度为 $n_0$，测试长度为 $n$，如何保持熵的一致性？
+
+**方案**: 调整温度参数使得期望熵保持不变：
+\begin{equation}
+\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{\log_{n_0} n}{\sqrt{d}} QK^{\top}\right)V
+\tag{41}
+\end{equation}
+
+**理论分析**: 假设注意力分数 $s_{ij} = \frac{q_i \cdot k_j}{\sqrt{d}}$ 的分布与长度无关，则：
+
+当序列长度从 $n_0$ 变为 $n$ 时，有效的非零项数量从 $\mathcal{O}(K)$ 可能增加。为保持熵的量级，我们需要：
+\begin{equation}
+H_n \approx H_{n_0}
+\tag{42}
+\end{equation}
+
+通过调整温度 $\tau = \frac{1}{\log_{n_0} n}$，可以部分补偿长度变化带来的熵变化。
+
+**数值验证**: 设 $n_0 = 512, n = 2048$，则：
+\begin{equation}
+\tau = \frac{1}{\log_{512} 2048} = \frac{1}{\frac{\log 2048}{\log 512}} = \frac{\log 512}{\log 2048} = \frac{9\log 2}{11\log 2} \approx 0.818
+\tag{43}
+\end{equation}
+
+即对于4倍长度，温度缩放到约0.82倍。
+
+### 四、数值稳定性分析
+
+#### 4.1 Softmax的数值稳定实现
+
+**问题**: 直接计算 $e^{x_i}$ 可能导致：
+- 上溢：$x_i$ 很大时，$e^{x_i} > \text{FLOAT_MAX}$
+- 下溢：$x_i$ 很小时，$e^{x_i} \approx 0$
+
+**解决方案**: 利用平移不变性 $\eqref{eq:3}$，减去最大值：
+\begin{equation}
+\tilde{x}_i = x_i - \max_j x_j
+\tag{44}
+\end{equation}
+
+则：
+\begin{equation}
+\text{softmax}(\boldsymbol{x})_i = \frac{e^{\tilde{x}_i}}{\sum_j e^{\tilde{x}_j}}
+\tag{45}
+\end{equation}
+
+**数值性质**:
+- $\tilde{x}_i \leq 0, \forall i$，避免上溢
+- $\max_i \tilde{x}_i = 0$，至少有一项为 $e^0 = 1$，避免全部下溢
+
+**伪代码**:
+```
+def stable_softmax(x):
+    x_max = max(x)
+    x_shifted = x - x_max
+    exp_x = exp(x_shifted)
+    return exp_x / sum(exp_x)
+```
+
+#### 4.2 Log-Softmax的稳定计算
+
+在计算交叉熵损失时，需要 $\log(\text{softmax}(\boldsymbol{x})_i)$：
+\begin{align}
+\log(\text{softmax}(\boldsymbol{x})_i) &= \log\frac{e^{x_i}}{\sum_j e^{x_j}} \tag{46}\\
+&= x_i - \log\sum_j e^{x_j} \tag{47}
+\end{align}
+
+**Log-Sum-Exp技巧**:
+\begin{align}
+\log\sum_j e^{x_j} &= \log\left(e^{x_{\max}}\sum_j e^{x_j - x_{\max}}\right) \tag{48}\\
+&= x_{\max} + \log\sum_j e^{x_j - x_{\max}} \tag{49}
+\end{align}
+
+其中 $x_{\max} = \max_j x_j$。
+
+**完整的稳定实现**:
+\begin{equation}
+\log(\text{softmax}(\boldsymbol{x})_i) = (x_i - x_{\max}) - \log\sum_j e^{x_j - x_{\max}}
+\tag{50}
+\end{equation}
+
+#### 4.3 梯度的数值稳定性
+
+Softmax的梯度计算 $\eqref{eq:18}$ 本身是数值稳定的，因为：
+- $s_i \in (0, 1)$，不会溢出
+- $(1 - s_i) \in (0, 1)$，同样稳定
+
+但在反向传播中，需要注意：
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial x_j} = s_j - \delta_{jy}
+\tag{51}
+\end{equation}
+
+这个形式非常稳定，因为：
+- $s_j \in (0, 1)$
+- $\delta_{jy} \in \{0, 1\}$
+- 差值在 $(-1, 1)$ 范围内
+
+### 五、复杂度分析
+
+#### 5.1 标准Attention的复杂度
+
+**时间复杂度**:
+\begin{equation}
+\mathcal{O}(n^2 d + n^2 + nd) = \mathcal{O}(n^2 d)
+\tag{52}
+\end{equation}
+
+详细分解：
+- 计算 $QK^{\top}$: $\mathcal{O}(n^2 d)$
+- 计算Softmax: $\mathcal{O}(n^2)$
+- 计算注意力输出: $\mathcal{O}(n^2 d)$
+
+**空间复杂度**:
+\begin{equation}
+\mathcal{O}(n^2 + nd) = \mathcal{O}(n^2)
+\tag{53}
+\end{equation}
+
+- 存储注意力矩阵: $\mathcal{O}(n^2)$
+- 存储 $Q, K, V$: $\mathcal{O}(nd)$
+
+#### 5.2 优化方案的复杂度对比
+
+**Flash Attention**: 通过分块计算避免存储完整注意力矩阵
+- 时间: $\mathcal{O}(n^2 d)$（不变）
+- 空间: $\mathcal{O}(nd)$（降为线性！）
+
+**Linear Attention**: 使用核方法近似
+- 时间: $\mathcal{O}(nd^2)$
+- 空间: $\mathcal{O}(nd)$
+
+当 $n \gg d$ 时，Linear Attention更优。
+
+**Sparse Attention**: 只计算部分注意力权重
+- 时间: $\mathcal{O}(nkd)$，其中 $k \ll n$ 是每个位置关注的token数
+- 空间: $\mathcal{O}(nk)$
+
+### 六、激活函数对比实验
+
+#### 6.1 理论对比
+
+| 激活函数 | 公式 | 归一化性质 | 温度调控 | 梯度性质 |
+|---------|------|-----------|---------|---------|
+| Softmax | $\frac{e^{x_i}}{\sum_j e^{x_j}}$ | 自适应 | 支持 | 光滑 |
+| ReLU² | $\frac{\text{relu}^2(x_i)}{\sum_j \text{relu}^2(x_j)}$ | 需手动设置 | 不支持 | 非光滑 |
+| Sigmoid | $\sigma(x_i) = \frac{1}{1+e^{-x_i}}$ | 无（不归一） | 支持 | 光滑但饱和 |
+| Tanh | $\tanh(x_i)$ | 无（不归一） | 支持 | 光滑但饱和 |
+
+#### 6.2 齐次性分析
+
+**Softmax**: 不具有齐次性
+\begin{equation}
+\text{softmax}(\lambda \boldsymbol{x}) \neq \lambda^k \text{softmax}(\boldsymbol{x})
+\tag{54}
+\end{equation}
+
+这使得温度参数有效。
+
+**ReLU²**: 具有2次齐次性
+\begin{equation}
+\text{relu}^2(\lambda x) = \lambda^2 \text{relu}^2(x)
+\tag{55}
+\end{equation}
+
+归一化后：
+\begin{equation}
+\frac{\text{relu}^2(\lambda x_i)}{\sum_j \text{relu}^2(\lambda x_j)} = \frac{\lambda^2 \text{relu}^2(x_i)}{\sum_j \lambda^2 \text{relu}^2(x_j)} = \frac{\text{relu}^2(x_i)}{\sum_j \text{relu}^2(x_j)}
+\tag{56}
+\end{equation}
+
+温度参数被抵消，无法调控！
+
+#### 6.3 梯度特性对比
+
+**Softmax梯度** $\eqref{eq:18}$:
+- 处处可导
+- 梯度有界：$|s_i(1-s_i)| \leq 1/4$
+- 自动归一化（梯度和为0）
+
+**ReLU²梯度**:
+\begin{equation}
+\frac{\partial \text{relu}^2(x)}{\partial x} = \begin{cases}
+2x, & x > 0 \\
+0, & x \leq 0
+\end{cases}
+\tag{57}
+\end{equation}
+
+- 在0点不可导
+- 梯度无界（可能导致梯度爆炸）
+- 稀疏性（负值梯度为0）
+
+### 七、实践建议与超参数选择
+
+#### 7.1 标准Attention的最佳实践
+
+**1. Scale因子选择**:
+\begin{equation}
+\alpha = \frac{1}{\sqrt{d_k}}
+\tag{58}
+\end{equation}
+
+**理论依据**: 假设 $q_i, k_j$ 的每个分量独立同分布，均值为0，方差为 $\sigma^2$，则：
+\begin{equation}
+\mathbb{E}[q_i \cdot k_j] = 0, \quad \text{Var}(q_i \cdot k_j) = d_k \sigma^2
+\tag{59}
+\end{equation}
+
+除以 $\sqrt{d_k}$ 使方差归一化：
+\begin{equation}
+\text{Var}\left(\frac{q_i \cdot k_j}{\sqrt{d_k}}\right) = \sigma^2
+\tag{60}
+\end{equation}
+
+这避免了Softmax输入方差随维度增长。
+
+**2. 温度参数调整**:
+
+对于长度外推，使用：
+\begin{equation}
+\tau = \frac{\log n_{\text{train}}}{\log n_{\text{test}}}
+\tag{61}
+\end{equation}
+
+**3. Dropout位置**:
+
+推荐在Attention权重上应用Dropout：
+\begin{equation}
+\text{Attention}(Q,K,V) = \text{Dropout}(\text{softmax}(QK^{\top}/\sqrt{d}))V
+\tag{62}
+\end{equation}
+
+典型值：$p_{\text{dropout}} = 0.1$
+
+#### 7.2 数值稳定性检查清单
+
+1. 使用Log-Softmax计算交叉熵损失
+2. 梯度裁剪：`clip_grad_norm_(parameters, max_norm=1.0)`
+3. 混合精度训练时注意Softmax精度
+4. 检查Attention矩阵的最大值/最小值
+
+#### 7.3 性能优化建议
+
+**内存优化**:
+- 使用Flash Attention减少显存占用
+- Gradient Checkpointing牺牲计算换显存
+
+**计算优化**:
+- 使用fused kernels（Softmax与Scale合并）
+- 利用硬件加速（Tensor Cores）
+
+**多头注意力配置**:
+\begin{equation}
+h \times d_k = d_{\text{model}}
+\tag{63}
+\end{equation}
+
+常见配置：
+- 小模型：$h=8, d_k=64, d_{\text{model}}=512$
+- 大模型：$h=16, d_k=64, d_{\text{model}}=1024$
+
+### 八、总结与展望
+
+#### 8.1 核心结论
+
+1. **Softmax的理论优势**:
+   - 自适应的归一化因子，与有效注意力范围匹配
+   - 支持温度参数调控，实现熵的灵活控制
+   - 数学性质优良（光滑、可导、有界）
+
+2. **与其他激活函数的对比**:
+   - ReLU²等幂函数因齐次性无法有效调控温度
+   - Softmax的指数形式是实现温度调控的最自然选择
+
+3. **长度泛化的关键**:
+   - 归一化因子应与实际注意力范围匹配
+   - 熵不变性提供了一个理论框架
+
+#### 8.2 开放问题
+
+1. 是否存在比Softmax更优的归一化方案？
+2. 如何理论化地预测最优温度参数？
+3. 熵不变性是否是长度外推的充分条件？
+
+#### 8.3 扩展阅读
+
+- Flash Attention: 高效的注意力计算
+- Linformer: 线性复杂度的近似方法
+- ALiBi: 基于偏置的位置编码方案
 

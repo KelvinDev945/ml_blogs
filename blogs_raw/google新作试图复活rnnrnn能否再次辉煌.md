@@ -246,7 +246,618 @@ url={\url{https://spaces.ac.cn/archives/9554}},
 
 ---
 
-## 公式推导与注释
+## 详细数学推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 1. RNN的数学基础
+
+**标准RNN的递归定义**：
+
+最基本的循环神经网络可以表示为：
+$$
+x_t = f(Ax_{t-1} + Bu_t + b) \tag{1}
+$$
+
+其中：
+- $x_t \in \mathbb{R}^d$ 是时刻 $t$ 的隐状态向量
+- $u_t \in \mathbb{R}^m$ 是时刻 $t$ 的输入向量
+- $A \in \mathbb{R}^{d \times d}$ 是状态转移矩阵
+- $B \in \mathbb{R}^{d \times m}$ 是输入权重矩阵
+- $b \in \mathbb{R}^d$ 是偏置向量
+- $f: \mathbb{R}^d \to \mathbb{R}^d$ 是非线性激活函数
+
+**注释**：这个递归定义说明RNN的核心是一个动力学系统，当前状态 $x_t$ 依赖于上一时刻状态 $x_{t-1}$ 和当前输入 $u_t$。
+
+### 2. 线性RNN的定义与性质
+
+**线性化**：
+
+当我们移除激活函数 $f$，得到线性RNN：
+$$
+x_t = Ax_{t-1} + Bu_t \tag{2}
+$$
+
+**状态展开**：
+
+通过反复迭代，我们可以将 $x_t$ 展开为输入序列的函数：
+$$
+\begin{aligned}
+x_0 &= Bu_0 \tag{3}\\
+x_1 &= A(Bu_0) + Bu_1 = ABu_0 + Bu_1 \tag{4}\\
+x_2 &= A(ABu_0 + Bu_1) + Bu_2 = A^2Bu_0 + ABu_1 + Bu_2 \tag{5}\\
+&\vdots \\
+x_t &= \sum_{k=0}^t A^{t-k}Bu_k \tag{6}
+\end{aligned}
+$$
+
+**数学直觉**：式(6)表明，时刻 $t$ 的状态是所有历史输入的加权和，权重由矩阵幂 $A^{t-k}$ 决定。这个权重随时间的衰减方式取决于 $A$ 的谱性质。
+
+### 3. 矩阵对角化理论
+
+**对角化的定义**：
+
+矩阵 $A \in \mathbb{C}^{d \times d}$ 可对角化，当且仅当存在可逆矩阵 $P \in \mathbb{C}^{d \times d}$ 和对角矩阵 $\Lambda = \text{diag}(\lambda_1, \ldots, \lambda_d)$，使得：
+$$
+A = P\Lambda P^{-1} \tag{7}
+$$
+
+其中 $\lambda_1, \ldots, \lambda_d$ 是 $A$ 的特征值，$P$ 的列向量是对应的特征向量。
+
+**对角化的性质**：
+
+对于对角化矩阵，幂运算变得简单：
+$$
+A^n = P\Lambda^n P^{-1} = P \text{diag}(\lambda_1^n, \ldots, \lambda_d^n) P^{-1} \tag{8}
+$$
+
+**复数域的必要性**：
+
+**定理**：任何 $n \times n$ 复矩阵都有 $n$ 个复特征值（计重数）。
+
+**证明思路**：根据代数基本定理，特征多项式 $\det(\lambda I - A) = 0$ 在复数域内总有 $n$ 个根。
+
+**注释**：实矩阵不一定有实特征值（例如旋转矩阵），但在复数域内一定可以找到特征值。这就是为什么LRU需要在复数域工作。
+
+### 4. LRU的参数化推导
+
+**从一般矩阵到对角矩阵**：
+
+根据对角化理论，设 $A = P\Lambda P^{-1}$，代入式(6)：
+$$
+\begin{aligned}
+x_t &= \sum_{k=0}^t A^{t-k}Bu_k \\
+&= \sum_{k=0}^t P\Lambda^{t-k}P^{-1}Bu_k \tag{9}\\
+&= P \sum_{k=0}^t \Lambda^{t-k}(P^{-1}Bu_k) \tag{10}
+\end{aligned}
+$$
+
+**维度匹配**：
+
+令 $\tilde{B} = P^{-1}B$，$\tilde{x}_t = P^{-1}x_t$，则：
+$$
+\tilde{x}_t = \sum_{k=0}^t \Lambda^{t-k}\tilde{B}u_k \tag{11}
+$$
+
+**element-wise分解**：
+
+由于 $\Lambda$ 是对角矩阵，式(11)在每个维度上独立：
+$$
+\tilde{x}_t^{(i)} = \sum_{k=0}^t \lambda_i^{t-k}\tilde{B}^{(i)}u_k, \quad i = 1, \ldots, d \tag{12}
+$$
+
+**注释**：这个分解非常关键，它将 $d \times d$ 的矩阵运算降低为 $d$ 个独立的标量递归。
+
+### 5. 极坐标参数化
+
+**复特征值的表示**：
+
+对于复特征值 $\lambda \in \mathbb{C}$，采用极坐标表示：
+$$
+\lambda = re^{i\theta} \tag{13}
+$$
+
+其中 $r = |\lambda| \geq 0$ 是模，$\theta \in [0, 2\pi)$ 是幅角。
+
+**代入递归公式**：
+$$
+\begin{aligned}
+\tilde{x}_t^{(i)} &= \sum_{k=0}^t (re^{i\theta})^{t-k}\tilde{B}^{(i)}u_k \\
+&= \sum_{k=0}^t r^{t-k}e^{i(t-k)\theta}\tilde{B}^{(i)}u_k \tag{14}
+\end{aligned}
+$$
+
+**稳定性约束**：
+
+为保证数值稳定，需要 $r \leq 1$：
+
+**定理（稳定性条件）**：若 $r > 1$，则当 $t \to \infty$ 时，$\tilde{x}_t^{(i)}$ 指数增长，导致数值不稳定。
+
+**证明**：考虑常数输入 $u_k = c$：
+$$
+|\tilde{x}_t^{(i)}| = \left|\sum_{k=0}^t r^{t-k}e^{i(t-k)\theta}\tilde{B}^{(i)}c\right| = |\tilde{B}^{(i)}c| \sum_{k=0}^t r^{t-k} = |\tilde{B}^{(i)}c| r^t \frac{1 - r^{-(t+1)}}{1 - r^{-1}} \tag{15}
+$$
+
+当 $r > 1$ 时，$r^t \to \infty$，导致数值爆炸。
+
+### 6. 无约束优化的参数化技巧
+
+**问题**：如何在优化过程中保证 $r \in [0, 1]$？
+
+**方案1**：直接约束
+$$
+r = \sigma(\nu) = \frac{1}{1 + e^{-\nu}} \tag{16}
+$$
+
+其中 $\nu \in \mathbb{R}$ 是无约束参数。
+
+**方案2**：指数衰减（LRU采用）
+$$
+r = e^{-\nu}, \quad \nu = e^{\nu^{\log}} \tag{17}
+$$
+
+其中 $\nu^{\log} \in \mathbb{R}$ 是无约束参数。
+
+**方案2的优势**：
+
+1. **组合优雅**：$r^k = e^{-k\nu}$，与 $e^{ik\theta}$ 可以组合为 $e^{k(-\nu + i\theta)}$
+2. **导数性质好**：$\frac{\partial r}{\partial \nu^{\log}} = -e^{-\nu} \cdot e^{\nu^{\log}} = -re^{\nu^{\log}}$，没有饱和区
+
+**完整参数化**：
+$$
+\lambda = e^{-\nu + i\theta} = e^{-e^{\nu^{\log}} + ie^{\theta^{\log}}} \tag{18}
+$$
+
+### 7. 初始化策略的数学分析
+
+**Glorot初始化的特征值分布**：
+
+对于 $d \times d$ 实矩阵，Glorot初始化从 $\mathcal{N}(0, 1/d)$ 采样每个元素。
+
+**定理（Ginibre分布）**：当 $d \to \infty$ 时，特征值均匀分布在复平面单位圆盘内。
+
+**密度函数**：
+$$
+\rho(\lambda) = \frac{1}{\pi}, \quad |\lambda| \leq 1 \tag{19}
+$$
+
+**圆盘内均匀采样**：
+
+在笛卡尔坐标系：$\lambda = x + iy$，均匀分布意味着 $dx \, dy = \text{const}$
+
+在极坐标系：$\lambda = re^{i\theta}$，$dx \, dy = r \, dr \, d\theta$
+
+因此均匀分布需要：
+$$
+r \, dr \, d\theta = \text{const} \tag{20}
+$$
+
+**推导**：
+
+设 $r^2 \sim U[0, 1]$，$\theta \sim U[0, 2\pi]$，则：
+$$
+P(r \leq R) = P(r^2 \leq R^2) = R^2 \tag{21}
+$$
+
+密度函数：$p(r) = \frac{d}{dr}(r^2) = 2r$，这正好对应 $r \, dr$ 的均匀性。
+
+### 8. 圆环初始化的改进
+
+**问题**：单位圆盘内的均匀初始化意味着很多 $r$ 接近0，导致记忆快速衰减。
+
+**解决方案**：圆环初始化
+
+在 $r \in [r_{\min}, r_{\max}]$ 的圆环内均匀采样：
+$$
+r^2 \sim U[r_{\min}^2, r_{\max}^2], \quad \theta \sim U[0, 2\pi] \tag{22}
+$$
+
+**LRU的选择**：$r_{\min} = 0.9$, $r_{\max} = 0.999$
+
+**数学直觉**：这保证了大部分特征值的模接近1，从而有更好的长期记忆能力。
+
+### 9. 稳定性分析：$\gamma$ 参数的引入
+
+**问题**：当 $r \approx 1$ 时，输出的方差会膨胀。
+
+**方差分析**：
+
+假设 $u_k \sim i.i.d.$，均值为0，方差为 $\sigma_u^2$，则：
+$$
+\begin{aligned}
+\mathbb{E}[|\tilde{x}_t^{(i)}|^2] &= \mathbb{E}\left[\left|\sum_{k=0}^t r^{t-k}e^{i(t-k)\theta}\tilde{B}^{(i)}u_k\right|^2\right] \\
+&= |\tilde{B}^{(i)}|^2 \sum_{k=0}^t r^{2(t-k)} \mathbb{E}[|u_k|^2] \tag{23}\\
+&= |\tilde{B}^{(i)}|^2 \sigma_u^2 \sum_{k=0}^t r^{2(t-k)} \\
+&= |\tilde{B}^{(i)}|^2 \sigma_u^2 \frac{1 - r^{2(t+1)}}{1 - r^2} \tag{24}
+\end{aligned}
+$$
+
+**当 $t \to \infty$ 且 $r < 1$**：
+$$
+\mathbb{E}[|\tilde{x}_t^{(i)}|^2] \to |\tilde{B}^{(i)}|^2 \sigma_u^2 \frac{1}{1 - r^2} \tag{25}
+$$
+
+**放大因子**：
+$$
+\text{Amplification} = \frac{1}{\sqrt{1 - r^2}} \tag{26}
+$$
+
+当 $r = 0.999$ 时，放大因子 $\approx 22.4$，这会导致训练不稳定。
+
+**解决方案**：引入缩放参数 $\gamma$
+
+修改递归为：
+$$
+\tilde{x}_t^{(i)} = \lambda \tilde{x}_{t-1}^{(i)} + \gamma \tilde{B}^{(i)}u_t \tag{27}
+$$
+
+**初始化**：$\gamma = \sqrt{1 - r^2}$
+
+**稳态方差**：
+$$
+\mathbb{E}[|\tilde{x}_t^{(i)}|^2] \to \gamma^2 |\tilde{B}^{(i)}|^2 \sigma_u^2 \frac{1}{1 - r^2} = |\tilde{B}^{(i)}|^2 \sigma_u^2 \tag{28}
+$$
+
+**注释**：通过这个技巧，输出方差与输入方差保持同一量级，提高训练稳定性。
+
+### 10. 并行计算：Prefix Sum算法
+
+**问题**：直接递归计算式(2)是串行的，无法并行。
+
+**线性RNN的卷积形式**：
+$$
+x_t = \sum_{k=0}^t \Lambda^{t-k}Bu_k \tag{29}
+$$
+
+**分治策略**：
+
+将序列 $[0, T]$ 分为 $[0, t]$ 和 $[t+1, T]$ 两部分：
+$$
+\begin{aligned}
+x_T &= \sum_{k=0}^T \Lambda^{T-k}Bu_k \\
+&= \sum_{k=0}^t \Lambda^{T-k}Bu_k + \sum_{k=t+1}^T \Lambda^{T-k}Bu_k \tag{30}\\
+&= \Lambda^{T-t} \sum_{k=0}^t \Lambda^{t-k}Bu_k + \sum_{k=t+1}^T \Lambda^{T-k}Bu_k \\
+&= \Lambda^{T-t} x_t + \sum_{k=t+1}^T \Lambda^{T-k}Bu_k \tag{31}
+\end{aligned}
+$$
+
+**算法复杂度分析**：
+
+设序列长度为 $L$，递归深度为 $\log_2 L$。
+
+每层需要的操作：
+- 分治：$O(L)$（并行）
+- 合并：$O(L)$（element-wise乘法和加法）
+
+总复杂度：$O(L \log L)$（时间，并行模型）
+
+**实际实现**：
+
+由于 $\Lambda$ 是对角矩阵，$\Lambda^{T-t}$ 的计算是element-wise的：
+$$
+\Lambda^{T-t} = \text{diag}(\lambda_1^{T-t}, \ldots, \lambda_d^{T-t}) \tag{32}
+$$
+
+### 11. 关联扫描（Associative Scan）算法
+
+**二元操作符的定义**：
+
+定义操作符 $\oplus: (A, x) \times (A, x) \to (A, x)$：
+$$
+(A_2, x_2) \oplus (A_1, x_1) = (A_2 A_1, A_2 x_1 + x_2) \tag{33}
+$$
+
+**结合律验证**：
+$$
+\begin{aligned}
+&[(A_3, x_3) \oplus (A_2, x_2)] \oplus (A_1, x_1) \\
+&= (A_3 A_2, A_3 x_2 + x_3) \oplus (A_1, x_1) \\
+&= (A_3 A_2 A_1, A_3 A_2 x_1 + A_3 x_2 + x_3) \tag{34}
+\end{aligned}
+$$
+
+这与 $(A_3, x_3) \oplus [(A_2, x_2) \oplus (A_1, x_1)]$ 的结果相同。
+
+**Prefix Scan的应用**：
+
+输入序列：$(A, Bu_0), (A, Bu_1), \ldots, (A, Bu_{L-1})$
+
+输出序列：通过 $\oplus$ 的前缀和得到所有 $x_t$
+
+### 12. 计算复杂度的严格分析
+
+**标准RNN**：
+
+- 每步：矩阵-向量乘法 $Ax_{t-1}$：$O(d^2)$
+- $L$ 步：$O(Ld^2)$
+- 无法并行
+
+**LRU（对角化）**：
+
+- 每步：element-wise乘法：$O(d)$
+- 串行：$O(Ld)$
+- 并行（Prefix Sum）：$O(L \log L \cdot d)$
+
+**Self-Attention**：
+
+- 注意力矩阵：$O(L^2d)$
+- 无法流式推理
+
+**对比表**：
+
+| 模型 | 训练复杂度 | 推理复杂度（流式） | 并行性 |
+|------|-----------|------------------|--------|
+| 标准RNN | $O(Ld^2)$ | $O(d^2)$/step | 低 |
+| LRU | $O(L \log L \cdot d)$ | $O(d)$/step | 高 |
+| Self-Attention | $O(L^2d)$ | $O(Ld)$/step | 高 |
+
+### 13. 梯度传播分析
+
+**BPTT的梯度消失/爆炸**：
+
+考虑损失函数 $\mathcal{L}(x_T)$，其关于 $x_0$ 的梯度：
+$$
+\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_T} \frac{\partial x_T}{\partial x_{T-1}} \cdots \frac{\partial x_1}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_T} \prod_{t=1}^T \frac{\partial x_t}{\partial x_{t-1}} \tag{35}
+$$
+
+对于线性RNN，$\frac{\partial x_t}{\partial x_{t-1}} = A$，因此：
+$$
+\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_T} A^T \tag{36}
+$$
+
+**谱半径的影响**：
+
+设 $\rho(A) = \max_i |\lambda_i|$ 是 $A$ 的谱半径，则：
+$$
+\|A^T\| \sim \rho(A)^T \tag{37}
+$$
+
+- 若 $\rho(A) < 1$：梯度消失
+- 若 $\rho(A) > 1$：梯度爆炸
+- 若 $\rho(A) = 1$：理想情况
+
+**LRU的优势**：通过初始化 $r \approx 1$，保证梯度稳定传播。
+
+### 14. 与Transformer的理论对比
+
+**表达能力**：
+
+**定理**：单层自注意力可以表示任何排列不变函数。
+
+**证明思路**：通过构造合适的 $Q, K, V$ 矩阵，可以实现任意的加权平均。
+
+**RNN的限制**：
+
+RNN是马尔可夫模型，受到状态维度 $d$ 的限制。但LRU通过：
+1. 复数参数化，增加表达能力
+2. 多头设计，类似多头注意力
+
+可以部分缓解这个限制。
+
+### 15. 收敛性理论
+
+**定理（线性RNN的收敛性）**：
+
+对于线性RNN $x_t = \Lambda x_{t-1} + Bu_t$，其中 $\Lambda = \text{diag}(\lambda_1, \ldots, \lambda_d)$，若：
+1. $|\lambda_i| < 1$ 对所有 $i$
+2. 输入序列有界：$\|u_t\| \leq C$
+
+则存在唯一稳态 $x_\infty$，使得当 $t \to \infty$ 时，$x_t \to x_\infty$。
+
+**证明**：
+
+稳态满足：
+$$
+x_\infty = \Lambda x_\infty + Bu_\infty \Rightarrow x_\infty = (I - \Lambda)^{-1} Bu_\infty \tag{38}
+$$
+
+由于 $|\lambda_i| < 1$，$(I - \Lambda)^{-1}$ 存在。
+
+### 16. 数值稳定性的实践建议
+
+**建议1**：使用混合精度训练
+
+- 前向传播：FP16
+- 梯度累积：FP32
+- $\lambda$ 参数：FP32（避免精度损失）
+
+**建议2**：梯度裁剪
+$$
+g \leftarrow \begin{cases} g & \text{if } \|g\| \leq \theta \\ \frac{\theta}{\|g\|} g & \text{otherwise} \end{cases} \tag{39}
+$$
+
+推荐 $\theta = 1.0$
+
+**建议3**：正则化
+
+L2正则化 $\lambda$ 参数，防止 $r \to 1$：
+$$
+\mathcal{L}_{\text{reg}} = \alpha \sum_i (\nu_i - \nu_{\text{target}})^2 \tag{40}
+$$
+
+其中 $\nu_{\text{target}}$ 对应 $r = 0.95$
+
+### 17. 多头LRU的设计
+
+**并行多头**：
+$$
+y = \text{Concat}(\text{head}_1, \ldots, \text{head}_h) W^O \tag{41}
+$$
+
+其中每个头：
+$$
+\text{head}_i = C_i^* x_t^{(i)}, \quad x_t^{(i)} = \Lambda_i x_{t-1}^{(i)} + \gamma_i B_i u_t \tag{42}
+$$
+
+**参数量**：
+
+- 单头LRU：$2d$（$\lambda$ 和 $\gamma$）+ $2dm$（$B$ 和 $C$）
+- $h$ 头LRU：$h(2d/h + 2dm/h) = 2d + 2dm$
+
+与单头相同！（假设总维度固定）
+
+### 18. SLRU：简化版本
+
+**定义**：
+
+SLRU = Simpler LRU，假设所有参数都是实数：
+$$
+x_t = \text{diag}(r_1, \ldots, r_d) x_{t-1} + Bu_t \tag{43}
+$$
+
+其中 $r_i \in [0, 1]$ 是实数。
+
+**优势**：
+1. 实现简单
+2. 计算效率高（无复数运算）
+
+**劣势**：
+1. 表达能力弱于LRU
+2. 无法表示振荡模式（需要复数相位）
+
+### 19. RWKV的数学结构
+
+**RWKV的RNN部分**：
+$$
+x_t = \sigma(r_t) \frac{y_t + (\gamma \lambda - 1)e^{k_t}v_t}{z_t + (\gamma \lambda - 1)e^{k_t}} \tag{44}
+$$
+
+其中：
+$$
+\begin{aligned}
+y_t &= \lambda y_{t-1} + e^{k_t}v_t \\
+z_t &= \lambda z_{t-1} + e^{k_t}
+\end{aligned} \tag{45}
+$$
+
+**归一化机制**：
+
+RWKV通过 $y_t / z_t$ 实现自动归一化，不需要额外的 $\gamma$ 参数。
+
+**与Attention的联系**：
+
+RWKV可以视为线性注意力的一种形式，其中：
+- $y_t$：累积的值向量
+- $z_t$：累积的归一化系数
+- $e^{k_t}$：注意力权重
+
+### 20. 实验结果的数学解释
+
+**LRA任务的特性**：
+
+LRA（Long Range Arena）测试长距离依赖能力，需要：
+1. 长期记忆（$r \approx 1$）
+2. 选择性注意（复数相位 $\theta$）
+
+**为什么线性RNN在LRA上表现好？**
+
+**原因1**：常数复杂度
+
+对于长度 $L = 16384$ 的序列，Self-Attention需要 $O(L^2)$ 的内存，而LRU只需要 $O(d)$。
+
+**原因2**：归纳偏置
+
+LRU的指数衰减假设符合很多实际任务的特性（近期信息更重要）。
+
+### 21. 语言建模的挑战
+
+**问题**：为什么LRU在LM任务上不如Attention？
+
+**理论分析**：
+
+**信息瓶颈**：
+
+设输入序列长度为 $L$，信息量为 $I(u_{<L})$。RNN需要将其压缩到 $d$ 维状态：
+$$
+I(x_L) \leq d \log_2 C \tag{46}
+$$
+
+其中 $C$ 是每个维度的量化级别。
+
+**Attention的优势**：
+
+Attention直接访问所有历史，无信息瓶颈：
+$$
+I(\text{Attention}(u_{<L})) \leq I(u_{<L}) \tag{47}
+$$
+
+**缓解策略**：
+
+1. 增大 $d$（但增加计算量）
+2. 分层结构
+3. 混合架构（RNN + Attention）
+
+### 22. 频域分析
+
+**离散傅里叶变换的视角**：
+
+对于LRU，设输入为正弦信号：
+$$
+u_t = A \sin(\omega t + \phi) \tag{48}
+$$
+
+输出的频率响应：
+$$
+H(\omega) = \frac{C^* \gamma B}{1 - \lambda e^{-i\omega}} \tag{49}
+$$
+
+**幅频特性**：
+$$
+|H(\omega)| = \frac{|C^* \gamma B|}{|1 - re^{i(\theta - \omega)}|} \tag{50}
+$$
+
+当 $\omega = \theta$ 时，$|H(\omega)|$ 最大，说明LRU对特定频率有选择性。
+
+### 23. 与连续时间系统的联系
+
+**状态空间模型（SSM）**：
+
+LRU可以视为离散化的线性SSM：
+$$
+\begin{aligned}
+\frac{dx(t)}{dt} &= Ax(t) + Bu(t) \\
+y(t) &= Cx(t)
+\end{aligned} \tag{51}
+$$
+
+**离散化方法（Zero-Order Hold）**：
+$$
+x_{k+1} = e^{A\Delta t} x_k + \int_0^{\Delta t} e^{A\tau} d\tau \cdot B u_k \tag{52}
+$$
+
+当 $A$ 是对角矩阵时：
+$$
+e^{A\Delta t} = \text{diag}(e^{\lambda_1 \Delta t}, \ldots, e^{\lambda_d \Delta t}) \tag{53}
+$$
+
+### 24. 训练技巧总结
+
+**学习率调度**：
+
+推荐使用warmup + cosine衰减：
+$$
+\eta_t = \eta_{\max} \cdot \min\left(\frac{t}{T_{\text{warmup}}}, \frac{1 + \cos(\pi \frac{t - T_{\text{warmup}}}{T_{\max} - T_{\text{warmup}}})}{2}\right) \tag{54}
+$$
+
+**权重初始化总结**：
+
+1. $\nu^{\log}$：使得 $r \in [0.9, 0.999]$
+2. $\theta^{\log}$：均匀 $U[0, 2\pi]$
+3. $B, C$：Xavier初始化
+4. $\gamma$：$\sqrt{1 - r^2}$
+
+### 25. 理论与实践的差距
+
+**理论优势**：
+- 线性复杂度
+- 常数推理成本
+- 可并行训练
+
+**实践挑战**：
+- 效果不如Attention（在LM上）
+- 需要更大的隐藏维度
+- 超参数调优困难
+
+**未来方向**：
+1. 更好的初始化策略
+2. 自适应的 $\lambda$ 参数
+3. 与Attention的混合架构
 

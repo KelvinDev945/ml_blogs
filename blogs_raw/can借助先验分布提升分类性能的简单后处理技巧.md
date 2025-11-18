@@ -197,5 +197,583 @@ url={\url{https://spaces.ac.cn/archives/8728}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 一、贝叶斯框架下的分类问题
+
+#### 1.1 基本贝叶斯公式
+
+**标准分类目标**：给定输入 $x$，我们希望预测其类别 $y \in \{1, 2, \ldots, m\}$。理想的分类器应该输出后验概率：
+
+\begin{equation}
+p(y|x) = \frac{p(x|y)p(y)}{p(x)} = \frac{p(x|y)p(y)}{\sum_{j=1}^m p(x|y=j)p(y=j)} \tag{1}
+\end{equation}
+
+其中：
+- $p(y)$ 是类别的先验分布
+- $p(x|y)$ 是类条件概率密度
+- $p(x)$ 是边缘概率密度
+
+**注释**：这个公式是贝叶斯定理的直接应用，它告诉我们如何从似然 $p(x|y)$ 和先验 $p(y)$ 计算后验 $p(y|x)$。
+
+#### 1.2 神经网络分类器的输出
+
+**实际情况**：深度学习分类器通常不直接建模 $p(x|y)$，而是通过softmax输出一个概率分布：
+
+\begin{equation}
+\hat{p}(y|x) = \text{softmax}(f_\theta(x))_y = \frac{e^{f_\theta(x)_y}}{\sum_{j=1}^m e^{f_\theta(x)_j}} \tag{2}
+\end{equation}
+
+其中 $f_\theta(x) \in \mathbb{R}^m$ 是神经网络的logits输出。
+
+**隐含假设**：标准的交叉熵训练实际上隐含地假设：
+1. 训练集的类别分布 $\tilde{p}(y)$ 等于真实的先验分布 $p(y)$
+2. 模型完美地学习了后验概率
+
+**注释**：但在实际中，这两个假设往往都不成立。训练集可能是平衡采样的（人为均匀），而真实世界的类别分布可能高度不平衡。
+
+#### 1.3 先验不匹配的影响
+
+**训练集先验**：设训练时的类别分布为 $\tilde{p}(y)$。
+
+**测试集先验**：真实世界的类别分布为 $p(y)$。
+
+**模型学到的后验**：如果模型完美拟合训练分布，那么：
+
+\begin{equation}
+\hat{p}(y|x) \approx \frac{p(x|y)\tilde{p}(y)}{\sum_{j=1}^m p(x|y=j)\tilde{p}(y=j)} \tag{3}
+\end{equation}
+
+**真实后验**：而我们真正需要的是：
+
+\begin{equation}
+p(y|x) = \frac{p(x|y)p(y)}{\sum_{j=1}^m p(x|y=j)p(y=j)} \tag{4}
+\end{equation}
+
+**修正公式**：通过比较式(3)和式(4)，我们可以推导出修正关系：
+
+\begin{equation}
+p(y|x) = \frac{\hat{p}(y|x) \cdot \frac{p(y)}{\tilde{p}(y)}}{\sum_{j=1}^m \hat{p}(y=j|x) \cdot \frac{p(y=j)}{\tilde{p}(y=j)}} \tag{5}
+\end{equation}
+
+**注释**：这个公式是后验校准的理论基础。它告诉我们，如果知道训练先验和测试先验，可以直接修正模型输出。
+
+### 二、不确定性度量与熵
+
+#### 2.1 熵的定义与性质
+
+**Shannon熵**：对于离散概率分布 $p = (p_1, \ldots, p_m)$，Shannon熵定义为：
+
+\begin{equation}
+H(p) = -\sum_{i=1}^m p_i \log p_i \tag{6}
+\end{equation}
+
+**基本性质**：
+1. **非负性**：$H(p) \geq 0$，当且仅当存在某个 $i$ 使得 $p_i = 1$ 时等号成立
+2. **最大性**：在约束 $\sum_i p_i = 1$ 下，均匀分布 $p_i = 1/m$ 使得熵达到最大值 $H_{\max} = \log m$
+3. **凹性**：$H$ 是关于 $p$ 的凹函数
+
+**注释**：熵度量了分布的"不确定性"或"混乱度"。熵越大，分布越"平坦"，预测越不确定。
+
+#### 2.2 熵在分类中的问题
+
+**示例对比**：考虑三分类问题，两个预测结果：
+- $p^{(a)} = [0.5, 0.25, 0.25]$：最大概率是0.5，其余两个类别各0.25
+- $p^{(b)} = [0.5, 0.5, 0]$：最大概率是0.5（并列），第三个类别概率为0
+
+**熵的计算**：
+
+\begin{align}
+H(p^{(a)}) &= -0.5\log 0.5 - 0.25\log 0.25 - 0.25\log 0.25 \tag{7}\\
+&= 0.5\cdot 0.693 + 2\cdot 0.25\cdot 1.386 = 1.040 \tag{8}\\
+H(p^{(b)}) &= -0.5\log 0.5 - 0.5\log 0.5 - 0\log 0 = 0.693 \tag{9}
+\end{align}
+
+**直觉矛盾**：按照熵的定义，$H(p^{(a)}) > H(p^{(b)})$，似乎 $p^{(a)}$ 更不确定。但从分类任务的角度看：
+- $p^{(a)}$ 有明确的最大值（0.5），预测类别1
+- $p^{(b)}$ 有两个并列最大值，无法明确选择类别1还是类别2
+
+因此 $p^{(b)}$ 实际上更不确定！
+
+**注释**：标准熵对所有类别一视同仁，但在分类任务中，我们更关心"谁是第一名"以及"第一名和第二名差距多大"。
+
+#### 2.3 Top-K熵
+
+**定义**：只考虑概率最大的 $k$ 个类别，并重新归一化后计算熵：
+
+设 $p_{(1)} \geq p_{(2)} \geq \cdots \geq p_{(m)}$ 是概率值的降序排列，定义：
+
+\begin{equation}
+\tilde{p}_i = \frac{p_{(i)}}{\sum_{j=1}^k p_{(j)}}, \quad i = 1, \ldots, k \tag{10}
+\end{equation}
+
+\begin{equation}
+H_{\text{top-}k}(p) = -\sum_{i=1}^k \tilde{p}_i \log \tilde{p}_i \tag{11}
+\end{equation}
+
+**归一化到[0,1]**：
+
+\begin{equation}
+U_{\text{top-}k}(p) = \frac{H_{\text{top-}k}(p)}{\log k} \tag{12}
+\end{equation}
+
+**重新计算示例**：以 $k=2$ 为例：
+
+\begin{align}
+p^{(a)}: &\quad \tilde{p} = [\frac{0.5}{0.75}, \frac{0.25}{0.75}] = [0.667, 0.333] \tag{13}\\
+&\quad U_{\text{top-2}}(p^{(a)}) = \frac{-0.667\log 0.667 - 0.333\log 0.333}{\log 2} = 0.637 \tag{14}\\
+p^{(b)}: &\quad \tilde{p} = [\frac{0.5}{1.0}, \frac{0.5}{1.0}] = [0.5, 0.5] \tag{15}\\
+&\quad U_{\text{top-2}}(p^{(b)}) = \frac{-0.5\log 0.5 - 0.5\log 0.5}{\log 2} = 1.0 \tag{16}
+\end{align}
+
+**注释**：现在 $U_{\text{top-2}}(p^{(b)}) > U_{\text{top-2}}(p^{(a)})$，与我们的直觉一致！$p^{(b)}$ 确实更不确定。
+
+### 三、CAN算法的数学原理
+
+#### 3.1 先验分布的估计
+
+**从训练集估计**：设训练集 $\mathcal{D}_{\text{train}} = \{(x_i, y_i)\}_{i=1}^N$，先验分布估计为：
+
+\begin{equation}
+\tilde{p}(y = j) = \frac{\sum_{i=1}^N \mathbb{1}\{y_i = j\}}{N} = \frac{N_j}{N} \tag{17}
+\end{equation}
+
+其中 $N_j$ 是类别 $j$ 在训练集中出现的次数。
+
+**拉普拉斯平滑**（可选）：为避免零概率：
+
+\begin{equation}
+\tilde{p}(y = j) = \frac{N_j + \alpha}{N + m\alpha} \tag{18}
+\end{equation}
+
+通常取 $\alpha = 1$。
+
+**注释**：如果训练集是人为平衡的，则 $\tilde{p}(y) \approx [1/m, \ldots, 1/m]$ 均匀分布。
+
+#### 3.2 行间标准化（Row-wise Normalization）
+
+**动机**：我们希望让一组预测结果的平均分布等于先验分布 $\tilde{p}(y)$。
+
+**标准化步骤**：给定一组预测 $\{p^{(1)}, \ldots, p^{(n)}, p^{(j)}\}$，计算平均：
+
+\begin{equation}
+\bar{p} = \frac{1}{n+1}\left(p^{(j)} + \sum_{i=1}^n p^{(i)}\right) \tag{19}
+\end{equation}
+
+然后对每个预测进行element-wise的缩放：
+
+\begin{equation}
+p^{(k)} \leftarrow p^{(k)} \odot \frac{\tilde{p}}{\bar{p}} \tag{20}
+\end{equation}
+
+其中 $\odot$ 表示element-wise乘法，$\frac{\tilde{p}}{\bar{p}}$ 也是element-wise除法。
+
+**验证均值**：缩放后，新的平均值为：
+
+\begin{align}
+\bar{p}_{\text{new}} &= \frac{1}{n+1}\sum_{k} p^{(k)} \odot \frac{\tilde{p}}{\bar{p}} \tag{21}\\
+&= \frac{1}{n+1}\left(\sum_{k} p^{(k)}\right) \odot \frac{\tilde{p}}{\bar{p}} = \bar{p} \odot \frac{\tilde{p}}{\bar{p}} = \tilde{p} \tag{22}
+\end{align}
+
+**注释**：这个操作确保了新的平均分布等于先验分布，这正是我们想要的！
+
+#### 3.3 行内标准化（Column-wise Normalization）
+
+**问题**：经过行间标准化后，每个 $p^{(k)}$ 不再满足归一化条件 $\sum_i p^{(k)}_i = 1$。
+
+**修正**：对每个预测重新归一化：
+
+\begin{equation}
+p^{(k)} \leftarrow \frac{p^{(k)}}{\sum_{i=1}^m p^{(k)}_i} \tag{23}
+\end{equation}
+
+**注释**：这个操作恢复了概率分布的归一化性质，但也会破坏式(22)的性质。因此理论上需要交替迭代。
+
+#### 3.4 交替标准化的收敛性
+
+**迭代算法**：
+
+\begin{equation}
+\begin{aligned}
+&\text{For } t = 1, 2, \ldots, T:\\
+&\quad \text{行间标准化: } p^{(k)} \leftarrow p^{(k)} \odot \frac{\tilde{p}}{\bar{p}}\\
+&\quad \text{行内标准化: } p^{(k)} \leftarrow \frac{p^{(k)}}{\sum_i p^{(k)}_i}
+\end{aligned} \tag{24}
+\end{equation}
+
+**收敛性质**：这个交替投影算法类似于Sinkhorn算法，在一定条件下可以证明收敛到一个满足：
+1. 每行归一化：$\sum_i p^{(k)}_i = 1$
+2. 列平均等于先验：$\frac{1}{n+1}\sum_k p^{(k)}_i = \tilde{p}_i$
+
+的不动点。
+
+**实践中**：论文发现 $T=1$ （只迭代一次）效果最好，过多迭代反而会降低性能。
+
+**注释**：这可能是因为模型输出本身存在误差，过度强制满足先验分布反而会引入额外偏差。
+
+### 四、CAN算法的信息论解释
+
+#### 4.1 互信息的角度
+
+**互信息**：预测 $p(y|x)$ 和先验 $p(y)$ 之间的互信息定义为：
+
+\begin{equation}
+I(Y; X) = \sum_{x,y} p(x,y)\log\frac{p(y|x)}{p(y)} = H(Y) - H(Y|X) \tag{25}
+\end{equation}
+
+其中 $H(Y|X) = \mathbb{E}_{x}[H(p(y|x))]$ 是条件熵。
+
+**CAN的作用**：通过修正后验使其平均分布等于先验，相当于在保持条件熵 $H(Y|X)$ 基本不变的情况下，调整边缘熵 $H(Y)$ 使其与真实先验匹配。
+
+**注释**：这确保了模型不会因为训练集的类别不平衡而系统性地偏向某些类别。
+
+#### 4.2 KL散度的视角
+
+**目标**：最小化修正后的预测分布与真实后验之间的KL散度：
+
+\begin{equation}
+\min_{p'} \mathbb{E}_{x}\left[D_{\text{KL}}(p_{\text{true}}(y|x) \| p'(y|x))\right] \tag{26}
+\end{equation}
+
+在约束条件下：
+
+\begin{equation}
+\mathbb{E}_{x}[p'(y|x)] = \tilde{p}(y) \tag{27}
+\end{equation}
+
+**拉格朗日形式**：
+
+\begin{equation}
+\mathcal{L} = \mathbb{E}_{x}\left[D_{\text{KL}}(p_{\text{true}}(y|x) \| p'(y|x))\right] + \lambda \left\|\mathbb{E}_{x}[p'(y|x)] - \tilde{p}(y)\right\|^2 \tag{28}
+\end{equation}
+
+**注释**：CAN可以看作是这个优化问题的一个近似解法，通过启发式的标准化步骤来逼近最优解。
+
+### 五、高置信度与低置信度的分离
+
+#### 5.1 置信度阈值的选择
+
+**阈值选择**：设定阈值 $\tau \in [0, 1]$，将样本分为两组：
+- 高置信度：$U_{\text{top-}k}(p^{(i)}) < \tau$
+- 低置信度：$U_{\text{top-}k}(p^{(i)}) \geq \tau$
+
+**经验准则**：通常 $\tau \in [0.8, 0.95]$ 之间。$\tau$ 越小，高置信度集越小，越"精英化"。
+
+**统计验证**：计算两组的准确率：
+
+\begin{equation}
+\text{Acc}_{\text{high}} = \frac{\sum_{i: U(p^{(i)}) < \tau} \mathbb{1}\{\arg\max p^{(i)} = y_i\}}{\sum_{i} \mathbb{1}\{U(p^{(i)}) < \tau\}} \tag{29}
+\end{equation}
+
+\begin{equation}
+\text{Acc}_{\text{low}} = \frac{\sum_{i: U(p^{(i)}) \geq \tau} \mathbb{1}\{\arg\max p^{(i)} = y_i\}}{\sum_{i} \mathbb{1}\{U(p^{(i)}) \geq \tau\}} \tag{30}
+\end{equation}
+
+**期望结果**：应该有 $\text{Acc}_{\text{high}} \gg \text{Acc}_{\text{low}}$。
+
+**注释**：如果这个不等式不成立，说明不确定性度量可能不合适，或者模型校准很差。
+
+#### 5.2 逐个修正的原理
+
+**为什么不批量修正**：如果将所有低置信度样本一起修正：
+
+\begin{equation}
+\{p^{(1)}, \ldots, p^{(n)}, p^{(n+1)}, \ldots, p^{(N)}\} \tag{31}
+\end{equation}
+
+其中前 $n$ 个是高置信度，后 $N-n$ 个是低置信度。
+
+**问题**：批量修正时，大量的低置信度样本会稀释高置信度样本的影响，导致平均分布 $\bar{p}$ 不准确。
+
+**逐个修正的优势**：对于每个低置信度样本 $p^{(j)}$，只与高置信度样本组合：
+
+\begin{equation}
+\{p^{(1)}, \ldots, p^{(n)}, p^{(j)}\} \tag{32}
+\end{equation}
+
+这样高置信度样本的"信号强度"更大，能更好地引导修正。
+
+**注释**：这是一个bias-variance权衡。批量修正variance小但bias可能大；逐个修正variance稍大但bias更小。
+
+### 六、超参数 $\alpha$ 的作用
+
+#### 6.1 $\alpha$ 的定义
+
+原论文引入了参数 $\alpha$，将行间标准化修改为：
+
+\begin{equation}
+p^{(k)} \leftarrow [p^{(k)}]^\alpha \odot \frac{\tilde{p}}{[\bar{p}]^\alpha} \tag{33}
+\end{equation}
+
+其中 $[\cdot]^\alpha$ 表示element-wise的幂运算。
+
+#### 6.2 $\alpha$ 的效果分析
+
+**$\alpha > 1$**：增强差异，使得大概率更大，小概率更小
+- $p = [0.7, 0.2, 0.1]$，$\alpha = 2$ 时：$p^\alpha = [0.49, 0.04, 0.01]$（归一化前）
+
+**$\alpha < 1$**：减弱差异，使得分布更平坦
+- $p = [0.7, 0.2, 0.1]$，$\alpha = 0.5$ 时：$p^\alpha = [0.837, 0.447, 0.316]$（归一化前）
+
+**$\alpha = 1$**：不改变，即本文前面推导的标准CAN
+
+**温度的关系**：这个操作类似于softmax中的温度参数 $T$：
+
+\begin{equation}
+\text{softmax}(z/T)_i = \frac{e^{z_i/T}}{\sum_j e^{z_j/T}} \tag{34}
+\end{equation}
+
+其中 $T > 1$ 使分布平滑，$T < 1$ 使分布尖锐。
+
+**注释**：原论文报告 $\alpha = 1$ 通常是最优选择，额外调参收益很小，这支持了我们的简化版本（不考虑 $\alpha$）。
+
+### 七、CAN的概率校准理论
+
+#### 7.1 模型校准的定义
+
+**完美校准**：一个模型是完美校准的，如果对于所有 $p \in [0, 1]$：
+
+\begin{equation}
+\mathbb{P}(Y = y | \hat{p}(y|X) = p) = p \tag{35}
+\end{equation}
+
+即预测概率等于实际条件概率。
+
+**期望校准误差（ECE）**：
+
+\begin{equation}
+\text{ECE} = \sum_{k=1}^K \frac{|B_k|}{N} \left| \text{Acc}(B_k) - \text{Conf}(B_k) \right| \tag{36}
+\end{equation}
+
+其中：
+- $B_k$ 是预测概率在区间 $[(k-1)/K, k/K)$ 内的样本
+- $\text{Acc}(B_k)$ 是该bin内的准确率
+- $\text{Conf}(B_k)$ 是该bin内的平均置信度
+
+**注释**：ECE越小，模型校准越好。完美校准时 ECE = 0。
+
+#### 7.2 CAN对校准的影响
+
+**后验修正的效果**：CAN通过式(5)的后验修正，理论上应该改善校准。
+
+**实验验证**：通过绘制可靠性图（Reliability Diagram）：
+- x轴：预测置信度（binned）
+- y轴：实际准确率
+
+理想情况下应该是 $y = x$ 直线。
+
+**CAN前后对比**：
+- CAN前：可能出现系统性偏差，如高估或低估
+- CAN后：应该更接近 $y = x$ 直线
+
+**注释**：CAN不仅改善准确率，还能改善校准，这在需要置信度估计的应用（如主动学习、拒绝选项）中很重要。
+
+### 八、理论上界与误差分析
+
+#### 8.1 修正误差的来源
+
+**误差分解**：CAN的总误差可以分解为：
+
+\begin{equation}
+\epsilon_{\text{total}} = \epsilon_{\text{model}} + \epsilon_{\text{prior}} + \epsilon_{\text{CAN}} \tag{37}
+\end{equation}
+
+其中：
+- $\epsilon_{\text{model}}$：模型本身的误差（未完美学习 $p(y|x)$）
+- $\epsilon_{\text{prior}}$：先验估计误差（$\tilde{p}(y) \neq p(y)$）
+- $\epsilon_{\text{CAN}}$：CAN算法的近似误差
+
+**注释**：只有当前两项足够小时，CAN才能发挥作用。如果模型本身很差，CAN也无济于事。
+
+#### 8.2 先验估计的鲁棒性
+
+**敏感性分析**：当先验估计有误差时：
+
+\begin{equation}
+\tilde{p}'(y) = \tilde{p}(y) + \delta(y), \quad \sum_y \delta(y) = 0 \tag{38}
+\end{equation}
+
+修正后的后验变为：
+
+\begin{equation}
+p'(y|x) \approx p(y|x) + \mathcal{O}(\|\delta\|) \tag{39}
+\end{equation}
+
+**注释**：只要先验估计大致正确（$\|\delta\|$ 小），CAN就能带来改善。不需要精确知道真实先验。
+
+### 九、多次迭代的理论分析
+
+#### 9.1 单次 vs 多次迭代
+
+**单次迭代** ($T=1$)：
+
+\begin{equation}
+p^{(j)}_1 = \frac{p^{(j)}_0 \odot \frac{\tilde{p}}{\bar{p}_0}}{\sum_i \left(p^{(j)}_{0,i} \cdot \frac{\tilde{p}_i}{\bar{p}_{0,i}}\right)} \tag{40}
+\end{equation}
+
+**两次迭代** ($T=2$)：
+
+先得到 $p^{(j)}_1$，然后计算新的 $\bar{p}_1$，再次修正：
+
+\begin{equation}
+p^{(j)}_2 = \frac{p^{(j)}_1 \odot \frac{\tilde{p}}{\bar{p}_1}}{\sum_i \left(p^{(j)}_{1,i} \cdot \frac{\tilde{p}_i}{\bar{p}_{1,i}}\right)} \tag{41}
+\end{equation}
+
+#### 9.2 过度迭代的风险
+
+**理论分析**：每次迭代都会使得平均分布更接近 $\tilde{p}$，但同时也会：
+1. 增加对先验估计误差的敏感性
+2. 可能过度平滑，损失模型的原始信息
+
+**实验观察**：
+- $T=1$：通常最优
+- $T=2,3$：效果与 $T=1$ 接近或略差
+- $T\geq 5$：效果开始明显下降
+
+**注释**：这是过拟合先验的表现。先验只是一个粗略的统计信息，不应过度依赖。
+
+### 十、与其他校准方法的比较
+
+#### 10.1 温度缩放（Temperature Scaling）
+
+**方法**：在softmax中引入温度参数 $T$：
+
+\begin{equation}
+p_T(y|x) = \frac{e^{z_y/T}}{\sum_j e^{z_j/T}} \tag{42}
+\end{equation}
+
+在验证集上优化 $T$ 以最小化负对数似然。
+
+**优点**：简单，只有一个参数
+**缺点**：所有样本使用同一个 $T$，无法个性化调整
+
+**与CAN的区别**：CAN针对低置信度样本单独处理，更灵活。
+
+#### 10.2 Platt Scaling
+
+**方法**：学习一个逻辑回归模型：
+
+\begin{equation}
+p_{\text{calib}}(y|x) = \sigma(az_y + b) \tag{43}
+\end{equation}
+
+其中 $a, b$ 在验证集上学习。
+
+**优点**：理论上可以修正任意单调误差
+**缺点**：需要额外的训练；多分类需要one-vs-rest
+
+**与CAN的区别**：Platt Scaling需要训练，CAN是纯后处理，无需额外训练。
+
+#### 10.3 Isotonic Regression
+
+**方法**：学习一个单调的非参数映射 $f: [0,1] \to [0,1]$：
+
+\begin{equation}
+p_{\text{calib}}(y|x) = f(\hat{p}(y|x)) \tag{44}
+\end{equation}
+
+使得 $f$ 单调且最小化校准误差。
+
+**优点**：非常灵活，可以拟合任意单调关系
+**缺点**：容易过拟合；需要大量验证数据
+
+**与CAN的区别**：Isotonic Regression是单变量校准，CAN考虑了类别之间的依赖（通过先验分布）。
+
+### 十一、数值实验与案例分析
+
+#### 11.1 类别不平衡的案例
+
+**设定**：
+- 真实先验：$p(y) = [0.1, 0.3, 0.6]$（高度不平衡）
+- 训练先验：$\tilde{p}(y) = [1/3, 1/3, 1/3]$（人为平衡）
+
+**模型输出**（未校准）：
+
+\begin{equation}
+\hat{p}(y|x) = [0.4, 0.35, 0.25] \tag{45}
+\end{equation}
+
+预测类别1（概率0.4）。
+
+**CAN修正**：
+
+\begin{align}
+p_{\text{CAN}}(y|x) &\propto \hat{p}(y|x) \odot \frac{p(y)}{\tilde{p}(y)} \tag{46}\\
+&\propto [0.4, 0.35, 0.25] \odot \frac{[0.1, 0.3, 0.6]}{[1/3, 1/3, 1/3]} \tag{47}\\
+&\propto [0.4\times 0.3, 0.35\times 0.9, 0.25\times 1.8] \tag{48}\\
+&= [0.12, 0.315, 0.45] \tag{49}
+\end{align}
+
+归一化后：$p_{\text{CAN}}(y|x) = [0.136, 0.358, 0.506]$
+
+**预测变化**：类别从1变为3！这反映了真实世界中类别3更常见的事实。
+
+**注释**：这个例子展示了CAN如何利用先验信息修正预测。
+
+#### 11.2 高置信度样本的稳定性
+
+**高置信度样本**：
+
+\begin{equation}
+p^{(h)} = [0.95, 0.03, 0.02], \quad U_{\text{top-2}}(p^{(h)}) = 0.23 < 0.9 \tag{50}
+\end{equation}
+
+**CAN修正前后**：由于 $p^{(h)}$ 是高置信度样本，不会被修正，保持不变。
+
+**低置信度样本**：
+
+\begin{equation}
+p^{(l)} = [0.45, 0.35, 0.20], \quad U_{\text{top-2}}(p^{(l)}) = 0.99 > 0.9 \tag{51}
+\end{equation}
+
+会被修正。
+
+**注释**：CAN只对不确定的预测进行调整，保留了高置信度预测的原始信息。
+
+### 十二、实现细节与优化
+
+#### 12.1 高效实现
+
+**向量化计算**：使用NumPy/PyTorch的向量化操作，避免显式循环：
+
+```python
+# 高置信度样本
+p_conf = predictions[uncertainty < tau]  # (n, m)
+# 对于每个低置信度样本
+for p_low in predictions[uncertainty >= tau]:
+    # 拼接
+    p_all = np.concatenate([p_conf, p_low[None]], axis=0)  # (n+1, m)
+    # 行间标准化
+    p_mean = p_all.mean(axis=0)  # (m,)
+    p_all = p_all * (prior / p_mean)  # broadcasting
+    # 行内标准化
+    p_all = p_all / p_all.sum(axis=1, keepdims=True)
+    # 提取修正后的低置信度样本
+    p_low_new = p_all[-1]
+```
+
+**注释**：这个实现的复杂度是 $O(N_{\text{low}} \times N_{\text{high}} \times m)$，对于大规模问题可能较慢。
+
+#### 12.2 近似加速
+
+**随机采样高置信度样本**：如果 $N_{\text{high}}$ 很大，可以随机采样一个子集：
+
+\begin{equation}
+\tilde{p}_{\text{conf}} = \{p^{(i)}\}_{i \in \mathcal{S}} \tag{52}
+\end{equation}
+
+其中 $\mathcal{S}$ 是大小为 $n_{\text{sample}}$ 的随机子集（如 $n_{\text{sample}} = 1000$）。
+
+**注释**：实验表明，只要 $n_{\text{sample}}$ 足够大（$\geq 500$），近似效果与使用全部高置信度样本几乎相同。
+
+### 十三、总结与展望
+
+本节详细推导了CAN算法的数学原理，核心内容包括：
+
+1. **贝叶斯框架**：从贝叶斯公式出发，理解先验不匹配如何影响后验
+2. **不确定性度量**：改进的top-k熵更适合分类任务
+3. **交替标准化**：行间-行内标准化的迭代收敛
+4. **逐个修正**：避免低置信度样本的稀释效应
+5. **校准理论**：CAN改善模型的概率校准性
+6. **数值分析**：具体案例展示CAN的修正效果
+
+CAN作为一个简单的后处理方法，在几乎不增加计算成本的情况下，有效利用先验信息改善了分类性能和校准性。
 

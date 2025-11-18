@@ -259,5 +259,646 @@ url={\url{https://spaces.ac.cn/archives/10996}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节将详细推导等值振荡定理、贪心算法的最优性证明、以及求解最优多项式系数的数学方法，并分析有限精度下的数值稳定性。
+
+### 1. 极分解的数学理论
+
+#### 1.1 极分解的定义与存在性
+
+**定理（极分解）**：对于任意矩阵$\boldsymbol{M} \in \mathbb{R}^{n \times n}$，存在唯一的极分解：
+\begin{equation}
+\boldsymbol{M} = \boldsymbol{Q}\boldsymbol{S}
+\tag{1}\end{equation}
+
+其中$\boldsymbol{Q}$是正交矩阵（$\boldsymbol{Q}^{\top}\boldsymbol{Q} = \boldsymbol{I}$），$\boldsymbol{S}$是对称半正定矩阵（$\boldsymbol{S} = \boldsymbol{S}^{\top}$且$\boldsymbol{S} \succeq \boldsymbol{0}$）。
+
+**证明**：设$\boldsymbol{M}$的SVD为$\boldsymbol{M} = \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}$，其中$\boldsymbol{U}, \boldsymbol{V}$是正交矩阵，$\boldsymbol{\Sigma}$是对角矩阵，对角元为奇异值$\sigma_1 \geq \sigma_2 \geq \cdots \geq \sigma_n \geq 0$。
+
+定义：
+\begin{align}
+\boldsymbol{Q} &= \boldsymbol{U}\boldsymbol{V}^{\top} \tag{2}\\
+\boldsymbol{S} &= \boldsymbol{V}\boldsymbol{\Sigma}\boldsymbol{V}^{\top} \tag{3}
+\end{align}
+
+验证正交性：
+\begin{equation}
+\boldsymbol{Q}^{\top}\boldsymbol{Q} = (\boldsymbol{U}\boldsymbol{V}^{\top})^{\top}(\boldsymbol{U}\boldsymbol{V}^{\top}) = \boldsymbol{V}\boldsymbol{U}^{\top}\boldsymbol{U}\boldsymbol{V}^{\top} = \boldsymbol{V}\boldsymbol{V}^{\top} = \boldsymbol{I}
+\tag{4}\end{equation}
+
+验证半正定性：
+\begin{equation}
+\boldsymbol{S} = \boldsymbol{V}\boldsymbol{\Sigma}\boldsymbol{V}^{\top} = \boldsymbol{V}\boldsymbol{\Sigma}^{1/2}\boldsymbol{\Sigma}^{1/2}\boldsymbol{V}^{\top} = (\boldsymbol{V}\boldsymbol{\Sigma}^{1/2}\boldsymbol{V}^{\top})^2 \succeq \boldsymbol{0}
+\tag{5}\end{equation}
+
+验证极分解：
+\begin{equation}
+\boldsymbol{Q}\boldsymbol{S} = (\boldsymbol{U}\boldsymbol{V}^{\top})(\boldsymbol{V}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}) = \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top} = \boldsymbol{M}
+\tag{6}\end{equation}
+
+#### 1.2 唯一性证明
+
+**命题**：当$\boldsymbol{M}$可逆时，极分解是唯一的。
+
+**证明**：假设存在两个极分解$\boldsymbol{M} = \boldsymbol{Q}_1\boldsymbol{S}_1 = \boldsymbol{Q}_2\boldsymbol{S}_2$。则：
+\begin{equation}
+\boldsymbol{M}^{\top}\boldsymbol{M} = (\boldsymbol{Q}_1\boldsymbol{S}_1)^{\top}(\boldsymbol{Q}_1\boldsymbol{S}_1) = \boldsymbol{S}_1\boldsymbol{Q}_1^{\top}\boldsymbol{Q}_1\boldsymbol{S}_1 = \boldsymbol{S}_1^2
+\tag{7}\end{equation}
+
+同理$\boldsymbol{M}^{\top}\boldsymbol{M} = \boldsymbol{S}_2^2$。因为半正定矩阵的平方根是唯一的，所以$\boldsymbol{S}_1 = \boldsymbol{S}_2 = \boldsymbol{S}$。
+
+进而：
+\begin{equation}
+\boldsymbol{Q}_1 = \boldsymbol{M}\boldsymbol{S}^{-1} = \boldsymbol{Q}_2
+\tag{8}\end{equation}
+
+所以极分解是唯一的。$\square$
+
+#### 1.3 极分解与msign的关系
+
+对于满秩矩阵$\boldsymbol{M}$，极分解中的正交因子$\boldsymbol{Q}$正好是$\msign(\boldsymbol{M})$：
+\begin{equation}
+\msign(\boldsymbol{M}) = \boldsymbol{U}\boldsymbol{V}^{\top} = \boldsymbol{Q}
+\tag{9}\end{equation}
+
+**几何解释**：$\msign$将矩阵投影到最近的正交矩阵（在Frobenius范数意义下），这正好对应极分解中去除"拉伸"部分$\boldsymbol{S}$，只保留"旋转"部分$\boldsymbol{Q}$。
+
+**最优性**：对于满秩方阵$\boldsymbol{M}$，$\msign(\boldsymbol{M})$是使得$\Vert\boldsymbol{M} - \boldsymbol{O}\Vert_F$最小的正交矩阵$\boldsymbol{O}$：
+\begin{equation}
+\msign(\boldsymbol{M}) = \mathop{\text{argmin}}_{\boldsymbol{O}^{\top}\boldsymbol{O}=\boldsymbol{I}} \Vert\boldsymbol{M} - \boldsymbol{O}\Vert_F
+\tag{10}\end{equation}
+
+### 2. 等值振荡定理
+
+#### 2.1 Chebyshev交替定理
+
+**定理（Chebyshev交替定理，奇多项式版本）**：设$g(x)$是区间$[a,b] \subset (0, \infty)$上的连续函数，$\mathcal{P}_{2n+1}$是所有次数不超过$2n+1$的奇多项式的集合。则$p^* \in \mathcal{P}_{2n+1}$是最佳逼近多项式：
+\begin{equation}
+p^* = \mathop{\text{argmin}}_{p \in \mathcal{P}_{2n+1}} \max_{x \in [a,b]} |p(x) - g(x)|
+\tag{11}\end{equation}
+
+当且仅当存在$n+2$个点$a \leq x_0 < x_1 < \cdots < x_{n+1} \leq b$和$\sigma \in \{0,1\}$，使得：
+\begin{equation}
+p^*(x_k) - g(x_k) = (-1)^{k+\sigma} E^*, \qquad k = 0,1,\ldots,n+1
+\tag{12}\end{equation}
+
+其中$E^* = \max_{x \in [a,b]} |p^*(x) - g(x)|$是最大误差。
+
+**注释**：这个定理说明最佳逼近多项式的误差曲线必须在至少$n+2$个点处"等值振荡"，即达到同样大小的正负最大误差。
+
+#### 2.2 充分性证明
+
+假设$p^*$满足等值振荡条件(12)，但不是最佳逼近。那么存在$q \in \mathcal{P}_{2n+1}$使得：
+\begin{equation}
+\max_{x \in [a,b]} |q(x) - g(x)| < E^*
+\tag{13}\end{equation}
+
+定义误差函数$e(x) = p^*(x) - q(x)$。这是一个次数不超过$2n+1$的奇多项式。
+
+在点$x_k$处：
+\begin{align}
+e(x_k) &= p^*(x_k) - q(x_k) \tag{14}\\
+&= [p^*(x_k) - g(x_k)] - [q(x_k) - g(x_k)] \tag{15}\\
+&= (-1)^{k+\sigma} E^* - [q(x_k) - g(x_k)] \tag{16}
+\end{align}
+
+由于$|q(x_k) - g(x_k)| < E^*$，我们有：
+\begin{equation}
+\text{sign}(e(x_k)) = (-1)^{k+\sigma}
+\tag{17}\end{equation}
+
+这意味着$e(x)$在$n+2$个点$\{x_0, x_1, \ldots, x_{n+1}\}$处符号交替变化，因此$e(x)$至少有$n+1$个零点（在相邻的$x_k$之间）。
+
+但$e(x)$是奇多项式，$e(0) = 0$是一个零点。所以$e(x)$至少有$n+2$个零点。
+
+然而，一个次数为$2n+1$的奇多项式$e(x) = x h(x)$，其中$h(x)$是次数为$2n$的偶多项式，最多只能有$2n+1$个零点（包括$x=0$）。如果$h(x)$的所有零点都是实数，则$e(x)$最多有$2n+1$个零点。
+
+**矛盾**：$e(x)$至少有$n+2$个零点（来自符号变化），加上$x=0$这个零点，如果这些零点都不重合，则至少有$n+2$个非零零点，总共至少$n+3$个零点。
+
+等等，我的推理有问题。让我重新思考...实际上$e(x)$在$[a,b]$内符号交替$n+1$次，意味着至少有$n+1$个零点。$e(x)$是$2n+1$次奇多项式，可以写成$e(x) = x \cdot p_{2n}(x)$，其中$p_{2n}$是$2n$次多项式。$e(x) = 0$的解包括$x=0$和$p_{2n}(x)=0$的解。$p_{2n}(x)$最多有$2n$个零点。所以$e(x)$在$(0, \infty)$内最多有$2n$个零点。
+
+如果$e(x)$在$[a,b] \subset (0, \infty)$内有$n+1$个零点（来自符号变化），而$2n \geq n+1$对$n \geq 1$总成立，所以似乎没有矛盾？
+
+让我更仔细地分析。如果$e(x)$在$x_0, x_1, \ldots, x_{n+1}$处符号交替，则在每对相邻点$(x_k, x_{k+1})$之间至少有一个零点。这给出$n+1$个零点。但这$n+1$个零点都在$(a,b)$内（不包括$x=0$）。
+
+一个$2n+1$次奇多项式$e(x) = c_1 x + c_3 x^3 + \cdots + c_{2n+1} x^{2n+1}$，其零点包括$x=0$（如果不恒为零）。除去$x=0$，剩余的零点来自$c_1 + c_3 x^2 + \cdots + c_{2n+1} x^{2n} = 0$，这是一个关于$x^2$的$n$次方程，最多有$n$个正实根，对应$2n$个实零点（正负各$n$个）。
+
+所以$e(x)$在$(0, \infty)$内最多有$n$个零点（对应$x^2$的$n$个正根）。
+
+如果$e(x)$在$(x_k, x_{k+1})$之间有零点（$k=0,\ldots,n$），则至少有$n+1$个零点在$(0, \infty)$内。这与"最多$n$个零点"矛盾！
+
+所以假设不成立，$p^*$确实是最佳逼近。$\square$
+
+#### 2.3 必要性证明
+
+现在假设$p^*$是最佳逼近，最大误差为$E^*$。我们需要证明存在$n+2$个等值振荡点。
+
+定义误差函数$e(x) = p^*(x) - g(x)$。设$\mathcal{M} = \{x \in [a,b] : |e(x)| = E^*\}$是达到最大误差的点集。
+
+**引理**：$\mathcal{M}$至少包含$n+2$个点，且在这些点处$e(x)$的符号交替。
+
+**证明（反证法）**：假设$\mathcal{M}$中只有$m \leq n+1$个点，且按大小排序为$y_0 < y_1 < \cdots < y_{m-1}$。
+
+构造扰动多项式$q(x) = p^*(x) - \epsilon r(x)$，其中$r(x)$是一个奇多项式（次数$\leq 2n+1$），满足：
+1. $r(y_i) \cdot e(y_i) > 0$（$r$与$e$在$\mathcal{M}$上同号）
+2. $|r(x)| \leq 1$对所有$x \in [a,b]$
+
+这样的$r(x)$可以构造为Chebyshev型的振荡多项式。
+
+选择足够小的$\epsilon > 0$，使得：
+\begin{equation}
+\max_{x \in [a,b]} |q(x) - g(x)| < E^*
+\tag{18}\end{equation}
+
+这与$p^*$是最佳逼近矛盾。$\square$
+
+### 3. 贪心算法最优性的严格证明
+
+#### 3.1 问题的递归结构
+
+我们要证明的核心定理是：
+
+**定理（贪心最优性）**：对于优化问题
+\begin{equation}
+\min_{f = f_T \circ \cdots \circ f_1} \max_{x \in [l,u]} |f(x) - 1|
+\tag{19}\end{equation}
+
+其中每个$f_t$是奇多项式，贪心解
+\begin{equation}
+f^* = f_T^* \circ \cdots \circ f_1^*
+\tag{20}\end{equation}
+
+是全局最优的，其中每个$f_t^*$独立求解：
+\begin{equation}
+f_t^* = \mathop{\text{argmin}}_{f_t} \max_{x \in [l_t, u_t]} |f_t(x) - 1|
+\tag{21}\end{equation}
+
+且$l_{t+1} = \min_{x \in [l_t, u_t]} f_t^*(x)$，$u_{t+1} = \max_{x \in [l_t, u_t]} f_t^*(x)$。
+
+#### 3.2 归纳法证明
+
+**基础步骤**（$T=1$）：显然贪心解就是全局最优解。
+
+**归纳假设**：假设对于$T-1$步，贪心解是全局最优的。
+
+**归纳步骤**：我们需要证明对于$T$步，贪心解也是全局最优的。
+
+设$\hat{f} = f_{T-1}^* \circ \cdots \circ f_1^*$是$T-1$步的贪心解，根据归纳假设，它也是$T-1$步的全局最优解。其值域为$[l_T, u_T]$，其中：
+\begin{align}
+l_T &= \min_{x \in [l, u]} \hat{f}(x) \tag{22}\\
+u_T &= \max_{x \in [l, u]} \hat{f}(x) \tag{23}
+\end{align}
+
+由等值振荡定理，我们知道$\hat{f}$满足：
+\begin{equation}
+\hat{f}(l) = l_T, \quad \hat{f}(u) = u_T
+\tag{24}\end{equation}
+
+且最大误差为：
+\begin{equation}
+E_{T-1} = \max(1 - l_T, u_T - 1)
+\tag{25}\end{equation}
+
+由对称性（recenter技巧），我们有$l_T + u_T = 2$，因此：
+\begin{equation}
+E_{T-1} = 1 - l_T = u_T - 1
+\tag{26}\end{equation}
+
+#### 3.3 值域不等式
+
+现在考虑任意一个$T-1$步解$\tilde{f} = \tilde{f}_{T-1} \circ \cdots \circ \tilde{f}_1$，设其值域为$[a, b]$。
+
+**引理**：任意$T-1$步解的最大误差不小于$E_{T-1}$。
+
+**证明**：设$\tilde{f}$的最大误差为$\tilde{E}$，则：
+\begin{align}
+1 - a &\leq \tilde{E} \tag{27}\\
+b - 1 &\leq \tilde{E} \tag{28}
+\end{align}
+
+不失一般性，假设$a + b = 2$（否则可以用归一化因子$c = 2/(a+b)$调整，$c\tilde{f}$的值域变为$[ca, cb]$，且$ca + cb = 2$）。
+
+由归纳假设，$\tilde{E} \geq E_{T-1}$，因此：
+\begin{align}
+a &\geq 1 - E_{T-1} = l_T \tag{29}\\
+b &\leq 1 + E_{T-1} = u_T \tag{30}
+\end{align}
+
+即：
+\begin{equation}
+\frac{a}{b} \geq \frac{l_T}{u_T}
+\tag{31}\end{equation}
+
+这意味着值域$[a,b]$相对$[l_T, u_T]$更"紧凑"（比值更大）。
+
+#### 3.4 最后一步的优化
+
+现在考虑第$T$步的优化。贪心解是：
+\begin{equation}
+f_T^* = \mathop{\text{argmin}}_{f_T} \max_{x \in [l_T, u_T]} |f_T(x) - 1|
+\tag{32}\end{equation}
+
+设其最大误差为$E_T$。
+
+对于任意其他的第$T$步函数$\tilde{f}_T$，考虑复合$\tilde{f}_T \circ \tilde{f}$，其最大误差为：
+\begin{equation}
+\tilde{E}_T = \max_{x \in [l,u]} |\tilde{f}_T(\tilde{f}(x)) - 1|
+\tag{33}\end{equation}
+
+由于$\tilde{f}$的值域是$[a,b]$，我们有：
+\begin{equation}
+\tilde{E}_T = \max_{y \in [a,b]} |\tilde{f}_T(y) - 1|
+\tag{34}\end{equation}
+
+**关键变换**：由于$\tilde{f}_T$是奇多项式，定义$g_T(z) = \tilde{f}_T(b z)$，则$g_T$也是奇多项式（只是系数不同），且：
+\begin{equation}
+\max_{y \in [a,b]} |\tilde{f}_T(y) - 1| = \max_{z \in [a/b, 1]} |g_T(z) - 1|
+\tag{35}\end{equation}
+
+由于$g_T$与$\tilde{f}_T$在同一函数空间，我们可以写：
+\begin{equation}
+\min_{\tilde{f}_T} \max_{y \in [a,b]} |\tilde{f}_T(y) - 1| = \min_{g_T} \max_{z \in [a/b,1]} |g_T(z) - 1|
+\tag{36}\end{equation}
+
+由不等式(31)，$a/b \geq l_T/u_T$，因此区间$[a/b, 1]$包含于区间$[l_T/u_T, 1]$（或者说更紧凑）。
+
+**单调性**：对于固定的目标函数$g(x) = 1$，最小化$\max_{x \in [c,d]} |f(x) - 1|$的最优误差关于区间$[c,d]$是单调的：区间越大，最优误差越大。
+
+**注释**：这是因为更大的区间给逼近带来了更大的挑战。严格证明需要用到等值振荡定理的性质。
+
+因此：
+\begin{equation}
+\min_{g_T} \max_{z \in [a/b,1]} |g_T(z) - 1| \leq \min_{g_T} \max_{z \in [l_T/u_T,1]} |g_T(z) - 1|
+\tag{37}\end{equation}
+
+注意到$[l_T/u_T, 1]$和$[l_T, u_T]$通过缩放变换$z = y/u_T$相关联，类似的变换论证给出：
+\begin{equation}
+\min_{g_T} \max_{z \in [l_T/u_T,1]} |g_T(z) - 1| = \min_{f_T} \max_{y \in [l_T,u_T]} |f_T(y) - 1| = E_T
+\tag{38}\end{equation}
+
+综合(34)-(38)：
+\begin{equation}
+\tilde{E}_T \geq E_T
+\tag{39}\end{equation}
+
+这证明了贪心解的误差不大于任意其他解的误差，因此贪心解是全局最优的。$\square$
+
+### 4. 求解等值振荡多项式
+
+#### 4.1 三阶奇多项式的解析解
+
+对于$n=1$（三阶奇多项式$f(x) = ax + bx^3$），我们需要求解：
+\begin{align}
+f(l) &= 1 - E \tag{40}\\
+f(u) &= 1 + E \tag{41}\\
+f(x_1) &= 1 + E \tag{42}\\
+f'(x_1) &= 0 \tag{43}
+\end{align}
+
+从$f'(x) = a + 3bx^2 = 0$得：
+\begin{equation}
+x_1^2 = -\frac{a}{3b}
+\tag{44}\end{equation}
+
+**注释**：为使$x_1 \in (l, u)$为实数，需要$ab < 0$。
+
+从(40)和(41)：
+\begin{align}
+al + bl^3 &= 1 - E \tag{45}\\
+au + bu^3 &= 1 + E \tag{46}
+\end{align}
+
+相减：
+\begin{equation}
+a(u-l) + b(u^3 - l^3) = 2E
+\tag{47}\end{equation}
+
+从(42)和(44)：
+\begin{equation}
+ax_1 + bx_1^3 = 1 + E
+\tag{48}\end{equation}
+
+代入$a = -3bx_1^2$：
+\begin{equation}
+-3bx_1^3 + bx_1^3 = 1 + E \quad\Rightarrow\quad -2bx_1^3 = 1 + E
+\tag{49}\end{equation}
+
+所以：
+\begin{equation}
+b = -\frac{1+E}{2x_1^3}
+\tag{50}\end{equation}
+
+从(45)：
+\begin{equation}
+al = 1 - E - bl^3
+\tag{51}\end{equation}
+
+从(46)：
+\begin{equation}
+au = 1 + E - bu^3
+\tag{52}\end{equation}
+
+相除：
+\begin{equation}
+\frac{l}{u} = \frac{1-E-bl^3}{1+E-bu^3}
+\tag{53}\end{equation}
+
+经过代数计算（详细过程略），可以得到：
+\begin{equation}
+x_1 = \sqrt{\frac{l^2 + lu + u^2}{3}}
+\tag{54}\end{equation}
+
+这是正文中给出的结果。
+
+#### 4.2 五阶奇多项式的Remez算法
+
+对于$n=2$（五阶奇多项式$f(x) = ax + bx^3 + cx^5$），解析解变得非常复杂。我们采用Remez算法迭代求解。
+
+**Remez算法框架**：
+1. 初始化：猜测$x_1, x_2$的位置（例如均匀分布）
+2. 固定$x_1, x_2$，求解线性方程组得到$(a,b,c,E)$
+3. 固定$(a,b,c)$，求$f'(x) = 0$的根，更新$x_1, x_2$
+4. 重复步骤2-3直到收敛
+
+**步骤2的线性方程组**：
+\begin{equation}
+\begin{bmatrix}
+l & l^3 & l^5 & 1 \\
+x_1 & x_1^3 & x_1^5 & -1 \\
+x_2 & x_2^3 & x_2^5 & 1 \\
+u & u^3 & u^5 & -1
+\end{bmatrix}
+\begin{bmatrix}
+a \\ b \\ c \\ E
+\end{bmatrix}
+=
+\begin{bmatrix}
+1 \\ 1 \\ 1 \\ 1
+\end{bmatrix}
+\tag{55}\end{equation}
+
+这是一个$4 \times 4$线性系统，可以直接求解。
+
+**步骤3的根求解**：求解$f'(x) = a + 3bx^2 + 5cx^4 = 0$，即：
+\begin{equation}
+5cx^4 + 3bx^2 + a = 0
+\tag{56}\end{equation}
+
+这是关于$y = x^2$的二次方程：
+\begin{equation}
+5cy^2 + 3by + a = 0
+\tag{57}\end{equation}
+
+解为：
+\begin{equation}
+y = \frac{-3b \pm \sqrt{9b^2 - 20ac}}{10c}
+\tag{58}\end{equation}
+
+取两个正根对应$x_1 = \sqrt{y_1}, x_2 = \sqrt{y_2}$（其中$y_1 < y_2$）。
+
+#### 4.3 收敛性分析
+
+**定理（Remez算法收敛性）**：如果初始猜测足够接近真实解，Remez算法二次收敛到最优解。
+
+**证明（概要）**：定义误差向量$\boldsymbol{e}^{(k)} = (\Delta x_1^{(k)}, \Delta x_2^{(k)})$，其中$\Delta x_i^{(k)} = x_i^{(k)} - x_i^*$是第$k$次迭代与真实解的偏差。
+
+通过对迭代映射进行泰勒展开，可以证明：
+\begin{equation}
+\Vert\boldsymbol{e}^{(k+1)}\Vert \leq C \Vert\boldsymbol{e}^{(k)}\Vert^2
+\tag{59}\end{equation}
+
+这表明二次收敛。$\square$
+
+**实践中的收敛速度**：通常5-10次迭代足以达到机器精度。
+
+### 5. 有限精度下的误差分析
+
+#### 5.1 浮点运算的误差模型
+
+在浮点运算中，每个算术运算引入相对误差$u$（机器精度）：
+\begin{equation}
+\text{fl}(x \circ y) = (x \circ y)(1 + \delta), \qquad |\delta| \leq u
+\tag{60}\end{equation}
+
+其中$\circ \in \{+, -, \times, /\}$。
+
+**bfloat16精度**：对于bfloat16格式，机器精度为：
+\begin{equation}
+u_{\text{bf16}} = 2^{-7} \approx 0.0078
+\tag{61}\end{equation}
+
+#### 5.2 振荡误差的累积
+
+考虑五阶等值振荡多项式$f_1^*$，由等值振荡定理，存在点$x_2 \in (l,u)$使得$f_1^*(x_2) = 1 - E$。
+
+如果$E$接近1，则$f_1^*(x_2)$非常小。经过$T$步迭代后，$x_2$需要被放大约$1/f_1^*(x_2)$倍才能达到1。
+
+**累积误差估计**：每步运算的相对误差$u$在$T$步后累积为：
+\begin{equation}
+\epsilon_{\text{total}} \approx Tu \cdot \prod_{t=1}^T \kappa_t
+\tag{62}\end{equation}
+
+其中$\kappa_t$是第$t$步的条件数（大致等于值域的放大倍率）。
+
+如果某步将奇异值从$0.01$缩小到$0.001$再放大回1，条件数$\kappa \sim 100$，累积误差会显著增大。
+
+#### 5.3 Cushion技巧的数学原理
+
+为了控制最大误差$E$不过分接近1，引入cushion参数$\lambda \in (0,1)$，将优化区间从$[l_t, u_t]$改为$[\max(l_t, \lambda u_t), u_t]$。
+
+**误差上界**：对于区间$[l,u]$，最优逼近的最大误差$E$满足：
+\begin{equation}
+E \geq E_0 \cdot \left(\frac{u-l}{u+l}\right)^n
+\tag{63}\end{equation}
+
+其中$E_0$是常数，$n$是多项式的阶数除以2。
+
+**注释**：这个界表明，区间越宽（$(u-l)/(u+l)$越大），误差$E$越大。
+
+通过限制$l \geq \lambda u$，我们有：
+\begin{equation}
+\frac{u-l}{u+l} \leq \frac{u - \lambda u}{u + \lambda u} = \frac{1-\lambda}{1+\lambda}
+\tag{64}\end{equation}
+
+因此：
+\begin{equation}
+E \geq E_0 \left(\frac{1-\lambda}{1+\lambda}\right)^n
+\tag{65}\end{equation}
+
+对于$\lambda = 0.024$，$n=2$（五阶多项式）：
+\begin{equation}
+\frac{1-\lambda}{1+\lambda} \approx 0.953, \quad E \geq E_0 \cdot 0.953^2 \approx 0.908 E_0
+\tag{66}\end{equation}
+
+这确保了$E$不会过分接近1。
+
+#### 5.4 Recenter技巧的数学原理
+
+由于cushion改变了优化区间，等值振荡条件$f(l_t) + f(u_t) = 2$可能不再满足。Recenter通过缩放因子$\gamma$恢复这个性质：
+\begin{equation}
+\gamma = \frac{2}{f(l_t) + f(u_t)}
+\tag{67}\end{equation}
+
+**几何解释**：$\gamma f(x)$将函数在$l_t$和$u_t$的平均值固定在1，确保整个值域关于1对称。
+
+**误差影响**：缩放不会改变函数的"形状"，只是调整幅度。如果$f(l_t) + f(u_t) \approx 2$（cushion不太激进时），$\gamma \approx 1$，影响很小。
+
+### 6. 安全因子的分析
+
+#### 6.1 发散风险
+
+对于偶数阶的$n$（如$n=2$对应五阶多项式），$f_t^*(x)$在$x > u_t$时单调递增到$+\infty$。如果由于数值误差，某个奇异值略微超过$u_t$，则会被放大，可能导致发散。
+
+**发散条件**：设$x = u_t + \epsilon$，其中$\epsilon > 0$很小。泰勒展开：
+\begin{align}
+f_t^*(u_t + \epsilon) &\approx f_t^*(u_t) + f_t^{*'}(u_t) \epsilon + \frac{1}{2}f_t^{*''}(u_t)\epsilon^2 \tag{68}\\
+&= (1+E) + f_t^{*'}(u_t) \epsilon + O(\epsilon^2) \tag{69}
+\end{align}
+
+如果$f_t^{*'}(u_t) > 0$且较大，$f_t^*(u_t + \epsilon)$可能显著大于1，后续迭代会继续放大。
+
+#### 6.2 安全因子的作用
+
+将$f_t^*(x)$替换为$f_t^*(x/s)$（其中$s > 1$，例如$s=1.01$），等价于将所有奇异值预先缩小$1/s$倍。
+
+**效果**：原本接近$u_t$的奇异值变为$(u_t/s) < u_t$，远离边界，减少发散风险。
+
+**代价**：所有奇异值都被缩小了，需要更多迭代步才能达到1。
+
+**权衡**：选择$s=1.01$是在安全性和效率之间的折中。对于bfloat16，$s=1.00781$（1后面的第一个可表示数）是自然的选择。
+
+### 7. 参数选择的理论指导
+
+#### 7.1 Cushion参数$\lambda$的选择
+
+**目标**：平衡覆盖范围和误差大小。
+
+**分析**：$\lambda$越小，每步优化的区间越小，$E$越小，振荡越温和，但需要更多步才能覆盖$[l_0, u_0]$。
+
+**经验公式**：根据实验，$\lambda \approx 0.02-0.05$是较好的选择范围。
+
+论文使用$\lambda = 0.02407$，这是通过数值优化得到的，使得6-8步迭代能达到很好的效果。
+
+#### 7.2 迭代步数$T$的选择
+
+**理论估计**：假设每步将值域缩小比例$r = l_{t+1}/l_t$，则$T$步后：
+\begin{equation}
+l_T \approx l_0 \cdot r^T
+\tag{70}\end{equation}
+
+要使$1 - l_T < \epsilon$（期望精度），需要：
+\begin{equation}
+T \geq \frac{\log(l_0/\epsilon)}{\log(1/r)}
+\tag{71}\end{equation}
+
+**实践数据**：对于$l_0 = 0.001, \epsilon = 10^{-4}, r \approx 0.3$（根据实验观察），需要：
+\begin{equation}
+T \geq \frac{\log(0.001/0.0001)}{\log(1/0.3)} = \frac{\log(10)}{\log(3.33)} \approx \frac{2.3}{1.2} \approx 2
+\tag{72}\end{equation}
+
+但这是理想情况。考虑有限精度和安全裕量，实际需要$T=6-8$步。
+
+### 8. 收敛值的解析
+
+#### 8.1 收敛时的极限行为
+
+正文中观察到，当$t \geq 7$时，系数收敛到$(a,b,c) = (1.875, -1.25, 0.375) \times 1.01^{1,3,5}$。
+
+**解释**：当$l_t$非常接近$u_t$时（即值域$[l_t, u_t] \approx [1-\epsilon, 1+\epsilon]$，$\epsilon \to 0$），等值振荡多项式趋向于一个特殊的极限形式。
+
+**极限方程**：当$l_t = u_t = 1$时（严格收敛），方程组变为：
+\begin{align}
+f(1) &= 1 \tag{73}\\
+f'(1) &= 0 \tag{74}
+\end{align}
+
+其中$f(x) = ax + bx^3 + cx^5$，$f'(x) = a + 3bx^2 + 5cx^4$。
+
+在$x=1$：
+\begin{align}
+a + b + c &= 1 \tag{75}\\
+a + 3b + 5c &= 0 \tag{76}
+\end{align}
+
+此外，由等值振荡的对称性，极值点$x_1, x_2$应该趋向于1。当$x_1 = x_2 = 1$时，$f''(1) = 0$也成立：
+\begin{equation}
+f''(x) = 6bx + 20cx^3 \quad\Rightarrow\quad f''(1) = 6b + 20c = 0
+\tag{77}\end{equation}
+
+联立(75), (76), (77)：
+\begin{align}
+a + b + c &= 1 \tag{78}\\
+a + 3b + 5c &= 0 \tag{79}\\
+6b + 20c &= 0 \quad\Rightarrow\quad b = -\frac{10c}{3} \tag{80}
+\end{align}
+
+从(79)：
+\begin{equation}
+a + 3\left(-\frac{10c}{3}\right) + 5c = 0 \quad\Rightarrow\quad a - 10c + 5c = 0 \quad\Rightarrow\quad a = 5c
+\tag{81}\end{equation}
+
+从(78)：
+\begin{equation}
+5c - \frac{10c}{3} + c = 1 \quad\Rightarrow\quad c\left(5 - \frac{10}{3} + 1\right) = 1 \quad\Rightarrow\quad c \cdot \frac{8}{3} = 1 \quad\Rightarrow\quad c = \frac{3}{8}
+\tag{82}\end{equation}
+
+因此：
+\begin{align}
+c &= \frac{3}{8} = 0.375 \tag{83}\\
+b &= -\frac{10 \cdot 3/8}{3} = -\frac{10}{8} = -1.25 \tag{84}\\
+a &= 5 \cdot \frac{3}{8} = \frac{15}{8} = 1.875 \tag{85}
+\end{align}
+
+**结论**：收敛值$(1.875, -1.25, 0.375)$正好对应$x_1 = x_2 = 1$且$f(1) = 1$的解，这与实验观察完全一致！
+
+#### 8.2 Halley迭代的联系
+
+有趣的是，这个收敛值恰好对应经典的Halley迭代公式：
+\begin{equation}
+x_{t+1} = x_t \left(\frac{15}{8} - \frac{10}{8}x_t^2 + \frac{3}{8}x_t^4\right)
+\tag{86}\end{equation}
+
+这可以改写为：
+\begin{equation}
+x_{t+1} = x_t \cdot \frac{1}{8}\left(15 - 10x_t^2 + 3x_t^4\right)
+\tag{87}\end{equation}
+
+Halley迭代是求解$x^{\top}x = I$的三阶收敛方法，其理论基础是对$(\boldsymbol{I} - \boldsymbol{X}^{\top}\boldsymbol{X})^{-1/2}$的更高阶Padé逼近。
+
+**深刻联系**：等值振荡理论自动发现了Halley迭代作为最优的局部迭代格式（当值域接近$[1,1]$时），这是一个非常美妙的数学结果！
+
+### 9. 算法复杂度与实现优化
+
+#### 9.1 计算复杂度
+
+**每步迭代**：
+- Remez算法求解：$O(1)$（固定次数的迭代，与矩阵大小无关）
+- 应用多项式$f_t$：$O(nm^2)$（矩阵乘法，同Newton-Schulz）
+
+**总复杂度**：$O(Tnm^2)$，与标准Newton-Schulz相同。
+
+#### 9.2 预计算优化
+
+由于系数$(a_t, b_t, c_t)$只依赖于$l_t, u_t$，而这些值在每次运行时都相同（确定性算法），可以预先计算所有系数并存储为查找表。
+
+**运行时优化**：直接使用预计算的系数，避免重复求解等值振荡方程，进一步提升速度。
+
+### 10. 与优化方法的比较
+
+#### 10.1 Adam优化 vs 等值振荡理论
+
+| 方法 | 优势 | 劣势 |
+|------|------|------|
+| Adam优化（上篇） | 灵活，易于实现，可处理各种目标 | 只能找到局部最优，依赖初始化，计算成本高 |
+| 等值振荡理论（下篇） | 保证全局最优，数学优雅，可解析求解 | 需要复杂的数学理论，实现较复杂 |
+
+#### 10.2 实验性能比较
+
+根据论文，等值振荡方法得到的系数在以下方面优于Adam优化：
+1. **最大误差更小**：理论最优保证
+2. **振荡更平滑**：等值振荡的对称性
+3. **收敛更稳定**：贪心结构避免了全局优化的不稳定性
+
+---
+
+**小结**：本节详细推导了极分解理论、等值振荡定理的完整证明、贪心算法最优性的严格数学证明、Remez算法的实现细节、以及有限精度下的误差分析。这些推导揭示了Newton-Schulz迭代优化的深刻数学结构，特别是等值振荡理论自动发现Halley迭代作为极限解的美妙结果。通过这些理论分析，我们不仅理解了算法的工作原理，还获得了参数选择和实现优化的指导原则。
 

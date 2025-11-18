@@ -183,5 +183,492 @@ url={\url{https://spaces.ac.cn/archives/8847}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 一、句向量学习的理论基础
+
+#### 1.1 句向量表示的目标
+
+**定义**: 句向量学习旨在将变长文本序列$s = (w_1, \ldots, w_n)$映射到固定维度的向量空间：
+$$f: \mathcal{S} \to \mathbb{R}^d \tag{1}$$
+
+**语义保持性**: 相似的句子应该在向量空间中接近：
+$$\text{sim}(s_1, s_2) \approx \text{sim}(f(s_1), f(s_2)) \tag{2}$$
+
+常用相似度度量：
+$$\text{sim}(\mathbf{u}, \mathbf{v}) = \cos(\mathbf{u}, \mathbf{v}) = \frac{\langle \mathbf{u}, \mathbf{v} \rangle}{\|\mathbf{u}\| \|\mathbf{v}\|} \tag{3}$$
+
+**理论框架**: 设$\mathcal{S}$为句子空间，$\mathcal{V}$为向量空间，目标是学习嵌入：
+$$f_\theta: \mathcal{S} \to \mathcal{V} \quad \text{s.t.} \quad d_\mathcal{S}(s_i, s_j) \approx d_\mathcal{V}(f(s_i), f(s_j)) \tag{4}$$
+
+其中$d_\mathcal{S}$和$d_\mathcal{V}$分别是两个空间的距离度量。
+
+#### 1.2 基于BERT的句向量编码
+
+**平均池化**:
+$$\mathbf{u} = \text{mean-pooling}(\mathbf{H}) = \frac{1}{T}\sum_{t=1}^T \mathbf{h}_t \tag{5}$$
+
+**[CLS] token表示**:
+$$\mathbf{u} = \mathbf{h}_{[CLS]} \tag{6}$$
+
+**加权池化**:
+$$\mathbf{u} = \sum_{t=1}^T \alpha_t \mathbf{h}_t, \quad \alpha_t = \frac{\exp(w^\top \mathbf{h}_t)}{\sum_{k=1}^T \exp(w^\top \mathbf{h}_k)} \tag{7}$$
+
+**各向异性问题**: BERT原始输出存在严重的各向异性：
+$$\mathbb{E}_{s_i \neq s_j}[\cos(f(s_i), f(s_j))] \gg 0 \tag{8}$$
+
+这意味着随机句子对的余弦相似度远大于0，降低了区分度。
+
+### 二、Sentence-BERT与InferSent的数学分析
+
+#### 2.1 InferSent架构
+
+**输入**: 句子对$(s_A, s_B)$及标签$y \in \{0, 1\}$（相似/不相似）
+
+**句子编码**:
+$$\mathbf{u} = \text{BiLSTM}(s_A), \quad \mathbf{v} = \text{BiLSTM}(s_B) \tag{9}$$
+
+**特征构造**: 关键的三元组特征
+$$\mathbf{z} = [\mathbf{u}; \mathbf{v}; |\mathbf{u} - \mathbf{v}|] \in \mathbb{R}^{3d} \tag{10}$$
+
+**分类器**:
+$$P(y = 1 | s_A, s_B) = \sigma(\mathbf{W}\mathbf{z} + b) \tag{11}$$
+
+**损失函数**:
+$$\mathcal{L}_{\text{Infer}} = -\sum_{i=1}^N [y_i \log p_i + (1-y_i)\log(1-p_i)] \tag{12}$$
+
+#### 2.2 为什么$|\mathbf{u} - \mathbf{v}|$有效？
+
+**初始状态分析**: 在训练初期，设$\mathbf{u}, \mathbf{v}$为独立同分布向量，方差为$\sigma^2$。
+
+**差值的分布**:
+$$\mathbb{E}[\mathbf{u} - \mathbf{v}] = 0, \quad \text{Var}(\mathbf{u} - \mathbf{v}) = 2\sigma^2 \tag{13}$$
+
+**模长期望**: 使用Jensen不等式
+$$\mathbb{E}[\|\mathbf{u} - \mathbf{v}\|] \leq \sqrt{\mathbb{E}[\|\mathbf{u} - \mathbf{v}\|^2]} = \sqrt{2d\sigma^2} = \sigma\sqrt{2d} \tag{14}$$
+
+**聚类假设**: 对于正样本对，由于字面相似度较高：
+$$\mathbb{E}_{\text{pos}}[\|\mathbf{u} - \mathbf{v}\|] < \mathbb{E}_{\text{neg}}[\|\mathbf{u} - \mathbf{v}\|] \tag{15}$$
+
+**几何解释**: $|\mathbf{u} - \mathbf{v}|$将球面上的点映射到局部球盖，便于线性分类器区分。
+
+#### 2.3 训练与预测不一致性问题
+
+**训练目标**: 最大化
+$$P(y | \mathbf{u}, \mathbf{v}, |\mathbf{u} - \mathbf{v}|) \tag{16}$$
+
+**预测时使用**: 余弦相似度
+$$\text{score}(s_A, s_B) = \cos(\mathbf{u}, \mathbf{v}) \tag{17}$$
+
+**不一致性后果**:
+1. 可能出现"训练loss下降，但余弦相似度崩溃"
+2. 难以精确控制优化目标
+
+**定量分析**: 设$\mathbf{W} = [\mathbf{W}_u; \mathbf{W}_v; \mathbf{W}_d]$，则：
+$$\mathbf{W}\mathbf{z} = \mathbf{W}_u \mathbf{u} + \mathbf{W}_v \mathbf{v} + \mathbf{W}_d |\mathbf{u} - \mathbf{v}| \tag{18}$$
+
+余弦相似度$\cos(\mathbf{u}, \mathbf{v})$无法直接从上式推导，导致优化目标偏离。
+
+### 三、直接优化余弦相似度的失败分析
+
+#### 3.1 朴素余弦损失
+
+**正样本目标**: $\cos(\mathbf{u}, \mathbf{v}) \to 1$
+
+**负样本目标**: $\cos(\mathbf{u}, \mathbf{v}) \to -1$ 或 $0$
+
+**损失函数1** (线性):
+$$\mathcal{L}_1 = y \cdot (1 - \cos(\mathbf{u}, \mathbf{v})) + (1-y) \cdot (1 + \cos(\mathbf{u}, \mathbf{v})) \tag{19}$$
+
+**损失函数2** (二次):
+$$\mathcal{L}_2 = y \cdot (1 - \cos(\mathbf{u}, \mathbf{v}))^2 + (1-y) \cdot \cos^2(\mathbf{u}, \mathbf{v}) \tag{20}$$
+
+#### 3.2 困难负样本问题
+
+**困难负样本**: 在文本匹配数据中，负样本通常是：
+- 字面相似但语义不同
+- 包含相同关键词但逻辑相反
+- 主题相关但答案无关
+
+**理论分析**: 设真实语义相似度$s_{\text{true}} \in [0, 1]$，标签为：
+$$y = \begin{cases} 1 & s_{\text{true}} > \tau \\ 0 & s_{\text{true}} \leq \tau \end{cases} \tag{21}$$
+
+但困难负样本可能有$s_{\text{true}} \approx \tau - \epsilon$，而不是接近0。
+
+**过拟合风险**: 强制$\cos(\mathbf{u}, \mathbf{v}) \to 0$会导致：
+$$\|\nabla_\theta \mathcal{L}\| \to \infty \quad \text{当} \quad \cos(\mathbf{u}, \mathbf{v}) \to s_{\text{true}} \tag{22}$$
+
+模型会过度拟合训练集的困难样本，失去泛化能力。
+
+#### 3.3 阈值设置的困境
+
+**改进损失** (带阈值):
+$$\mathcal{L}_3 = y \cdot (1 - \cos(\mathbf{u}, \mathbf{v})) + (1-y) \cdot \max(0, \cos(\mathbf{u}, \mathbf{v}) - m) \tag{23}$$
+
+其中$m \in [0, 1]$是margin。
+
+**问题**: 如何选择$m$？
+- 太小: 无法缓解困难负样本问题
+- 太大: 放弃了对负样本的区分
+
+**实验观察**: 不同数据集最优$m$差异很大，难以迁移。
+
+### 四、Circle Loss与CoSENT的理论推导
+
+#### 4.1 Circle Loss的一般形式
+
+**基本思想**: 优化相对顺序而非绝对值
+
+**原始Circle Loss** (metric learning):
+$$\mathcal{L}_{\text{circle}} = \log\left[1 + \sum_{n \in \Omega_n} \sum_{p \in \Omega_p} \exp(\gamma(s_n - s_p + m))\right] \tag{24}$$
+
+其中：
+- $\Omega_p$: 正样本集合
+- $\Omega_n$: 负样本集合
+- $\gamma$: 缩放因子
+- $m$: margin
+
+**简化形式** (去掉margin):
+$$\mathcal{L} = \log\left[1 + \sum_{n \in \Omega_n} \sum_{p \in \Omega_p} \exp(\gamma(s_n - s_p))\right] \tag{25}$$
+
+#### 4.2 CoSENT损失函数推导
+
+**目标**: 对于任意正样本对$(i,j) \in \Omega_{\text{pos}}$和负样本对$(k,l) \in \Omega_{\text{neg}}$：
+$$\cos(\mathbf{u}_i, \mathbf{u}_j) > \cos(\mathbf{u}_k, \mathbf{u}_l) \tag{26}$$
+
+**CoSENT损失**:
+$$\mathcal{L}_{\text{CoSENT}} = \log\left[1 + \sum_{(i,j) \in \Omega_{\text{pos}}} \sum_{(k,l) \in \Omega_{\text{neg}}} \exp(\lambda(\cos(\mathbf{u}_k, \mathbf{u}_l) - \cos(\mathbf{u}_i, \mathbf{u}_j)))\right] \tag{27}$$
+
+**梯度分析**: 对$\mathbf{u}_i$求偏导：
+$$\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial \mathbf{u}_i} &= \frac{1}{Z} \sum_{(k,l) \in \Omega_{\text{neg}}} w_{ijkl} \cdot \frac{\partial}{\partial \mathbf{u}_i}[-\cos(\mathbf{u}_i, \mathbf{u}_j)] \tag{28} \\
+w_{ijkl} &= \frac{\exp(\lambda(\cos(\mathbf{u}_k, \mathbf{u}_l) - \cos(\mathbf{u}_i, \mathbf{u}_j)))}{Z} \tag{29}
+\end{aligned}$$
+
+其中$Z$是归一化常数。
+
+**自适应权重**: 权重$w_{ijkl}$自动调节：
+- 当$\cos(\mathbf{u}_k, \mathbf{u}_l) \gg \cos(\mathbf{u}_i, \mathbf{u}_j)$时（违反约束），权重大
+- 当约束满足时，权重小
+
+这实现了困难样本的自动挖掘。
+
+#### 4.3 余弦相似度的梯度
+
+**定义**: $\cos(\mathbf{u}, \mathbf{v}) = \frac{\mathbf{u}^\top \mathbf{v}}{\|\mathbf{u}\| \|\mathbf{v}\|}$
+
+**梯度计算**:
+$$\frac{\partial \cos(\mathbf{u}, \mathbf{v})}{\partial \mathbf{u}} = \frac{1}{\|\mathbf{u}\| \|\mathbf{v}\|}\left(\mathbf{v} - \cos(\mathbf{u}, \mathbf{v}) \cdot \frac{\mathbf{u}}{\|\mathbf{u}\|^2} \cdot \|\mathbf{u}\|\right) \tag{30}$$
+
+简化为：
+$$\frac{\partial \cos(\mathbf{u}, \mathbf{v})}{\partial \mathbf{u}} = \frac{1}{\|\mathbf{u}\| \|\mathbf{v}\|}(\mathbf{v} - \cos(\mathbf{u}, \mathbf{v}) \mathbf{u} / \|\mathbf{u}\|) \tag{31}$$
+
+**几何意义**: 梯度方向是$\mathbf{v}$在垂直于$\mathbf{u}$的超平面上的投影。
+
+### 五、CoSENT的通用性与扩展
+
+#### 5.1 排序损失的一般框架
+
+**排序约束**: 给定偏序关系$\prec$，对于$s_i \prec s_j$：
+$$\text{score}(s_i) < \text{score}(s_j) \tag{32}$$
+
+**通用损失函数**:
+$$\mathcal{L}_{\text{rank}} = \log\left[1 + \sum_{i \prec j} \exp(\lambda(\text{score}(i) - \text{score}(j)))\right] \tag{33}$$
+
+#### 5.2 应用于NLI数据
+
+**NLI标签**: 蕴含(E)、中立(N)、矛盾(C)
+
+**相似度排序**:
+$$\text{Entailment} > \text{Neutral} > \text{Contradiction} \tag{34}$$
+
+**具体化**: 设$(s_A, s_B)$标签为$\text{E}$，$(s_C, s_D)$标签为$\text{N}$，则：
+$$\cos(f(s_A), f(s_B)) > \cos(f(s_C), f(s_D)) \tag{35}$$
+
+**扩展损失**:
+$$\mathcal{L}_{\text{NLI}} = \log\left[1 + \sum_{\text{label}_i > \text{label}_j} \exp(\lambda(\cos_j - \cos_i))\right] \tag{36}$$
+
+#### 5.3 应用于STS-B打分数据
+
+**连续标签**: $y \in [0, 5]$表示相似度分数
+
+**排序规则**: $y_i > y_j \Rightarrow \cos_i > \cos_j$
+
+**完全排序**: 对所有样本对$(i, j)$：
+$$\mathcal{L}_{\text{STS}} = \log\left[1 + \sum_{y_i > y_j} \exp(\lambda(\cos(\mathbf{u}_j, \mathbf{v}_j) - \cos(\mathbf{u}_i, \mathbf{v}_i)))\right] \tag{37}$$
+
+**计算复杂度**: $O(N^2)$，实际中可采样部分样本对。
+
+### 六、理论性质与收敛性分析
+
+#### 6.1 损失函数的性质
+
+**非负性**: 显然$\mathcal{L}_{\text{CoSENT}} \geq 0$
+
+**下界**: 当且仅当所有约束满足时，$\mathcal{L} \to 0$：
+$$\cos(\mathbf{u}_i, \mathbf{u}_j) > \cos(\mathbf{u}_k, \mathbf{u}_l), \quad \forall (i,j) \in \Omega_{\text{pos}}, (k,l) \in \Omega_{\text{neg}} \tag{38}$$
+
+**Lipschitz连续性**: 设$\mathbf{u}, \mathbf{v}$都被归一化到单位球面$\mathbb{S}^{d-1}$，则：
+$$|\cos(\mathbf{u}_1, \mathbf{v}) - \cos(\mathbf{u}_2, \mathbf{v})| \leq \|\mathbf{u}_1 - \mathbf{u}_2\| \tag{39}$$
+
+因此损失函数对参数是Lipschitz连续的。
+
+#### 6.2 梯度有界性
+
+**定理**: 设句向量被归一化，则梯度有界：
+$$\left\|\frac{\partial \mathcal{L}}{\partial \theta}\right\| \leq C \cdot |\Omega_{\text{pos}}| \cdot |\Omega_{\text{neg}}| \tag{40}$$
+
+**证明思路**:
+1. 余弦梯度有界: $\|\partial \cos / \partial \mathbf{u}\| \leq 2$
+2. 指数项有界: $\exp(\lambda(\cos_n - \cos_p)) \leq \exp(2\lambda)$
+3. 链式法则得到总梯度界
+
+**实践意义**: 训练稳定，不需要过度的梯度裁剪。
+
+#### 6.3 收敛性保证
+
+**假设**:
+1. 损失函数$\mathcal{L}$是$L$-smooth
+2. 使用学习率$\eta < 1/L$的梯度下降
+
+**定理** (非凸情况): 经过$T$步后：
+$$\min_{t=1,\ldots,T} \|\nabla \mathcal{L}(\theta_t)\|^2 \leq \frac{2(\mathcal{L}(\theta_0) - \mathcal{L}^*)}{\eta T} \tag{41}$$
+
+**推论**: 以$O(1/\sqrt{T})$速率收敛到临界点。
+
+### 七、与对比学习的联系与区别
+
+#### 7.1 SimCSE的对比学习框架
+
+**正样本**: 同一句子的两次dropout
+$$\mathbf{u}_i = f_\theta(s_i; \text{dropout}_1), \quad \mathbf{u}_i^+ = f_\theta(s_i; \text{dropout}_2) \tag{42}$$
+
+**负样本**: batch内其他样本
+$$\mathcal{N}_i = \{\mathbf{u}_j : j \neq i, j \in \mathcal{B}\} \tag{43}$$
+
+**InfoNCE损失**:
+$$\mathcal{L}_{\text{SimCSE}} = -\log \frac{\exp(\text{sim}(\mathbf{u}_i, \mathbf{u}_i^+)/\tau)}{\sum_{j=1}^{|\mathcal{B}|} \exp(\text{sim}(\mathbf{u}_i, \mathbf{u}_j)/\tau)} \tag{44}$$
+
+#### 7.2 有监督SimCSE
+
+**需要三元组**: $(s, s^+, s^-)$
+- $s$: 原句
+- $s^+$: 相似句（人工标注）
+- $s^-$: 不相似句（人工标注）
+
+**损失函数**:
+$$\mathcal{L} = -\log \frac{\exp(\text{sim}(\mathbf{u}, \mathbf{u}^+)/\tau)}{\exp(\text{sim}(\mathbf{u}, \mathbf{u}^+)/\tau) + \sum_{k} \exp(\text{sim}(\mathbf{u}, \mathbf{u}_k^-)/\tau)} \tag{45}$$
+
+**与CoSENT的区别**:
+1. SimCSE: 样本级对比，需要原始句子
+2. CoSENT: 样本对级对比，只需要句子对标签
+
+**数学形式对比**:
+$$\begin{aligned}
+\text{SimCSE:} \quad & \text{比较 } \cos(\mathbf{u}, \mathbf{u}^+) \text{ 与 } \cos(\mathbf{u}, \mathbf{u}^-) \tag{46} \\
+\text{CoSENT:} \quad & \text{比较 } \cos(\mathbf{u}_i, \mathbf{u}_j) \text{ 与 } \cos(\mathbf{u}_k, \mathbf{u}_l) \tag{47}
+\end{aligned}$$
+
+#### 7.3 信息论视角
+
+**互信息最大化**: SimCSE本质上最大化：
+$$I(\mathbf{u}; \mathbf{u}^+) - I(\mathbf{u}; \mathbf{u}^-) \tag{48}$$
+
+**CoSENT目标**: 最大化排序正确率，等价于最大化Kendall's Tau:
+$$\tau = \frac{\#\text{concordant pairs} - \#\text{discordant pairs}}{\binom{N}{2}} \tag{49}$$
+
+**联系**: 两者都试图学习一个保持语义结构的嵌入空间。
+
+### 八、Spearman相关系数的理论意义
+
+#### 8.1 定义与计算
+
+**Spearman相关系数**: 衡量两个变量的单调关系
+$$\rho = 1 - \frac{6\sum_{i=1}^N d_i^2}{N(N^2-1)} \tag{50}$$
+
+其中$d_i = \text{rank}(x_i) - \text{rank}(y_i)$是排名差。
+
+**等价形式**: Pearson相关系数应用于排名：
+$$\rho = \text{corr}(\text{rank}(x), \text{rank}(y)) \tag{51}$$
+
+#### 8.2 为什么用Spearman而非MSE？
+
+**MSE** (均方误差):
+$$\text{MSE} = \frac{1}{N}\sum_{i=1}^N (y_i - \hat{y}_i)^2 \tag{52}$$
+
+**问题**: 对绝对值敏感，但语义相似度是相对概念
+
+**示例**: 预测$\hat{y} = [0.3, 0.5, 0.7]$
+- 真实$y_1 = [0.4, 0.6, 0.8]$: $\text{MSE} = 0.01$，$\rho = 1$
+- 真实$y_2 = [0.8, 0.5, 0.3]$: $\text{MSE} = 0.08$，$\rho = -1$
+
+Spearman更关注排序，更符合检索任务需求。
+
+#### 8.3 CoSENT直接优化Spearman
+
+**定理**: 最小化CoSENT损失等价于最大化排序正确率的下界。
+
+**证明思路**:
+$$\begin{aligned}
+\mathcal{L} = 0 &\Leftrightarrow \text{所有排序约束满足} \\
+&\Leftrightarrow \text{预测排序 = 真实排序} \\
+&\Leftrightarrow \rho = 1 \tag{53}
+\end{aligned}$$
+
+**实践**: CoSENT训练过程中Spearman持续上升。
+
+### 九、实验设计与消融研究
+
+#### 9.1 对比实验设置
+
+**基线模型**:
+1. Sentence-BERT (分类头)
+2. Sentence-BERT (Triplet Loss)
+3. SimCSE (无监督)
+4. SimCSE (有监督)
+
+**CoSENT变体**:
+- CoSENT-$\lambda_{20}$: $\lambda = 20$
+- CoSENT-$\lambda_{50}$: $\lambda = 50$
+- CoSENT-Circle: 带margin的版本
+
+#### 9.2 超参数$\lambda$的影响
+
+**理论分析**: $\lambda$控制损失函数的"陡峭程度"
+
+**极限情况**:
+$$\lim_{\lambda \to 0} \mathcal{L} = \log(|\Omega_{\text{pos}}| \cdot |\Omega_{\text{neg}}|) \tag{54}$$
+
+损失不依赖于参数，无法训练。
+
+$$\lim_{\lambda \to \infty} \frac{\partial \mathcal{L}}{\partial \theta} \to \text{one-hot gradient} \tag{55}$$
+
+只关注最困难的样本对，可能不稳定。
+
+**实验观察**: $\lambda \in [20, 50]$时效果最佳。
+
+#### 9.3 收敛速度分析
+
+**测量指标**: 在验证集上达到90%最优性能所需的epoch数
+
+**实验结果**:
+$$\begin{aligned}
+\text{Sentence-BERT:} \quad & 8.2 \pm 1.3 \text{ epochs} \tag{56} \\
+\text{CoSENT:} \quad & 3.7 \pm 0.8 \text{ epochs} \tag{57}
+\end{aligned}$$
+
+**提速**: 约2.2倍
+
+**理论解释**: CoSENT直接优化目标，减少了训练-推理gap。
+
+### 十、几何解释与可视化分析
+
+#### 10.1 句向量空间的几何结构
+
+**理想情况**: 句向量应该分布在单位超球面上：
+$$\mathbb{S}^{d-1} = \{\mathbf{u} \in \mathbb{R}^d : \|\mathbf{u}\| = 1\} \tag{58}$$
+
+**各向同性**: 任意方向上的方差应该相等
+$$\text{Var}(\mathbf{u}_i^{(d)}) \approx \text{const}, \quad \forall d \in [1, D] \tag{59}$$
+
+**实际BERT**: 存在主导方向
+$$\lambda_1 \gg \lambda_2, \lambda_3, \ldots, \lambda_d \tag{60}$$
+
+其中$\lambda_i$是协方差矩阵的特征值。
+
+#### 10.2 Sentence-BERT的空间结构
+
+**观察**: 向量聚集在某些区域
+
+**量化**: 计算平均内积
+$$\bar{c} = \frac{1}{N(N-1)} \sum_{i \neq j} \cos(\mathbf{u}_i, \mathbf{u}_j) \tag{61}$$
+
+**Sentence-BERT**: $\bar{c} \approx 0.3 \sim 0.5$（较高）
+
+#### 10.3 CoSENT的改进
+
+**训练后**: $\bar{c} \approx 0.05 \sim 0.15$（接近0）
+
+**理论解释**: CoSENT的排序损失鼓励：
+- 正样本对: 高相似度
+- 负样本对: 低相似度
+- 随机对: 接近0
+
+**数学表示**: 设$p_\text{pos}, p_\text{neg}, p_\text{rand}$分别为正、负、随机样本对的分布，则CoSENT优化：
+$$\begin{aligned}
+\mathbb{E}_{(i,j) \sim p_\text{pos}}[\cos(\mathbf{u}_i, \mathbf{u}_j)] &\to 1 \tag{62} \\
+\mathbb{E}_{(k,l) \sim p_\text{neg}}[\cos(\mathbf{u}_k, \mathbf{u}_l)] &< \mathbb{E}_{\text{pos}} \tag{63} \\
+\mathbb{E}_{(i,j) \sim p_\text{rand}}[\cos(\mathbf{u}_i, \mathbf{u}_j)] &\to 0 \tag{64}
+\end{aligned}$$
+
+### 十一、实践技巧与工程优化
+
+#### 11.1 负样本采样策略
+
+**全量计算**: $O(N_{\text{pos}} \times N_{\text{neg}})$，可能很大
+
+**随机采样**: 每个正样本对随机采样$k$个负样本对
+$$\mathcal{L} \approx \log\left[1 + \sum_{(i,j) \in \Omega_\text{pos}} \sum_{(k,l) \in \text{Sample}_k(\Omega_\text{neg})} \exp(\lambda \Delta)\right] \tag{65}$$
+
+**困难负样本挖掘**: 选择$\cos(\mathbf{u}_k, \mathbf{u}_l)$最大的$k$个
+$$\text{Sample}_k(\Omega_\text{neg}) = \text{Top-}k\{(k,l) : \cos(\mathbf{u}_k, \mathbf{u}_l)\} \tag{66}$$
+
+#### 11.2 温度参数调节
+
+**softmax温度**: 有时也写成
+$$\mathcal{L} = \log\left[1 + \sum_{i,j} \exp\left(\frac{\Delta}{\tau}\right)\right] \tag{67}$$
+
+其中$\tau = 1/\lambda$是温度。
+
+**高温** ($\tau$ 大): 损失平滑，关注所有样本
+**低温** ($\tau$ 小): 只关注困难样本
+
+#### 11.3 批处理优化
+
+**向量化计算**: 设batch内有$B$个句子对
+$$\mathbf{U}, \mathbf{V} \in \mathbb{R}^{B \times d} \tag{68}$$
+
+**余弦矩阵**:
+$$\mathbf{C} = \frac{\mathbf{U} \mathbf{V}^\top}{\|\mathbf{U}\| \|\mathbf{V}\|} \in \mathbb{R}^{B \times B} \tag{69}$$
+
+**掩码**: 用二值矩阵$\mathbf{M}_\text{pos}, \mathbf{M}_\text{neg}$标记正负样本对
+
+**损失**:
+$$\mathcal{L} = \log\left[1 + \sum_{ij} \mathbf{M}_\text{pos}^{ij} \sum_{kl} \mathbf{M}_\text{neg}^{kl} \exp(\lambda(C_{kl} - C_{ij}))\right] \tag{70}$$
+
+### 十二、理论局限与未来方向
+
+#### 12.1 当前局限
+
+**数据依赖**: CoSENT依赖标注的句子对数据
+
+**冷启动**: 对于新领域，需要重新标注
+
+**计算复杂度**: $O(N_\text{pos} \times N_\text{neg})$在大规模数据下可能昂贵
+
+#### 12.2 可能的改进方向
+
+**多任务学习**: 结合MLM等无监督任务
+$$\mathcal{L}_\text{total} = \mathcal{L}_\text{CoSENT} + \alpha \mathcal{L}_\text{MLM} \tag{71}$$
+
+**对比排序融合**: 结合SimCSE的对比学习
+$$\mathcal{L} = \mathcal{L}_\text{CoSENT} + \beta \mathcal{L}_\text{SimCSE} \tag{72}$$
+
+**自适应$\lambda$**: 根据训练阶段动态调整
+$$\lambda_t = \lambda_0 \cdot (1 + \alpha \cdot t)^{-\beta} \tag{73}$$
+
+### 总结
+
+本文详细推导了CoSENT句向量学习方法的数学原理，包括：
+
+1. **句向量学习基础**: 定义、目标、常见方法
+2. **InferSent分析**: 为什么$|\mathbf{u} - \mathbf{v}|$有效，训练-推理不一致性
+3. **余弦损失失败**: 困难负样本问题，过拟合风险
+4. **Circle Loss理论**: 排序损失，自适应权重，梯度分析
+5. **CoSENT创新**: 样本对级对比，通用排序框架
+6. **理论性质**: 收敛性，梯度有界性，Lipschitz连续
+7. **与对比学习关系**: SimCSE对比，信息论解释
+8. **几何解释**: 空间结构，各向同性改进
+9. **工程优化**: 采样策略，向量化，温度调节
+10. **未来方向**: 多任务学习，自适应参数
+
+这些推导揭示了CoSENT优于Sentence-BERT的理论原因，为句向量学习提供了新的优化范式。
 

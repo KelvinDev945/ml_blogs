@@ -1,0 +1,321 @@
+### 多任务学习漫谈（一）详细推导
+
+本文件包含为"多任务学习漫谈一以损失之名.md"准备的详细数学推导。
+
+### 1. 加权求和的数学基础
+
+**定义1.1 (Pareto最优性)**
+在多目标优化中，当无法在不损害至少一个目标的情况下改善任何目标时，称该解为Pareto最优解。
+
+对于多任务学习：
+\begin{equation}
+\min_\theta (\mathcal{L}_1(\theta), \ldots, \mathcal{L}_n(\theta))
+\tag{1}
+\end{equation}
+
+**定理1.1**: 加权求和法的解是Pareto前沿的子集。
+
+\begin{equation}
+\theta^* \in \arg\min_\theta \sum_{i=1}^n \alpha_i \mathcal{L}_i(\theta) \implies \theta^* \text{ 是Pareto最优}
+\tag{2}
+\end{equation}
+
+但反之不成立：存在Pareto最优解不能通过任何正权重的加权求和得到（非凸Pareto前沿）。
+
+### 2. 初始状态归一化的推导
+
+**问题2.1**: 不同任务的损失量纲不同，如何公平对待？
+
+**解决方案**: 无量纲化处理：
+\begin{equation}
+\tilde{\mathcal{L}}_i = \frac{\mathcal{L}_i}{\mathcal{L}_i^{(init)}}
+\tag{3}
+\end{equation}
+
+**性质2.1 (缩放不变性)**: 如果$\mathcal{L}_i' = c \mathcal{L}_i$，则：
+\begin{equation}
+\frac{\mathcal{L}_i'}{\mathcal{L}_i'^{(init)}} = \frac{c\mathcal{L}_i}{c\mathcal{L}_i^{(init)}} = \frac{\mathcal{L}_i}{\mathcal{L}_i^{(init)}}
+\tag{4}
+\end{equation}
+
+**初始损失估计**:
+- K分类 + 交叉熵: $\mathcal{L}^{(init)} = \log K$
+- 回归 + MSE: $\mathcal{L}^{(init)} = \mathbb{E}[\|y\|^2]$
+- 二分类 + BCE: $\mathcal{L}^{(init)} = \log 2$
+
+### 3. 先验分布与熵的关系
+
+**定理3.1**: 对于K分类，先验分布$p = [p_1, \ldots, p_K]$下的期望损失为熵：
+\begin{equation}
+\mathcal{L}^{(prior)} = -\sum_{k=1}^K p_k \log p_k = H(p)
+\tag{5}
+\end{equation}
+
+**证明**: 模型预测为先验分布$p$，样本真实分布也是$p$时：
+\begin{equation}
+\mathbb{E}_{y \sim p}[-\log p_y] = -\sum_k p_k \log p_k
+\tag{6}
+\end{equation}
+
+**示例**: 如果数据集80%正例，20%负例：
+\begin{equation}
+H = -0.8\log 0.8 - 0.2\log 0.2 \approx 0.722
+\tag{7}
+\end{equation}
+
+而均匀分布：$H = -2 \times 0.5\log 0.5 = \log 2 \approx 0.693$。
+
+### 4. 实时状态调整的梯度分析
+
+**方案**:
+\begin{equation}
+\mathcal{L} = \sum_{i=1}^n \frac{\mathcal{L}_i}{\text{sg}(\mathcal{L}_i)}
+\tag{8}
+\end{equation}
+
+**梯度计算**:
+\begin{equation}
+\nabla_\theta \frac{\mathcal{L}_i}{\text{sg}(\mathcal{L}_i)} = \frac{\nabla_\theta \mathcal{L}_i}{\mathcal{L}_i}
+\tag{9}
+\end{equation}
+
+**等价形式**:
+\begin{equation}
+\frac{\nabla_\theta \mathcal{L}_i}{\mathcal{L}_i} = \nabla_\theta \log \mathcal{L}_i
+\tag{10}
+\end{equation}
+
+因此优化$\sum_i \frac{\mathcal{L}_i}{\text{sg}(\mathcal{L}_i)}$等价于优化$\sum_i \log \mathcal{L}_i$。
+
+### 5. 几何平均的推导
+
+**定理5.1**:
+\begin{equation}
+\sum_{i=1}^n \log \mathcal{L}_i = \log \prod_{i=1}^n \mathcal{L}_i = n \log \sqrt[n]{\prod_{i=1}^n \mathcal{L}_i}
+\tag{11}
+\end{equation}
+
+**定义5.1 (几何平均)**:
+\begin{equation}
+GM(\mathcal{L}_1, \ldots, \mathcal{L}_n) = \sqrt[n]{\prod_{i=1}^n \mathcal{L}_i}
+\tag{12}
+\end{equation}
+
+**性质**: 几何平均对异常值不敏感，相比算术平均：
+\begin{equation}
+GM(1, 100) = 10 < AM(1, 100) = 50.5
+\tag{13}
+\end{equation}
+
+### 6. 广义平均理论
+
+**定义6.1 (幂平均)**:
+\begin{equation}
+M_p(\mathcal{L}_1, \ldots, \mathcal{L}_n) = \left(\frac{1}{n}\sum_{i=1}^n \mathcal{L}_i^p\right)^{1/p}
+\tag{14}
+\end{equation}
+
+**特殊情况**:
+- $p = 1$: 算术平均
+- $p \to 0$: 几何平均
+- $p = -1$: 调和平均
+- $p \to +\infty$: 最大值
+- $p \to -\infty$: 最小值
+
+**定理6.1 (单调性)**:
+\begin{equation}
+p_1 < p_2 \implies M_{p_1}(\mathcal{L}) \leq M_{p_2}(\mathcal{L})
+\tag{15}
+\end{equation}
+
+**证明**: 利用Hölder不等式。
+
+### 7. 梯度归一化的深入分析
+
+**方案**:
+\begin{equation}
+\mathcal{L} = \sum_{i=1}^n \frac{\mathcal{L}_i}{\|\nabla_\theta \mathcal{L}_i\|^{(\text{sg})}}
+\tag{16}
+\end{equation}
+
+**梯度**:
+\begin{equation}
+\nabla_\theta \mathcal{L} = \sum_{i=1}^n \frac{\nabla_\theta \mathcal{L}_i}{\|\nabla_\theta \mathcal{L}_i\|}
+\tag{17}
+\end{equation}
+
+**几何解释**: 将所有任务的梯度归一化后相加，每个任务贡献一个单位向量。
+
+**性质7.1 (方向保持)**:
+- 每个任务的梯度方向保持不变
+- 所有任务的梯度具有相同的模长权重
+- 最终梯度是梯度方向的投票
+
+**定理7.1 (梯度冲突检测)**:
+当$\langle \nabla \mathcal{L}_i, \nabla \mathcal{L}_j \rangle < 0$时，任务$i$和$j$存在梯度冲突。
+
+### 8. 不确定性加权（扩展内容）
+
+**理论基础**: 基于贝叶斯推断，任务的不确定性可以作为权重。
+
+**模型**: 假设每个任务有观测噪声$\sigma_i$：
+\begin{equation}
+y_i = f_i(\theta) + \mathcal{N}(0, \sigma_i^2)
+\tag{18}
+\end{equation}
+
+**对数似然**:
+\begin{equation}
+\log p(y_i | \theta, \sigma_i) = -\frac{1}{2\sigma_i^2}\|y_i - f_i(\theta)\|^2 - \log \sigma_i - \frac{1}{2}\log 2\pi
+\tag{19}
+\end{equation}
+
+**多任务联合似然**:
+\begin{equation}
+\mathcal{L} = \sum_{i=1}^n \left(\frac{1}{2\sigma_i^2}\mathcal{L}_i + \log \sigma_i\right)
+\tag{20}
+\end{equation}
+
+**学习$\sigma_i$**: 将$\sigma_i$作为可学习参数：
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \sigma_i} = -\frac{\mathcal{L}_i}{\sigma_i^3} + \frac{1}{\sigma_i} = 0 \implies \sigma_i^2 = \mathcal{L}_i
+\tag{21}
+\end{equation}
+
+### 9. 平移不变性分析
+
+**定义9.1**: 损失函数$L(\mathcal{L}_1, \ldots, \mathcal{L}_n)$具有平移不变性，如果：
+\begin{equation}
+L(\mathcal{L}_1 + c, \ldots, \mathcal{L}_n + c) = L(\mathcal{L}_1, \ldots, \mathcal{L}_n) + nc
+\tag{22}
+\end{equation}
+
+**梯度平移不变性**:
+\begin{equation}
+\nabla_\theta L(\mathcal{L}_1 + c, \ldots, \mathcal{L}_n + c) = \nabla_\theta L(\mathcal{L}_1, \ldots, \mathcal{L}_n)
+\tag{23}
+\end{equation}
+
+**定理9.1**: 梯度归一化方法满足梯度平移不变性。
+
+**证明**:
+\begin{equation}
+\nabla(\mathcal{L}_i + c) = \nabla \mathcal{L}_i
+\tag{24}
+\end{equation}
+
+因此：
+\begin{equation}
+\frac{\nabla(\mathcal{L}_i + c)}{\|\nabla(\mathcal{L}_i + c)\|} = \frac{\nabla \mathcal{L}_i}{\|\nabla \mathcal{L}_i\|}
+\tag{25}
+\end{equation}
+
+### 10. GradNorm方法对比
+
+**GradNorm核心思想**: 动态调整权重使所有任务的梯度模长相对平衡。
+
+**目标函数**:
+\begin{equation}
+L_{grad} = \sum_i \left|\|\nabla \mathcal{L}_i\| - \bar{G} \cdot r_i^{\alpha}\right|
+\tag{26}
+\end{equation}
+
+其中：
+- $\bar{G} = \frac{1}{n}\sum_i \|\nabla \mathcal{L}_i\|$: 平均梯度模
+- $r_i = \mathcal{L}_i / \mathcal{L}_i^{(0)}$: 相对损失率
+- $\alpha$: 超参数
+
+**与本文方法的对比**:
+- GradNorm: 需要额外优化权重
+- 梯度归一化: 直接固定权重为$1/\|\nabla \mathcal{L}_i\|$
+
+### 11. PCGrad方法
+
+**投影梯度**: 当检测到梯度冲突时，投影掉冲突部分。
+
+对于任务$i$和$j$，如果$\langle g_i, g_j \rangle < 0$：
+\begin{equation}
+\tilde{g}_i = g_i - \frac{\langle g_i, g_j \rangle}{\|g_j\|^2} g_j
+\tag{27}
+\end{equation}
+
+**算法**:
+1. 计算所有任务梯度$\{g_1, \ldots, g_n\}$
+2. 对每个$g_i$，投影掉与其他任务冲突的部分
+3. 更新参数：$\theta \leftarrow \theta - \eta \sum_i \tilde{g}_i$
+
+### 12. 数值示例
+
+**场景**: 2个任务，简化为标量优化。
+
+**任务1**: $\mathcal{L}_1 = (\theta - 1)^2$
+**任务2**: $\mathcal{L}_2 = (\theta + 1)^2$
+
+**梯度**:
+- $\nabla \mathcal{L}_1 = 2(\theta - 1)$
+- $\nabla \mathcal{L}_2 = 2(\theta + 1)$
+
+**不同方法的梯度**:
+
+1. **均匀加权**: $\nabla \mathcal{L} = 2(\theta - 1) + 2(\theta + 1) = 4\theta$
+   - 最优解: $\theta^* = 0$
+
+2. **梯度归一化**:
+   \begin{equation}
+   \nabla \mathcal{L} = \frac{2(\theta-1)}{|2(\theta-1)|} + \frac{2(\theta+1)}{|2(\theta+1)|}
+   \tag{28}
+   \end{equation}
+
+   当$\theta \in (-1, 1)$: $\nabla \mathcal{L} = -1 + 1 = 0$（任何点都是驻点！）
+
+3. **几何平均**: 优化$\sqrt{\mathcal{L}_1 \mathcal{L}_2}$
+   - 最优解: 同样是$\theta^* = 0$
+
+### 13. 理论性质总结
+
+**定理13.1 (凸性保持)**:
+如果所有$\mathcal{L}_i$都是凸的，则：
+- 加权求和是凸的
+- 对数求和不一定是凸的
+- 幂平均($p \geq 1$)是凸的
+
+**定理13.2 (Lipschitz常数)**:
+如果$\mathcal{L}_i$是$L_i$-Lipschitz的，则：
+- 加权求和是$\sum_i \alpha_i L_i$-Lipschitz的
+- 梯度归一化是$n$-Lipschitz的
+
+### 14. 实践建议总结
+
+**选择策略决策树**:
+
+```
+是否需要理论保证？
+├─ 是 → 使用加权求和
+│   └─ 如何选权重？
+│       ├─ 不知道 → 先验状态归一化
+│       └─ 有先验知识 → 手动设置
+└─ 否 → 追求性能
+    └─ 是否有验证集？
+        ├─ 是 → 梯度归一化 + 调$\gamma$
+        └─ 否 → 实时状态归一化
+```
+
+**超参数调优建议**:
+- $\gamma \in \{-1, 0, 1, 2\}$
+- 先尝试$\gamma = 0$（几何平均）
+- 如果某个任务过强，增大$\gamma$
+- 如果某个任务过弱，减小$\gamma$
+
+### 15. 总结
+
+本推导涵盖了：
+- 多目标优化理论基础
+- 各种权重调节方法的数学原理
+- 平移/缩放不变性分析
+- 实践算法对比
+- 数值示例与理论性质
+
+关键洞察：
+- 没有"最优"的多任务学习方法
+- 需要根据具体问题选择合适的策略
+- 梯度层面的方法通常更灵活
