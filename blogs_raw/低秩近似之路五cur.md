@@ -159,5 +159,512 @@ url={\url{https://spaces.ac.cn/archives/10662}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节将详细推导CUR分解的数学理论，包括定义、算法、误差分析和应用。所有重要公式都使用编号标记。
+
+### 1. CUR分解的形式化定义
+
+**定义1.1 (CUR分解)**: 给定矩阵 $\boldsymbol{M}\in\mathbb{R}^{n\times m}$，其CUR分解定义为：
+
+\begin{equation}
+\boldsymbol{M} \approx \boldsymbol{\mathcal{C}} \boldsymbol{\mathcal{U}} \boldsymbol{\mathcal{R}}
+\tag{1}
+\end{equation}
+
+其中：
+- $\boldsymbol{\mathcal{C}} \in \mathbb{R}^{n \times r}$ 是从 $\boldsymbol{M}$ 中选择的 $r$ 列组成的矩阵
+- $\boldsymbol{\mathcal{R}} \in \mathbb{R}^{r \times m}$ 是从 $\boldsymbol{M}$ 中选择的 $r$ 行组成的矩阵
+- $\boldsymbol{\mathcal{U}} \in \mathbb{R}^{r \times r}$ 是中间系数矩阵
+
+**优化目标**: CUR分解的优化问题可形式化为：
+
+\begin{equation}
+\min_{S_1, S_2, \boldsymbol{\mathcal{U}}} \|\boldsymbol{M}_{[:,S_1]} \boldsymbol{\mathcal{U}} \boldsymbol{M}_{[S_2,:]} - \boldsymbol{M}\|_F^2
+\tag{2}
+\end{equation}
+
+约束条件：
+\begin{equation}
+\begin{cases}
+S_1 \subset \{1,2,\ldots,m\}, \quad |S_1| = r \\
+S_2 \subset \{1,2,\ldots,n\}, \quad |S_2| = r \\
+\boldsymbol{\mathcal{U}} \in \mathbb{R}^{r \times r}
+\end{cases}
+\tag{3}
+\end{equation}
+
+### 2. $\boldsymbol{\mathcal{U}}$ 的最优解推导
+
+**命题2.1**: 当 $\boldsymbol{\mathcal{C}}$ 和 $\boldsymbol{\mathcal{R}}$ 固定时，$\boldsymbol{\mathcal{U}}$ 的最优解为：
+
+\begin{equation}
+\boldsymbol{\mathcal{U}}^* = \boldsymbol{\mathcal{C}}^{\dagger} \boldsymbol{M} \boldsymbol{\mathcal{R}}^{\dagger}
+\tag{4}
+\end{equation}
+
+其中 $\dagger$ 表示Moore-Penrose伪逆。
+
+**证明**: 优化目标可以写为：
+
+\begin{equation}
+f(\boldsymbol{\mathcal{U}}) = \|\boldsymbol{\mathcal{C}} \boldsymbol{\mathcal{U}} \boldsymbol{\mathcal{R}} - \boldsymbol{M}\|_F^2
+\tag{5}
+\end{equation}
+
+展开Frobenius范数：
+
+\begin{equation}
+f(\boldsymbol{\mathcal{U}}) = \text{tr}\left[(\boldsymbol{\mathcal{C}} \boldsymbol{\mathcal{U}} \boldsymbol{\mathcal{R}} - \boldsymbol{M})^T (\boldsymbol{\mathcal{C}} \boldsymbol{\mathcal{U}} \boldsymbol{\mathcal{R}} - \boldsymbol{M})\right]
+\tag{6}
+\end{equation}
+
+展开并利用迹的循环性质：
+
+\begin{equation}
+\begin{aligned}
+f(\boldsymbol{\mathcal{U}}) &= \text{tr}(\boldsymbol{\mathcal{R}}^T \boldsymbol{\mathcal{U}}^T \boldsymbol{\mathcal{C}}^T \boldsymbol{\mathcal{C}} \boldsymbol{\mathcal{U}} \boldsymbol{\mathcal{R}}) - 2\text{tr}(\boldsymbol{\mathcal{R}}^T \boldsymbol{\mathcal{U}}^T \boldsymbol{\mathcal{C}}^T \boldsymbol{M}) + \text{tr}(\boldsymbol{M}^T \boldsymbol{M})
+\end{aligned}
+\tag{7}
+\end{equation}
+
+对 $\boldsymbol{\mathcal{U}}$ 求导并令其为零（使用矩阵求导法则 $\frac{\partial}{\partial \boldsymbol{X}} \text{tr}(\boldsymbol{A}\boldsymbol{X}\boldsymbol{B}) = \boldsymbol{A}^T \boldsymbol{B}^T$）：
+
+\begin{equation}
+\frac{\partial f}{\partial \boldsymbol{\mathcal{U}}} = 2\boldsymbol{\mathcal{C}}^T \boldsymbol{\mathcal{C}} \boldsymbol{\mathcal{U}} \boldsymbol{\mathcal{R}} \boldsymbol{\mathcal{R}}^T - 2\boldsymbol{\mathcal{C}}^T \boldsymbol{M} \boldsymbol{\mathcal{R}}^T = 0
+\tag{8}
+\end{equation}
+
+整理得到正规方程：
+
+\begin{equation}
+\boldsymbol{\mathcal{C}}^T \boldsymbol{\mathcal{C}} \boldsymbol{\mathcal{U}} \boldsymbol{\mathcal{R}} \boldsymbol{\mathcal{R}}^T = \boldsymbol{\mathcal{C}}^T \boldsymbol{M} \boldsymbol{\mathcal{R}}^T
+\tag{9}
+\end{equation}
+
+利用伪逆的性质 $\boldsymbol{A}^{\dagger} = (\boldsymbol{A}^T \boldsymbol{A})^{-1} \boldsymbol{A}^T$（当 $\boldsymbol{A}$ 列满秩时），我们得到：
+
+\begin{equation}
+\boldsymbol{\mathcal{U}}^* = (\boldsymbol{\mathcal{C}}^T \boldsymbol{\mathcal{C}})^{-1} \boldsymbol{\mathcal{C}}^T \boldsymbol{M} \boldsymbol{\mathcal{R}}^T (\boldsymbol{\mathcal{R}} \boldsymbol{\mathcal{R}}^T)^{-1} = \boldsymbol{\mathcal{C}}^{\dagger} \boldsymbol{M} \boldsymbol{\mathcal{R}}^{\dagger}
+\tag{10}
+\end{equation}
+
+**几何解释**: 公式(4)的几何意义是：$\boldsymbol{\mathcal{U}}$ 通过最小二乘方法将 $\boldsymbol{M}$ 从列空间 $\text{col}(\boldsymbol{\mathcal{C}})$ 和行空间 $\text{row}(\boldsymbol{\mathcal{R}})$ 的角度进行最佳逼近。
+
+### 3. 交叉子矩阵方法
+
+**命题3.1**: CUR分解的另一个常用选择是：
+
+\begin{equation}
+\boldsymbol{\mathcal{U}} = \boldsymbol{M}_{[S_2, S_1]}^{\dagger}
+\tag{11}
+\end{equation}
+
+其中 $\boldsymbol{M}_{[S_2, S_1]}$ 是 $\boldsymbol{\mathcal{C}}$ 和 $\boldsymbol{\mathcal{R}}$ 的交叉子矩阵。
+
+**分块矩阵表示**: 不失一般性，通过行列重排，设选中的行列排在前面：
+
+\begin{equation}
+\boldsymbol{M} = \begin{pmatrix}
+\boldsymbol{A} & \boldsymbol{B} \\
+\boldsymbol{C} & \boldsymbol{D}
+\end{pmatrix}
+\tag{12}
+\end{equation}
+
+其中 $\boldsymbol{A} \in \mathbb{R}^{r \times r}$ 是交叉子矩阵，则CUR近似为：
+
+\begin{equation}
+\boldsymbol{M} \approx \begin{pmatrix}
+\boldsymbol{A} \\
+\boldsymbol{C}
+\end{pmatrix} \boldsymbol{A}^{\dagger} \begin{pmatrix}
+\boldsymbol{A} & \boldsymbol{B}
+\end{pmatrix} = \begin{pmatrix}
+\boldsymbol{A}\boldsymbol{A}^{\dagger}\boldsymbol{A} & \boldsymbol{A}\boldsymbol{A}^{\dagger}\boldsymbol{B} \\
+\boldsymbol{C}\boldsymbol{A}^{\dagger}\boldsymbol{A} & \boldsymbol{C}\boldsymbol{A}^{\dagger}\boldsymbol{B}
+\end{pmatrix}
+\tag{13}
+\end{equation}
+
+当 $\boldsymbol{A}$ 满秩时，$\boldsymbol{A}\boldsymbol{A}^{\dagger} = \boldsymbol{I}_r$，因此：
+
+\begin{equation}
+\boldsymbol{M} \approx \begin{pmatrix}
+\boldsymbol{A} & \boldsymbol{B} \\
+\boldsymbol{C} & \boldsymbol{C}\boldsymbol{A}^{-1}\boldsymbol{B}
+\end{pmatrix}
+\tag{14}
+\end{equation}
+
+**解释**:
+- 选中的行列 $\boldsymbol{A}, \boldsymbol{B}, \boldsymbol{C}$ 被**精确重构**
+- 未选中部分 $\boldsymbol{D}$ 通过 $\boldsymbol{C}\boldsymbol{A}^{-1}\boldsymbol{B}$ 进行**插值近似**
+- 这种方法相当于一种**矩阵补全**策略
+
+### 4. 与SVD的关系
+
+**定理4.1 (SVD的最优性)**: 设 $\boldsymbol{M}$ 的SVD分解为：
+
+\begin{equation}
+\boldsymbol{M} = \sum_{i=1}^{\min(n,m)} \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^T = \boldsymbol{U} \boldsymbol{\Sigma} \boldsymbol{V}^T
+\tag{15}
+\end{equation}
+
+则秩-$r$ 的最优逼近为：
+
+\begin{equation}
+\boldsymbol{M}_r^* = \sum_{i=1}^{r} \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^T = \boldsymbol{U}_{:,1:r} \boldsymbol{\Sigma}_{1:r,1:r} \boldsymbol{V}_{:,1:r}^T
+\tag{16}
+\end{equation}
+
+满足：
+
+\begin{equation}
+\|\boldsymbol{M} - \boldsymbol{M}_r^*\|_F^2 = \sum_{i=r+1}^{\min(n,m)} \sigma_i^2
+\tag{17}
+\end{equation}
+
+**CUR与SVD的误差比较**: 定义近似比率：
+
+\begin{equation}
+\rho = \frac{\|\boldsymbol{M} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{U}}\boldsymbol{\mathcal{R}}\|_F^2}{\|\boldsymbol{M} - \boldsymbol{M}_r^*\|_F^2}
+\tag{18}
+\end{equation}
+
+理论上 $\rho \geq 1$，好的CUR算法能使 $\rho$ 接近1。
+
+**命题4.2**: 对于良好选择的 $\boldsymbol{\mathcal{C}}, \boldsymbol{\mathcal{R}}$，存在常数 $C$ 使得：
+
+\begin{equation}
+\|\boldsymbol{M} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger}\boldsymbol{M}\boldsymbol{\mathcal{R}}^{\dagger}\boldsymbol{\mathcal{R}}\|_F \leq C \cdot \|\boldsymbol{M} - \boldsymbol{M}_r^*\|_F
+\tag{19}
+\end{equation}
+
+### 5. 杠杆分数采样理论
+
+**定义5.1 (帽子矩阵)**: 对于 $\boldsymbol{M} \in \mathbb{R}^{n \times m}$ ($n < m$)，列帽子矩阵定义为：
+
+\begin{equation}
+\boldsymbol{H}_{\text{col}} = \boldsymbol{M}^T (\boldsymbol{M}\boldsymbol{M}^T)^{\dagger} \boldsymbol{M}
+\tag{20}
+\end{equation}
+
+行帽子矩阵定义为：
+
+\begin{equation}
+\boldsymbol{H}_{\text{row}} = \boldsymbol{M}^T (\boldsymbol{M}^T\boldsymbol{M})^{\dagger} \boldsymbol{M}
+\tag{21}
+\end{equation}
+
+**几何意义**: $\boldsymbol{H}_{\text{col}}$ 将向量投影到 $\boldsymbol{M}$ 的列空间。设线性回归问题为：
+
+\begin{equation}
+\min_{\boldsymbol{W}} \|\boldsymbol{Y} - \boldsymbol{W}\boldsymbol{M}\|_F^2
+\tag{22}
+\end{equation}
+
+最优解为 $\boldsymbol{W}^* = \boldsymbol{Y}\boldsymbol{M}^{\dagger}$，预测值为：
+
+\begin{equation}
+\hat{\boldsymbol{Y}} = \boldsymbol{W}^* \boldsymbol{M} = \boldsymbol{Y} \boldsymbol{M}^{\dagger} \boldsymbol{M} = \boldsymbol{Y} \boldsymbol{H}_{\text{col}}
+\tag{23}
+\end{equation}
+
+**定义5.2 (杠杆分数)**: 第 $j$ 列的杠杆分数定义为：
+
+\begin{equation}
+\ell_j = [\boldsymbol{H}_{\text{col}}]_{jj} = \boldsymbol{m}_j^T (\boldsymbol{M}\boldsymbol{M}^T)^{\dagger} \boldsymbol{m}_j
+\tag{24}
+\end{equation}
+
+其中 $\boldsymbol{m}_j$ 是 $\boldsymbol{M}$ 的第 $j$ 列。
+
+**命题5.3 (杠杆分数的SVD表示)**: 设 $\boldsymbol{M} = \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^T$，秩为 $\gamma$，则：
+
+\begin{equation}
+\boldsymbol{H}_{\text{col}} = \boldsymbol{M}^{\dagger} \boldsymbol{M} = \boldsymbol{V}\boldsymbol{\Sigma}^{\dagger}\boldsymbol{\Sigma}\boldsymbol{V}^T = \boldsymbol{V}_{:,1:\gamma} \boldsymbol{V}_{:,1:\gamma}^T
+\tag{25}
+\end{equation}
+
+因此：
+
+\begin{equation}
+\ell_j = \|\boldsymbol{V}_{j,1:\gamma}\|_2^2 = \sum_{i=1}^{\gamma} V_{ji}^2
+\tag{26}
+\end{equation}
+
+**性质**: 杠杆分数满足：
+
+\begin{equation}
+\sum_{j=1}^{m} \ell_j = \text{tr}(\boldsymbol{H}_{\text{col}}) = \gamma
+\tag{27}
+\end{equation}
+
+**采样策略**:
+1. **确定性**: 选择杠杆分数最大的 $r$ 列
+2. **随机性**: 按概率分布 $p_j = \ell_j / \gamma$ 采样 $r$ 列
+
+**定理5.4 (杠杆分数采样误差界)**: 若按杠杆分数采样 $r = O(k \log k / \epsilon^2)$ 列（$k$ 是目标秩），则以高概率：
+
+\begin{equation}
+\|\boldsymbol{M} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger}\boldsymbol{M}\|_F \leq (1+\epsilon) \|\boldsymbol{M} - \boldsymbol{M}_k\|_F
+\tag{28}
+\end{equation}
+
+### 6. DEIM算法详解
+
+**算法思想**: DEIM (Discrete Empirical Interpolation Method) 基于贪心策略，从SVD的右奇异向量中选择行。
+
+**输入**: 矩阵 $\boldsymbol{M} \in \mathbb{R}^{n \times m}$，目标秩 $r$
+
+**步骤**:
+
+**Step 1**: 计算SVD（或截断SVD）：
+
+\begin{equation}
+\boldsymbol{M} \approx \boldsymbol{U}_{:,1:r} \boldsymbol{\Sigma}_{1:r,1:r} \boldsymbol{V}_{:,1:r}^T
+\tag{29}
+\end{equation}
+
+**Step 2**: 初始化，选择 $\boldsymbol{V}_{:,1}$ 绝对值最大元素的行：
+
+\begin{equation}
+i_1 = \arg\max_{i \in \{1,\ldots,m\}} |V_{i,1}|
+\tag{30}
+\end{equation}
+
+设 $S_1 = \{i_1\}$。
+
+**Step 3**: 对 $k = 2, 3, \ldots, r$，递归选择：
+
+计算残差：
+
+\begin{equation}
+\boldsymbol{r}_k = \boldsymbol{V}_{:,k} - \boldsymbol{V}_{:,1:k-1} \boldsymbol{V}_{S_{k-1},1:k-1}^{-1} \boldsymbol{V}_{S_{k-1},k}
+\tag{31}
+\end{equation}
+
+选择残差最大的行：
+
+\begin{equation}
+i_k = \arg\max_{i \notin S_{k-1}} |r_{k,i}|
+\tag{32}
+\end{equation}
+
+更新 $S_k = S_{k-1} \cup \{i_k\}$。
+
+**Step 4**: 输出列索引 $S_r$，构造：
+
+\begin{equation}
+\boldsymbol{\mathcal{C}} = \boldsymbol{M}_{:,S_r}, \quad \boldsymbol{\mathcal{U}} = \boldsymbol{M}_{S_r,S_r}^{\dagger}
+\tag{33}
+\end{equation}
+
+**定理6.1 (DEIM误差界)**: DEIM选择的列满足：
+
+\begin{equation}
+\|\boldsymbol{V}_{:,1:r} - \boldsymbol{V}_{:,1:r}\boldsymbol{V}_{S_r,1:r}^{-1}\boldsymbol{V}_{S_r,:}\|_F \leq \sqrt{r(r+1)} \|\boldsymbol{V}_{:,r+1:}\|_F
+\tag{34}
+\end{equation}
+
+**贪心准则的直觉**: 在每一步，我们选择当前CUR近似误差最大的位置，确保：
+- 选中的列能捕获主要的方差
+- 交叉子矩阵 $\boldsymbol{V}_{S_r,1:r}$ 尽可能良好条件（行列式绝对值大）
+
+### 7. 误差分析
+
+**定理7.1 (一般误差界)**: 对于CUR分解 $\boldsymbol{M} \approx \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{U}}\boldsymbol{\mathcal{R}}$，近似误差可分解为：
+
+\begin{equation}
+\boldsymbol{M} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{U}}\boldsymbol{\mathcal{R}} = (\boldsymbol{I} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger})\boldsymbol{M} + \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger}\boldsymbol{M}(\boldsymbol{I} - \boldsymbol{\mathcal{R}}^{\dagger}\boldsymbol{\mathcal{R}})
+\tag{35}
+\end{equation}
+
+当使用 $\boldsymbol{\mathcal{U}} = \boldsymbol{\mathcal{C}}^{\dagger}\boldsymbol{M}\boldsymbol{\mathcal{R}}^{\dagger}$ 时。
+
+**证明**: 展开右边：
+
+\begin{equation}
+\begin{aligned}
+&(\boldsymbol{I} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger})\boldsymbol{M} + \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger}\boldsymbol{M}(\boldsymbol{I} - \boldsymbol{\mathcal{R}}^{\dagger}\boldsymbol{\mathcal{R}}) \\
+&= \boldsymbol{M} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger}\boldsymbol{M} + \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger}\boldsymbol{M} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger}\boldsymbol{M}\boldsymbol{\mathcal{R}}^{\dagger}\boldsymbol{\mathcal{R}} \\
+&= \boldsymbol{M} - \boldsymbol{\mathcal{C}}(\boldsymbol{\mathcal{C}}^{\dagger}\boldsymbol{M}\boldsymbol{\mathcal{R}}^{\dagger})\boldsymbol{\mathcal{R}} \\
+&= \boldsymbol{M} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{U}}\boldsymbol{\mathcal{R}}
+\end{aligned}
+\tag{36}
+\end{equation}
+
+**推论7.2**: 利用三角不等式：
+
+\begin{equation}
+\|\boldsymbol{M} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{U}}\boldsymbol{\mathcal{R}}\|_F \leq \|(\boldsymbol{I} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger})\boldsymbol{M}\|_F + \|\boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{C}}^{\dagger}\boldsymbol{M}(\boldsymbol{I} - \boldsymbol{\mathcal{R}}^{\dagger}\boldsymbol{\mathcal{R}})\|_F
+\tag{37}
+\end{equation}
+
+第一项是列选择误差，第二项是行选择误差。
+
+**定理7.3 (随机CUR误差界)**: 若按杠杆分数采样 $r = \Omega(k/\epsilon^2)$ 列和行，则以概率至少 $1-\delta$：
+
+\begin{equation}
+\|\boldsymbol{M} - \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{U}}\boldsymbol{\mathcal{R}}\|_F \leq (1+\epsilon)\|\boldsymbol{M} - \boldsymbol{M}_k\|_F + \delta \|\boldsymbol{M}\|_F
+\tag{38}
+\end{equation}
+
+### 8. 算法复杂度分析
+
+**SVD方法**:
+- 完整SVD: $O(\min(nm^2, n^2m))$
+- 截断SVD (如randomized SVD): $O(nmr)$
+
+**CUR分解复杂度**:
+
+**杠杆分数方法**:
+1. 计算截断SVD: $O(nmr)$
+2. 计算杠杆分数: $O(mr)$
+3. 选择/采样列: $O(m + nr)$
+4. 计算 $\boldsymbol{\mathcal{U}}$: $O(nr^2 + r^2m + r^3)$
+
+总计: $O(nmr + r^3)$
+
+**DEIM方法**:
+1. 计算截断SVD: $O(nmr)$
+2. 贪心选择（$r$ 次迭代，每次 $O(mr)$）: $O(mr^2)$
+3. 计算 $\boldsymbol{\mathcal{U}}$: $O(r^3)$
+
+总计: $O(nmr + mr^2)$
+
+**存储复杂度对比**:
+- SVD: 需存储 $\boldsymbol{U}_{:,1:r}, \boldsymbol{\Sigma}_{1:r,1:r}, \boldsymbol{V}_{:,1:r}^T$，共 $O(nr + mr + r)$
+- CUR: 需存储列索引、行索引和 $\boldsymbol{\mathcal{U}}$，共 $O(nr + mr + r^2)$
+
+### 9. 数值示例
+
+**示例9.1**: 考虑一个低秩矩阵：
+
+\begin{equation}
+\boldsymbol{M} = \begin{pmatrix}
+1 & 2 & 3 & 4 \\
+2 & 4 & 6 & 8 \\
+3 & 6 & 9 & 12 \\
+4 & 8 & 12 & 16
+\end{pmatrix} + \boldsymbol{E}
+\tag{39}
+\end{equation}
+
+其中 $\boldsymbol{E}$ 是小扰动。精确地，$\boldsymbol{M} = \boldsymbol{v}\boldsymbol{v}^T$，$\boldsymbol{v} = (1,2,3,4)^T$，秩为1。
+
+**SVD**: 主奇异值 $\sigma_1 \approx \sqrt{30}$，对应：
+
+\begin{equation}
+\boldsymbol{u}_1 = \frac{1}{\sqrt{30}}(1,2,3,4)^T, \quad \boldsymbol{v}_1 = \frac{1}{\sqrt{30}}(1,2,3,4)^T
+\tag{40}
+\end{equation}
+
+秩-1近似：$\boldsymbol{M}_1 = \sigma_1 \boldsymbol{u}_1 \boldsymbol{v}_1^T = \boldsymbol{M}$（无扰动时）。
+
+**CUR** (选择第1列和第1行):
+
+\begin{equation}
+\boldsymbol{\mathcal{C}} = \begin{pmatrix} 1 \\ 2 \\ 3 \\ 4 \end{pmatrix}, \quad
+\boldsymbol{\mathcal{R}} = \begin{pmatrix} 1 & 2 & 3 & 4 \end{pmatrix}
+\tag{41}
+\end{equation}
+
+\begin{equation}
+\boldsymbol{\mathcal{U}} = (\boldsymbol{\mathcal{C}}^T \boldsymbol{\mathcal{C}})^{-1} \boldsymbol{\mathcal{C}}^T \boldsymbol{M} \boldsymbol{\mathcal{R}}^T (\boldsymbol{\mathcal{R}} \boldsymbol{\mathcal{R}}^T)^{-1} = \frac{1}{30} \cdot 30 \cdot \frac{1}{30} = 1
+\tag{42}
+\end{equation}
+
+CUR近似：
+
+\begin{equation}
+\boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{U}}\boldsymbol{\mathcal{R}} = \begin{pmatrix} 1 \\ 2 \\ 3 \\ 4 \end{pmatrix} \cdot 1 \cdot \begin{pmatrix} 1 & 2 & 3 & 4 \end{pmatrix} = \boldsymbol{M}
+\tag{43}
+\end{equation}
+
+完美重构！
+
+**示例9.2 (杠杆分数计算)**: 对于
+
+\begin{equation}
+\boldsymbol{M} = \begin{pmatrix}
+1 & 0 & 0 \\
+0 & 1 & 0 \\
+0 & 0 & 1 \\
+0 & 0 & 0
+\end{pmatrix}
+\tag{44}
+\end{equation}
+
+SVD给出 $\boldsymbol{V} = \boldsymbol{I}_3$（前3个奇异值为1），因此：
+
+\begin{equation}
+\ell_1 = \|\boldsymbol{V}_{1,:}\|^2 = 1, \quad \ell_2 = 1, \quad \ell_3 = 1
+\tag{45}
+\end{equation}
+
+所有列的杠杆分数相等，随机采样时每列被选中的概率相同。
+
+### 10. 应用场景
+
+**应用10.1 (推荐系统)**: 用户-物品评分矩阵 $\boldsymbol{R} \in \mathbb{R}^{n_u \times n_i}$，CUR分解：
+- $\boldsymbol{\mathcal{C}}$: 代表性物品
+- $\boldsymbol{\mathcal{R}}$: 代表性用户
+- $\boldsymbol{\mathcal{U}}$: 代表用户对代表物品的偏好
+
+优势：可解释性强，能识别"原型用户"和"原型物品"。
+
+**应用10.2 (文档聚类)**: 文档-词矩阵 $\boldsymbol{X} \in \mathbb{R}^{n_d \times n_w}$，CUR选择：
+- 代表性词汇（列）
+- 代表性文档（行）
+
+用于降维和特征选择。
+
+**应用10.3 (图像压缩)**: 图像矩阵 $\boldsymbol{I} \in \mathbb{R}^{h \times w}$：
+- $\boldsymbol{\mathcal{C}}$: 代表性列（垂直条纹）
+- $\boldsymbol{\mathcal{R}}$: 代表性行（水平条纹）
+
+存储成本：$r(h+w+r)$ vs. 原始 $hw$，当 $r \ll \min(h,w)$ 时显著压缩。
+
+### 11. CUR的可解释性优势
+
+相比SVD，CUR的关键优势在于**可解释性**：
+
+**对比表**:
+
+| 方面 | SVD | CUR |
+|------|-----|-----|
+| 基向量 | 抽象的正交向量 | 原始数据的行/列 |
+| 物理意义 | 难以解释 | 直观可解释 |
+| 稀疏性 | 密集矩阵 | 保持原始稀疏性 |
+| 计算 | 需全矩阵 | 可增量/流式 |
+
+**定理11.1 (稀疏性保持)**: 若 $\boldsymbol{M}$ 是稀疏矩阵（每行/列非零元素 $\leq s$），则：
+- $\boldsymbol{\mathcal{C}}, \boldsymbol{\mathcal{R}}$ 同样稀疏（每列/行非零元素 $\leq s$）
+- SVD的 $\boldsymbol{U}, \boldsymbol{V}$ 通常是稠密的
+
+### 12. 小结与展望
+
+CUR分解通过以下方式实现低秩近似：
+
+\begin{equation}
+\underbrace{\text{原始矩阵}}_{\boldsymbol{M}} \approx \underbrace{\text{代表列}}_{\boldsymbol{\mathcal{C}}} \times \underbrace{\text{系数矩阵}}_{\boldsymbol{\mathcal{U}}} \times \underbrace{\text{代表行}}_{\boldsymbol{\mathcal{R}}}
+\tag{46}
+\end{equation}
+
+**核心要点**:
+1. $\boldsymbol{\mathcal{U}}$ 的最优解通过伪逆给出（公式4）
+2. 列/行选择是关键：杠杆分数和DEIM是主流方法
+3. 误差界与SVD相当（在对数因子内）
+4. 可解释性和稀疏性是主要优势
+
+**未来方向**:
+- 自适应采样策略
+- 流式/在线CUR算法
+- 张量CUR分解
+- 深度学习中的应用（注意力机制的CUR近似）
+
+\begin{equation}
+\boxed{\text{CUR分解：保持数据原始结构的智能低秩近似}}
+\tag{47}
+\end{equation}
 

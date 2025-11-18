@@ -234,5 +234,731 @@ url={\url{https://spaces.ac.cn/archives/10180}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节提供有理生成函数方法的详细数学推导,包括友矩阵构造、Z变换理论、传递函数分析、稳定性理论等核心内容的完整证明。
+
+### 一、有理函数的基本理论
+
+#### 1.1 有理函数的定义与性质
+
+**定义1.1 (有理函数)**: 有理函数是两个多项式之比:
+\begin{equation}
+H(z) = \frac{P(z)}{Q(z)} = \frac{b_0 + b_1z + \cdots + b_mz^m}{a_0 + a_1z + \cdots + a_nz^n} \tag{1}
+\end{equation}
+
+**定理1.2 (有理函数的标准形式)**: 任何有理函数可以标准化为:
+\begin{equation}
+H(z) = \frac{b_1 + b_2z + \cdots + b_dz^{d-1}}{1 + a_1z + \cdots + a_dz^d} \tag{2}
+\end{equation}
+其中$d = \max(m,n)$,分母首项系数归一化为1。
+
+**证明**: 两边同时除以$a_0$(假设$a_0 \neq 0$),必要时补零使分子分母次数匹配。$\square$
+
+**定理1.3 (部分分式展开)**: 若$H(z)$的极点$\lambda_1,\ldots,\lambda_d$互不相同,则:
+\begin{equation}
+H(z) = \sum_{k=1}^{d}\frac{r_k}{1 - \lambda_k z} \tag{3}
+\end{equation}
+其中$r_k$为留数。
+
+**推论1.4**: 部分分式展开对应的时域信号为:
+\begin{equation}
+h_n = \sum_{k=1}^{d}r_k \lambda_k^n \tag{4}
+\end{equation}
+
+#### 1.2 从SSM到有理函数
+
+**定理1.5 (SSM生成函数的有理性)**: 对于线性SSM:
+\begin{align}
+x_{k+1} &= \bar{A}x_k + \bar{B}u_k \tag{5} \\
+y_k &= \bar{C}^*x_k \tag{6}
+\end{align}
+其卷积核的生成函数为:
+\begin{equation}
+\mathcal{G}(z) = \bar{C}^*(I - z\bar{A})^{-1}\bar{B} \tag{7}
+\end{equation}
+是$z$的有理函数。
+
+**详细推导**:
+
+步骤1: 设初始状态$x_0 = 0$,递归展开:
+\begin{align}
+y_1 &= \bar{C}^*\bar{B}u_0 \tag{8} \\
+y_2 &= \bar{C}^*\bar{A}\bar{B}u_0 + \bar{C}^*\bar{B}u_1 \tag{9} \\
+&\vdots \tag{10} \\
+y_n &= \sum_{k=0}^{n-1}\bar{C}^*\bar{A}^k\bar{B}u_{n-1-k} \tag{11}
+\end{align}
+
+步骤2: 定义卷积核$K_k = \bar{C}^*\bar{A}^k\bar{B}$,构造生成函数:
+\begin{align}
+\mathcal{G}(z) &= \sum_{k=0}^{\infty}K_k z^k \tag{12} \\
+&= \sum_{k=0}^{\infty}\bar{C}^*\bar{A}^k\bar{B}z^k \tag{13} \\
+&= \bar{C}^*\left(\sum_{k=0}^{\infty}(z\bar{A})^k\right)\bar{B} \tag{14} \\
+&= \bar{C}^*(I - z\bar{A})^{-1}\bar{B} \tag{15}
+\end{align}
+
+步骤3: 使用$M^{-1} = \frac{\text{adj}(M)}{\det(M)}$:
+\begin{equation}
+\mathcal{G}(z) = \frac{\bar{C}^*\text{adj}(I - z\bar{A})\bar{B}}{\det(I - z\bar{A})} \tag{16}
+\end{equation}
+
+步骤4: 分析:
+- 分母$\det(I - z\bar{A})$是$z$的$d$次多项式
+- 分子$\bar{C}^*\text{adj}(I - z\bar{A})\bar{B}$是$z$的至多$d-1$次多项式
+- 因此$\mathcal{G}(z)$是有理函数$\square$
+
+#### 1.3 有理函数的唯一性
+
+**定理1.6 (参数化的非唯一性)**: 给定有理函数$H(z) = \frac{P(z)}{Q(z)}$,存在无穷多组$(\bar{A},\bar{B},\bar{C})$使得:
+\begin{equation}
+H(z) = \bar{C}^*(I - z\bar{A})^{-1}\bar{B} \tag{17}
+\end{equation}
+
+**证明**: 对于任意可逆矩阵$T$,令:
+\begin{equation}
+(\bar{A}',\bar{B}',\bar{C}') = (T\bar{A}T^{-1}, T\bar{B}, (T^{-1})^*\bar{C}) \tag{18}
+\end{equation}
+
+则:
+\begin{align}
+\bar{C}'^*(I - z\bar{A}')^{-1}\bar{B}' &= \bar{C}^*T^{-*}(I - zT\bar{A}T^{-1})^{-1}T\bar{B} \tag{19} \\
+&= \bar{C}^*T^{-*}T(I - z\bar{A})^{-1}T^{-1}T\bar{B} \tag{20} \\
+&= \bar{C}^*(I - z\bar{A})^{-1}\bar{B} \tag{21}
+\end{align}
+$\square$
+
+**推论1.7**: 不同的状态空间实现(realization)对应相同的输入-输出行为。
+
+### 二、友矩阵(Companion Matrix)的构造
+
+#### 2.1 友矩阵的定义
+
+**定义2.1 (友矩阵)**: 给定首一多项式$p(\lambda) = \lambda^d + a_1\lambda^{d-1} + \cdots + a_d$,其友矩阵定义为:
+\begin{equation}
+C_p = \begin{pmatrix}
+-a_1 & -a_2 & -a_3 & \cdots & -a_{d-1} & -a_d \\
+1 & 0 & 0 & \cdots & 0 & 0 \\
+0 & 1 & 0 & \cdots & 0 & 0 \\
+\vdots & \vdots & \vdots & \ddots & \vdots & \vdots \\
+0 & 0 & 0 & \cdots & 1 & 0
+\end{pmatrix} \tag{22}
+\end{equation}
+
+**定理2.2 (友矩阵的特征多项式)**: 友矩阵$C_p$的特征多项式恰好是$p(\lambda)$。
+
+**详细证明**:
+
+步骤1: 计算$\det(\lambda I - C_p)$:
+\begin{equation}
+\det(\lambda I - C_p) = \det\begin{pmatrix}
+\lambda + a_1 & a_2 & a_3 & \cdots & a_{d-1} & a_d \\
+-1 & \lambda & 0 & \cdots & 0 & 0 \\
+0 & -1 & \lambda & \cdots & 0 & 0 \\
+\vdots & \vdots & \vdots & \ddots & \vdots & \vdots \\
+0 & 0 & 0 & \cdots & -1 & \lambda
+\end{pmatrix} \tag{23}
+\end{equation}
+
+步骤2: 按第一行展开行列式。对第一列,系数为$(\lambda + a_1)$,子式为:
+\begin{equation}
+M_1 = \det\begin{pmatrix}
+\lambda & 0 & 0 & \cdots & 0 \\
+-1 & \lambda & 0 & \cdots & 0 \\
+0 & -1 & \lambda & \cdots & 0 \\
+\vdots & \vdots & \vdots & \ddots & \vdots \\
+0 & 0 & 0 & \cdots & \lambda
+\end{pmatrix} = \lambda^{d-1} \tag{24}
+\end{equation}
+
+步骤3: 对第$j$列($j \geq 2$),系数为$(-1)^{1+j}a_j$,子式为:
+\begin{equation}
+M_j = (-1)^{j-1}\lambda^{d-j} \tag{25}
+\end{equation}
+
+步骤4: 综合得到:
+\begin{align}
+\det(\lambda I - C_p) &= (\lambda + a_1)\lambda^{d-1} + \sum_{j=2}^{d}(-1)^{1+j}a_j \cdot (-1)^{j-1}\lambda^{d-j} \tag{26} \\
+&= \lambda^d + a_1\lambda^{d-1} + a_2\lambda^{d-2} + \cdots + a_d \tag{27} \\
+&= p(\lambda) \tag{28}
+\end{align}
+$\square$
+
+#### 2.2 可控标准型
+
+**定理2.3 (可控标准型实现)**: 给定传递函数:
+\begin{equation}
+H(z) = \frac{b_1 + b_2z + \cdots + b_dz^{d-1}}{1 + a_1z + \cdots + a_dz^d} \tag{29}
+\end{equation}
+
+可控标准型实现为:
+\begin{align}
+\bar{A} &= \begin{pmatrix}
+-a_1 & -a_2 & \cdots & -a_d \\
+1 & 0 & \cdots & 0 \\
+\vdots & \vdots & \ddots & \vdots \\
+0 & 0 & \cdots & 0
+\end{pmatrix} \tag{30} \\
+\bar{B} &= \begin{pmatrix} 1 \\ 0 \\ \vdots \\ 0 \end{pmatrix} \tag{31} \\
+\bar{C} &= \begin{pmatrix} b_1 \\ b_2 \\ \vdots \\ b_d \end{pmatrix} \tag{32}
+\end{align}
+
+**详细验证**:
+
+步骤1: 计算$(I - z\bar{A})^{-1}$。注意到:
+\begin{equation}
+I - z\bar{A} = \begin{pmatrix}
+1 + za_1 & za_2 & \cdots & za_d \\
+-z & 1 & \cdots & 0 \\
+\vdots & \vdots & \ddots & \vdots \\
+0 & 0 & \cdots & 1
+\end{pmatrix} \tag{33}
+\end{equation}
+
+步骤2: 计算行列式:
+\begin{equation}
+\det(I - z\bar{A}) = 1 + a_1z + a_2z^2 + \cdots + a_dz^d \tag{34}
+\end{equation}
+
+步骤3: 利用Cramer法则,$(I - z\bar{A})^{-1}\bar{B}$的第$k$个分量为:
+\begin{equation}
+[(I - z\bar{A})^{-1}\bar{B}]_k = \frac{z^{k-1}}{\det(I - z\bar{A})} \tag{35}
+\end{equation}
+
+步骤4: 计算$\bar{C}^*(I - z\bar{A})^{-1}\bar{B}$:
+\begin{align}
+\bar{C}^*(I - z\bar{A})^{-1}\bar{B} &= \sum_{k=1}^{d}b_k \cdot \frac{z^{k-1}}{1 + a_1z + \cdots + a_dz^d} \tag{36} \\
+&= \frac{b_1 + b_2z + \cdots + b_dz^{d-1}}{1 + a_1z + \cdots + a_dz^d} \tag{37} \\
+&= H(z) \tag{38}
+\end{align}
+$\square$
+
+#### 2.3 可观标准型
+
+**定理2.4 (可观标准型)**: 同样的传递函数,可观标准型实现为:
+\begin{align}
+\bar{A} &= \begin{pmatrix}
+-a_1 & 1 & 0 & \cdots & 0 \\
+-a_2 & 0 & 1 & \cdots & 0 \\
+\vdots & \vdots & \vdots & \ddots & \vdots \\
+-a_d & 0 & 0 & \cdots & 0
+\end{pmatrix} \tag{39} \\
+\bar{B} &= \begin{pmatrix} b_1 \\ b_2 \\ \vdots \\ b_d \end{pmatrix} \tag{40} \\
+\bar{C} &= \begin{pmatrix} 1 \\ 0 \\ \vdots \\ 0 \end{pmatrix} \tag{41}
+\end{align}
+
+这是可控标准型的转置形式。
+
+### 三、Z变换理论
+
+#### 3.1 Z变换的定义
+
+**定义3.1 (Z变换)**: 离散时间信号$\{x_n\}_{n=0}^{\infty}$的Z变换定义为:
+\begin{equation}
+X(z) = \mathcal{Z}\{x_n\} = \sum_{n=0}^{\infty}x_n z^{-n} \tag{42}
+\end{equation}
+
+**注**: 与生成函数$\sum_{n=0}^{\infty}x_n z^n$相比,Z变换使用$z^{-n}$。两者通过变量替换$z \leftrightarrow z^{-1}$关联。
+
+**定理3.2 (Z变换的收敛域)**: $X(z)$在$|z| > R$的区域收敛,其中$R = \limsup_{n \to \infty}|x_n|^{1/n}$。
+
+#### 3.2 Z变换的基本性质
+
+**定理3.3 (线性性)**:
+\begin{equation}
+\mathcal{Z}\{ax_n + by_n\} = aX(z) + bY(z) \tag{43}
+\end{equation}
+
+**定理3.4 (时移性质)**:
+\begin{equation}
+\mathcal{Z}\{x_{n-k}\} = z^{-k}X(z) \tag{44}
+\end{equation}
+(假设$x_n = 0, n < 0$)
+
+**定理3.5 (卷积定理)**:
+\begin{equation}
+\mathcal{Z}\{x_n * y_n\} = X(z)Y(z) \tag{45}
+\end{equation}
+
+**证明**: 设$w_n = \sum_{k=0}^{n}x_k y_{n-k}$,则:
+\begin{align}
+W(z) &= \sum_{n=0}^{\infty}w_n z^{-n} \tag{46} \\
+&= \sum_{n=0}^{\infty}\left(\sum_{k=0}^{n}x_k y_{n-k}\right)z^{-n} \tag{47} \\
+&= \sum_{k=0}^{\infty}\sum_{m=0}^{\infty}x_k y_m z^{-(k+m)} \tag{48} \\
+&= \left(\sum_{k=0}^{\infty}x_k z^{-k}\right)\left(\sum_{m=0}^{\infty}y_m z^{-m}\right) \tag{49} \\
+&= X(z)Y(z) \tag{50}
+\end{align}
+$\square$
+
+#### 3.3 传递函数的Z域表示
+
+**定义3.6 (传递函数)**: 系统的传递函数定义为输出与输入的Z变换之比:
+\begin{equation}
+H(z) = \frac{Y(z)}{U(z)} \tag{51}
+\end{equation}
+
+**定理3.7 (差分方程的Z变换)**: 差分方程:
+\begin{equation}
+y_n + a_1y_{n-1} + \cdots + a_dy_{n-d} = b_0u_n + b_1u_{n-1} + \cdots + b_du_{n-d} \tag{52}
+\end{equation}
+
+对应的传递函数为:
+\begin{equation}
+H(z) = \frac{b_0 + b_1z^{-1} + \cdots + b_dz^{-d}}{1 + a_1z^{-1} + \cdots + a_dz^{-d}} \tag{53}
+\end{equation}
+
+**证明**: 对(52)两边取Z变换,利用时移性质:
+\begin{align}
+Y(z) + a_1z^{-1}Y(z) + \cdots + a_dz^{-d}Y(z) &= b_0U(z) + \cdots + b_dz^{-d}U(z) \tag{54} \\
+(1 + a_1z^{-1} + \cdots + a_dz^{-d})Y(z) &= (b_0 + \cdots + b_dz^{-d})U(z) \tag{55} \\
+H(z) = \frac{Y(z)}{U(z)} &= \frac{b_0 + b_1z^{-1} + \cdots + b_dz^{-d}}{1 + a_1z^{-1} + \cdots + a_dz^{-d}} \tag{56}
+\end{align}
+$\square$
+
+### 四、极点-零点分析
+
+#### 4.1 极点与零点的定义
+
+**定义4.1**: 对于传递函数$H(z) = \frac{P(z)}{Q(z)}$:
+- **零点**: $P(z) = 0$的根,记为$\{z_k\}$
+- **极点**: $Q(z) = 0$的根,记为$\{\lambda_k\}$
+
+**定理4.2 (极点与状态矩阵)**: 极点恰好是$\bar{A}$的特征值:
+\begin{equation}
+\det(I - z\bar{A}) = 0 \Leftrightarrow \det(\lambda I - \bar{A}) = 0, \quad \lambda = z^{-1} \tag{57}
+\end{equation}
+
+#### 4.2 稳定性分析
+
+**定理4.3 (BIBO稳定性)**: 系统BIBO(有界输入有界输出)稳定当且仅当所有极点的模严格小于1:
+\begin{equation}
+|\lambda_k| < 1, \quad \forall k \tag{58}
+\end{equation}
+
+**详细证明**:
+
+步骤1: 部分分式展开:
+\begin{equation}
+H(z) = \sum_{k=1}^{d}\frac{r_k}{1 - \lambda_k z} \tag{59}
+\end{equation}
+
+步骤2: 逆Z变换得到脉冲响应:
+\begin{equation}
+h_n = \sum_{k=1}^{d}r_k \lambda_k^n \tag{60}
+\end{equation}
+
+步骤3: BIBO稳定性要求$\sum_{n=0}^{\infty}|h_n| < \infty$:
+\begin{align}
+\sum_{n=0}^{\infty}|h_n| &\leq \sum_{n=0}^{\infty}\sum_{k=1}^{d}|r_k||\lambda_k|^n \tag{61} \\
+&= \sum_{k=1}^{d}|r_k|\sum_{n=0}^{\infty}|\lambda_k|^n \tag{62}
+\end{align}
+
+步骤4: 几何级数收敛条件:
+\begin{equation}
+\sum_{n=0}^{\infty}|\lambda_k|^n < \infty \Leftrightarrow |\lambda_k| < 1 \tag{63}
+\end{equation}
+$\square$
+
+**推论4.4 (边界情况)**:
+- 若$|\lambda_k| = 1$,系统临界稳定(marginally stable)
+- 若$|\lambda_k| > 1$,系统不稳定
+
+#### 4.3 零点的作用
+
+**定理4.5 (零点的影响)**: 零点不影响稳定性,但影响:
+1. **瞬态响应**: 零点位置影响系统的超调和振荡
+2. **频率响应**: 零点造成频率响应的局部极大
+3. **可逆性**: 若零点在单位圆内,系统可因果稳定地逆转
+
+**示例4.6**:
+\begin{equation}
+H_1(z) = \frac{1}{1 - 0.5z} \quad \text{vs} \quad H_2(z) = \frac{1 - 0.9z}{1 - 0.5z} \tag{64}
+\end{equation}
+
+两者极点相同(都稳定),但$H_2$的零点$z = 1/0.9 \approx 1.11$在单位圆外,导致阶跃响应有不同特性。
+
+### 五、频率响应分析
+
+#### 5.1 频率响应的定义
+
+**定义5.1 (频率响应)**: 将单位圆上的点$z = e^{j\omega}$代入传递函数:
+\begin{equation}
+H(e^{j\omega}) = |H(e^{j\omega})|e^{j\angle H(e^{j\omega})} \tag{65}
+\end{equation}
+- $|H(e^{j\omega})|$: 幅度响应(magnitude response)
+- $\angle H(e^{j\omega})$: 相位响应(phase response)
+
+**定理5.2 (稳态正弦响应)**: 若输入$u_n = A\cos(\omega n)$,稳态输出为:
+\begin{equation}
+y_n^{ss} = A|H(e^{j\omega})|\cos(\omega n + \angle H(e^{j\omega})) \tag{66}
+\end{equation}
+
+**证明**:
+步骤1: 复数形式输入$u_n = Ae^{j\omega n}$的Z变换:
+\begin{equation}
+U(z) = \frac{A}{1 - e^{j\omega}z^{-1}} \tag{67}
+\end{equation}
+
+步骤2: 输出的Z变换:
+\begin{equation}
+Y(z) = H(z)U(z) = H(z)\frac{A}{1 - e^{j\omega}z^{-1}} \tag{68}
+\end{equation}
+
+步骤3: 部分分式展开,主导项(来自$z = e^{j\omega}$的极点):
+\begin{equation}
+y_n^{ss} = AH(e^{j\omega})e^{j\omega n} \tag{69}
+\end{equation}
+
+步骤4: 取实部得到(66)式。$\square$
+
+#### 5.2 Bode图
+
+**定义5.3 (Bode图)**: 频率响应的对数图:
+- **幅度图**: $20\log_{10}|H(e^{j\omega})|$ vs $\omega$
+- **相位图**: $\angle H(e^{j\omega})$ vs $\omega$
+
+**定理5.4 (极点-零点对频率响应的贡献)**:
+\begin{align}
+|H(e^{j\omega})| &= K\frac{\prod_k|e^{j\omega} - z_k|}{\prod_l|e^{j\omega} - \lambda_l|} \tag{70} \\
+\angle H(e^{j\omega}) &= \sum_k\angle(e^{j\omega} - z_k) - \sum_l\angle(e^{j\omega} - \lambda_l) \tag{71}
+\end{align}
+
+**几何解释**:
+- 零点$z_k$: 从$e^{j\omega}$到$z_k$的向量
+- 极点$\lambda_l$: 从$e^{j\omega}$到$\lambda_l$的向量
+- 幅度响应 = (到零点距离之积) / (到极点距离之积)
+
+#### 5.3 特殊频率点
+
+**定理5.5 (Nyquist频率)**: 对于离散系统,有意义的频率范围为$\omega \in [0, \pi]$,因为:
+\begin{equation}
+H(e^{j(\omega + 2\pi)}) = H(e^{j\omega}) \tag{72}
+\end{equation}
+
+**定义5.6**:
+- **DC增益**: $H(1) = H(e^{j0})$
+- **Nyquist增益**: $H(-1) = H(e^{j\pi})$
+
+### 六、IIR滤波器设计
+
+#### 6.1 IIR滤波器的基本概念
+
+**定义6.1 (IIR滤波器)**: 无限脉冲响应(IIR)滤波器的差分方程:
+\begin{equation}
+y_n = \sum_{k=1}^{d}a_k y_{n-k} + \sum_{k=0}^{d}b_k u_{n-k} \tag{73}
+\end{equation}
+
+与FIR(有限脉冲响应)滤波器的区别: IIR包含输出的反馈项。
+
+**优点**: 相同性能下,IIR需要更少的系数
+**缺点**: 可能不稳定,相位响应非线性
+
+#### 6.2 Butterworth滤波器
+
+**定理6.2 (Butterworth低通滤波器)**: $N$阶Butterworth滤波器的频率响应:
+\begin{equation}
+|H(e^{j\omega})|^2 = \frac{1}{1 + (\omega/\omega_c)^{2N}} \tag{74}
+\end{equation}
+其中$\omega_c$是截止频率。
+
+**特性**:
+- 通带内最大平坦(maximally flat)
+- 无波纹
+- 单调衰减
+
+**极点配置**: Butterworth极点均匀分布在半径为$\omega_c$的圆上:
+\begin{equation}
+\lambda_k = \omega_c e^{j\pi(2k+N-1)/(2N)}, \quad k = 0,1,\ldots,N-1 \tag{75}
+\end{equation}
+
+#### 6.3 Chebyshev滤波器
+
+**定理6.3 (Chebyshev Type I)**:
+\begin{equation}
+|H(e^{j\omega})|^2 = \frac{1}{1 + \epsilon^2 T_N^2(\omega/\omega_c)} \tag{76}
+\end{equation}
+其中$T_N$是$N$阶Chebyshev多项式,$\epsilon$控制通带波纹。
+
+**特性**:
+- 通带有等波纹
+- 过渡带比Butterworth陡峭
+- 阻带单调衰减
+
+#### 6.4 双线性变换设计法
+
+**定理6.4 (双线性变换)**: 从模拟滤波器$H_a(s)$到数字滤波器$H(z)$:
+\begin{equation}
+s = \frac{2}{T}\frac{1 - z^{-1}}{1 + z^{-1}} \tag{77}
+\end{equation}
+
+**性质**:
+1. 将$s$平面的虚轴映射到$z$平面的单位圆
+2. 保持稳定性: 若$H_a(s)$稳定,则$H(z)$稳定
+3. 产生频率扭曲(warping):
+\begin{equation}
+\omega = 2\arctan(\Omega T/2) \tag{78}
+\end{equation}
+
+**预扭曲(Pre-warping)**: 设计时调整模拟频率以补偿扭曲:
+\begin{equation}
+\Omega_c = \frac{2}{T}\tan(\omega_c/2) \tag{79}
+\end{equation}
+
+### 七、递归实现与并行实现
+
+#### 7.1 直接形式I
+
+**算法7.1 (Direct Form I)**:
+```
+对每个时间步n:
+  # 计算FIR部分
+  v_n = Σ(k=0 to d) b_k · u_{n-k}
+
+  # 计算IIR部分
+  y_n = v_n - Σ(k=1 to d) a_k · y_{n-k}
+```
+
+**复杂度**: $\mathcal{O}(d)$每时间步
+**存储**: 需要$2d$个延迟单元
+
+#### 7.2 直接形式II(标准型)
+
+**算法7.2 (Direct Form II)**:
+```
+对每个时间步n:
+  # 合并延迟线
+  w_n = u_n - Σ(k=1 to d) a_k · w_{n-k}
+  y_n = Σ(k=0 to d) b_k · w_{n-k}
+```
+
+**优点**: 只需$d$个延迟单元(最小化)
+**缺点**: 对有限字长敏感
+
+#### 7.3 级联形式
+
+**定理7.3 (级联分解)**: 将高阶传递函数分解为二阶节(biquad)级联:
+\begin{equation}
+H(z) = K\prod_{k=1}^{\lceil d/2 \rceil}H_k(z) \tag{80}
+\end{equation}
+其中每个$H_k(z)$是二阶:
+\begin{equation}
+H_k(z) = \frac{b_{k0} + b_{k1}z + b_{k2}z^2}{1 + a_{k1}z + a_{k2}z^2} \tag{81}
+\end{equation}
+
+**优点**:
+- 数值稳定性好
+- 易于调整
+- 可独立设计每个二阶节
+
+#### 7.4 并行形式
+
+**定理7.4 (并行分解)**: 部分分式展开:
+\begin{equation}
+H(z) = C + \sum_{k=1}^{d}\frac{r_k}{1 - \lambda_k z} \tag{82}
+\end{equation}
+
+**实现**: 每个一阶节并行计算,最后求和:
+```python
+y_n = C·u_n + Σ_k r_k·x_k[n]
+其中 x_k[n+1] = λ_k·x_k[n] + u_n
+```
+
+**优点**: 完全并行,适合硬件实现
+**缺点**: 对极点位置敏感
+
+### 八、RFT方法的深入分析
+
+#### 8.1 从矩阵到多项式
+
+**定理8.1 (特征多项式的计算)**: 对于$d \times d$矩阵$\bar{A}$,其特征多项式:
+\begin{equation}
+p(\lambda) = \det(\lambda I - \bar{A}) = \lambda^d + c_1\lambda^{d-1} + \cdots + c_d \tag{83}
+\end{equation}
+可通过以下方法计算:
+
+**方法1 (Faddeev-LeVerrier算法)**:
+\begin{align}
+M_0 &= I \tag{84} \\
+c_k &= -\frac{1}{k}\text{tr}(\bar{A}M_{k-1}) \tag{85} \\
+M_k &= \bar{A}M_{k-1} + c_k I \tag{86}
+\end{align}
+
+复杂度: $\mathcal{O}(d^4)$
+
+**方法2 (通过QR分解)**:
+1. QR分解: $\bar{A} = QR$
+2. 转为Hessenberg形式
+3. 特征多项式由Hessenberg矩阵快速计算
+
+复杂度: $\mathcal{O}(d^3)$
+
+#### 8.2 RFT参数化的优势
+
+**定理8.2 (参数化的简化)**: RFT参数化:
+\begin{align}
+\text{矩阵参数化:} &\quad (\bar{A},\bar{B},\bar{C}) \in \mathbb{R}^{d^2 + 2d} \tag{87} \\
+\text{RFT参数化:} &\quad (a,b) \in \mathbb{R}^{2d} \tag{88}
+\end{align}
+
+参数减少: $d^2 + 2d \to 2d$,节约$\mathcal{O}(d^2)$。
+
+**定理8.3 (训练复杂度)**:
+- **矩阵形式**: 需计算$\bar{A}^k$,$k = 0,1,\ldots,L-1$,复杂度$\mathcal{O}(Ld^3)$
+- **RFT形式**: 直接DFT,复杂度$\mathcal{O}(L\log L)$
+
+### 九、稳定性约束
+
+#### 9.1 Schur-Cohn判据
+
+**定理9.1 (Schur-Cohn判据)**: 多项式$p(z) = a_0 + a_1z + \cdots + a_nz^n$的所有根在单位圆内当且仅当Schur-Cohn矩阵正定。
+
+**Schur-Cohn矩阵**:
+\begin{equation}
+S = \begin{pmatrix}
+a_0 & 0 & \cdots & 0 & \bar{a}_n \\
+a_1 & a_0 & \cdots & 0 & \bar{a}_{n-1} \\
+\vdots & \vdots & \ddots & \vdots & \vdots \\
+a_n & a_{n-1} & \cdots & a_0 & \bar{a}_0
+\end{pmatrix} \tag{89}
+\end{equation}
+
+#### 9.2 充分条件
+
+**定理9.2 (简化充分条件)**: 若:
+\begin{equation}
+\sum_{k=1}^{d}|a_k| < 1 \tag{90}
+\end{equation}
+则多项式$1 + a_1z + \cdots + a_dz^d$的所有根的模都不超过1。
+
+**证明**: 使用反证法和Rouché定理(详见文件2的证明)。$\square$
+
+**实践应用**: RFT初始化策略:
+\begin{align}
+a_1,\ldots,a_d &\sim \mathcal{N}(0, \sigma^2), \quad \sigma \ll 1 \tag{91} \\
+b_1,\ldots,b_d &\sim \mathcal{N}(0, 1/\sqrt{d}) \tag{92}
+\end{align}
+
+确保初始时系统接近稳定。
+
+### 十、数值示例与可视化
+
+#### 10.1 简单一阶系统
+
+**示例10.1**: 考虑$H(z) = \frac{0.5}{1 - 0.8z}$
+
+**参数**: $a_1 = -0.8$, $b_1 = 0.5$
+
+**极点**: $\lambda = 0.8$(在单位圆内,稳定)
+
+**脉冲响应**: $h_n = 0.5 \times 0.8^n$
+
+**频率响应**:
+\begin{equation}
+|H(e^{j\omega})| = \frac{0.5}{|1 - 0.8e^{j\omega}|} = \frac{0.5}{\sqrt{1.64 - 1.6\cos\omega}} \tag{93}
+\end{equation}
+
+在$\omega = 0$时最大: $|H(1)| = 0.5/0.2 = 2.5$
+
+#### 10.2 二阶谐振系统
+
+**示例10.2**: $H(z) = \frac{0.1}{1 + 1.5z + 0.9z^2}$
+
+**极点**:
+\begin{equation}
+\lambda_{1,2} = \frac{-1.5 \pm \sqrt{1.5^2 - 4 \times 0.9}}{2} = -0.75 \pm j0.66 \tag{94}
+\end{equation}
+
+$|\lambda_{1,2}| = \sqrt{0.75^2 + 0.66^2} \approx 1.0$(临界稳定)
+
+**谐振频率**: $\omega_r = \arctan(0.66/0.75) \approx 0.73$ rad
+
+**行为**: 系统在$\omega \approx 0.73$处有强烈谐振。
+
+### 十一、与其他方法的联系
+
+#### 11.1 RFT vs S4
+
+| 特性 | S4 | RFT |
+|------|-----|-----|
+| 参数化 | $(\bar{A},\bar{B},\bar{C})$ | $(a,b)$ |
+| 参数量 | $\mathcal{O}(d^2)$ | $\mathcal{O}(d)$ |
+| 训练复杂度 | $\mathcal{O}((L+d)\log^2(L+d))$ | $\mathcal{O}(L\log L)$ |
+| 依赖state size | 是 | 否 |
+| $\bar{A}$约束 | DPLR分解 | 无(隐式通过$a$) |
+
+**核心区别**: RFT直接在传递函数空间工作,避免了显式的矩阵运算。
+
+#### 11.2 RFT vs LTI系统理论
+
+RFT本质上是经典LTI(线性时不变)系统理论在深度学习中的应用:
+- **极点配置 $\leftrightarrow$ 动力学特性**
+- **零点配置 $\leftrightarrow$ 瞬态响应**
+- **有理函数 $\leftrightarrow$ SSM等价性**
+
+**创新点**: 将$(a,b)$作为可学习参数,通过反向传播优化。
+
+### 十二、实践指南
+
+#### 12.1 初始化策略
+
+**策略12.1**:
+```python
+# 保守初始化(接近积分器)
+a = np.zeros(d)
+a[0] = -0.9  # 单极点在z=0.9
+b = np.random.randn(d) / np.sqrt(d)
+
+# 随机初始化(探索性)
+a = np.random.randn(d) * 0.1
+b = np.random.randn(d) / np.sqrt(d)
+确保: np.sum(np.abs(a)) < 0.9  # 稳定性
+```
+
+#### 12.2 训练技巧
+
+**技巧12.2**:
+1. **梯度裁剪**: 防止极点跳出单位圆
+\begin{equation}
+a_k \leftarrow \text{clip}(a_k, -1, 1) \tag{95}
+\end{equation}
+
+2. **稳定性投影**: 每$N$步投影到稳定区域
+```python
+if np.sum(np.abs(a)) >= 1:
+    a = a * 0.9 / np.sum(np.abs(a))
+```
+
+3. **学习率调度**: 极点参数用较小学习率
+
+#### 12.3 调试检查清单
+
+**检查12.3**:
+- [ ] 极点都在单位圆内?
+- [ ] DFT/IDFT配对正确?
+- [ ] 零填充长度正确($2L$)?
+- [ ] 数值稳定(无NaN/Inf)?
+- [ ] 梯度正常传播?
+
+### 十三、总结
+
+#### 13.1 核心思想
+
+RFT的本质: **将SSM参数化为有理函数的系数,利用Z变换和DFT实现高效计算**。
+
+关键步骤:
+1. **建模**: $H(z) = \frac{b_1 + \cdots + b_dz^{d-1}}{1 + a_1z + \cdots + a_dz^d}$
+2. **参数化**: $(a_1,\ldots,a_d,b_1,\ldots,b_d)$作为可学习参数
+3. **训练**: 通过DFT计算卷积,复杂度$\mathcal{O}(L\log L)$
+4. **推理**: 通过友矩阵恢复状态空间实现,复杂度$\mathcal{O}(d)$
+
+#### 13.2 理论意义
+
+- 连接了深度学习与经典控制理论
+- 提供了SSM的极简参数化
+- 证明了有理函数的表达充分性
+
+#### 13.3 实践价值
+
+- 大幅降低计算复杂度(与state size无关)
+- 简化参数调优(参数更少,更直观)
+- 易于分析和解释(极点-零点视角)
+
+**展望**: RFT开启了"学习传递函数"的新范式,为序列建模提供了优雅而高效的方案。
 

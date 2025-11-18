@@ -270,5 +270,834 @@ url={\url{https://spaces.ac.cn/archives/10114}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节详细推导HiPPO (High-order Polynomial Projection Operators) 框架，包括线性时不变系统基础、Legendre多项式、HiPPO矩阵显式形式、记忆机制等。所有重要公式使用编号标记。
+
+### 1. 线性时不变系统基础
+
+**定义1.1 (线性时不变系统 Linear Time-Invariant System)**:  线性时不变(LTI)系统的连续时间形式为：
+
+\begin{equation}
+\begin{cases}
+\dot{x}(t) = A x(t) + B u(t) \\
+y(t) = C x(t) + D u(t)
+\end{cases}
+\tag{1}
+\end{equation}
+
+其中：
+- $u(t) \in \mathbb{R}^{d_i}$ 是输入信号
+- $x(t) \in \mathbb{R}^{d}$ 是隐状态（记忆）
+- $y(t) \in \mathbb{R}^{d_o}$ 是输出
+- $A \in \mathbb{R}^{d \times d}$ 是状态转移矩阵
+- $B \in \mathbb{R}^{d \times d_i}$ 是输入矩阵
+- $C \in \mathbb{R}^{d_o \times d}$ 是输出矩阵
+- $D \in \mathbb{R}^{d_o \times d_i}$ 是直接传递矩阵
+
+**定理1.2 (LTI系统解)**: 给定初始条件 $x(0) = x_0$，系统(1)的解为：
+
+\begin{equation}
+x(t) = e^{At} x_0 + \int_0^t e^{A(t-\tau)} B u(\tau) d\tau
+\tag{2}
+\end{equation}
+
+其中矩阵指数定义为：
+
+\begin{equation}
+e^{At} = \sum_{k=0}^{\infty} \frac{(At)^k}{k!} = I + At + \frac{(At)^2}{2!} + \cdots
+\tag{3}
+\end{equation}
+
+**几何意义**:
+- 第一项：初始状态的演化（自由响应）
+- 第二项：输入信号的累积影响（强迫响应）
+
+**命题1.3 (特征值与稳定性)**: 设 $A$ 的特征值为 $\lambda_1, \ldots, \lambda_d$，则：
+- 若 $\text{Re}(\lambda_i) < 0$ 对所有 $i$ 成立，系统渐近稳定
+- 若存在 $\text{Re}(\lambda_i) > 0$，系统不稳定
+- 边界情况 $\text{Re}(\lambda_i) = 0$ 需进一步分析
+
+**示例1.4**: 对角化系统
+
+\begin{equation}
+A = \begin{pmatrix}
+\lambda_1 & 0 & 0 \\
+0 & \lambda_2 & 0 \\
+0 & 0 & \lambda_3
+\end{pmatrix}
+\tag{4}
+\end{equation}
+
+则：
+
+\begin{equation}
+e^{At} = \begin{pmatrix}
+e^{\lambda_1 t} & 0 & 0 \\
+0 & e^{\lambda_2 t} & 0 \\
+0 & 0 & e^{\lambda_3 t}
+\end{pmatrix}
+\tag{5}
+\end{equation}
+
+基本解包含指数函数族 $\{e^{\lambda_1 t}, e^{\lambda_2 t}, e^{\lambda_3 t}\}$。
+
+### 2. 为什么选择线性系统？
+
+**命题2.1 (表达能力)**: 即使 $A$ 只包含实数特征值和成对共轭复特征值，线性系统也能表达复杂函数。
+
+**示例**: 考虑4维系统：
+
+\begin{equation}
+A = \begin{pmatrix}
+1 & 0 & 0 & 0 \\
+0 & -1 & 0 & 0 \\
+0 & 0 & 0 & \omega \\
+0 & 0 & -\omega & 0
+\end{pmatrix}
+\tag{6}
+\end{equation}
+
+基本解为：
+
+\begin{equation}
+x(t) = \begin{pmatrix}
+e^{t} \\
+e^{-t} \\
+\sin(\omega t) \\
+\cos(\omega t)
+\end{pmatrix}
+\tag{7}
+\end{equation}
+
+包含：
+- 指数增长/衰减：$e^{\pm t}$
+- 周期振荡：$\sin(\omega t), \cos(\omega t)$
+
+**定理2.2 (万能逼近)**: 对于足够大的 $d$，线性系统可以通过指数和三角函数的线性组合逼近任意连续函数（类似傅里叶级数的思想）。
+
+### 3. HiPPO框架的动机
+
+**问题陈述**: 给定实时信号 $u(t)$，如何用**有限维**向量 $x(t) \in \mathbb{R}^d$ 存储历史信息？
+
+**挑战**:
+- 信号 $u:[0,t] \to \mathbb{R}$ 是无限维的
+- 需要有损压缩
+- 需要在线更新（随 $t$ 增长）
+
+**HiPPO思路**: 用正交多项式基逼近历史信号，存储投影系数。
+
+**定义3.1 (函数逼近问题)**: 设 $g_0(s), g_1(s), \ldots, g_{N-1}(s)$ 是区间 $[a,b]$ 上的标准正交基，即：
+
+\begin{equation}
+\int_a^b g_i(s) g_j(s) ds = \delta_{ij}
+\tag{8}
+\end{equation}
+
+对于函数 $f: [a,b] \to \mathbb{R}$，其最佳 $N$ 阶逼近为：
+
+\begin{equation}
+f(s) \approx \sum_{n=0}^{N-1} c_n g_n(s)
+\tag{9}
+\end{equation}
+
+其中投影系数为：
+
+\begin{equation}
+c_n = \int_a^b f(s) g_n(s) ds
+\tag{10}
+\end{equation}
+
+**命题3.2**: 公式(9)的逼近在$L^2$范数下最优：
+
+\begin{equation}
+\{c_0, \ldots, c_{N-1}\} = \arg\min_{c'_0, \ldots, c'_{N-1}} \int_a^b \left| f(s) - \sum_{n=0}^{N-1} c'_n g_n(s) \right|^2 ds
+\tag{11}
+\end{equation}
+
+### 4. 在线函数逼近
+
+**设定**: 当前时刻为 $t$，历史信号为 $u(\tau)$，$\tau \in [0,t]$。
+
+**关键问题**: 区间 $[0,t]$ 随时间变化，如何标准化？
+
+**方法**: 引入映射 $s \mapsto t_{\leq t}(s)$，将固定区间 $[a,b]$ 映射到动态区间 $[0,t]$。
+
+**定义4.1 (时间重参数化)**: 定义映射族 $\{t_{\leq t}(s)\}_{t \geq 0}$，满足：
+- 对每个 $t$，$t_{\leq t}: [a,b] \to [0,t]$ 是单调映射
+- $t_{\leq t}(a) = 0$ （可选，取决于记忆策略）
+
+**投影系数的时间演化**: 在时刻 $t$，系数定义为：
+
+\begin{equation}
+c_n(t) = \int_a^b u(t_{\leq t}(s)) g_n(s) ds
+\tag{12}
+\end{equation}
+
+**定理4.2 (系数动力学推导)**: 对 $c_n(t)$ 关于 $t$ 求导：
+
+\begin{equation}
+\begin{aligned}
+\dot{c}_n(t) &= \frac{d}{dt} \int_a^b u(t_{\leq t}(s)) g_n(s) ds \\
+&= \int_a^b \frac{\partial u(t_{\leq t}(s))}{\partial t} g_n(s) ds \\
+&= \int_a^b u'(t_{\leq t}(s)) \frac{\partial t_{\leq t}(s)}{\partial t} g_n(s) ds
+\end{aligned}
+\tag{13}
+\end{equation}
+
+利用链式法则和分部积分：
+
+\begin{equation}
+\dot{c}_n(t) = \int_a^b \left( \frac{\partial t_{\leq t}(s)}{\partial t} \bigg/ \frac{\partial t_{\leq t}(s)}{\partial s} \right) g_n(s) \, du(t_{\leq t}(s))
+\tag{14}
+\end{equation}
+
+分部积分得：
+
+\begin{equation}
+\begin{aligned}
+\dot{c}_n(t) = &\left. u(t_{\leq t}(s)) \left( \frac{\partial t_{\leq t}(s)}{\partial t} \bigg/ \frac{\partial t_{\leq t}(s)}{\partial s} \right) g_n(s) \right|_a^b \\
+&- \int_a^b u(t_{\leq t}(s)) \frac{d}{ds} \left[ \left( \frac{\partial t_{\leq t}(s)}{\partial t} \bigg/ \frac{\partial t_{\leq t}(s)}{\partial s} \right) g_n(s) \right] ds
+\end{aligned}
+\tag{15}
+\end{equation}
+
+这是**HiPPO框架的核心公式**。
+
+### 5. Legendre多项式基础
+
+**定义5.1 (Legendre多项式)**: Legendre多项式 $P_n(x)$ 定义在 $[-1,1]$ 上，满足：
+
+\begin{equation}
+\int_{-1}^1 P_m(x) P_n(x) dx = \frac{2}{2n+1} \delta_{mn}
+\tag{16}
+\end{equation}
+
+**标准化**: 定义标准正交基：
+
+\begin{equation}
+g_n(x) = \sqrt{\frac{2n+1}{2}} P_n(x)
+\tag{17}
+\end{equation}
+
+使得 $\int_{-1}^1 g_m(x) g_n(x) dx = \delta_{mn}$。
+
+**前几阶**:
+
+\begin{equation}
+\begin{aligned}
+P_0(x) &= 1 \\
+P_1(x) &= x \\
+P_2(x) &= \frac{1}{2}(3x^2 - 1) \\
+P_3(x) &= \frac{1}{2}(5x^3 - 3x) \\
+P_4(x) &= \frac{1}{8}(35x^4 - 30x^2 + 3)
+\end{aligned}
+\tag{18}
+\end{equation}
+
+**递推关系**:
+
+\begin{equation}
+(n+1) P_{n+1}(x) = (2n+1) x P_n(x) - n P_{n-1}(x)
+\tag{19}
+\end{equation}
+
+**导数递推**:
+
+\begin{equation}
+P'_{n+1}(x) - P'_{n-1}(x) = (2n+1) P_n(x)
+\tag{20}
+\end{equation}
+
+\begin{equation}
+P'_{n+1}(x) = (n+1) P_n(x) + x P'_n(x)
+\tag{21}
+\end{equation}
+
+**边界值**:
+
+\begin{equation}
+P_n(1) = 1, \quad P_n(-1) = (-1)^n
+\tag{22}
+\end{equation}
+
+### 6. 关键恒等式推导
+
+**引理6.1**: 从公式(20)迭代得：
+
+\begin{equation}
+P'_{n+1}(x) = \sum_{k=0}^n (2k+1) \chi_{n-k} P_k(x)
+\tag{23}
+\end{equation}
+
+其中 $\chi_j = 1$ 当 $j$ 为偶数，否则 $\chi_j = 0$。
+
+**证明**: 递归应用(20)：
+
+\begin{equation}
+\begin{aligned}
+P'_{n+1}(x) &= (2n+1) P_n(x) + P'_{n-1}(x) \\
+&= (2n+1) P_n(x) + (2n-3) P_{n-2}(x) + P'_{n-3}(x) \\
+&= \cdots
+\end{aligned}
+\tag{24}
+\end{equation}
+
+**引理6.2**: 结合(21)和(23)：
+
+\begin{equation}
+x P'_n(x) = n P_n(x) + (2n-3) P_{n-2}(x) + (2n-7) P_{n-4}(x) + \cdots
+\tag{25}
+\end{equation}
+
+**引理6.3 (核心恒等式)**:
+
+\begin{equation}
+(x+1) P'_n(x) = -(n+1) P_n(x) + \sum_{k=0}^n (2k+1) P_k(x)
+\tag{26}
+\end{equation}
+
+**证明**:
+
+\begin{equation}
+\begin{aligned}
+(x+1) P'_n(x) &= x P'_n(x) + P'_n(x) \\
+&= [n P_n(x) + \text{even terms}] + [(n+1)P_n(x) + \text{odd terms}] \\
+&= \sum_{k=0}^n (2k+1) P_k(x) - (n+1) P_n(x)
+\end{aligned}
+\tag{27}
+\end{equation}
+
+### 7. HiPPO-LegT (Translated Legendre)
+
+**记忆策略**: 只保留最近窗口 $[t-\theta, t]$ 的信息（滑动窗口）。
+
+**映射**:
+
+\begin{equation}
+t_{\leq t}(s) = \frac{s+1}{2} \theta + (t - \theta)
+\tag{28}
+\end{equation}
+
+将 $[-1,1]$ 映射到 $[t-\theta, t]$。
+
+**计算偏导数**:
+
+\begin{equation}
+\frac{\partial t_{\leq t}(s)}{\partial t} = 1, \quad \frac{\partial t_{\leq t}(s)}{\partial s} = \frac{\theta}{2}
+\tag{29}
+\end{equation}
+
+**代入HiPPO框架(15)**:
+
+\begin{equation}
+\begin{aligned}
+\dot{c}_n(t) = &\left. u(t_{\leq t}(s)) \frac{2}{\theta} g_n(s) \right|_{-1}^{1} \\
+&- \int_{-1}^1 u(t_{\leq t}(s)) \frac{2}{\theta} g'_n(s) ds
+\end{aligned}
+\tag{30}
+\end{equation}
+
+**边界项**:
+
+\begin{equation}
+\begin{aligned}
+\text{边界} &= \frac{2}{\theta} [u(t) g_n(1) - u(t-\theta) g_n(-1)] \\
+&= \frac{2}{\theta} \sqrt{\frac{2n+1}{2}} [u(t) - (-1)^n u(t-\theta)]
+\end{aligned}
+\tag{31}
+\end{equation}
+
+**积分项**: 利用公式(23)：
+
+\begin{equation}
+\begin{aligned}
+&\int_{-1}^1 u(t_{\leq t}(s)) g'_n(s) ds \\
+=& \int_{-1}^1 u(t_{\leq t}(s)) \sqrt{\frac{2n+1}{2}} P'_n(s) ds \\
+=& \int_{-1}^1 u(t_{\leq t}(s)) \sqrt{\frac{2n+1}{2}} \sum_{k=0}^{n-1} (2k+1) \chi_{n-1-k} P_k(s) ds \\
+=& \sqrt{2n+1} \sum_{k=0}^{n-1} \sqrt{2k+1} \chi_{n-1-k} c_k(t)
+\end{aligned}
+\tag{32}
+\end{equation}
+
+**近似 $u(t-\theta)$**:
+
+\begin{equation}
+u(t-\theta) = u(t_{\leq t}(-1)) \approx \sum_{k=0}^{N-1} c_k(t) g_k(-1) = \sum_{k=0}^{N-1} c_k(t) (-1)^k \sqrt{\frac{2k+1}{2}}
+\tag{33}
+\end{equation}
+
+**最终动力学**: 设 $x(t) = (c_0(t), c_1(t), \ldots, c_{N-1}(t))^T$，则：
+
+\begin{equation}
+\dot{x}(t) = \frac{1}{\theta} A^{(\text{LegT})} x(t) + \frac{1}{\theta} B^{(\text{LegT})} u(t)
+\tag{34}
+\end{equation}
+
+其中：
+
+\begin{equation}
+A^{(\text{LegT})}_{nk} = -\begin{cases}
+\sqrt{(2n+1)(2k+1)}, & k < n \\
+(-1)^{n-k} \sqrt{(2n+1)(2k+1)}, & k \geq n
+\end{cases}
+\tag{35}
+\end{equation}
+
+\begin{equation}
+B^{(\text{LegT})}_n = \sqrt{2(2n+1)}
+\tag{36}
+\end{equation}
+
+**定理7.1 (LegT的显式形式)**: LegT HiPPO矩阵为：
+
+\begin{equation}
+A^{(\text{LegT})} = -\begin{pmatrix}
+1 & -1 & -\sqrt{3} & -\sqrt{5} & \cdots \\
+\sqrt{3} & 3 & -3 & -\sqrt{15} & \cdots \\
+\sqrt{5} & \sqrt{15} & 5 & -5 & \cdots \\
+\sqrt{7} & \sqrt{21} & \sqrt{35} & 7 & \cdots \\
+\vdots & \vdots & \vdots & \vdots & \ddots
+\end{pmatrix}
+\tag{37}
+\end{equation}
+
+### 8. HiPPO-LegS (Scaled Legendre)
+
+**记忆策略**: 保留全部历史 $[0,t]$，均匀缩放。
+
+**映射**:
+
+\begin{equation}
+t_{\leq t}(s) = \frac{s+1}{2} t
+\tag{38}
+\end{equation}
+
+将 $[-1,1]$ 映射到 $[0,t]$。
+
+**偏导数**:
+
+\begin{equation}
+\frac{\partial t_{\leq t}(s)}{\partial t} = \frac{s+1}{2}, \quad \frac{\partial t_{\leq t}(s)}{\partial s} = \frac{t}{2}
+\tag{39}
+\end{equation}
+
+**比值**:
+
+\begin{equation}
+\frac{\partial t_{\leq t}(s)}{\partial t} \bigg/ \frac{\partial t_{\leq t}(s)}{\partial s} = \frac{s+1}{t}
+\tag{40}
+\end{equation}
+
+**代入HiPPO框架**:
+
+\begin{equation}
+\begin{aligned}
+\dot{c}_n(t) = &\left. u(t_{\leq t}(s)) \frac{s+1}{t} g_n(s) \right|_{-1}^{1} \\
+&- \int_{-1}^1 u(t_{\leq t}(s)) \frac{d}{ds}\left[\frac{s+1}{t} g_n(s)\right] ds
+\end{aligned}
+\tag{41}
+\end{equation}
+
+**边界项**: 由于 $t_{\leq t}(-1) = 0$，边界项为：
+
+\begin{equation}
+\text{边界} = \frac{1}{t} \left[2 u(t) g_n(1) - 0\right] = \frac{2}{t} \sqrt{\frac{2n+1}{2}} u(t)
+\tag{42}
+\end{equation}
+
+**积分项**:
+
+\begin{equation}
+\begin{aligned}
+&\int_{-1}^1 u(t_{\leq t}(s)) \frac{d}{ds}\left[\frac{s+1}{t} g_n(s)\right] ds \\
+=& \frac{1}{t} \int_{-1}^1 u(t_{\leq t}(s)) \left[g_n(s) + (s+1) g'_n(s)\right] ds \\
+=& \frac{1}{t} \left[c_n(t) + \int_{-1}^1 u(t_{\leq t}(s)) (s+1) \sqrt{\frac{2n+1}{2}} P'_n(s) ds\right]
+\end{aligned}
+\tag{43}
+\end{equation}
+
+利用恒等式(26)：
+
+\begin{equation}
+\begin{aligned}
+&\int_{-1}^1 u(t_{\leq t}(s)) (s+1) P'_n(s) ds \\
+=& \int_{-1}^1 u(t_{\leq t}(s)) \left[-(n+1) P_n(s) + \sum_{k=0}^n (2k+1) P_k(s)\right] ds \\
+=& \sqrt{\frac{2}{2n+1}} \left[-(n+1) c_n(t) + \sum_{k=0}^n \sqrt{(2n+1)(2k+1)} c_k(t)\right]
+\end{aligned}
+\tag{44}
+\end{equation}
+
+**最终动力学**:
+
+\begin{equation}
+\dot{c}_n(t) = \frac{1}{t} \left[\sqrt{2(2n+1)} u(t) + n c_n(t) - \sum_{k=0}^n \sqrt{(2n+1)(2k+1)} c_k(t)\right]
+\tag{45}
+\end{equation}
+
+设 $x(t) = (c_0, c_1, \ldots, c_{N-1})^T$：
+
+\begin{equation}
+\dot{x}(t) = \frac{1}{t} A^{(\text{LegS})} x(t) + \frac{1}{t} B^{(\text{LegS})} u(t)
+\tag{46}
+\end{equation}
+
+其中：
+
+\begin{equation}
+A^{(\text{LegS})}_{nk} = -\begin{cases}
+\sqrt{(2n+1)(2k+1)}, & k < n \\
+n+1, & k = n \\
+0, & k > n
+\end{cases}
+\tag{47}
+\end{equation}
+
+\begin{equation}
+B^{(\text{LegS})}_n = \sqrt{2(2n+1)}
+\tag{48}
+\end{equation}
+
+**定理8.1 (LegS的显式形式)**: LegS HiPPO矩阵为：
+
+\begin{equation}
+A^{(\text{LegS})} = -\begin{pmatrix}
+1 & 0 & 0 & 0 & \cdots \\
+\sqrt{3} & 2 & 0 & 0 & \cdots \\
+\sqrt{5} & \sqrt{15} & 3 & 0 & \cdots \\
+\sqrt{7} & \sqrt{21} & \sqrt{35} & 4 & \cdots \\
+\vdots & \vdots & \vdots & \vdots & \ddots
+\end{pmatrix}
+\tag{49}
+\end{equation}
+
+注意：LegS矩阵是**下三角**，LegT矩阵是**全阵**。
+
+### 9. 矩阵性质分析
+
+**命题9.1 (LegT的性质)**:
+1. **反对称部分**: $A^{(\text{LegT})} + (A^{(\text{LegT})})^T$ 是对角矩阵
+2. **特征值**: 具有负实部（保证稳定性）
+3. **记忆窗口**: 固定为 $\theta$
+
+**命题9.2 (LegS的性质)**:
+1. **下三角**: 易于计算矩阵指数
+2. **特征值**: 对角线元素 $-1, -2, -3, \ldots$（全为负实数）
+3. **时间依赖**: 系数有 $1/t$ 因子，随时间衰减
+
+**定理9.3 (LegS特征值)**: LegS矩阵的特征值为：
+
+\begin{equation}
+\lambda_n = -(n+1), \quad n = 0, 1, 2, \ldots
+\tag{50}
+\end{equation}
+
+**证明**: 由于下三角，特征值即为对角线元素。
+
+**推论**: 系统稳定，且高阶模式衰减更快。
+
+### 10. 离散化：从ODE到RNN
+
+**Euler方法**: 设时间步长为 $\Delta t$：
+
+\begin{equation}
+x_{k+1} = x_k + \Delta t \cdot [\bar{A} x_k + \bar{B} u_k]
+\tag{51}
+\end{equation}
+
+其中 $\bar{A} = A/\theta$ (LegT) 或 $A/t$ (LegS)。
+
+整理得：
+
+\begin{equation}
+x_{k+1} = (I + \Delta t \bar{A}) x_k + \Delta t \bar{B} u_k
+\tag{52}
+\end{equation}
+
+**精确离散化（ZOH）**: 零阶保持（Zero-Order Hold）假设 $u(t) = u_k$ 在 $[k\Delta t, (k+1)\Delta t]$ 内恒定：
+
+\begin{equation}
+x_{k+1} = e^{\bar{A} \Delta t} x_k + \left(\int_0^{\Delta t} e^{\bar{A} s} ds\right) \bar{B} u_k
+\tag{53}
+\end{equation}
+
+定义离散化矩阵：
+
+\begin{equation}
+\bar{A}_d = e^{\bar{A} \Delta t}, \quad \bar{B}_d = \bar{A}^{-1} (e^{\bar{A} \Delta t} - I) \bar{B}
+\tag{54}
+\end{equation}
+
+（当 $\bar{A}$ 可逆时）
+
+**双线性变换（Tustin）**:
+
+\begin{equation}
+\bar{A}_d = (I - \frac{\Delta t}{2} \bar{A})^{-1} (I + \frac{\Delta t}{2} \bar{A})
+\tag{55}
+\end{equation}
+
+\begin{equation}
+\bar{B}_d = (I - \frac{\Delta t}{2} \bar{A})^{-1} \Delta t \bar{B}
+\tag{56}
+\end{equation}
+
+### 11. 记忆能力分析
+
+**定义11.1 (记忆容量)**: 对于信号 $u:[0,T] \to \mathbb{R}$，HiPPO的重构误差为：
+
+\begin{equation}
+E(T, N) = \int_0^T \left| u(\tau) - \sum_{n=0}^{N-1} c_n(T) g_n(2\tau/T - 1) \right|^2 d\tau
+\tag{57}
+\end{equation}
+
+（对于LegS）
+
+**定理11.2 (收敛速度)**: 对于 $k$ 阶光滑函数 $u \in C^k$：
+
+\begin{equation}
+E(T, N) = O(N^{-k})
+\tag{58}
+\end{equation}
+
+即阶数 $N$ 越高，逼近越精确。
+
+**推论**: HiPPO可以用**有限维**状态存储**无限维**历史，误差可控。
+
+**LegT vs. LegS**:
+- **LegT**: 固定窗口 $\theta$，适合局部模式
+- **LegS**: 全局历史，但分辨率随 $T$ 增大而降低
+
+**类比**: LegS类似"变焦镜头"，距离越远（时间越早），分辨率越低。
+
+### 12. 与RNN的对比
+
+**标准RNN**:
+
+\begin{equation}
+h_{t+1} = \tanh(W_h h_t + W_x x_t + b)
+\tag{59}
+\end{equation}
+
+**HiPPO/SSM**:
+
+\begin{equation}
+h_{t+1} = \bar{A}_d h_t + \bar{B}_d x_t
+\tag{60}
+\end{equation}
+
+**对比表**:
+
+| 特性 | 标准RNN | HiPPO-SSM |
+|------|---------|-----------|
+| 非线性 | 有 (tanh) | 无（线性） |
+| 可解释性 | 弱 | 强（多项式投影） |
+| 长程记忆 | 梯度消失 | 结构化记忆 |
+| 训练难度 | 高 | 中（可初始化） |
+| 理论保证 | 少 | 多（逼近误差界） |
+
+**命题12.1 (线性SSM的表达力)**: 通过添加非线性输出层：
+
+\begin{equation}
+y_t = \sigma(C h_t + D x_t)
+\tag{61}
+\end{equation}
+
+线性SSM可以保持记忆能力同时获得非线性表达力。
+
+### 13. 计算复杂度
+
+**每步更新** ($x \in \mathbb{R}^d$, $u \in \mathbb{R}$):
+
+\begin{equation}
+h_{t+1} = \bar{A}_d h_t + \bar{B}_d u_t
+\tag{62}
+\end{equation}
+
+- 矩阵-向量乘法: $O(d^2)$（稠密矩阵）
+- 向量加法: $O(d)$
+
+**总计**: $O(d^2)$ 每步
+
+**优化**:
+1. **LegS下三角**: 复杂度降至 $O(d^2)$，但可能利用稀疏性
+2. **结构化矩阵**: 利用Toeplitz、循环等结构（S4的贡献）
+3. **频域计算**: FFT加速卷积形式
+
+### 14. 卷积表示
+
+**定理14.1**: 对于LTI系统，输入-输出关系可表示为卷积：
+
+\begin{equation}
+y_t = (K * u)_t = \sum_{i=0}^{t} K_{t-i} u_i
+\tag{63}
+\end{equation}
+
+其中卷积核：
+
+\begin{equation}
+K_i = C \bar{A}_d^i \bar{B}_d
+\tag{64}
+\end{equation}
+
+**计算优势**: 可使用FFT在 $O(L \log L)$ 时间内计算整个序列（$L$ 是序列长度）：
+
+\begin{equation}
+y = \text{IFFT}(\text{FFT}(K) \odot \text{FFT}(u))
+\tag{65}
+\end{equation}
+
+其中 $\odot$ 是逐元素乘积。
+
+### 15. 初始化策略
+
+**随机初始化问题**: 随机矩阵 $A$ 可能导致：
+- 梯度爆炸/消失
+- 记忆能力差
+
+**HiPPO初始化**: 使用 $A^{(\text{LegT})}$ 或 $A^{(\text{LegS})}$ 作为 $A$ 的初始值。
+
+**优势**:
+1. 理论保证的记忆能力
+2. 良好的谱性质（特征值）
+3. 训练稳定性
+
+**可训练性**: 可以固定 $A$（纯HiPPO）或微调（学习任务特定记忆）。
+
+### 16. 数值示例
+
+**示例16.1**: 3阶LegT矩阵 ($N=3$, $\theta=1$)：
+
+\begin{equation}
+A^{(\text{LegT})} = -\begin{pmatrix}
+1 & -1 & -\sqrt{3} \\
+\sqrt{3} & 3 & -3 \\
+\sqrt{5} & \sqrt{15} & 5
+\end{pmatrix}
+\tag{66}
+\end{equation}
+
+\begin{equation}
+B^{(\text{LegT})} = \begin{pmatrix}
+\sqrt{2} \\
+\sqrt{6} \\
+\sqrt{10}
+\end{pmatrix}
+\tag{67}
+\end{equation}
+
+**输入**: $u(t) = \sin(t)$，在 $t \in [0, 2\pi]$。
+
+**状态演化**: 数值求解 ODE $\dot{x} = Ax + Bu$，得到 $c_0(t), c_1(t), c_2(t)$。
+
+**重构**: $\hat{u}(\tau) = \sum_{n=0}^2 c_n(t) g_n(2\tau - t - 1)$ （窗口内）
+
+**示例16.2**: LegS矩阵 ($N=3$)：
+
+\begin{equation}
+A^{(\text{LegS})} = -\begin{pmatrix}
+1 & 0 & 0 \\
+\sqrt{3} & 2 & 0 \\
+\sqrt{5} & \sqrt{15} & 3
+\end{pmatrix}
+\tag{68}
+\end{equation}
+
+下三角结构使得特征值显式可见：$\lambda = -1, -2, -3$。
+
+### 17. 扩展与变体
+
+**HiPPO-LagT (Laguerre)**: 使用Laguerre多项式，适合 $[0, \infty)$：
+
+\begin{equation}
+\dot{c}_n(t) = -c_n(t) + \text{耦合项}
+\tag{69}
+\end{equation}
+
+**HiPPO-FouT (Fourier)**: 使用傅里叶基（复数域）：
+
+\begin{equation}
+c_n(t) = \int_a^b u(t_{\leq t}(s)) e^{-2\pi i n s} ds
+\tag{70}
+\end{equation}
+
+**加权记忆**: 引入权重函数 $\mu(s)$：
+
+\begin{equation}
+c_n(t) = \int_a^b u(t_{\leq t}(s)) g_n(s) \mu(s) ds
+\tag{71}
+\end{equation}
+
+可以实现指数衰减记忆等。
+
+### 18. 理论保证
+
+**定理18.1 (最优投影)**: HiPPO系数 $c_n(t)$ 是 $u$ 在 $t_{\leq t}$ 映射下关于基 $\{g_n\}$ 的最优$L^2$投影。
+
+**定理18.2 (在线更新)**: HiPPO提供的ODE系统是投影系数的**最优在线更新规则**。
+
+**定理18.3 (稳定性)**: LegT和LegS矩阵的所有特征值具有负实部，保证系统稳定。
+
+**定理18.4 (记忆容量)**: 对于带宽有限的信号，$N = O(\text{带宽} \times \text{时间窗口})$ 足以近似重构。
+
+### 19. 应用场景
+
+**19.1 长序列建模**:
+- 语言模型（替代Transformer）
+- 时间序列预测
+- 音频生成
+
+**19.2 控制系统**:
+- 状态估计
+- 滤波器设计
+
+**19.3 神经科学**:
+- 生物记忆建模
+- 突触权重演化
+
+### 20. 小结
+
+HiPPO框架通过正交多项式投影建立了在线函数逼近与线性ODE系统的联系：
+
+\begin{equation}
+\boxed{
+\begin{aligned}
+&\text{实时信号} \quad u(t) \\
+&\downarrow \quad \text{多项式投影} \\
+&\text{系数} \quad c(t) = (c_0, \ldots, c_{N-1})^T \\
+&\downarrow \quad \text{动力学} \\
+&\dot{c}(t) = A c(t) + B u(t) \\
+&\downarrow \quad \text{记忆} \\
+&\text{重构} \quad \hat{u}(\tau) \approx \sum_n c_n(t) g_n(\cdot)
+\end{aligned}
+}
+\tag{72}
+\end{equation}
+
+**核心贡献**:
+
+1. **理论基础**: 线性系统的记忆能力有严格保证
+2. **显式公式**: LegT和LegS矩阵可直接使用
+3. **可扩展性**: 不同基函数适应不同记忆策略
+4. **与深度学习结合**: 为S4、Mamba等模型奠定基础
+
+**关键公式回顾**:
+
+\begin{equation}
+\boxed{
+\begin{array}{ll}
+\text{LegT:} & A_{nk} = -\sqrt{(2n+1)(2k+1)} \times \text{sign}(n,k) \\
+\text{LegS:} & A_{nk} = -\sqrt{(2n+1)(2k+1)} \cdot \mathbb{1}_{k < n} - (n+1)\mathbb{1}_{k=n}
+\end{array}
+}
+\tag{73}
+\end{equation}
+
+**HiPPO的启示**:
+- 线性系统通过精心设计可以拥有强大的记忆能力
+- 数学结构（正交多项式）指导深度学习架构设计
+- 理论与实践的结合是未来研究的方向
+
+\begin{equation}
+\boxed{\text{HiPPO：让线性系统学会记忆的数学魔法}}
+\tag{74}
+\end{equation}
 

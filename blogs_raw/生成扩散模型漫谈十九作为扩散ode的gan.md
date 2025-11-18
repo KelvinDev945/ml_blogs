@@ -135,5 +135,349 @@ url={\url{https://spaces.ac.cn/archives/9662}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 1. Wasserstein梯度流与GAN的连接
+
+#### 1.1 Wasserstein梯度流回顾
+
+**定理1.1**（Wasserstein梯度流）：考虑概率密度$q_t(\boldsymbol{x})$随时间$t$的演化。为了最小化KL散度$D_{KL}(q_t\|p)$，最速下降流（steepest descent flow）由连续性方程描述：
+
+$$
+\frac{\partial q_t(\boldsymbol{x})}{\partial t} = -\nabla_{\boldsymbol{x}} \cdot \left(q_t(\boldsymbol{x}) \nabla_{\boldsymbol{x}} \log r_t(\boldsymbol{x})\right) \tag{1}
+$$
+
+其中$r_t(\boldsymbol{x}) = \frac{p(\boldsymbol{x})}{q_t(\boldsymbol{x})}$是密度比。
+
+**推导**：KL散度的泛函导数为：
+
+$$
+\frac{\delta}{\delta q} D_{KL}(q\|p) = \log q(\boldsymbol{x}) - \log p(\boldsymbol{x}) + 1 = -\log r(\boldsymbol{x}) + 1 \tag{2}
+$$
+
+Wasserstein空间中的梯度流对应于选择速度场$\boldsymbol{v}(\boldsymbol{x})$使得：
+
+$$
+\boldsymbol{v}(\boldsymbol{x}) = -\nabla_{\boldsymbol{x}} \frac{\delta D_{KL}}{\delta q} = \nabla_{\boldsymbol{x}} \log r(\boldsymbol{x}) \tag{3}
+$$
+
+代入连续性方程$\frac{\partial q}{\partial t} + \nabla \cdot (q\boldsymbol{v}) = 0$即得(1)。
+
+#### 1.2 从连续性方程到ODE
+
+**引理1.2**（特征线方法）：方程(1)等价于以下ODE的推送测度（pushforward measure）：
+
+$$
+\frac{d\boldsymbol{x}}{dt} = \nabla_{\boldsymbol{x}} \log r_t(\boldsymbol{x}) \tag{4}
+$$
+
+**证明**：设$\boldsymbol{x}_t$满足(4)，初始分布$\boldsymbol{x}_0 \sim q_0$。则$q_t$是$\boldsymbol{x}_t$的边缘分布。利用Itô引理的确定性版本（传输公式）：
+
+$$
+\frac{d}{dt}\phi(\boldsymbol{x}_t) = \langle \nabla \phi, \frac{d\boldsymbol{x}_t}{dt} \rangle = \langle \nabla \phi, \nabla \log r_t \rangle \tag{5}
+$$
+
+对任意测试函数$\phi$，积分得：
+
+$$
+\frac{d}{dt}\int \phi(\boldsymbol{x}) q_t(\boldsymbol{x}) d\boldsymbol{x} = \int \langle \nabla \phi, \nabla \log r_t \rangle q_t d\boldsymbol{x} \tag{6}
+$$
+
+分部积分（假设边界项消失）：
+
+$$
+= -\int \phi(\boldsymbol{x}) \nabla \cdot (q_t \nabla \log r_t) d\boldsymbol{x} \tag{7}
+$$
+
+这正是(1)的弱形式。□
+
+### 2. GAN判别器与密度比估计
+
+#### 2.1 Vanilla GAN的最优判别器
+
+**GAN的判别器目标**：
+
+$$
+\max_D \mathbb{E}_{\boldsymbol{x} \sim p}\left[\log \sigma(D(\boldsymbol{x}))\right] + \mathbb{E}_{\boldsymbol{x} \sim q}\left[\log(1 - \sigma(D(\boldsymbol{x})))\right] \tag{8}
+$$
+
+其中$\sigma(z) = \frac{1}{1 + e^{-z}}$是sigmoid函数。
+
+**定理2.1**（最优判别器）：(8)的最优解为：
+
+$$
+D^*(\boldsymbol{x}) = \log \frac{p(\boldsymbol{x})}{q(\boldsymbol{x})} = \log r(\boldsymbol{x}) \tag{9}
+$$
+
+**证明**：对每个$\boldsymbol{x}$，目标函数关于$D(\boldsymbol{x})$的泛函为：
+
+$$
+L(D(\boldsymbol{x})) = p(\boldsymbol{x}) \log \sigma(D(\boldsymbol{x})) + q(\boldsymbol{x}) \log(1 - \sigma(D(\boldsymbol{x}))) \tag{10}
+$$
+
+求导并令其为零：
+
+$$
+\frac{\partial L}{\partial D} = p(\boldsymbol{x}) \sigma'(D) / \sigma(D) - q(\boldsymbol{x}) \sigma'(D) / (1 - \sigma(D)) = 0 \tag{11}
+$$
+
+利用$\sigma'(z) = \sigma(z)(1-\sigma(z))$：
+
+$$
+p(\boldsymbol{x})(1 - \sigma(D^*)) = q(\boldsymbol{x}) \sigma(D^*) \tag{12}
+$$
+
+解得：
+
+$$
+\sigma(D^*(\boldsymbol{x})) = \frac{p(\boldsymbol{x})}{p(\boldsymbol{x}) + q(\boldsymbol{x})} \tag{13}
+$$
+
+应用$\sigma(z) = \frac{1}{1 + e^{-z}}$的逆函数：
+
+$$
+D^*(\boldsymbol{x}) = \log \frac{\sigma(D^*)}{1 - \sigma(D^*)} = \log \frac{p(\boldsymbol{x})}{q(\boldsymbol{x})} \tag{14}
+$$
+
+□
+
+#### 2.2 f-GAN的一般化
+
+**f-divergence**：对于凸函数$f$，定义：
+
+$$
+D_f(p\|q) = \mathbb{E}_{\boldsymbol{x} \sim q}\left[f\left(\frac{p(\boldsymbol{x})}{q(\boldsymbol{x})}\right)\right] \tag{15}
+$$
+
+**f-GAN目标**：
+
+$$
+\max_D \mathbb{E}_{\boldsymbol{x} \sim p}[g_f(D(\boldsymbol{x}))] + \mathbb{E}_{\boldsymbol{x} \sim q}[h_f(D(\boldsymbol{x}))] \tag{16}
+$$
+
+其中$g_f$, $h_f$是与$f$共轭的函数。
+
+**定理2.2**：f-GAN的最优判别器满足：
+
+$$
+D^*(\boldsymbol{x}) = f'\left(\frac{p(\boldsymbol{x})}{q(\boldsymbol{x})}\right) \tag{17}
+$$
+
+即$D^*$是密度比$r(\boldsymbol{x})$的单调变换。
+
+### 3. 从样本空间到参数空间的映射
+
+#### 3.1 生成器参数化的分布族
+
+**设定**：生成器$\boldsymbol{g}_{\boldsymbol{\theta}}: \mathbb{R}^d \to \mathbb{R}^n$将噪声$\boldsymbol{z} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})$映射到样本空间。定义诱导分布：
+
+$$
+q_{\boldsymbol{\theta}}(\boldsymbol{x}) = \int \delta(\boldsymbol{x} - \boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z})) \mathcal{N}(\boldsymbol{z}; \mathbf{0}, \boldsymbol{I}) d\boldsymbol{z} \tag{18}
+$$
+
+或等价地：
+
+$$
+\boldsymbol{x} = \boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z}), \quad \boldsymbol{z} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I}) \Rightarrow \boldsymbol{x} \sim q_{\boldsymbol{\theta}} \tag{19}
+$$
+
+#### 3.2 参数空间的时间演化
+
+**核心思想**：将训练过程的参数轨迹$\boldsymbol{\theta}_t$视为时间$t$的函数，对应分布族$\{q_t\}_{t \geq 0}$，其中：
+
+$$
+q_t(\boldsymbol{x}) := q_{\boldsymbol{\theta}_t}(\boldsymbol{x}) \tag{20}
+$$
+
+**样本空间的演化**：对于固定的$\boldsymbol{z}$，样本轨迹为：
+
+$$
+\boldsymbol{x}_t = \boldsymbol{g}_{\boldsymbol{\theta}_t}(\boldsymbol{z}) \tag{21}
+$$
+
+求时间导数：
+
+$$
+\frac{d\boldsymbol{x}_t}{dt} = \frac{\partial \boldsymbol{g}_{\boldsymbol{\theta}}}{\partial \boldsymbol{\theta}}\bigg|_{\boldsymbol{\theta}=\boldsymbol{\theta}_t} \cdot \frac{d\boldsymbol{\theta}_t}{dt} = \mathbf{J}_{\boldsymbol{g}}(\boldsymbol{z}, \boldsymbol{\theta}_t) \dot{\boldsymbol{\theta}}_t \tag{22}
+$$
+
+其中$\mathbf{J}_{\boldsymbol{g}} \in \mathbb{R}^{n \times m}$（$m$是参数维度）是Jacobian矩阵。
+
+#### 3.3 匹配Wasserstein流
+
+**目标**：希望样本空间的演化(22)匹配Wasserstein流(4)：
+
+$$
+\mathbf{J}_{\boldsymbol{g}}(\boldsymbol{z}, \boldsymbol{\theta}_t) \dot{\boldsymbol{\theta}}_t = \nabla_{\boldsymbol{x}_t} \log r_t(\boldsymbol{x}_t) \tag{23}
+$$
+
+**离散化**：用欧拉法离散化，步长$\epsilon$：
+
+$$
+\boldsymbol{x}_{t+1} \approx \boldsymbol{x}_t + \epsilon \nabla_{\boldsymbol{x}_t} D_t(\boldsymbol{x}_t) \tag{24}
+$$
+
+其中$D_t$是在时刻$t$训练的判别器（近似$\log r_t$）。
+
+**参数更新目标**：希望新参数$\boldsymbol{\theta}_{t+1}$满足：
+
+$$
+\boldsymbol{g}_{\boldsymbol{\theta}_{t+1}}(\boldsymbol{z}) \approx \boldsymbol{g}_{\boldsymbol{\theta}_t}(\boldsymbol{z}) + \epsilon \nabla_{\boldsymbol{g}} D_t(\boldsymbol{g}_{\boldsymbol{\theta}_t}(\boldsymbol{z})) \tag{25}
+$$
+
+这导致以下优化问题：
+
+$$
+\boldsymbol{\theta}_{t+1} = \arg\min_{\boldsymbol{\theta}} \mathbb{E}_{\boldsymbol{z} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})}\left[\left\|\boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z}) - \boldsymbol{g}_{\boldsymbol{\theta}_t}(\boldsymbol{z}) - \epsilon \nabla_{\boldsymbol{g}} D_t(\boldsymbol{g}_{\boldsymbol{\theta}_t}(\boldsymbol{z}))\right\|^2\right] \tag{26}
+$$
+
+### 4. 从优化视角的等价性
+
+#### 4.1 单步梯度下降的等价性
+
+**引理4.1**：如果用梯度下降法单步优化(26)，等价于优化：
+
+$$
+\min_{\boldsymbol{\theta}} \mathbb{E}_{\boldsymbol{z} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})}\left[-D_t(\boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z}))\right] \tag{27}
+$$
+
+**证明**：计算(26)的梯度，在$\boldsymbol{\theta} = \boldsymbol{\theta}_t$处：
+
+$$
+\begin{aligned}
+&\nabla_{\boldsymbol{\theta}}\left\|\boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z}) - \boldsymbol{g}_{\boldsymbol{\theta}_t}(\boldsymbol{z}) - \epsilon \nabla_{\boldsymbol{g}} D_t(\boldsymbol{g}_{\boldsymbol{\theta}_t}(\boldsymbol{z}))\right\|^2\bigg|_{\boldsymbol{\theta}=\boldsymbol{\theta}_t} \\
+&= 2(\boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z}) - \boldsymbol{g}_{\boldsymbol{\theta}_t}(\boldsymbol{z}) - \epsilon \nabla_{\boldsymbol{g}} D_t)^T \mathbf{J}_{\boldsymbol{g}}\bigg|_{\boldsymbol{\theta}=\boldsymbol{\theta}_t} \\
+&= -2\epsilon (\nabla_{\boldsymbol{g}} D_t)^T \mathbf{J}_{\boldsymbol{g}}(\boldsymbol{z}, \boldsymbol{\theta}_t) \\
+&= -2\epsilon \nabla_{\boldsymbol{\theta}} D_t(\boldsymbol{g}_{\boldsymbol{\theta}_t}(\boldsymbol{z}))
+\end{aligned} \tag{28}
+$$
+
+因此，(26)和(27)的梯度只差常数倍$-2\epsilon$，单步梯度下降等价。□
+
+**推论**：标准GAN生成器损失$\min_G \mathbb{E}[-D(G(\boldsymbol{z}))]$是MonoFlow离散化的一阶近似。
+
+#### 4.2 MonoFlow算法框架
+
+**算法1**（MonoFlow交替训练）：
+
+```
+初始化：生成器参数 θ_0，判别器 D_0
+对 t = 0, 1, 2, ... :
+    # 判别器步骤
+    采样 {x_i ~ p}_i=1^n (真实数据)
+    采样 {z_i ~ N(0,I)}_i=1^n, 计算 {g_θ_t(z_i)}_i=1^n
+    更新判别器：
+        D_{t+1} = argmax_D [ E_p[log σ(D(x))] + E_{g_θ_t(z)}[log(1-σ(D(x)))] ]
+
+    # 生成器步骤（MonoFlow形式）
+    采样 {z_i ~ N(0,I)}_i=1^m
+    更新生成器：
+        θ_{t+1} = argmin_θ E_z[ ||g_θ(z) - g_θ_t(z) - ε∇_g D_{t+1}(g_θ_t(z))||^2 ]
+
+    # 或等价地（标准GAN形式，单步优化时）
+    θ_{t+1} = argmin_θ E_z[ -D_{t+1}(g_θ(z)) ]
+```
+
+### 5. 单调变换的一般化
+
+#### 5.1 MonoFlow名称的由来
+
+**定理5.1**（单调函数变换）：Wasserstein梯度流(1)可推广为：
+
+$$
+\frac{\partial q_t}{\partial t} = -\nabla \cdot \left(q_t \nabla h(\log r_t)\right) \tag{29}
+$$
+
+其中$h: \mathbb{R} \to \mathbb{R}$是任意单调递增函数。
+
+**证明思路**：梯度流本质是沿着KL散度减小最快的方向。引入重参数化$\tilde{r}_t = h(r_t)$，由于$h$单调，$D_{KL}(q_t\|p)$减小等价于$D_{\tilde{KL}}(q_t\|p)$减小（基于$\tilde{r}_t$）。
+
+**对应的生成器损失**：
+
+$$
+\min_{\boldsymbol{\theta}} \mathbb{E}_{\boldsymbol{z}}\left[-h(D_t(\boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z})))\right] \tag{30}
+$$
+
+**常见选择**：
+- $h(z) = z$：标准GAN，$-D(G(\boldsymbol{z}))$
+- $h(z) = -\log(1 + e^{-z})$：Non-saturating GAN，$-\log \sigma(D(G(\boldsymbol{z})))$
+- $h(z) = -e^{-z}$：某些f-GAN变体
+
+### 6. 理论意义与实践洞察
+
+#### 6.1 训练一致性
+
+**经典GAN理论的不足**：通常证明路径是：
+
+$$
+\text{固定}\ q \to \text{求最优}\ D^* = \log r \to \text{代入生成器损失} \to \min_q D_{KL}(q\|p)
+$$
+
+这隐含假设每步都求解$\max_D$到最优，但实际训练是交替单步优化。
+
+**MonoFlow的优势**：
+
+$$
+\text{当前}\ q_t \to \text{训练}\ D_t \approx \log r_t \to \text{Wasserstein流一步} \to q_{t+1}
+$$
+
+这与实际训练过程一致：判别器不需要完全最优，只需近似当前密度比。
+
+#### 6.2 生成器多步优化的问题
+
+**定理6.1**：若对固定$D_t$，生成器优化$k > 1$步，则偏离Wasserstein流。
+
+**证明**：记$\boldsymbol{\theta}_t^{(0)} = \boldsymbol{\theta}_t$，进行$k$步梯度下降：
+
+$$
+\boldsymbol{\theta}_t^{(j+1)} = \boldsymbol{\theta}_t^{(j)} - \eta \nabla_{\boldsymbol{\theta}} \mathbb{E}[-D_t(\boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z}))]\bigg|_{\boldsymbol{\theta}=\boldsymbol{\theta}_t^{(j)}} \tag{31}
+$$
+
+当$j > 0$时，$D_t$已经不再是$q_{\boldsymbol{\theta}_t^{(j)}}$的准确密度比估计，因此(31)不对应Wasserstein流。
+
+**实践建议**：
+- 判别器多步优化：可以，因为每次更新都改进密度比估计
+- 生成器单步优化：推荐，保持与理论一致
+- 若要多步优化生成器：使用MonoFlow损失(26)而非标准GAN损失(27)
+
+#### 6.3 与传承和创新的联系
+
+**MonoFlow损失(26)的分解**：
+
+$$
+\begin{aligned}
+&\min_{\boldsymbol{\theta}} \mathbb{E}\left[\|\boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z}) - \boldsymbol{g}_{\boldsymbol{\theta}_t}(\boldsymbol{z})\|^2\right] \\
+&\quad + \min_{\boldsymbol{\theta}} \mathbb{E}\left[\|\epsilon \nabla_{\boldsymbol{g}} D_t\|^2\right] - 2\epsilon \mathbb{E}\left[\langle \boldsymbol{g}_{\boldsymbol{\theta}} - \boldsymbol{g}_{\boldsymbol{\theta}_t}, \nabla_{\boldsymbol{g}} D_t \rangle\right]
+\end{aligned} \tag{32}
+$$
+
+第一项：$D_{KL}(q_{\boldsymbol{\theta}}\|q_{\boldsymbol{\theta}_t})$，**传承**——保持与前一步的相似性
+第三项：$-\mathbb{E}[D_t(\boldsymbol{g}_{\boldsymbol{\theta}})]$，**创新**——提升判别器评分
+
+这与VAE/AAE中的正则化项类似（参考苏剑林博客）。
+
+### 7. 总结与开放问题
+
+#### 7.1 核心结论
+
+1. **GAN = 参数空间扩散ODE**：通过$\boldsymbol{\theta}_t$的演化诱导$q_t$的Wasserstein流
+2. **判别器 = 密度比估计器**：$D_t(\boldsymbol{x}) \approx \log r_t(\boldsymbol{x})$
+3. **交替训练的合理性**：单步优化保证与Wasserstein流一致
+
+#### 7.2 理论贡献
+
+| 视角 | GAN经典理论 | MonoFlow理论 |
+|------|------------|--------------|
+| 判别器角色 | 完全最优（理想） | 当前时刻近似（现实） |
+| 生成器更新 | 最小化KL散度（全局） | Wasserstein流一步（局部） |
+| 训练一致性 | ✗（理论假设与实践不符） | ✓（严格对应交替训练） |
+
+#### 7.3 未来方向
+
+1. **高阶数值方法**：能否用Runge-Kutta等高阶方法改进采样质量？
+2. **自适应步长**：$\epsilon_t$应该如何随训练动态调整？
+3. **稳定性分析**：什么条件下保证$\lim_{t\to\infty} q_t = p$？
+4. **扩展到条件生成**：如何在条件GAN中应用MonoFlow框架？
+
+---
+
+**最终总结**：MonoFlow为GAN提供了基于扩散ODE的严格数学基础，澄清了判别器和生成器交替训练的理论正当性。这一视角不仅统一了GAN和扩散模型，还为改进GAN训练算法提供了新的设计原则。
 

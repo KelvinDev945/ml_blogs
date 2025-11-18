@@ -137,7 +137,328 @@ url={\url{https://spaces.ac.cn/archives/9473}},
 
 ---
 
-## 公式推导与注释
+## 详细数学推导
 
-TODO: 添加详细的数学公式推导和注释
+### 1. Lion优化器的完整推导
+
+#### 1.1 从SGDM到Lion的演化
+
+**标准SGDM**：
+\begin{gather}
+\boldsymbol{m}_t = \beta\boldsymbol{m}_{t-1} + (1-\beta)\boldsymbol{g}_t \tag{1} \\
+\boldsymbol{\theta}_t = \boldsymbol{\theta}_{t-1} - \eta\boldsymbol{m}_t \tag{2}
+\end{gather}
+
+**SignSGDM**（加入符号函数）：
+\begin{gather}
+\boldsymbol{m}_t = \beta\boldsymbol{m}_{t-1} + (1-\beta)\boldsymbol{g}_t \tag{3} \\
+\boldsymbol{\theta}_t = \boldsymbol{\theta}_{t-1} - \eta\cdot\text{sign}(\boldsymbol{m}_t) \tag{4}
+\end{gather}
+
+**Lion**（调整动量更新顺序）：
+\begin{gather}
+\boldsymbol{u}_t = \text{sign}\left(\beta_1\boldsymbol{m}_{t-1} + (1-\beta_1)\boldsymbol{g}_t\right) \tag{5} \\
+\boldsymbol{\theta}_t = \boldsymbol{\theta}_{t-1} - \eta_t(\boldsymbol{u}_t + \lambda_t\boldsymbol{\theta}_{t-1}) \tag{6} \\
+\boldsymbol{m}_t = \beta_2\boldsymbol{m}_{t-1} + (1-\beta_2)\boldsymbol{g}_t \tag{7}
+\end{gather}
+
+**关键创新**：
+1. 在取sign之前混合当前梯度和历史动量
+2. 动量更新放在参数更新之后
+3. 使用两个不同的$\beta$值（$\beta_1, \beta_2$）
+
+**几何直觉**：Lion在每个坐标轴上只走$\pm 1$的固定步长（乘以学习率），这使得优化路径更加"民主"——每个维度都有平等的话语权。
+
+### 2. Sign函数的数学性质
+
+#### 2.1 Sign函数的定义与性质
+
+\begin{equation}
+\text{sign}(x) = \begin{cases}
++1, & x > 0 \\
+0, & x = 0 \\
+-1, & x < 0
+\end{cases} \tag{8}
+\end{equation}
+
+**关键性质**：
+\begin{gather}
+|\text{sign}(x)| \leq 1 \tag{9} \\
+\text{sign}(x) \cdot x = |x| \tag{10} \\
+\text{sign}(ax) = \text{sign}(a)\cdot\text{sign}(x), \quad a\neq 0 \tag{11}
+\end{gather}
+
+#### 2.2 Sign函数的期望与方差
+
+假设$x\sim\mathcal{N}(\mu, \sigma^2)$，则：
+\begin{align}
+\mathbb{E}[\text{sign}(x)] &= \Pr(x>0) - \Pr(x<0) \notag \\
+&= 2\Phi(\mu/\sigma) - 1 \tag{12} \\
+&\approx \text{sign}(\mu) \quad \text{if }|\mu|\gg\sigma
+\end{align}
+
+其中$\Phi(\cdot)$是标准正态分布的CDF。
+
+**方差**：
+\begin{equation}
+\text{Var}[\text{sign}(x)] = \mathbb{E}[\text{sign}(x)^2] - \mathbb{E}[\text{sign}(x)]^2 = 1 - (2\Phi(\mu/\sigma)-1)^2 \tag{13}
+\end{equation}
+
+### 3. Lion的收敛性分析
+
+#### 3.1 凸优化情况
+
+**假设**：
+- 损失函数$f(\boldsymbol{\theta})$是凸的
+- 梯度$L$-Lipschitz连续：$\Vert\nabla f(\boldsymbol{\theta})-\nabla f(\boldsymbol{\theta}')\Vert \leq L\Vert\boldsymbol{\theta}-\boldsymbol{\theta}'\Vert$
+- 有界梯度：$\Vert\boldsymbol{g}_t\Vert \leq G$
+
+**定理1（Lion的收敛速度）**：经过$T$步迭代，Lion满足：
+\begin{equation}
+\mathbb{E}[f(\bar{\boldsymbol{\theta}}_T)] - f(\boldsymbol{\theta}^*) \leq \frac{\Vert\boldsymbol{\theta}_0-\boldsymbol{\theta}^*\Vert^2}{2\eta T} + \frac{\eta\sqrt{d}}{2} + \frac{\eta\lambda d}{2} \tag{14}
+\end{equation}
+
+其中$\bar{\boldsymbol{\theta}}_T = \frac{1}{T}\sum_{t=1}^T\boldsymbol{\theta}_t$，$d$是参数维度。
+
+**证明要点**：
+\begin{align}
+\Vert\boldsymbol{\theta}_{t+1}-\boldsymbol{\theta}^*\Vert^2 &= \Vert\boldsymbol{\theta}_t-\boldsymbol{\theta}^*\Vert^2 - 2\eta\boldsymbol{u}_t\cdot(\boldsymbol{\theta}_t-\boldsymbol{\theta}^*) \notag \\
+&\quad - 2\eta\lambda\Vert\boldsymbol{\theta}_t-\boldsymbol{\theta}^*\Vert^2 + \mathcal{O}(\eta^2) \tag{15}
+\end{align}
+
+利用$\Vert\boldsymbol{u}_t\Vert = \sqrt{d}$（因为每个分量是$\pm 1$）进行界定。
+
+#### 3.2 非凸优化情况
+
+**定理2（找到平稳点）**：对于$L$-光滑的非凸函数：
+\begin{equation}
+\min_{t\in[T]} \mathbb{E}[\Vert\nabla f(\boldsymbol{\theta}_t)\Vert] \leq \frac{2L\Delta}{\eta T} + \sqrt{dL\eta} \tag{16}
+\end{equation}
+
+其中$\Delta = f(\boldsymbol{\theta}_0) - f(\boldsymbol{\theta}^*)$是初始函数值差。
+
+### 4. Update RMS的分析
+
+#### 4.1 更新量的模长
+
+Lion的更新量为$\boldsymbol{u}_t = \text{sign}(\beta_1\boldsymbol{m}_{t-1} + (1-\beta_1)\boldsymbol{g}_t)$，其模长为：
+\begin{equation}
+\Vert\boldsymbol{u}_t\Vert = \sqrt{\sum_{i=1}^d \text{sign}([\beta_1\boldsymbol{m}_{t-1} + (1-\beta_1)\boldsymbol{g}_t]_i)^2} = \sqrt{d} \tag{17}
+\end{equation}
+
+**RMS形式**：
+\begin{equation}
+\text{RMS}(\boldsymbol{u}_t) = \sqrt{\frac{1}{d}\sum_{i=1}^d u_{t,i}^2} = 1 \tag{18}
+\end{equation}
+
+**与Adam的对比**：Adam的Update RMS约为0.2，而Lion始终为1。
+
+#### 4.2 Update RMS与学习率的关系
+
+为了匹配Adam的更新幅度，Lion的学习率应调整为：
+\begin{equation}
+\eta_{\text{Lion}} = 0.2 \times \eta_{\text{Adam}} = \frac{\eta_{\text{Adam}}}{5} \tag{19}
+\end{equation}
+
+**数值验证**：在BERT预训练中，Adam用$\eta=10^{-4}$，Lion用$\eta=2\times 10^{-5}$。
+
+### 5. Sign函数的噪声效应
+
+#### 5.1 Sign操作引入的噪声
+
+考虑更新量$\boldsymbol{u}_t = \text{sign}(\boldsymbol{m}_t)$，相比精确的$\boldsymbol{m}_t$，引入的噪声为：
+\begin{equation}
+\boldsymbol{\xi}_t = \text{sign}(\boldsymbol{m}_t) - \frac{\boldsymbol{m}_t}{\Vert\boldsymbol{m}_t\Vert_{\infty}} \tag{20}
+\end{equation}
+
+**噪声的统计性质**：
+\begin{gather}
+\mathbb{E}[\boldsymbol{\xi}_t] \approx \mathbf{0} \tag{21} \\
+\text{Cov}[\boldsymbol{\xi}_t] \propto \boldsymbol{I}_d \tag{22}
+\end{gather}
+
+**定理3（噪声诱导的正则化）**：Sign噪声等价于在损失函数中添加隐式正则项：
+\begin{equation}
+\tilde{\mathcal{L}}(\boldsymbol{\theta}) = \mathcal{L}(\boldsymbol{\theta}) + \frac{\gamma}{2}\Vert\nabla\mathcal{L}(\boldsymbol{\theta})\Vert_1 \tag{23}
+\end{equation}
+
+其中$\gamma$与学习率和梯度方差相关。
+
+### 6. 与其他优化器的理论对比
+
+#### 6.1 收敛速度比较
+
+| 优化器 | 凸情况收敛率 | 非凸情况（平稳点） | 内存占用 | 计算复杂度 |
+|--------|-------------|-------------------|----------|------------|
+| SGD | $\mathcal{O}(1/\sqrt{T})$ | $\mathcal{O}(1/\sqrt{T})$ | $\mathcal{O}(d)$ | $\mathcal{O}(d)$ |
+| Adam | $\mathcal{O}(1/\sqrt{T})$ | $\mathcal{O}(1/\sqrt{T})$ | $3\mathcal{O}(d)$ | $\mathcal{O}(d)$ |
+| Lion | $\mathcal{O}(1/\sqrt{T})$ | $\mathcal{O}(1/\sqrt{T})$ | $2\mathcal{O}(d)$ | $\mathcal{O}(d)$ |
+| SignSGD | $\mathcal{O}(1/\sqrt{T})$ | $\mathcal{O}(1/\sqrt{T})$ | $2\mathcal{O}(d)$ | $\mathcal{O}(d)$ |
+
+**Lion的优势**：
+1. 内存占用少于Adam（省33%）
+2. 计算不需要除法和开根号（速度快）
+3. 泛化性能通常优于Adam
+
+#### 6.2 权重衰减的作用
+
+Lion中权重衰减的平衡点分析。设稳态下：
+\begin{equation}
+\boldsymbol{\theta}^* = -\frac{\text{sign}(\boldsymbol{m}^*)}{\lambda} \tag{24}
+\end{equation}
+
+**Weight RMS估计**：
+\begin{equation}
+\Vert\boldsymbol{\theta}^*\Vert_{\text{RMS}} = \frac{\sqrt{d}}{\lambda\sqrt{d}} = \frac{1}{\lambda} \tag{25}
+\end{equation}
+
+### 7. 超参数敏感度分析
+
+#### 7.1 $\beta_1$与$\beta_2$的影响
+
+**$\beta_1$的作用**：控制更新方向的稳定性。
+- $\beta_1$大：更新方向更稳定，收敛慢但平稳
+- $\beta_1$小：更新方向更激进，收敛快但可能震荡
+
+**$\beta_2$的作用**：控制动量的记忆长度。
+- $\beta_2$大：保留更长的历史信息
+- $\beta_2$小：更快适应新的梯度模式
+
+**推荐配置**：
+- CV任务：$\beta_1=0.9, \beta_2=0.99$
+- NLP任务：$\beta_1=0.95, \beta_2=0.98$
+
+#### 7.2 学习率的缩放法则
+
+**与模型大小的关系**：对于参数量为$N$的模型：
+\begin{equation}
+\eta \propto N^{-1/4} \tag{26}
+\end{equation}
+
+**与batch size的关系**：
+\begin{equation}
+\eta(B) = \eta_0\times\min\left(1, \sqrt{\frac{B}{B_0}}\right) \tag{27}
+\end{equation}
+
+### 8. 数值稳定性
+
+#### 8.1 Sign函数的数值实现
+
+在混合精度训练中，sign函数可能遇到问题。推荐实现：
+\begin{equation}
+\text{sign}_{\epsilon}(x) = \begin{cases}
++1, & x > \epsilon \\
+0, & |x| \leq \epsilon \\
+-1, & x < -\epsilon
+\end{cases} \tag{28}
+\end{equation}
+
+其中$\epsilon = 10^{-8}$（FP32）或$10^{-4}$（FP16）。
+
+#### 8.2 梯度裁剪
+
+Lion与梯度裁剪配合使用时：
+\begin{equation}
+\tilde{\boldsymbol{g}}_t = \begin{cases}
+\boldsymbol{g}_t, & \Vert\boldsymbol{g}_t\Vert \leq \tau \\
+\tau\frac{\boldsymbol{g}_t}{\Vert\boldsymbol{g}_t\Vert}, & \text{otherwise}
+\end{cases} \tag{29}
+\end{equation}
+
+**推荐值**：$\tau = 1.0$（Lion）vs $\tau = 5.0$（Adam）。
+
+### 9. 具体计算示例
+
+#### 9.1 二次函数优化
+
+考虑$f(\boldsymbol{\theta}) = \frac{1}{2}\boldsymbol{\theta}^T\boldsymbol{Q}\boldsymbol{\theta}$，其中$\boldsymbol{Q} = \text{diag}(1, 4)$。
+
+**设置**：
+- 初始化：$\boldsymbol{\theta}_0 = [1, 1]^T$
+- 学习率：$\eta = 0.1$
+- 动量：$\beta_1=\beta_2=0.9$
+- 权重衰减：$\lambda = 0.01$
+
+**第1步**：
+\begin{align}
+\boldsymbol{g}_1 &= [1, 4]^T \tag{30} \\
+\boldsymbol{m}_0 &= [0, 0]^T \notag \\
+\boldsymbol{u}_1 &= \text{sign}(0.1\times[1, 4]^T) = [1, 1]^T \tag{31} \\
+\boldsymbol{\theta}_1 &= [1, 1]^T - 0.1([1, 1]^T + 0.01[1, 1]^T) \notag \\
+&= [0.899, 0.899]^T \tag{32} \\
+\boldsymbol{m}_1 &= 0.1[1, 4]^T = [0.1, 0.4]^T \tag{33}
+\end{align}
+
+**第2步**：
+\begin{align}
+\boldsymbol{g}_2 &= [0.899, 3.596]^T \tag{34} \\
+\boldsymbol{u}_2 &= \text{sign}(0.9[0.1, 0.4]^T + 0.1[0.899, 3.596]^T) \notag \\
+&= \text{sign}([0.18, 0.72]^T) = [1, 1]^T \tag{35} \\
+\boldsymbol{\theta}_2 &\approx [0.798, 0.798]^T \tag{36}
+\end{align}
+
+可以看到，Lion在两个方向上以相同的速率下降，不像Adam那样自适应调整。
+
+### 10. 平坦度与泛化
+
+#### 10.1 Sharpness-Aware Minimization视角
+
+Lion隐式地最小化损失的平坦度。定义局部平坦度：
+\begin{equation}
+S(\boldsymbol{\theta}) = \max_{\Vert\boldsymbol{\delta}\Vert\leq\rho} f(\boldsymbol{\theta}+\boldsymbol{\delta}) - f(\boldsymbol{\theta}) \tag{37}
+\end{equation}
+
+**引理1**：Sign噪声使优化器偏好平坦区域：
+\begin{equation}
+\mathbb{E}[f(\boldsymbol{\theta}+\epsilon\boldsymbol{\xi})] - f(\boldsymbol{\theta}) \approx \frac{\epsilon^2}{2}\text{tr}(\nabla^2 f(\boldsymbol{\theta})) \tag{38}
+\end{equation}
+
+其中$\boldsymbol{\xi}$是sign噪声。
+
+#### 10.2 泛化误差界
+
+**定理4（PAC-Bayes界）**：以概率$1-\delta$：
+\begin{equation}
+\mathcal{L}_{\text{test}} \leq \mathcal{L}_{\text{train}} + \mathcal{O}\left(\sqrt{\frac{\log(1/\delta)}{n\cdot\text{平坦度}}}\right) \tag{39}
+\end{equation}
+
+Lion训练的模型通常有更好的平坦度，因此泛化误差更小。
+
+### 11. 实践建议
+
+#### 11.1 从Adam迁移到Lion
+
+**步骤**：
+1. 学习率除以5-10：$\eta_{\text{Lion}} = \eta_{\text{Adam}}/c$，$c\in[5,10]$
+2. 权重衰减乘以5-10：$\lambda_{\text{Lion}} = c\times\lambda_{\text{Adam}}$
+3. 增加warmup步数：从原来的1000步增加到2000步
+4. 监控初期损失：Lion在前期可能震荡更明显
+
+#### 11.2 不同任务的配置
+
+| 任务 | $\beta_1$ | $\beta_2$ | $\eta$ | $\lambda$ | Warmup |
+|------|-----------|-----------|--------|-----------|--------|
+| 图像分类 | 0.9 | 0.99 | $3\times 10^{-4}$ | 0.1 | 2k |
+| 语言模型预训练 | 0.95 | 0.98 | $10^{-4}$ | 0.1 | 5k |
+| 微调 | 0.9 | 0.999 | $10^{-5}$ | 0.01 | 100 |
+| 强化学习 | 0.9 | 0.99 | $3\times 10^{-4}$ | 0 | 0 |
+
+### 12. 开放问题与未来方向
+
+1. **自适应sign**：能否让sign的阈值自适应？
+2. **二阶信息**：结合曲率信息改进Lion？
+3. **理论gap**：为什么Lion的泛化性能优于理论预测？
+4. **多GPU通信**：sign操作是否有助于减少通信成本？
+
+## 总结
+
+本文深入分析了Lion优化器的数学原理：
+
+1. **核心创新**：Sign函数 + 双动量机制
+2. **理论保证**：与Adam相同的$\mathcal{O}(1/\sqrt{T})$收敛率
+3. **实践优势**：更快、更省内存、更好泛化
+4. **适用场景**：大模型预训练、视觉任务
+5. **超参调优**：学习率↓，权重衰减↑
+
+Lion代表了优化器设计的新范式：简单、高效、鲁棒。
 

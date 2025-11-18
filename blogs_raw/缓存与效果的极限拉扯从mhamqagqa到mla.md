@@ -231,5 +231,702 @@ url={\url{https://spaces.ac.cn/archives/10091}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 一、多头注意力(MHA)的完整数学推导
+
+#### 1.1 标准MHA的数学定义
+
+对于输入序列 $\boldsymbol{X} = [\boldsymbol{x}_1, \boldsymbol{x}_2, \ldots, \boldsymbol{x}_l] \in \mathbb{R}^{l \times d}$，多头注意力机制可以形式化为：
+
+\begin{equation}
+\text{MHA}(\boldsymbol{X}) = \text{Concat}(\boldsymbol{O}^{(1)}, \boldsymbol{O}^{(2)}, \ldots, \boldsymbol{O}^{(h)}) \boldsymbol{W}_O
+\tag{1}
+\end{equation}
+
+其中 $\boldsymbol{O}^{(s)} \in \mathbb{R}^{l \times d_v}$ 是第 $s$ 个头的输出，$\boldsymbol{W}_O \in \mathbb{R}^{hd_v \times d}$ 是输出投影矩阵。
+
+**数学直觉**: MHA通过多个独立的注意力头并行处理信息，每个头关注不同的表示子空间，最后拼接融合。这类似于卷积神经网络中的多通道机制。
+
+#### 1.2 单头注意力的详细推导
+
+对于第 $s$ 个注意力头，计算过程为：
+
+\begin{equation}
+\boldsymbol{O}^{(s)} = \text{Attention}(\boldsymbol{Q}^{(s)}, \boldsymbol{K}^{(s)}, \boldsymbol{V}^{(s)})
+\tag{2}
+\end{equation}
+
+展开注意力计算：
+
+\begin{equation}
+\text{Attention}(\boldsymbol{Q}^{(s)}, \boldsymbol{K}^{(s)}, \boldsymbol{V}^{(s)}) = \text{softmax}\left(\frac{\boldsymbol{Q}^{(s)} {\boldsymbol{K}^{(s)}}^\top}{\sqrt{d_k}}\right) \boldsymbol{V}^{(s)}
+\tag{3}
+\end{equation}
+
+其中：
+- $\boldsymbol{Q}^{(s)} = \boldsymbol{X}\boldsymbol{W}_q^{(s)} \in \mathbb{R}^{l \times d_k}$ (查询矩阵)
+- $\boldsymbol{K}^{(s)} = \boldsymbol{X}\boldsymbol{W}_k^{(s)} \in \mathbb{R}^{l \times d_k}$ (键矩阵)
+- $\boldsymbol{V}^{(s)} = \boldsymbol{X}\boldsymbol{W}_v^{(s)} \in \mathbb{R}^{l \times d_v}$ (值矩阵)
+
+**缩放因子的数学原理**: $1/\sqrt{d_k}$ 的缩放确保了点积的方差为1。假设 $\boldsymbol{q}$ 和 $\boldsymbol{k}$ 的每个元素独立同分布，均值为0，方差为1，则点积 $\boldsymbol{q}^\top \boldsymbol{k} = \sum_{i=1}^{d_k} q_i k_i$ 的方差为：
+
+\begin{equation}
+\text{Var}(\boldsymbol{q}^\top \boldsymbol{k}) = \sum_{i=1}^{d_k} \text{Var}(q_i k_i) = d_k
+\tag{4}
+\end{equation}
+
+因此除以 $\sqrt{d_k}$ 可以将方差归一化为1，防止softmax饱和。
+
+#### 1.3 自回归生成中的因果注意力
+
+对于自回归语言模型，第 $t$ 个token只能关注到位置 $\leq t$ 的token：
+
+\begin{equation}
+\boldsymbol{o}_t^{(s)} = \sum_{i=1}^{t} \alpha_{t,i}^{(s)} \boldsymbol{v}_i^{(s)}
+\tag{5}
+\end{equation}
+
+其中注意力权重为：
+
+\begin{equation}
+\alpha_{t,i}^{(s)} = \frac{\exp\left(\boldsymbol{q}_t^{(s)} {\boldsymbol{k}_i^{(s)}}^\top / \sqrt{d_k}\right)}{\sum_{j=1}^{t} \exp\left(\boldsymbol{q}_t^{(s)} {\boldsymbol{k}_j^{(s)}}^\top / \sqrt{d_k}\right)}
+\tag{6}
+\end{equation}
+
+**数学性质**: 注意力权重满足 $\sum_{i=1}^{t} \alpha_{t,i}^{(s)} = 1$ 且 $\alpha_{t,i}^{(s)} \geq 0$，因此这是一个凸组合。
+
+#### 1.4 MHA的计算复杂度分析
+
+**时间复杂度**:
+1. QKV投影: $\mathcal{O}(3hld \cdot d_k) = \mathcal{O}(hld^2)$ (因为通常 $hd_k = d$)
+2. 注意力矩阵计算: $\mathcal{O}(hl^2d_k)$
+3. 注意力加权求和: $\mathcal{O}(hl^2d_v)$
+4. 输出投影: $\mathcal{O}(ld \cdot hd_v) = \mathcal{O}(ld^2)$
+
+总时间复杂度：
+
+\begin{equation}
+T_{\text{MHA}} = \mathcal{O}(ld^2 + hl^2d) = \mathcal{O}(l^2d)
+\tag{7}
+\end{equation}
+
+(当 $l \gg d$ 时，$l^2d$ 项占主导)
+
+**空间复杂度**:
+1. QKV矩阵: $\mathcal{O}(3hld_k) = \mathcal{O}(ld)$
+2. 注意力矩阵: $\mathcal{O}(hl^2)$
+3. 输出矩阵: $\mathcal{O}(ld)$
+
+总空间复杂度：
+
+\begin{equation}
+S_{\text{MHA}} = \mathcal{O}(ld + hl^2)
+\tag{8}
+\end{equation}
+
+### 二、KV Cache的数学原理与内存分析
+
+#### 2.1 KV Cache的必要性推导
+
+在自回归生成中，生成第 $t+1$ 个token时，需要计算：
+
+\begin{equation}
+\boldsymbol{o}_{t+1}^{(s)} = \sum_{i=1}^{t+1} \alpha_{t+1,i}^{(s)} \boldsymbol{v}_i^{(s)}
+\tag{9}
+\end{equation}
+
+注意到对于 $i \leq t$，$\boldsymbol{k}_i^{(s)}$ 和 $\boldsymbol{v}_i^{(s)}$ 在计算 $\boldsymbol{o}_t^{(s)}$ 时已经算过，无需重新计算。
+
+**重复计算量分析**: 如果不使用KV Cache，生成长度为 $L$ 的序列，总计算量为：
+
+\begin{equation}
+\text{Total FLOPs} = \sum_{t=1}^{L} \mathcal{O}(t \cdot hd_k) = \mathcal{O}(L^2hd_k)
+\tag{10}
+\end{equation}
+
+使用KV Cache后，每步只需计算新token的KV：
+
+\begin{equation}
+\text{Total FLOPs (cached)} = \sum_{t=1}^{L} \mathcal{O}(hd_k) = \mathcal{O}(Lhd_k)
+\tag{11}
+\end{equation}
+
+**加速比**:
+
+\begin{equation}
+\text{Speedup} = \frac{\mathcal{O}(L^2hd_k)}{\mathcal{O}(Lhd_k)} = \mathcal{O}(L)
+\tag{12}
+\end{equation}
+
+#### 2.2 MHA的KV Cache内存占用
+
+对于MHA，每层需要缓存 $h$ 个头的K和V矩阵。对于长度为 $L$ 的序列：
+
+单层KV Cache大小：
+
+\begin{equation}
+\text{Cache}_{\text{MHA}} = 2 \times h \times L \times d_k \times \text{sizeof(dtype)}
+\tag{13}
+\end{equation}
+
+对于LLAMA2-7B ($d=4096, h=32, d_k=128$)，使用FP16 (2字节)：
+
+\begin{equation}
+\text{Cache}_{\text{MHA}}^{\text{per layer}} = 2 \times 32 \times L \times 128 \times 2 = 16384L \text{ bytes} = 16L \text{ KB}
+\tag{14}
+\end{equation}
+
+LLAMA2-7B有32层，总KV Cache：
+
+\begin{equation}
+\text{Total Cache} = 32 \times 16L = 512L \text{ KB} = 0.5L \text{ MB}
+\tag{15}
+\end{equation}
+
+**示例**: 对于 $L=4096$ 的上下文：
+- 单层: $16 \times 4096 = 65536$ KB = 64 MB
+- 32层总计: $32 \times 64 = 2048$ MB = 2 GB
+
+对于 $L=32768$ (32K上下文):
+- 总KV Cache: $0.5 \times 32768 = 16384$ MB = 16 GB
+
+#### 2.3 KV Cache的瓶颈分析
+
+**内存带宽瓶颈**: 假设GPU有带宽 $B$ (例如A100的HBM带宽为1.5 TB/s)，每次生成需要读取的KV Cache大小为 $S_{\text{cache}}$，则生成一个token的最小时间为：
+
+\begin{equation}
+t_{\text{min}} = \frac{S_{\text{cache}}}{B}
+\tag{16}
+\end{equation}
+
+对于LLAMA2-7B，$L=4096$时 $S_{\text{cache}} = 2$ GB：
+
+\begin{equation}
+t_{\text{min}} = \frac{2 \text{ GB}}{1.5 \text{ TB/s}} = \frac{2}{1500} \text{ s} \approx 1.33 \text{ ms}
+\tag{17}
+\end{equation}
+
+**吞吐量限制**: 假设batch size为 $B_s$，每个请求的平均序列长度为 $\bar{L}$，GPU显存为 $M$，则最大batch size受限于：
+
+\begin{equation}
+B_s \leq \frac{M - M_{\text{model}}}{N_{\text{layer}} \times \text{Cache}_{\text{MHA}}(\bar{L})}
+\tag{18}
+\end{equation}
+
+其中 $M_{\text{model}}$ 是模型参数占用的显存。
+
+**数值示例**: A100 80GB，LLAMA2-7B (FP16约14GB)，$\bar{L}=2048$：
+
+\begin{equation}
+B_s \leq \frac{80 - 14}{32 \times 0.5 \times 2048 / 1024} = \frac{66}{32} \approx 2
+\tag{19}
+\end{equation}
+
+### 三、MQA (Multi-Query Attention) 的数学推导
+
+#### 3.1 MQA的动机与数学定义
+
+MQA的核心思想是让所有头共享同一组K和V：
+
+\begin{equation}
+\boldsymbol{o}_t^{(s)} = \sum_{i=1}^{t} \frac{\exp\left(\boldsymbol{q}_t^{(s)} \boldsymbol{k}_i^\top / \sqrt{d_k}\right)}{\sum_{j=1}^{t} \exp\left(\boldsymbol{q}_t^{(s)} \boldsymbol{k}_j^\top / \sqrt{d_k}\right)} \boldsymbol{v}_i
+\tag{20}
+\end{equation}
+
+注意这里 $\boldsymbol{k}_i$ 和 $\boldsymbol{v}_i$ 没有上标 $(s)$，即所有头共享。
+
+**参数对比**:
+- MHA: $h$ 个 $\boldsymbol{W}_q^{(s)}$，$h$ 个 $\boldsymbol{W}_k^{(s)}$，$h$ 个 $\boldsymbol{W}_v^{(s)}$
+- MQA: $h$ 个 $\boldsymbol{W}_q^{(s)}$，1 个 $\boldsymbol{W}_k$，1 个 $\boldsymbol{W}_v$
+
+#### 3.2 MQA的KV Cache压缩比
+
+单层KV Cache：
+
+\begin{equation}
+\text{Cache}_{\text{MQA}} = 2 \times 1 \times L \times d_k \times \text{sizeof(dtype)}
+\tag{21}
+\end{equation}
+
+压缩比：
+
+\begin{equation}
+\text{Compression Ratio} = \frac{\text{Cache}_{\text{MHA}}}{\text{Cache}_{\text{MQA}}} = \frac{2hLd_k}{2Ld_k} = h
+\tag{22}
+\end{equation}
+
+**数值示例**: 对于LLAMA2-7B ($h=32$)，KV Cache减少到原来的 $1/32$：
+- $L=4096$: MHA 2GB → MQA 64MB
+- $L=32768$: MHA 16GB → MQA 512MB
+
+#### 3.3 MQA的表达能力分析
+
+**秩的角度**: MHA的输出可以写成：
+
+\begin{equation}
+\boldsymbol{O}_{\text{MHA}} = \sum_{s=1}^{h} \boldsymbol{A}^{(s)} \boldsymbol{V}^{(s)}
+\tag{23}
+\end{equation}
+
+其中 $\boldsymbol{A}^{(s)} \in \mathbb{R}^{l \times l}$ 是注意力矩阵。理论秩最高为 $\min(hd_v, l)$。
+
+MQA的输出：
+
+\begin{equation}
+\boldsymbol{O}_{\text{MQA}} = \left(\sum_{s=1}^{h} \boldsymbol{A}^{(s)}\right) \boldsymbol{V}
+\tag{24}
+\end{equation}
+
+理论秩最高为 $\min(d_v, l)$，降低了 $h$ 倍。
+
+**容量损失**: MQA相当于强制了一个低秩约束，可能降低模型的表达能力。实验表明对于大多数任务损失有限。
+
+#### 3.4 MQA的参数量变化
+
+MHA参数量：
+
+\begin{equation}
+P_{\text{MHA}} = h(d \times d_k + d \times d_k + d \times d_v) + hd_v \times d
+\tag{25}
+\end{equation}
+
+当 $d_k = d_v = d/h$ 时：
+
+\begin{equation}
+P_{\text{MHA}} = 3d^2 + d^2 = 4d^2
+\tag{26}
+\end{equation}
+
+MQA参数量：
+
+\begin{equation}
+P_{\text{MQA}} = hd \times d_k + d \times d_k + d \times d_v + hd_v \times d
+\tag{27}
+\end{equation}
+
+\begin{equation}
+P_{\text{MQA}} = d^2 + 2d \times \frac{d}{h} + d^2 = 2d^2 + \frac{2d^2}{h}
+\tag{28}
+\end{equation}
+
+参数减少量：
+
+\begin{equation}
+\Delta P = 4d^2 - (2d^2 + \frac{2d^2}{h}) = 2d^2(1 - \frac{1}{h}) \approx 2d^2
+\tag{29}
+\end{equation}
+
+**补偿策略**: 为保持总参数量不变，通常增大FFN的隐藏层维度。
+
+### 四、GQA (Grouped-Query Attention) 的数学推导
+
+#### 4.1 GQA的分组机制
+
+GQA将 $h$ 个头分成 $g$ 组，每组共享一组K和V。设每组有 $h/g$ 个头：
+
+\begin{equation}
+\boldsymbol{o}_t^{(s)} = \sum_{i=1}^{t} \alpha_{t,i}^{(s)} \boldsymbol{v}_i^{(\lceil sg/h \rceil)}, \quad s = 1, 2, \ldots, h
+\tag{30}
+\end{equation}
+
+其中 $\lceil sg/h \rceil$ 是第 $s$ 个头所属的组索引。
+
+**示例**: $h=8, g=2$:
+- 组1: 头1,2,3,4 共享 $\boldsymbol{k}^{(1)}, \boldsymbol{v}^{(1)}$
+- 组2: 头5,6,7,8 共享 $\boldsymbol{k}^{(2)}, \boldsymbol{v}^{(2)}$
+
+#### 4.2 GQA的KV Cache分析
+
+单层KV Cache：
+
+\begin{equation}
+\text{Cache}_{\text{GQA}} = 2 \times g \times L \times d_k \times \text{sizeof(dtype)}
+\tag{31}
+\end{equation}
+
+压缩比：
+
+\begin{equation}
+\text{Compression Ratio} = \frac{\text{Cache}_{\text{MHA}}}{\text{Cache}_{\text{GQA}}} = \frac{h}{g}
+\tag{32}
+\end{equation}
+
+**参数化**:
+- $g=h$: GQA退化为MHA (无压缩)
+- $g=1$: GQA退化为MQA (最大压缩)
+- $1 < g < h$: 中间状态，平衡效果与效率
+
+#### 4.3 LLAMA2-70B的GQA配置分析
+
+LLAMA2-70B使用 $g=8$ 的GQA配置：
+- $h=64$ (64个头)
+- $g=8$ (8组)
+- 每组 $64/8 = 8$ 个头
+
+**内存节省**:
+
+\begin{equation}
+\text{Saving} = 1 - \frac{g}{h} = 1 - \frac{8}{64} = 87.5\%
+\tag{33}
+\end{equation}
+
+**分布式推理优势**: 8组KV正好对应8张GPU卡，每张卡负责一组：
+
+\begin{equation}
+\text{Per-GPU Cache} = \frac{\text{Cache}_{\text{GQA}}}{8} = \frac{2gLd_k}{8} = \frac{Ld_k}{4} \times \text{sizeof(dtype)}
+\tag{34}
+\end{equation}
+
+这避免了跨卡通信KV Cache的开销。
+
+#### 4.4 GQA的低秩分解视角
+
+将GQA的所有K和V拼接：
+
+\begin{equation}
+\boldsymbol{C} = [\boldsymbol{k}^{(1)}, \ldots, \boldsymbol{k}^{(g)}, \boldsymbol{v}^{(1)}, \ldots, \boldsymbol{v}^{(g)}] \in \mathbb{R}^{l \times g(d_k + d_v)}
+\tag{35}
+\end{equation}
+
+可以写成低秩投影：
+
+\begin{equation}
+\boldsymbol{C} = \boldsymbol{X} \boldsymbol{W}_c
+\tag{36}
+\end{equation}
+
+其中 $\boldsymbol{W}_c \in \mathbb{R}^{d \times g(d_k + d_v)}$。
+
+**秩约束**: 由于 $g(d_k + d_v) < h(d_k + d_v) = d$ (通常情况)，这是一个秩为 $g(d_k + d_v)$ 的低秩矩阵。
+
+### 五、MLA (Multi-head Latent Attention) 的深入推导
+
+#### 5.1 MLA的核心思想：低秩投影
+
+MLA的关键洞察是：GQA的分割和复制操作可以用更一般的线性变换替代。
+
+**GQA的操作**:
+1. 投影到低维: $\boldsymbol{c}_i = \boldsymbol{x}_i \boldsymbol{W}_c \in \mathbb{R}^{d_c}$
+2. 分割: 将 $\boldsymbol{c}_i$ 分成 $g$ 份
+3. 复制: 每份复制 $h/g$ 次
+4. 线性变换得到K和V
+
+**MLA的改进**: 用可学习的线性变换替代固定的分割和复制：
+
+\begin{equation}
+\boldsymbol{k}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_k^{(s)}, \quad \boldsymbol{v}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_v^{(s)}
+\tag{37}
+\end{equation}
+
+其中 $\boldsymbol{W}_k^{(s)} \in \mathbb{R}^{d_c \times d_k}$, $\boldsymbol{W}_v^{(s)} \in \mathbb{R}^{d_c \times d_v}$。
+
+#### 5.2 MLA的恒等变换技巧
+
+**训练阶段**: 正常计算注意力
+
+\begin{equation}
+\boldsymbol{q}_t^{(s)} \boldsymbol{k}_i^{(s)\top} = (\boldsymbol{x}_t \boldsymbol{W}_q^{(s)}) (\boldsymbol{c}_i \boldsymbol{W}_k^{(s)})^\top
+\tag{38}
+\end{equation}
+
+**推理阶段的恒等变换**:
+
+\begin{equation}
+\boldsymbol{q}_t^{(s)} \boldsymbol{k}_i^{(s)\top} = \boldsymbol{x}_t (\boldsymbol{W}_q^{(s)} \boldsymbol{W}_k^{(s)\top}) \boldsymbol{c}_i^\top
+\tag{39}
+\end{equation}
+
+定义合并矩阵：
+
+\begin{equation}
+\boldsymbol{W}_{qk}^{(s)} = \boldsymbol{W}_q^{(s)} \boldsymbol{W}_k^{(s)\top} \in \mathbb{R}^{d \times d_c}
+\tag{40}
+\end{equation}
+
+则：
+
+\begin{equation}
+\boldsymbol{q}_t^{(s)} \boldsymbol{k}_i^{(s)\top} = (\boldsymbol{x}_t \boldsymbol{W}_{qk}^{(s)}) \boldsymbol{c}_i^\top
+\tag{41}
+\end{equation}
+
+**关键洞察**: KV Cache只需要存 $\boldsymbol{c}_i \in \mathbb{R}^{d_c}$，而不是 $h$ 个 $\boldsymbol{k}_i^{(s)} \in \mathbb{R}^{d_k}$ 和 $\boldsymbol{v}_i^{(s)} \in \mathbb{R}^{d_v}$！
+
+#### 5.3 MLA的KV Cache大小
+
+单层KV Cache (不含RoPE部分):
+
+\begin{equation}
+\text{Cache}_{\text{MLA}}^{\text{base}} = L \times d_c \times \text{sizeof(dtype)}
+\tag{42}
+\end{equation}
+
+DeepSeek-V2设置 $d_c = 512$，相比MHA的 $h \times d_k = 32 \times 128 = 4096$，压缩比为：
+
+\begin{equation}
+\text{Compression} = \frac{4096}{512} = 8\times
+\tag{43}
+\end{equation}
+
+#### 5.4 MLA与RoPE的兼容性问题
+
+**矛盾**: RoPE需要在K和Q上应用位置相关的旋转矩阵：
+
+\begin{equation}
+\boldsymbol{q}_t^{(s)} = \boldsymbol{x}_t \boldsymbol{W}_q^{(s)} \boldsymbol{\mathcal{R}}_t, \quad \boldsymbol{k}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_k^{(s)} \boldsymbol{\mathcal{R}}_i
+\tag{44}
+\end{equation}
+
+此时：
+
+\begin{equation}
+\boldsymbol{q}_t^{(s)} \boldsymbol{k}_i^{(s)\top} = \boldsymbol{x}_t \boldsymbol{W}_q^{(s)} \boldsymbol{\mathcal{R}}_t \boldsymbol{\mathcal{R}}_i^\top \boldsymbol{W}_k^{(s)\top} \boldsymbol{c}_i^\top = \boldsymbol{x}_t \boldsymbol{W}_q^{(s)} \boldsymbol{\mathcal{R}}_{t-i} \boldsymbol{W}_k^{(s)\top} \boldsymbol{c}_i^\top
+\tag{45}
+\end{equation}
+
+由于 $\boldsymbol{\mathcal{R}}_{t-i}$ 依赖于位置差，无法预先合并到投影矩阵中！
+
+#### 5.5 MLA的混合解决方案
+
+**方案**: 将Q和K分为两部分：
+
+1. **低秩部分** (不加RoPE): 维度 $d_k$
+\begin{equation}
+\boldsymbol{q}_{t,c}^{(s)} = \boldsymbol{x}_t \boldsymbol{W}_{qc}^{(s)}, \quad \boldsymbol{k}_{i,c}^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_{kc}^{(s)}
+\tag{46}
+\end{equation}
+
+2. **RoPE部分** (共享): 维度 $d_r$
+\begin{equation}
+\boldsymbol{q}_{t,r}^{(s)} = \boldsymbol{x}_t \boldsymbol{W}_{qr}^{(s)} \boldsymbol{\mathcal{R}}_t, \quad \boldsymbol{k}_{i,r} = \boldsymbol{x}_i \boldsymbol{W}_{kr} \boldsymbol{\mathcal{R}}_i
+\tag{47}
+\end{equation}
+
+注意 $\boldsymbol{k}_{i,r}$ 所有头共享 (无上标$(s)$)。
+
+**最终的Q和K**:
+
+\begin{equation}
+\boldsymbol{q}_t^{(s)} = [\boldsymbol{q}_{t,c}^{(s)}, \boldsymbol{q}_{t,r}^{(s)}] \in \mathbb{R}^{d_k + d_r}
+\tag{48}
+\end{equation}
+
+\begin{equation}
+\boldsymbol{k}_i^{(s)} = [\boldsymbol{k}_{i,c}^{(s)}, \boldsymbol{k}_{i,r}] \in \mathbb{R}^{d_k + d_r}
+\tag{49}
+\end{equation}
+
+#### 5.6 MLA的最终KV Cache
+
+需要缓存：
+1. $\boldsymbol{c}_i \in \mathbb{R}^{d_c}$ (低秩部分)
+2. $\boldsymbol{k}_{i,r} \in \mathbb{R}^{d_r}$ (RoPE部分，所有头共享)
+
+单层总KV Cache：
+
+\begin{equation}
+\text{Cache}_{\text{MLA}} = L \times (d_c + d_r) \times \text{sizeof(dtype)}
+\tag{50}
+\end{equation}
+
+DeepSeek-V2: $d_c = 512, d_r = 64$:
+
+\begin{equation}
+\text{Cache}_{\text{MLA}} = L \times 576 \times 2 = 1152L \text{ bytes}
+\tag{51}
+\end{equation}
+
+相比MHA的 $2 \times 32 \times 128 \times L \times 2 = 16384L$ 字节:
+
+\begin{equation}
+\text{Compression} = \frac{16384}{1152} \approx 14.2\times
+\tag{52}
+\end{equation}
+
+#### 5.7 MLA的低秩投影Q
+
+为减少训练时的激活内存，MLA也对Q使用低秩投影：
+
+\begin{equation}
+\boldsymbol{c}_i' = \boldsymbol{x}_i \boldsymbol{W}_c' \in \mathbb{R}^{d_c'}
+\tag{53}
+\end{equation}
+
+\begin{equation}
+\boldsymbol{q}_i^{(s)} = [\boldsymbol{c}_i' \boldsymbol{W}_{qc}^{(s)}, \boldsymbol{c}_i' \boldsymbol{W}_{qr}^{(s)} \boldsymbol{\mathcal{R}}_i]
+\tag{54}
+\end{equation}
+
+DeepSeek-V2: $d_c' = 1536$，相比 $d = 5120$ 节省约 70% 的Q投影参数。
+
+#### 5.8 MLA推理时的计算量分析
+
+**Prefill阶段** (训练模式):
+- QKV投影: $\mathcal{O}(Ld \cdot d_c') + \mathcal{O}(Lhd_c' \cdot d_k) + \mathcal{O}(Lhd_c \cdot d_v)$
+- 注意力计算: $\mathcal{O}(L^2h(d_k + d_r))$
+
+**Generation阶段** (推理模式):
+- Q计算: $\mathcal{O}(h \cdot d_c \cdot d_k)$ (通过 $\boldsymbol{W}_{qk}^{(s)} = \boldsymbol{W}_{qc}^{(s)} \boldsymbol{W}_{kc}^{(s)\top}$)
+- 注意力计算: $\mathcal{O}(Lh(d_c + d_r))$
+
+**相比MHA的变化**:
+- 计算量增加: head size从 $d_k$ 变为 $d_c + d_r = 512 + 64 = 576$ (4.5倍)
+- 但内存带宽减少: KV Cache减少14倍
+
+由于Generation是内存带宽瓶颈，MLA仍然获得显著加速。
+
+### 六、性能-效率权衡的理论分析
+
+#### 6.1 注意力机制的表达能力
+
+**定理**: 对于序列长度为 $l$ 的输入，MHA的输出空间维度最多为 $\min(l, hd_v)$。
+
+**证明**: MHA的输出为：
+
+\begin{equation}
+\boldsymbol{O} = \text{Concat}\left(\sum_{i=1}^{l} \alpha_i^{(1)} \boldsymbol{v}_i^{(1)}, \ldots, \sum_{i=1}^{l} \alpha_i^{(h)} \boldsymbol{v}_i^{(h)}\right)
+\tag{55}
+\end{equation}
+
+每个头的输出是 $l$ 个向量的凸组合，因此最多有 $l$ 个线性独立的输出。总共 $h$ 个头，每个头维度 $d_v$，因此最多 $\min(l, hd_v)$ 维。□
+
+**推论**: MQA的输出空间维度最多为 $\min(l, d_v)$，降低了 $h$ 倍。
+
+#### 6.2 KV Cache压缩与容量的trade-off
+
+定义**有效容量** $C$ 为模型能够建模的独立模式数量：
+
+\begin{equation}
+C_{\text{MHA}} \propto hd_v, \quad C_{\text{MQA}} \propto d_v, \quad C_{\text{GQA}} \propto gd_v
+\tag{56}
+\end{equation}
+
+定义**效率** $E$ 为单位内存的吞吐量：
+
+\begin{equation}
+E \propto \frac{1}{\text{Cache Size}}
+\tag{57}
+\end{equation}
+
+**Pareto前沿**:
+
+\begin{equation}
+C \times E = \text{constant}
+\tag{58}
+\end{equation}
+
+GQA通过参数 $g$ 在Pareto前沿上滑动，选择最优的容量-效率平衡点。
+
+#### 6.3 数值示例：不同方案的对比
+
+假设 $d=4096, h=32, d_k=d_v=128, L=4096$:
+
+| 方案 | KV Cache (MB) | 有效容量 | 推理吞吐 (相对) |
+|------|---------------|----------|-----------------|
+| MHA  | 2048          | $32 \times 128 = 4096$ | 1.0× |
+| GQA-8 | 256          | $8 \times 128 = 1024$ | 8.0× |
+| MQA  | 64            | $128$ | 32× |
+| MLA  | 144           | $\approx 1536$ (有效) | 14.2× |
+
+**结论**: MLA在几乎不损失容量的情况下，获得了接近MQA的效率提升。
+
+### 七、实践建议与数值验证
+
+#### 7.1 选择合适的注意力机制
+
+**决策树**:
+
+1. **内存充足** ($L < 2048$): 使用MHA，最大化模型容量
+2. **中等序列** ($2048 \leq L \leq 8192$): 使用GQA ($g=8$)，平衡效果与效率
+3. **长序列** ($L > 8192$): 使用MLA或MQA，优先节省内存
+4. **资源受限**: 使用MQA，最大化吞吐
+
+#### 7.2 GQA的组数选择
+
+经验公式：
+
+\begin{equation}
+g = \min\left(\frac{M_{\text{avail}}}{M_{\text{target}}}, h\right)
+\tag{59}
+\end{equation}
+
+其中 $M_{\text{avail}}$ 是可用内存，$M_{\text{target}}$ 是目标KV Cache大小。
+
+**示例**: 希望KV Cache不超过1GB，$L=8192$:
+
+\begin{equation}
+2gLd_k \times 2 \leq 1024 \text{ MB} \Rightarrow g \leq \frac{1024 \times 10^6}{2 \times 8192 \times 128 \times 2} \approx 12
+\tag{60}
+\end{equation}
+
+选择 $g=8$ (最接近的2的幂次)。
+
+#### 7.3 MLA的参数配置
+
+**低秩维度选择**: DeepSeek-V2的经验是 $d_c \approx d/10$:
+
+\begin{equation}
+d_c = \max\left(\frac{d}{10}, 512\right)
+\tag{61}
+\end{equation}
+
+**RoPE维度**: 通常取 $d_r = d_k / 2$:
+
+\begin{equation}
+d_r = \frac{d_k}{2} = \frac{d/h}{2}
+\tag{62}
+\end{equation}
+
+**Q的低秩维度**: 约为K的3倍:
+
+\begin{equation}
+d_c' \approx 3d_c
+\tag{63}
+\end{equation}
+
+#### 7.4 推理优化实践
+
+**量化**: FP16 → INT8可进一步减少2倍KV Cache:
+
+\begin{equation}
+\text{Cache}_{\text{INT8}} = \frac{\text{Cache}_{\text{FP16}}}{2}
+\tag{64}
+\end{equation}
+
+**分页注意力**: 将KV Cache分块存储，减少内存碎片：
+
+\begin{equation}
+\text{Efficiency} = \frac{L \times \text{Block Size}}{\lceil L / \text{Block Size} \rceil \times \text{Block Size}} \geq 90\%
+\tag{65}
+\end{equation}
+
+推荐Block Size = 64 或 128。
+
+### 八、总结
+
+本文详细推导了从MHA到MLA的演变过程，关键公式总结：
+
+**KV Cache大小**:
+\begin{equation}
+\begin{cases}
+\text{MHA}: & 2hLd_k \\
+\text{MQA}: & 2Ld_k \\
+\text{GQA}: & 2gLd_k \\
+\text{MLA}: & L(d_c + d_r)
+\end{cases}
+\tag{66}
+\end{equation}
+
+**压缩比**:
+\begin{equation}
+\text{Ratio}_{\text{MLA}} = \frac{2hd_k}{d_c + d_r} = \frac{2 \times 32 \times 128}{512 + 64} \approx 14.2\times
+\tag{67}
+\end{equation}
+
+**推理加速**:
+\begin{equation}
+\text{Speedup} \approx \text{Compression Ratio} \times \text{Bandwidth Factor}
+\tag{68}
+\end{equation}
+
+MLA通过巧妙的数学变换，在几乎不损失模型能力的前提下，实现了显著的内存节省和推理加速，是Transformer推理优化的重要里程碑。
 

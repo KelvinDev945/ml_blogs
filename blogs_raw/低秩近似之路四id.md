@@ -159,5 +159,602 @@ url={\url{https://spaces.ac.cn/archives/10501}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节详细推导插值分解(ID)的数学理论，包括定义、几何意义、算法构造、误差分析等。所有重要公式使用编号标记。
+
+### 1. 插值分解的形式化定义
+
+**定义1.1 (插值分解 Interpolative Decomposition)**: 给定矩阵 $\boldsymbol{M} \in \mathbb{R}^{n \times m}$，其列插值分解(Column ID)定义为：
+
+\begin{equation}
+\boldsymbol{M} \approx \boldsymbol{C} \boldsymbol{Z}
+\tag{1}
+\end{equation}
+
+其中：
+- $\boldsymbol{C} = \boldsymbol{M}_{:,S} \in \mathbb{R}^{n \times r}$ 是从 $\boldsymbol{M}$ 中选择的 $r$ 列（**骨架列**）
+- $\boldsymbol{Z} \in \mathbb{R}^{r \times m}$ 是**插值系数矩阵**
+- $S \subset \{1,2,\ldots,m\}$，$|S| = r$ 是列索引集
+
+**优化问题**: ID的优化形式为：
+
+\begin{equation}
+\min_{S, \boldsymbol{Z}} \|\boldsymbol{M}_{:,S} \boldsymbol{Z} - \boldsymbol{M}\|_F^2 \quad \text{s.t.} \quad S \subset \{1,\ldots,m\}, \, |S| = r
+\tag{2}
+\end{equation}
+
+**行插值分解**: 类似地，行ID为 $\boldsymbol{M} \approx \boldsymbol{W} \boldsymbol{R}$，其中 $\boldsymbol{R} = \boldsymbol{M}_{S,:}$。
+
+### 2. $\boldsymbol{Z}$ 的最优解
+
+**命题2.1**: 当骨架列 $\boldsymbol{C}$ 固定时，$\boldsymbol{Z}$ 的最优解为：
+
+\begin{equation}
+\boldsymbol{Z}^* = \boldsymbol{C}^{\dagger} \boldsymbol{M}
+\tag{3}
+\end{equation}
+
+其中 $\boldsymbol{C}^{\dagger}$ 是Moore-Penrose伪逆。
+
+**证明**: 这是标准的最小二乘问题。目标函数为：
+
+\begin{equation}
+f(\boldsymbol{Z}) = \|\boldsymbol{C}\boldsymbol{Z} - \boldsymbol{M}\|_F^2 = \text{tr}[(\boldsymbol{C}\boldsymbol{Z} - \boldsymbol{M})^T(\boldsymbol{C}\boldsymbol{Z} - \boldsymbol{M})]
+\tag{4}
+\end{equation}
+
+展开：
+
+\begin{equation}
+f(\boldsymbol{Z}) = \text{tr}(\boldsymbol{Z}^T \boldsymbol{C}^T \boldsymbol{C} \boldsymbol{Z}) - 2\text{tr}(\boldsymbol{Z}^T \boldsymbol{C}^T \boldsymbol{M}) + \text{tr}(\boldsymbol{M}^T \boldsymbol{M})
+\tag{5}
+\end{equation}
+
+对 $\boldsymbol{Z}$ 求导：
+
+\begin{equation}
+\frac{\partial f}{\partial \boldsymbol{Z}} = 2\boldsymbol{C}^T \boldsymbol{C} \boldsymbol{Z} - 2\boldsymbol{C}^T \boldsymbol{M} = 0
+\tag{6}
+\end{equation}
+
+得到正规方程：
+
+\begin{equation}
+\boldsymbol{C}^T \boldsymbol{C} \boldsymbol{Z} = \boldsymbol{C}^T \boldsymbol{M}
+\tag{7}
+\end{equation}
+
+利用伪逆定义 $\boldsymbol{C}^{\dagger} = (\boldsymbol{C}^T \boldsymbol{C})^{-1} \boldsymbol{C}^T$（列满秩时），得：
+
+\begin{equation}
+\boldsymbol{Z}^* = (\boldsymbol{C}^T \boldsymbol{C})^{-1} \boldsymbol{C}^T \boldsymbol{M} = \boldsymbol{C}^{\dagger} \boldsymbol{M}
+\tag{8}
+\end{equation}
+
+**几何意义**: $\boldsymbol{C}\boldsymbol{Z}^*$ 是 $\boldsymbol{M}$ 在 $\text{col}(\boldsymbol{C})$（$\boldsymbol{C}$ 的列空间）上的**正交投影**。
+
+### 3. ID的几何解释
+
+**命题3.1 (线性组合表示)**: 设 $\boldsymbol{C} = (\boldsymbol{c}_1, \boldsymbol{c}_2, \ldots, \boldsymbol{c}_r)$，则对任意列向量 $\boldsymbol{z} = (z_1, \ldots, z_r)^T$：
+
+\begin{equation}
+\boldsymbol{C}\boldsymbol{z} = \sum_{i=1}^r z_i \boldsymbol{c}_i
+\tag{9}
+\end{equation}
+
+因此，$\boldsymbol{M}$ 的第 $j$ 列可以表示为骨架列的线性组合：
+
+\begin{equation}
+\boldsymbol{m}_j \approx \sum_{i=1}^r Z_{ij} \boldsymbol{c}_i
+\tag{10}
+\end{equation}
+
+**定义3.2 (插值性质)**: 对于选中的列 $j \in S$，理想的ID应满足**精确重构**：
+
+\begin{equation}
+\boldsymbol{C}\boldsymbol{Z}_{:,j} = \boldsymbol{m}_j, \quad \forall j \in S
+\tag{11}
+\end{equation}
+
+这意味着 $\boldsymbol{Z}$ 在选中列的位置应为单位向量，即：
+
+\begin{equation}
+\boldsymbol{Z}_{:,S} = \boldsymbol{I}_r
+\tag{12}
+\end{equation}
+
+**命题3.3 (ID的标准形式)**: 通过列重排，ID可以写为：
+
+\begin{equation}
+\boldsymbol{M} \boldsymbol{\Pi} = \boldsymbol{C} \begin{pmatrix} \boldsymbol{I}_r & \boldsymbol{X} \end{pmatrix}
+\tag{13}
+\end{equation}
+
+其中 $\boldsymbol{\Pi}$ 是排列矩阵，$\boldsymbol{X} \in \mathbb{R}^{r \times (m-r)}$ 是插值系数。
+
+**推论**: 展开形式为：
+
+\begin{equation}
+\boldsymbol{M} \boldsymbol{\Pi} = \begin{pmatrix} \boldsymbol{C} & \boldsymbol{M}_{:,\bar{S}} \end{pmatrix} \approx \boldsymbol{C} \begin{pmatrix} \boldsymbol{I}_r & \boldsymbol{X} \end{pmatrix} = \begin{pmatrix} \boldsymbol{C} & \boldsymbol{C}\boldsymbol{X} \end{pmatrix}
+\tag{14}
+\end{equation}
+
+其中 $\bar{S} = \{1,\ldots,m\} \setminus S$ 是未选中的列索引。
+
+### 4. 有界插值条件
+
+**定义4.1 (有界ID)**: 若ID满足 $|Z_{ij}| \leq \kappa$ 对所有 $i,j$ 成立，则称为 $\kappa$-有界ID。
+
+**常见要求**:
+- **严格插值**: $\kappa = 1$（难以保证）
+- **宽松插值**: $\kappa = 2$（多数算法可达到）
+
+**定理4.2 (有界性的意义)**: 若 $|Z_{ij}| \leq \kappa$，则：
+
+\begin{equation}
+\|\boldsymbol{M} - \boldsymbol{C}\boldsymbol{Z}\|_F \leq \kappa \|\boldsymbol{M} - \boldsymbol{M}_r\|_F
+\tag{15}
+\end{equation}
+
+其中 $\boldsymbol{M}_r$ 是秩-$r$ 的最优SVD逼近。
+
+**几何直觉**: 有界性保证插值系数不会过大，避免数值不稳定和过拟合。
+
+### 5. 列驱QR分解算法
+
+**定理5.1 (QR分解与投影)**: 设 $\boldsymbol{C} = \boldsymbol{Q}\boldsymbol{R}$ 是QR分解，其中 $\boldsymbol{Q} \in \mathbb{R}^{n \times r}$ 列正交，$\boldsymbol{R} \in \mathbb{R}^{r \times r}$ 上三角，则：
+
+\begin{equation}
+\boldsymbol{C}^{\dagger} = \boldsymbol{R}^{-1} \boldsymbol{Q}^T
+\tag{16}
+\end{equation}
+
+$\boldsymbol{M}$ 的第 $k$ 列在 $\boldsymbol{C}$ 上的投影为：
+
+\begin{equation}
+\boldsymbol{C}\boldsymbol{C}^{\dagger} \boldsymbol{m}_k = \boldsymbol{Q}\boldsymbol{Q}^T \boldsymbol{m}_k = \sum_{i=1}^r (\boldsymbol{q}_i^T \boldsymbol{m}_k) \boldsymbol{q}_i
+\tag{17}
+\end{equation}
+
+投影误差为：
+
+\begin{equation}
+\boldsymbol{e}_k = \boldsymbol{m}_k - \boldsymbol{Q}\boldsymbol{Q}^T \boldsymbol{m}_k, \quad \|\boldsymbol{e}_k\|^2 = \|\boldsymbol{m}_k\|^2 - \sum_{i=1}^r (\boldsymbol{q}_i^T \boldsymbol{m}_k)^2
+\tag{18}
+\end{equation}
+
+**算法5.2 (列驱QR分解 Column-Pivoting QR)**:
+
+**初始化**: 计算所有列的模长平方 $d_j = \|\boldsymbol{m}_j\|^2$，$j=1,\ldots,m$。
+
+**第1步**: 选择模长最大的列：
+
+\begin{equation}
+\rho_1 = \arg\max_{j} d_j
+\tag{19}
+\end{equation}
+
+归一化：
+
+\begin{equation}
+\boldsymbol{q}_1 = \frac{\boldsymbol{m}_{\rho_1}}{\|\boldsymbol{m}_{\rho_1}\|}
+\tag{20}
+\end{equation}
+
+**第 $k$ 步** ($k = 2, \ldots, r$):
+
+更新残差模长：
+
+\begin{equation}
+d_j \leftarrow d_j - (\boldsymbol{q}_{k-1}^T \boldsymbol{m}_j)^2, \quad j \notin \{\rho_1, \ldots, \rho_{k-1}\}
+\tag{21}
+\end{equation}
+
+选择残差最大的列：
+
+\begin{equation}
+\rho_k = \arg\max_{j \notin \{\rho_1,\ldots,\rho_{k-1}\}} d_j
+\tag{22}
+\end{equation}
+
+Gram-Schmidt正交化：
+
+\begin{equation}
+\hat{\boldsymbol{q}}_k = \boldsymbol{m}_{\rho_k} - \sum_{i=1}^{k-1} (\boldsymbol{q}_i^T \boldsymbol{m}_{\rho_k}) \boldsymbol{q}_i
+\tag{23}
+\end{equation}
+
+归一化：
+
+\begin{equation}
+\boldsymbol{q}_k = \frac{\hat{\boldsymbol{q}}_k}{\|\hat{\boldsymbol{q}}_k\|}
+\tag{24}
+\end{equation}
+
+**输出**: 列置换 $\boldsymbol{\Pi}$，使得：
+
+\begin{equation}
+\boldsymbol{M}\boldsymbol{\Pi} = \boldsymbol{Q}\boldsymbol{R}
+\tag{25}
+\end{equation}
+
+其中 $\boldsymbol{R}$ 满足**递减对角线性质**：
+
+\begin{equation}
+|R_{11}| \geq |R_{22}| \geq \cdots \geq |R_{rr}|
+\tag{26}
+\end{equation}
+
+**定理5.3 (列驱QR的性质)**: 列驱QR分解保证对任意 $k \leq r$：
+
+\begin{equation}
+R_{kk}^2 \geq \sum_{i=k}^m R_{ij}^2, \quad \forall j \geq k
+\tag{27}
+\end{equation}
+
+即每列的"主元素"（对角线元素）不小于该列下方元素的模长。
+
+### 6. 基于QR的ID构造
+
+**定理6.1 (QR-ID算法)**: 设 $\boldsymbol{M}\boldsymbol{\Pi} = \boldsymbol{Q}\boldsymbol{R}$ 是列驱QR分解，分块为：
+
+\begin{equation}
+\boldsymbol{R} = \begin{pmatrix} \boldsymbol{R}_{11} & \boldsymbol{R}_{12} \\ \boldsymbol{0} & \boldsymbol{R}_{22} \end{pmatrix}, \quad \boldsymbol{R}_{11} \in \mathbb{R}^{r \times r}
+\tag{28}
+\end{equation}
+
+则ID为：
+
+\begin{equation}
+\boldsymbol{M} \approx \boldsymbol{C}\boldsymbol{Z}, \quad \boldsymbol{C} = \boldsymbol{Q}_{:,1:r} \boldsymbol{R}_{11}, \quad \boldsymbol{Z} = \begin{pmatrix} \boldsymbol{I}_r & \boldsymbol{R}_{11}^{-1} \boldsymbol{R}_{12} \end{pmatrix} \boldsymbol{\Pi}^T
+\tag{29}
+\end{equation}
+
+**证明**: 利用QR分解的秩-$r$ 近似：
+
+\begin{equation}
+\boldsymbol{M}\boldsymbol{\Pi} = \boldsymbol{Q}\boldsymbol{R} \approx \boldsymbol{Q}_{:,1:r} \begin{pmatrix} \boldsymbol{R}_{11} & \boldsymbol{R}_{12} \end{pmatrix}
+\tag{30}
+\end{equation}
+
+注意到 $\boldsymbol{Q}_{:,1:r} \boldsymbol{R}_{11}$ 恰为 $\boldsymbol{M}\boldsymbol{\Pi}$ 的前 $r$ 列，即骨架列：
+
+\begin{equation}
+\boldsymbol{C} = \boldsymbol{M}\boldsymbol{\Pi}_{:,1:r} = \boldsymbol{Q}_{:,1:r} \boldsymbol{R}_{11}
+\tag{31}
+\end{equation}
+
+重写(30)为：
+
+\begin{equation}
+\boldsymbol{M}\boldsymbol{\Pi} \approx \boldsymbol{C} \boldsymbol{R}_{11}^{-1} \begin{pmatrix} \boldsymbol{R}_{11} & \boldsymbol{R}_{12} \end{pmatrix} = \boldsymbol{C} \begin{pmatrix} \boldsymbol{I}_r & \boldsymbol{R}_{11}^{-1} \boldsymbol{R}_{12} \end{pmatrix}
+\tag{32}
+\end{equation}
+
+两边右乘 $\boldsymbol{\Pi}^T$ 得(29)。
+
+**推论6.2**: ID的插值系数为：
+
+\begin{equation}
+\boldsymbol{X} = \boldsymbol{R}_{11}^{-1} \boldsymbol{R}_{12}
+\tag{33}
+\end{equation}
+
+### 7. ID的误差分析
+
+**定理7.1 (ID误差界)**: 设 $\boldsymbol{M}$ 的SVD为 $\boldsymbol{M} = \sum_{i=1}^{\text{rank}(\boldsymbol{M})} \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^T$，则列驱QR-ID满足：
+
+\begin{equation}
+\|\boldsymbol{M} - \boldsymbol{C}\boldsymbol{Z}\|_F^2 \leq (1 + r(m-r)) \sum_{i=r+1}^{\text{rank}(\boldsymbol{M})} \sigma_i^2
+\tag{34}
+\end{equation}
+
+对比SVD最优误差 $\|\boldsymbol{M} - \boldsymbol{M}_r\|_F^2 = \sum_{i=r+1} \sigma_i^2$，ID的误差有因子 $1 + r(m-r)$。
+
+**证明思路**: 利用QR分解的性质，近似误差主要来自：
+1. 截断低秩近似的误差（类似SVD）
+2. 列选择不如SVD最优带来的额外误差
+
+详细证明见Halko等人的综述论文。
+
+**定理7.2 (单列误差)**: 对于未选中的列 $j \notin S$，其逼近误差为：
+
+\begin{equation}
+\|\boldsymbol{m}_j - \boldsymbol{C}\boldsymbol{z}_j\|^2 = \|\boldsymbol{m}_j\|^2 - \|\boldsymbol{Q}^T \boldsymbol{m}_j\|^2
+\tag{35}
+\end{equation}
+
+其中 $\boldsymbol{Q}$ 是 $\boldsymbol{C}$ 的正交基。
+
+**推论**: 若所有列都在 $\text{col}(\boldsymbol{C})$ 中，则ID无误差；误差来源于垂直于骨架列空间的分量。
+
+### 8. 随机化ID算法
+
+**算法8.1 (随机投影ID)**:
+
+**输入**: 矩阵 $\boldsymbol{M} \in \mathbb{R}^{n \times m}$，目标秩 $r$，投影维度 $d \ll n$。
+
+**Step 1**: 生成随机投影矩阵 $\boldsymbol{\Omega} \in \mathbb{R}^{d \times n}$，元素 $\sim \mathcal{N}(0, 1/n)$。
+
+**Step 2**: 计算降维矩阵：
+
+\begin{equation}
+\boldsymbol{Y} = \boldsymbol{\Omega} \boldsymbol{M} \in \mathbb{R}^{d \times m}
+\tag{36}
+\end{equation}
+
+**Step 3**: 对 $\boldsymbol{Y}$ 执行列驱QR分解，得到列索引 $S$。
+
+**Step 4**: 从原矩阵提取骨架列 $\boldsymbol{C} = \boldsymbol{M}_{:,S}$，计算 $\boldsymbol{Z} = \boldsymbol{C}^{\dagger} \boldsymbol{M}$。
+
+**定理8.2 (随机投影误差界)**: 以概率至少 $1-\delta$，随机ID满足：
+
+\begin{equation}
+\|\boldsymbol{M} - \boldsymbol{C}\boldsymbol{Z}\|_F \leq C(r, \delta) \|\boldsymbol{M} - \boldsymbol{M}_r\|_F
+\tag{37}
+\end{equation}
+
+其中 $C(r, \delta) = O(\sqrt{r \log(r/\delta)})$ 是依赖于秩和置信度的常数。
+
+**复杂度**:
+- 随机投影: $O(dnm)$（若 $d = O(r)$，则为 $O(rnm)$）
+- QR分解: $O(dm^2) = O(rm^2)$（远小于 $O(nm^2)$）
+
+### 9. 列采样ID算法
+
+**算法9.1 (两阶段采样)**:
+
+**Phase 1 (粗采样)**: 从 $m$ 列中随机采样 $k \gg r$ 列（如 $k = 2r \log r$），得到 $\boldsymbol{M}^{(1)} \in \mathbb{R}^{n \times k}$。
+
+**Phase 2 (精选择)**: 对 $\boldsymbol{M}^{(1)}$ 执行列驱QR，选择前 $r$ 列作为骨架。
+
+**优势**:
+- 简单易实现
+- 复杂度 $O(nk^2) = O(nr^2 \log^2 r)$，远小于 $O(nm^2)$
+- 实验表现优于复杂随机投影
+
+**定理9.2 (采样ID误差)**: 若按均匀分布采样 $k = \Omega(r \log r / \epsilon^2)$ 列，则以高概率：
+
+\begin{equation}
+\|\boldsymbol{M} - \boldsymbol{C}\boldsymbol{Z}\|_F \leq (1+\epsilon) \|\boldsymbol{M} - \boldsymbol{M}_r\|_F
+\tag{38}
+\end{equation}
+
+### 10. ID的唯一性和存在性
+
+**定理10.1 (存在性)**: 对于任意矩阵 $\boldsymbol{M} \in \mathbb{R}^{n \times m}$ 和任意 $r \leq \text{rank}(\boldsymbol{M})$，存在列索引集 $S$ 使得：
+
+\begin{equation}
+\boldsymbol{M} = \boldsymbol{C} \boldsymbol{Z}, \quad \boldsymbol{Z}_{:,S} = \boldsymbol{I}_r
+\tag{39}
+\end{equation}
+
+当且仅当 $\boldsymbol{C} = \boldsymbol{M}_{:,S}$ 列满秩（秩为 $r$）。
+
+**证明**: 若 $\text{rank}(\boldsymbol{C}) = r$，则 $\boldsymbol{C}$ 的列空间是 $r$ 维子空间。由秩的定义，$\boldsymbol{M}$ 的所有列可以表示为 $\boldsymbol{C}$ 的线性组合，即存在 $\boldsymbol{Z}$ 使得 $\boldsymbol{M} = \boldsymbol{C}\boldsymbol{Z}$。插值条件 $\boldsymbol{Z}_{:,S} = \boldsymbol{I}_r$ 等价于 $\boldsymbol{C} = \boldsymbol{C}\boldsymbol{Z}_{:,S}$，自然成立。
+
+**定理10.2 (非唯一性)**: 一般情况下，ID不唯一。不同的列选择 $S$ 会导致不同的 $\boldsymbol{Z}$。
+
+**示例**: 对于秩-1矩阵 $\boldsymbol{M} = \boldsymbol{v}\boldsymbol{w}^T$，任意非零列都可以作为骨架列，因此有 $m$ 种不同的秩-1 ID。
+
+### 11. ID与其他分解的关系
+
+**命题11.1 (ID与SVD)**: 设 $\boldsymbol{M} = \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^T$ 是SVD，则：
+- SVD: $\boldsymbol{M}_r = \boldsymbol{U}_{:,1:r} \boldsymbol{\Sigma}_{1:r,1:r} \boldsymbol{V}_{:,1:r}^T$（基于正交基）
+- ID: $\boldsymbol{M} \approx \boldsymbol{M}_{:,S} \boldsymbol{Z}$（基于原始列）
+
+**关键区别**:
+
+\begin{equation}
+\begin{aligned}
+\text{SVD:} &\quad \text{最优但抽象} \\
+\text{ID:} &\quad \text{次优但可解释}
+\end{aligned}
+\tag{40}
+\end{equation}
+
+**命题11.2 (ID与CUR)**: CUR分解 $\boldsymbol{M} \approx \boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{U}}\boldsymbol{\mathcal{R}}$ 可以视为双向ID：
+- 列ID: $\boldsymbol{M} \approx \boldsymbol{\mathcal{C}} (\boldsymbol{\mathcal{U}}\boldsymbol{\mathcal{R}})$
+- 行ID: $\boldsymbol{M} \approx (\boldsymbol{\mathcal{C}}\boldsymbol{\mathcal{U}}) \boldsymbol{\mathcal{R}}$
+
+CUR同时约束行和列，ID只约束一侧。
+
+**命题11.3 (ID与NMF)**: 非负矩阵分解(NMF) $\boldsymbol{M} \approx \boldsymbol{W}\boldsymbol{H}$ 要求 $\boldsymbol{W}, \boldsymbol{H} \geq 0$，而ID无非负约束。但当 $\boldsymbol{M} \geq 0$ 且选择合适的 $S$ 时，ID的 $\boldsymbol{C}$ 自然非负。
+
+### 12. 精度提升：枚举优化
+
+**算法12.1 (单列枚举优化)**:
+
+对于 $r=1$，可以通过枚举找到最优骨架列：
+
+\begin{equation}
+i^* = \arg\min_{i \in \{1,\ldots,m\}} \sum_{j=1}^m \left\| \boldsymbol{m}_j - \frac{\boldsymbol{m}_i^T \boldsymbol{m}_j}{\|\boldsymbol{m}_i\|^2} \boldsymbol{m}_i \right\|^2
+\tag{41}
+\end{equation}
+
+**复杂度**: $O(m^2 n)$，适用于 $m$ 不太大的情况。
+
+**定理12.2 (枚举vs.列驱QR)**: 列驱QR选择模长最大的列：
+
+\begin{equation}
+i_{\text{CPQR}} = \arg\max_i \|\boldsymbol{m}_i\|
+\tag{42}
+\end{equation}
+
+而枚举优化选择总投影误差最小的列。一般地，$i^* \neq i_{\text{CPQR}}$，枚举方法更优但更慢。
+
+**示例**: 考虑三个列向量：
+
+\begin{equation}
+\boldsymbol{m}_1 = \begin{pmatrix} 10 \\ 0 \end{pmatrix}, \quad
+\boldsymbol{m}_2 = \begin{pmatrix} 1 \\ 1 \end{pmatrix}, \quad
+\boldsymbol{m}_3 = \begin{pmatrix} 1 \\ -1 \end{pmatrix}
+\tag{43}
+\end{equation}
+
+- 列驱QR选择 $\boldsymbol{m}_1$（模长最大）
+- 枚举优化可能选择 $\boldsymbol{m}_2$ 或 $\boldsymbol{m}_3$（取决于总误差）
+
+实际上，$\boldsymbol{m}_2, \boldsymbol{m}_3$ 正交，用 $\boldsymbol{m}_1$ 逼近它们都有较大误差。
+
+### 13. 数值示例
+
+**示例13.1 (秩-1矩阵)**: 考虑
+
+\begin{equation}
+\boldsymbol{M} = \begin{pmatrix}
+2 & 4 & 6 \\
+1 & 2 & 3
+\end{pmatrix} = \begin{pmatrix} 2 \\ 1 \end{pmatrix} \begin{pmatrix} 1 & 2 & 3 \end{pmatrix}
+\tag{44}
+\end{equation}
+
+秩为1，任选一列（如第2列）作为骨架：
+
+\begin{equation}
+\boldsymbol{C} = \begin{pmatrix} 4 \\ 2 \end{pmatrix}
+\tag{45}
+\end{equation}
+
+计算插值系数：
+
+\begin{equation}
+\boldsymbol{Z} = \boldsymbol{C}^{\dagger} \boldsymbol{M} = \frac{1}{\boldsymbol{C}^T \boldsymbol{C}} \boldsymbol{C}^T \boldsymbol{M} = \frac{1}{20} \begin{pmatrix} 4 & 2 \end{pmatrix} \begin{pmatrix} 2 & 4 & 6 \\ 1 & 2 & 3 \end{pmatrix}
+\tag{46}
+\end{equation}
+
+\begin{equation}
+\boldsymbol{Z} = \frac{1}{20} \begin{pmatrix} 10 & 20 & 30 \end{pmatrix} = \begin{pmatrix} 0.5 & 1 & 1.5 \end{pmatrix}
+\tag{47}
+\end{equation}
+
+验证：
+
+\begin{equation}
+\boldsymbol{C}\boldsymbol{Z} = \begin{pmatrix} 4 \\ 2 \end{pmatrix} \begin{pmatrix} 0.5 & 1 & 1.5 \end{pmatrix} = \begin{pmatrix} 2 & 4 & 6 \\ 1 & 2 & 3 \end{pmatrix} = \boldsymbol{M}
+\tag{48}
+\end{equation}
+
+完美重构！注意 $\boldsymbol{Z}$ 在第2列为1（对应骨架列），满足插值条件。
+
+**示例13.2 (近似低秩矩阵)**: 考虑带噪声的秩-1矩阵：
+
+\begin{equation}
+\boldsymbol{M} = \begin{pmatrix}
+1 & 2 & 3 \\
+2 & 4 & 6 \\
+3 & 6 & 9
+\end{pmatrix} + 0.1 \cdot \boldsymbol{E}
+\tag{49}
+\end{equation}
+
+其中 $\boldsymbol{E}$ 是随机噪声。列驱QR可能选择第3列（模长最大），骨架列为：
+
+\begin{equation}
+\boldsymbol{C} \approx \begin{pmatrix} 3.0x \\ 6.0x \\ 9.0x \end{pmatrix}
+\tag{50}
+\end{equation}
+
+计算 $\boldsymbol{Z}$，近似重构误差约为 $\|\boldsymbol{E}\|_F$ 量级。
+
+### 14. ID的应用
+
+**应用14.1 (特征选择)**: 在机器学习中，数据矩阵 $\boldsymbol{X} \in \mathbb{R}^{n \times p}$（$n$ 个样本，$p$ 个特征），ID选择 $r$ 个代表性特征：
+
+\begin{equation}
+\boldsymbol{X} \approx \boldsymbol{X}_{:,S} \boldsymbol{Z}
+\tag{51}
+\end{equation}
+
+优势：保留原始特征，易于解释（相比PCA的主成分）。
+
+**应用14.2 (矩阵补全)**: 对于部分观测矩阵，ID可用于补全缺失值。已知列集 $S$，估计：
+
+\begin{equation}
+\boldsymbol{M}_{:,\bar{S}} \approx \boldsymbol{M}_{:,S} \boldsymbol{X}
+\tag{52}
+\end{equation}
+
+其中 $\boldsymbol{X} = \boldsymbol{M}_{:,S}^{\dagger} \boldsymbol{M}_{:,\bar{S}}$（需估计）。
+
+**应用14.3 (加速矩阵运算)**: 矩阵-向量乘积 $\boldsymbol{M}\boldsymbol{x}$ 可以通过ID加速：
+
+\begin{equation}
+\boldsymbol{M}\boldsymbol{x} \approx \boldsymbol{C} (\boldsymbol{Z} \boldsymbol{x})
+\tag{53}
+\end{equation}
+
+复杂度从 $O(nm)$ 降至 $O(nr + rm)$（当 $r \ll \min(n,m)$ 时显著）。
+
+### 15. 算法复杂度总结
+
+**列驱QR-ID**:
+- QR分解: $O(nm^2)$（瓶颈）
+- 构造 $\boldsymbol{Z}$: $O(nr^2 + rm)$
+- 总计: $O(nm^2)$
+
+**随机投影ID**:
+- 随机投影: $O(dnm)$，$d = O(r)$ 时为 $O(rnm)$
+- 小矩阵QR: $O(dm^2) = O(rm^2)$
+- 总计: $O(rnm + rm^2)$
+
+**列采样ID**:
+- 采样: $O(nk)$，$k = O(r \log r)$
+- 小矩阵QR: $O(nk^2) = O(nr^2 \log^2 r)$
+- 总计: $O(nr^2 \log^2 r)$（最快）
+
+### 16. 稳定性和条件数
+
+**定义16.1 (ID的条件数)**: 定义骨架矩阵 $\boldsymbol{C}$ 的条件数为：
+
+\begin{equation}
+\kappa(\boldsymbol{C}) = \frac{\sigma_{\max}(\boldsymbol{C})}{\sigma_{\min}(\boldsymbol{C})}
+\tag{54}
+\end{equation}
+
+**定理16.2**: 若 $\kappa(\boldsymbol{C})$ 很大，则 $\boldsymbol{Z} = \boldsymbol{C}^{\dagger} \boldsymbol{M}$ 的计算数值不稳定，且 $\|\boldsymbol{Z}\|$ 可能很大。
+
+列驱QR通过选择递减对角线性质，倾向于选择条件数较好的列组合。
+
+**推论**: 有界插值条件 $|Z_{ij}| \leq \kappa$ 隐含地要求 $\kappa(\boldsymbol{C})$ 不会太大。
+
+### 17. 小结
+
+插值分解(ID)通过选择原矩阵的若干列作为"骨架"实现低秩逼近：
+
+\begin{equation}
+\underbrace{\boldsymbol{M}}_{n \times m} \approx \underbrace{\boldsymbol{C}}_{n \times r} \underbrace{\boldsymbol{Z}}_{r \times m}
+\tag{55}
+\end{equation}
+
+**核心要点**:
+
+1. **最优系数**: $\boldsymbol{Z}^* = \boldsymbol{C}^{\dagger} \boldsymbol{M}$（公式3）
+2. **几何意义**: 将矩阵列投影到骨架列空间
+3. **标准算法**: 列驱QR分解
+4. **随机加速**: 随机投影、列采样
+5. **误差界**: 与SVD相当（常数因子）
+6. **应用**: 特征选择、矩阵补全、加速计算
+
+**ID vs. SVD**:
+
+\begin{equation}
+\boxed{
+\begin{aligned}
+\text{SVD:} &\quad \text{最优性 + 抽象性} \\
+\text{ID:} &\quad \text{次优性 + 可解释性}
+\end{aligned}
+}
+\tag{56}
+\end{equation}
+
+**未来方向**:
+- 自适应列选择策略
+- 在线/流式ID算法
+- 结构化矩阵的快速ID
+- 张量插值分解
+
+\begin{equation}
+\boxed{\text{ID：用数据自身的骨架重建数据}}
+\tag{57}
+\end{equation}
 

@@ -165,5 +165,375 @@ url={\url{https://spaces.ac.cn/archives/9752}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 一、信息论基础
+
+#### 1.1 熵与压缩率的关系
+
+**香农信息熵定义**：对于离散随机变量$X$，其信息熵定义为
+\begin{equation}
+H(X) = -\sum_{i} p(x_i) \log_2 p(x_i) \tag{1}
+\end{equation}
+
+**数学直觉**：熵度量了随机变量的不确定性。$\log_2 p(x_i)$表示事件$x_i$的自信息（单位：bit），负号使其为正值，期望即为平均信息量。
+
+**压缩率定义**：假设词表大小为$V$，平均每个token对应$L$个bytes，则压缩率定义为
+\begin{equation}
+R = \frac{L}{\log_2 V} \tag{2}
+\end{equation}
+
+**推导过程**：
+- 若每个token等概出现，需要$\log_2 V$ bits编码一个token
+- 该token实际对应$L$ bytes = $8L$ bits的原始数据
+- 因此压缩比为$\frac{8L}{\log_2 V}$，压缩率即为上式
+
+**实际考虑**：token分布通常不均匀，理论最优编码长度由熵给出
+\begin{equation}
+H(T) = -\sum_{t \in V} p(t) \log_2 p(t) \tag{3}
+\end{equation}
+
+**香农第一定理**：对于信源$T$，最优无损压缩的平均码长不小于其熵$H(T)$，即
+\begin{equation}
+\mathbb{E}[L_{code}] \geq H(T) \tag{4}
+\end{equation}
+
+#### 1.2 Byte级别的信息熵
+
+**Byte熵计算**：设byte序列为$B = b_1, b_2, \ldots, b_n$，每个byte取值范围为$[0, 255]$，则
+\begin{equation}
+H(B) = -\sum_{i=0}^{255} p(b=i) \log_2 p(b=i) \tag{5}
+\end{equation}
+
+**经验观察**：
+- 英文字符（1 byte/char）：熵约为$4-5$ bits
+- 中文字符（3 bytes/char in UTF-8）：熵约为$10-13$ bits
+- 因此中文平均信息熵约为英文的2-3倍
+
+**信息密度**：定义单位byte的信息密度为
+\begin{equation}
+\rho = \frac{H(T)}{L_{avg}} \tag{6}
+\end{equation}
+其中$L_{avg}$是token的平均byte长度。
+
+### 二、N-gram语言模型
+
+#### 2.1 条件概率分解
+
+**完整概率分解**：对于byte序列$c_1, c_2, \ldots, c_l$，根据链式法则
+\begin{equation}
+p(c_1, c_2, \ldots, c_l) = \prod_{i=1}^{l} p(c_i | c_1, \ldots, c_{i-1}) \tag{7}
+\end{equation}
+
+**马尔可夫假设**：n-gram模型假设每个byte只依赖于前$n-1$个byte
+\begin{equation}
+p(c_i | c_1, \ldots, c_{i-1}) \approx p(c_i | c_{i-n+1}, \ldots, c_{i-1}) \tag{8}
+\end{equation}
+
+**推导说明**：
+- 当$i \leq n$时，使用所有历史：$p(c_i | c_1, \ldots, c_{i-1})$
+- 当$i > n$时，截断历史：$p(c_i | c_{i-n+1}, \ldots, c_{i-1})$
+
+#### 2.2 词概率的n-gram分解
+
+**关键推导**：设词$w = c_1 c_2 \ldots c_m$，其概率可分解为
+\begin{equation}
+p(w) = \prod_{j=1}^{m} p(c_j | c_{\max(1, j-n+1)}, \ldots, c_{j-1}) \tag{9}
+\end{equation}
+
+**具体示例**（以$n=3$, $w=$"深度学习"为例）：
+\begin{align}
+p(\text{"深度学习"}) &= p(\text{深}) \cdot p(\text{度}|\text{深}) \cdot p(\text{学}|\text{深度}) \cdot p(\text{习}|\text{度学}) \tag{10}\\
+&= p(c_1) \cdot p(c_2|c_1) \cdot p(c_3|c_1,c_2) \cdot p(c_4|c_2,c_3) \tag{11}
+\end{align}
+
+**边界处理**：
+- $j=1$: $p(c_1)$ 为unigram概率
+- $j=2$: $p(c_2|c_1)$ 为bigram概率
+- $j \geq n$: $p(c_j|c_{j-n+1}, \ldots, c_{j-1})$ 为完整n-gram
+
+### 三、Unigram分词算法
+
+#### 3.1 最大概率路径
+
+**问题定义**：给定byte序列$B = b_1, \ldots, b_n$和词表$V$，找到最优切分$W^* = w_1, w_2, \ldots, w_k$使得
+\begin{equation}
+W^* = \argmax_{W} \prod_{i=1}^{k} p(w_i) \tag{12}
+\end{equation}
+
+**对数形式**（避免下溢）：
+\begin{equation}
+W^* = \argmax_{W} \sum_{i=1}^{k} \log p(w_i) \tag{13}
+\end{equation}
+
+**组合爆炸**：对于长度$n$的序列，可能的切分数为$2^{n-1}$（每个间隙可切可不切），暴力枚举不可行。
+
+#### 3.2 Viterbi动态规划
+
+**状态定义**：令$dp[i]$表示前$i$个byte的最优切分的对数概率
+\begin{equation}
+dp[i] = \max_{1 \leq j < i, b_{j+1:i} \in V} \left( dp[j] + \log p(b_{j+1:i}) \right) \tag{14}
+\end{equation}
+
+**初始化**：
+\begin{equation}
+dp[0] = 0 \tag{15}
+\end{equation}
+
+**递推公式详解**：
+- 枚举所有可能的最后一个词：$b_{j+1:i}$（从位置$j+1$到$i$）
+- 要求该词在词表中：$b_{j+1:i} \in V$
+- 前$j$个byte的最优解为$dp[j]$
+- 加上当前词的对数概率$\log p(b_{j+1:i})$
+
+**回溯路径**：同时维护指针数组$ptr[i]$记录切分点
+\begin{equation}
+ptr[i] = \argmax_{j} \left( dp[j] + \log p(b_{j+1:i}) \right) \tag{16}
+\end{equation}
+
+**完整算法**：
+```
+输入：byte序列 B[1..n]，词表 V，词概率 p(·)
+输出：最优切分 W*
+
+1. 初始化 dp[0] = 0
+2. For i = 1 to n:
+     For j = 0 to i-1:
+       if B[j+1:i] ∈ V:
+         score = dp[j] + log p(B[j+1:i])
+         if score > dp[i]:
+           dp[i] = score
+           ptr[i] = j
+3. 回溯：从 ptr[n] 开始恢复切分路径
+```
+
+**复杂度分析**：
+- 时间复杂度：$O(n^2 \cdot T_{lookup})$，其中$T_{lookup}$为词表查询时间
+- 使用Trie树可优化为$O(n \cdot L_{max})$，其中$L_{max}$为最长词长度
+
+### 四、BytePiece训练算法
+
+#### 4.1 词频统计与剪枝
+
+**n-gram计数**：对于语料库$C$，统计所有n-gram的频次
+\begin{equation}
+count(w) = \sum_{s \in C} \sum_{i} \mathbb{I}(s[i:i+|w|] = w) \tag{17}
+\end{equation}
+其中$\mathbb{I}(\cdot)$是指示函数。
+
+**最大似然估计**：词概率的MLE为
+\begin{equation}
+p(w) = \frac{count(w)}{\sum_{w' \in V} count(w')} \tag{18}
+\end{equation}
+
+**平滑处理**：为避免零概率，采用Add-k平滑
+\begin{equation}
+p_{smooth}(w) = \frac{count(w) + k}{Nsum + k \cdot |V|} \tag{19}
+\end{equation}
+其中$N = \sum_{w'} count(w')$，通常取$k=1$（Laplace平滑）。
+
+#### 4.2 冗余词剪枝
+
+**冗余性判断**：若词$w = w_1 \circ w_2$（拼接），且满足
+\begin{equation}
+p(w_1) \cdot p(w_2) > p(w) \tag{20}
+\end{equation}
+则$w$永远不会在Unigram分词中被选中（因为分开切分概率更大），可以剪枝。
+
+**数学证明**：假设序列包含$w$，比较两种切分：
+- 保留$w$：贡献$\log p(w)$
+- 拆分为$w_1, w_2$：贡献$\log p(w_1) + \log p(w_2)$
+
+由于
+\begin{equation}
+\log p(w_1) + \log p(w_2) = \log(p(w_1) \cdot p(w_2)) > \log p(w) \tag{21}
+\end{equation}
+拆分总是更优，因此$w$冗余。
+
+**递归剪枝**：考虑词$w = w_1 \circ w_2 \circ w_3$
+\begin{equation}
+p(w_1) \cdot p(w_2) \cdot p(w_3) > p(w) \Rightarrow w\text{冗余} \tag{22}
+\end{equation}
+
+### 五、压缩率理论分析
+
+#### 5.1 理论压缩上界
+
+**熵率**：定义语言的熵率为
+\begin{equation}
+H_{\infty} = \lim_{n \to \infty} \frac{1}{n} H(B_1, B_2, \ldots, B_n) \tag{23}
+\end{equation}
+
+**香农源编码定理**：对于平稳遍历信源，最优压缩率趋近于熵率
+\begin{equation}
+\lim_{n \to \infty} \frac{L_{compressed}}{L_{original}} = \frac{H_{\infty}}{8} \tag{24}
+\end{equation}
+
+**实际估计**：对于中文文本，经验值为
+- 熵率$H_{\infty} \approx 5-6$ bits/byte
+- 理论压缩极限约为$\frac{5.5}{8} \approx 0.69$
+
+#### 5.2 Tokenizer压缩率
+
+**tokens数统计**：对于长度$N$（bytes）的文本，分词后得到$M$个tokens
+\begin{equation}
+R_{actual} = \frac{N}{M} \tag{25}
+\end{equation}
+
+**与词表大小的关系**：根据Zipf定律，词频分布为
+\begin{equation}
+p(w_r) \propto \frac{1}{r^{\alpha}} \tag{26}
+\end{equation}
+其中$r$是词的频率排名，$\alpha \approx 1$。
+
+**期望词长**：在Zipf分布下，期望token长度为
+\begin{equation}
+\mathbb{E}[L] = \sum_{r=1}^{|V|} p(w_r) \cdot |w_r| \tag{27}
+\end{equation}
+
+**优化目标**：最大化
+\begin{equation}
+\max_{V} \frac{\mathbb{E}[L]}{\log_2 |V|} \tag{28}
+\end{equation}
+在固定$|V|$下获得最长的平均token长度。
+
+### 六、数值稳定性技巧
+
+#### 6.1 对数空间计算
+
+**问题**：直接计算$\prod_i p(w_i)$会导致数值下溢（概率连乘快速趋近0）。
+
+**解决方案**：在对数空间计算
+\begin{equation}
+\log \prod_i p(w_i) = \sum_i \log p(w_i) \tag{29}
+\end{equation}
+
+**LogSumExp技巧**：计算$\log(\sum_i e^{x_i})$时避免溢出
+\begin{equation}
+\log \sum_i e^{x_i} = x_{max} + \log \sum_i e^{x_i - x_{max}} \tag{30}
+\end{equation}
+其中$x_{max} = \max_i x_i$。
+
+#### 6.2 Laplace平滑的数值考虑
+
+**极端情况**：当$count(w) = 0$时，不加平滑会导致$p(w) = 0$，进而$\log p(w) = -\infty$。
+
+**平滑后的对数概率**：
+\begin{equation}
+\log p_{smooth}(w) = \log(count(w) + k) - \log(N + k \cdot |V|) \tag{31}
+\end{equation}
+
+**下界保证**：即使$count(w) = 0$，仍有
+\begin{equation}
+\log p_{smooth}(w) \geq \log k - \log(N + k \cdot |V|) \tag{32}
+\end{equation}
+避免了负无穷。
+
+### 七、BytePiece vs BPE比较
+
+#### 7.1 BPE合并规则
+
+**BPE迭代过程**：每次选择频次最高的byte pair合并
+\begin{equation}
+(b_i, b_j)^* = \argmax_{(b_i, b_j)} count(b_i, b_j) \tag{33}
+\end{equation}
+
+**贪心近似**：BPE是贪心算法，不保证全局最优。每次合并后需重新统计：
+\begin{equation}
+count_{new}(b_i b_j) = count_{old}(b_i, b_j) \tag{34}
+\end{equation}
+
+#### 7.2 复杂度对比
+
+**BPE训练复杂度**：
+- 每轮需扫描全部语料：$O(N)$
+- 需要$|V|$轮迭代
+- 总复杂度：$O(N \cdot |V|)$
+
+**BytePiece训练复杂度**：
+- n-gram统计：$O(N \cdot n)$（单次扫描）
+- 排序与剪枝：$O(|V| \log |V|)$
+- 总复杂度：$O(N \cdot n + |V| \log |V|)$
+
+**空间复杂度**：
+- BPE：需存储所有pair频次，约$O(|V|^2)$
+- BytePiece：存储n-gram频次，约$O(|V|)$
+
+### 八、实践建议
+
+#### 8.1 超参数选择
+
+**n-gram阶数$n$**：
+- $n=6$的理论依据：英文单词平均长度$\approx 4-5$，加上词缀，$n=6$足够覆盖
+- 更大的$n$：提升准确性，但增加统计复杂度和稀疏性
+- 建议：$n \in [5, 7]$
+
+**词表大小$|V|$**：
+- 小词表（$<10k$）：压缩率低，训练快
+- 中词表（$30-50k$）：平衡点，适合多数应用
+- 大词表（$>100k$）：压缩率高，但增加模型参数
+
+**平滑系数$k$**：
+- $k=0$：无平滑，可能出现零概率
+- $k=1$：Laplace平滑，经典选择
+- $k \in (0,1)$：Lidstone平滑，更温和
+
+#### 8.2 工程优化
+
+**Trie树加速**：词表查询从$O(|V|)$优化到$O(L_{max})$
+\begin{equation}
+T_{Viterbi} = O(n \cdot L_{max} \cdot T_{Trie}) \tag{35}
+\end{equation}
+其中$T_{Trie} = O(L_{max})$。
+
+**并行化**：n-gram统计天然支持Map-Reduce
+\begin{equation}
+count(w) = \sum_{partition} count_{partition}(w) \tag{36}
+\end{equation}
+
+**内存优化**：使用布隆过滤器预过滤低频n-gram
+\begin{equation}
+\text{filter}(w) = \begin{cases}
+1, & \text{if } count(w) \geq \theta \\
+0, & \text{otherwise}
+\end{cases} \tag{37}
+\end{equation}
+
+### 九、理论拓展
+
+#### 9.1 信息论视角
+
+**互信息**：词$w$的信息增益为
+\begin{equation}
+I(w) = \log \frac{p(w)}{\prod_{i} p(c_i)} \tag{38}
+\end{equation}
+高互信息的词更应该保留在词表中。
+
+**困惑度（Perplexity）**：评估语言模型质量
+\begin{equation}
+PPL = 2^{H(T)} = \exp\left(-\frac{1}{N} \sum_{i=1}^{N} \log p(w_i)\right) \tag{39}
+\end{equation}
+越低越好。
+
+#### 9.2 与其他Tokenizer的联系
+
+**WordPiece**：使用似然增益而非频次
+\begin{equation}
+score(w_i, w_j) = \frac{p(w_i w_j)}{p(w_i) p(w_j)} \tag{40}
+\end{equation}
+
+**Unigram LM**（SentencePiece）：本质上与BytePiece相同，但使用EM算法迭代优化
+\begin{equation}
+p^{(t+1)}(w) = \frac{\sum_{s} \mathbb{E}_{p^{(t)}}[count(w|s)]}{\sum_{w'} \sum_{s} \mathbb{E}_{p^{(t)}}[count(w'|s)]} \tag{41}
+\end{equation}
+
+### 十、总结
+
+BytePiece通过n-gram语言模型和Viterbi算法实现了高效的Tokenizer训练：
+
+1. **信息论基础**：压缩率$R = \frac{L}{\log_2 V}$，受熵率$H_{\infty}$限制
+2. **Unigram分词**：动态规划求解最大概率路径，复杂度$O(n \cdot L_{max})$
+3. **训练算法**：一次扫描统计n-gram，复杂度$O(N \cdot n)$，远快于BPE的$O(N \cdot |V|)$
+4. **剪枝策略**：移除冗余词$p(w_1)p(w_2) > p(w)$，减少词表大小
+5. **数值稳定**：对数空间计算+Laplace平滑避免下溢
+
+**核心优势**：纯Python实现、训练高效、压缩率高、无需NFKC归一化。
 

@@ -137,5 +137,282 @@ url={\url{https://spaces.ac.cn/archives/10017}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+---
+
+## 公式推导与注释
+
+### 一、Attention的RNN形式推导
+
+#### 1.1 标准Attention回顾
+
+**Causal Attention定义**: 对于位置 $i$，输出为：
+\begin{equation}
+o_i = \sum_{j=1}^i a_{i,j} v_j = \frac{\sum_{j=1}^i e^{q_i \cdot k_j} v_j}{\sum_{j=1}^i e^{q_i \cdot k_j}}
+\tag{1}
+\end{equation}
+
+定义归一化前的注意力权重：
+\begin{equation}
+\alpha_{i,j} = \exp(q_i \cdot k_j)
+\tag{2}
+\end{equation}
+
+则可以改写为：
+\begin{equation}
+o_i = \frac{\sum_{j=1}^i \alpha_{i,j} v_j}{\sum_{j=1}^i \alpha_{i,j}}
+\tag{3}
+\end{equation}
+
+#### 1.2 递归形式推导
+
+**核心观察**: 求和可以写成递归形式！
+
+定义两个累积变量：
+\begin{align}
+S_i &= \sum_{j=1}^i \alpha_{i,j} v_j \tag{4}\\
+Z_i &= \sum_{j=1}^i \alpha_{i,j} \tag{5}
+\end{align}
+
+则输出为：
+\begin{equation}
+o_i = \frac{S_i}{Z_i}
+\tag{6}
+\end{equation}
+
+**递归关系**: 注意到：
+\begin{align}
+S_i &= S_{i-1} + \alpha_{i,i} v_i \tag{7}\\
+Z_i &= Z_{i-1} + \alpha_{i,i} \tag{8}
+\end{align}
+
+但这还不是标准的RNN形式，因为 $\alpha_{i,j}$ 依赖于 $j$。
+
+#### 1.3 完整的RNN视角
+
+**关键变换**: 将 $\alpha_{i,j} = e^{q_i \cdot k_j}$ 改写为位置差的函数。
+
+使用RoPE等位置编码时，有：
+\begin{equation}
+q_i \cdot k_j = f(i-j, q_i', k_j')
+\tag{9}
+\end{equation}
+
+**递归扫描**: 从位置 $1$ 到 $i$，递归计算：
+\begin{equation}
+\begin{pmatrix} S_t \\ Z_t \end{pmatrix} = \begin{pmatrix} S_{t-1} \\ Z_{t-1} \end{pmatrix} + e^{q_i \cdot k_t} \begin{pmatrix} v_t \\ 1 \end{pmatrix}
+\tag{10}
+\end{equation}
+
+初始条件：$S_0 = \boldsymbol{0}, Z_0 = 0$
+
+**时间复杂度**:
+- 每个位置 $i$ 需要扫描 $1$ 到 $i$: $\mathcal{O}(i)$
+- 总复杂度: $\sum_{i=1}^n \mathcal{O}(i) = \mathcal{O}(n^2)$
+
+这正是"平方复杂度的RNN"！
+
+### 二、空间复杂度分析：$\mathcal{O}(1)$ 的可能性
+
+#### 2.1 标准实现的空间复杂度
+
+**KV Cache方法**: 存储所有 $k_1, \ldots, k_n$ 和 $v_1, \ldots, v_n$
+- 空间: $\mathcal{O}(nd)$
+- 时间: 每步 $\mathcal{O}(d)$（已有cache）
+
+**权衡**: 用空间换时间
+
+#### 2.2 极致的时间换空间
+
+**问题**: 能否不存储KV，只保持固定大小的状态？
+
+**答案**: 可以！但需要重复计算。
+
+**方法**: 对于位置 $i$，需要计算 $o_i$ 时：
+1. 从输入重新计算 $k_1, \ldots, k_i$ 和 $v_1, \ldots, v_i$
+2. 使用递归公式计算 $S_i, Z_i$
+3. 输出 $o_i = S_i / Z_i$
+
+**空间**: 只需存储当前的 $(S, Z)$，为 $\mathcal{O}(d)$
+
+**时间**: 每个位置重新扫描历史，总复杂度变为 $\mathcal{O}(n^2)$ 或更高
+
+#### 2.3 多层网络的级联效应
+
+**单层**: 
+- 空间: $\mathcal{O}(d)$
+- 时间: $\mathcal{O}(n^2)$
+
+**多层**: 第 $l$ 层的输入依赖于第 $l-1$ 层的输出
+
+**递归计算**: 
+- 第 $l$ 层位置 $i$ 的计算需要第 $l-1$ 层的 $o_1^{(l-1)}, \ldots, o_i^{(l-1)}$
+- 每个 $o_j^{(l-1)}$ 又需要重新计算
+
+**复杂度爆炸**: $L$ 层网络的时间复杂度为 $\mathcal{O}(n^{2L})$！
+
+### 三、状态空间模型(SSM)视角
+
+#### 3.1 线性RNN的标准形式
+
+**状态空间方程**:
+\begin{align}
+h_t &= A h_{t-1} + B x_t \tag{11}\\
+y_t &= C h_t + D x_t \tag{12}
+\end{align}
+
+其中：
+- $h_t \in \mathbb{R}^d$: 隐状态
+- $x_t \in \mathbb{R}^{d_{in}}$: 输入
+- $y_t \in \mathbb{R}^{d_{out}}$: 输出
+- $A \in \mathbb{R}^{d \times d}$: 状态转移矩阵
+- $B, C, D$: 输入/输出映射矩阵
+
+**特点**:
+- 固定状态维度 $d$
+- 线性时间复杂度 $\mathcal{O}(nd)$
+- 固定空间复杂度 $\mathcal{O}(d)$
+
+#### 3.2 Attention作为非线性SSM
+
+Attention可以写成类似形式，但状态维度动态增长：
+\begin{align}
+S_i &= S_{i-1} + \phi(q_i, k_i) v_i \tag{13}\\
+Z_i &= Z_{i-1} + \phi(q_i, k_i) \tag{14}\\
+o_i &= \psi(S_i, Z_i) = S_i / Z_i \tag{15}
+\end{align}
+
+**与标准SSM的差异**:
+1. 非线性: $\phi(q_i, k_i) = e^{q_i \cdot k_i}$
+2. 依赖历史: 需要访问 $k_1, \ldots, k_{i-1}$
+3. 动态维度: 有效状态维度随序列长度增长
+
+#### 3.3 线性化尝试：S4模型
+
+**S4(Structured State Space)**: 限制 $A$ 为对角矩阵或低秩矩阵
+\begin{equation}
+A = \text{diag}(\lambda_1, \ldots, \lambda_d)
+\tag{16}
+\end{equation}
+
+**优势**:
+- 真正的 $\mathcal{O}(nd)$ 复杂度
+- 可以并行化训练
+
+**劣势**:
+- 表达能力受限于固定状态维度
+- 难以捕获长距离依赖（相比Attention）
+
+### 四、记忆容量的理论分析
+
+#### 4.1 信息论视角
+
+**定义**: 记忆容量为能够存储的最大信息量（比特）
+
+**RNN的记忆**: 
+- 状态维度 $d$
+- 精度 $b$ 比特/维度
+- 总容量: $C_{\text{RNN}} = d \cdot b$ 比特
+
+**Attention的记忆**:
+- 存储 $n$ 个Key-Value对
+- 每对 $(k_j, v_j) \in \mathbb{R}^d \times \mathbb{R}^d$
+- 总容量: $C_{\text{Attn}} = 2nd \cdot b$ 比特
+
+**对比**: 当 $n \gg 1$ 时，$C_{\text{Attn}} \gg C_{\text{RNN}}$
+
+#### 4.2 压缩定理
+
+**定理**: 对于序列长度为 $n$ 的任务，如果需要记忆 $\Omega(n)$ 的信息量，则：
+1. 固定维度RNN无法完美解决
+2. Attention理论上可以（通过KV Cache）
+3. 但实际受限于模型容量
+
+**证明思路**:
+- 构造需要记忆所有历史的任务（如复制任务）
+- 证明固定维度状态无法编码 $n$ 个独立信息
+
+#### 4.3 实践中的权衡
+
+**场景1**: 短序列、频繁推理
+- RNN优势：内存占用小
+- Attention劣势：KV Cache增长
+
+**场景2**: 长序列、复杂依赖
+- Attention优势：可以回溯查看
+- RNN劣势：固定容量瓶颈
+
+### 五、实践优化策略
+
+#### 5.1 混合架构
+
+**方案1**: 局部Attention + 全局RNN
+\begin{align}
+o_i^{\text{local}} &= \text{Attention}(q_i, k_{i-w:i}, v_{i-w:i}) \tag{17}\\
+h_i &= \text{RNN}(h_{i-1}, o_i^{\text{local}}) \tag{18}\\
+o_i &= \text{MLP}([o_i^{\text{local}}, h_i]) \tag{19}
+\end{align}
+
+**参数**:
+- 局部窗口大小 $w$: 通常 $w = 256$
+- RNN隐状态维度: $d_h = 512$
+
+**复杂度**:
+- Attention: $\mathcal{O}(nwd)$
+- RNN: $\mathcal{O}(nd_h^2)$
+- 总计: $\mathcal{O}(n(wd + d_h^2))$
+
+#### 5.2 动态KV压缩
+
+**思想**: 定期压缩KV Cache
+
+**方法**:
+1. 每 $k$ 步，将旧的KV压缩为summary向量
+2. 保留最近的 $m$ 个KV对
+3. Attention同时查询summary和最近KV
+
+**实现**:
+\begin{equation}
+\tilde{k} = \frac{1}{k} \sum_{j=i-k}^{i-1} k_j, \quad \tilde{v} = \frac{1}{k} \sum_{j=i-k}^{i-1} v_j
+\tag{20}
+\end{equation}
+
+**空间**: 从 $\mathcal{O}(nd)$ 降到 $\mathcal{O}(md + (n/k)d) = \mathcal{O}((m + n/k)d)$
+
+#### 5.3 Flash Attention的启示
+
+**核心**: 通过重计算降低内存
+
+**方法**: 分块计算Attention，不存储完整矩阵
+- 分块大小: $B = 128$
+- 内存: 从 $\mathcal{O}(n^2)$ 降到 $\mathcal{O}(nB)$
+- 时间: 保持 $\mathcal{O}(n^2d)$（有常数项增加）
+
+**数学**:
+\begin{equation}
+\text{Attention}(Q, K, V) = \text{concat}(\text{Attn}_1, \ldots, \text{Attn}_{n/B})
+\tag{21}
+\end{equation}
+
+其中每个块独立计算并存储部分统计量。
+
+### 六、总结与展望
+
+#### 6.1 核心发现
+
+1. **Attention即RNN**: 可以写成递归形式，但需要扫描历史
+2. **空间可以是 $\mathcal{O}(1)$**: 通过重计算，代价是时间复杂度
+3. **记忆瓶颈**: 两者本质上都是固定"内存"的计算设备
+
+#### 6.2 实践启示
+
+- **模型选择**: 根据序列长度和任务特性
+- **混合方案**: 结合Attention和RNN的优势
+- **硬件协同**: Flash Attention等IO优化方向
+
+#### 6.3 未来方向
+
+- 自适应记忆管理
+- 神经图灵机等外部记忆
+- 量子计算在序列建模中的应用
+
 

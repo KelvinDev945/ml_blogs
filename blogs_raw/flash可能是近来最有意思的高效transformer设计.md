@@ -207,5 +207,536 @@ url={\url{https://spaces.ac.cn/archives/8934}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 1. 标准Transformer的FFN层数学形式
+
+**前馈神经网络（Feed-Forward Network）的标准形式**：
+
+标准的FFN包含两个线性变换和一个非线性激活函数：
+
+\begin{equation}
+\text{FFN}(\boldsymbol{X}) = \phi(\boldsymbol{X}\boldsymbol{W}_1 + \boldsymbol{b}_1)\boldsymbol{W}_2 + \boldsymbol{b}_2 \tag{1}
+\end{equation}
+
+其中：
+- $\boldsymbol{X} \in \mathbb{R}^{n \times d}$：输入矩阵（$n$个token，每个维度$d$）
+- $\boldsymbol{W}_1 \in \mathbb{R}^{d \times e}$：第一层权重（扩展到$e$维，通常$e = 4d$）
+- $\boldsymbol{W}_2 \in \mathbb{R}^{e \times d}$：第二层权重（投影回$d$维）
+- $\phi$：激活函数（如ReLU、GELU）
+
+**注释**：FFN的作用是对每个token独立地进行非线性变换，增加模型的表达能力。
+
+**参数量分析**：
+
+\begin{equation}
+\text{Params}_{\text{FFN}} = d \times e + e \times d = 2de = 8d^2 \quad (\text{当}e=4d\text{时}) \tag{2}
+\end{equation}
+
+**计算复杂度**：
+
+\begin{equation}
+\text{Time}_{\text{FFN}} = O(nde + ned) = O(nde) = O(4nd^2) \tag{3}
+\end{equation}
+
+### 2. GLU（门控线性单元）的数学原理
+
+**GLU的定义**：
+
+GLU使用门控机制来调制特征：
+
+\begin{equation}
+\text{GLU}(\boldsymbol{X}) = (\boldsymbol{X}\boldsymbol{W}_1 + \boldsymbol{b}_1) \odot \sigma(\boldsymbol{X}\boldsymbol{V}_1 + \boldsymbol{c}_1) \tag{4}
+\end{equation}
+
+其中：
+- $\odot$：逐元素乘法（Hadamard积）
+- $\sigma$：门控激活函数（通常是Sigmoid）
+- $\boldsymbol{W}_1, \boldsymbol{V}_1 \in \mathbb{R}^{d \times e}$：两组独立的权重矩阵
+
+**改进版GLU（用于GAU）**：
+
+\begin{equation}
+\boldsymbol{O} = (\boldsymbol{U} \odot \boldsymbol{V})\boldsymbol{W}_o \tag{5}
+\end{equation}
+
+\begin{equation}
+\boldsymbol{U} = \phi_u(\boldsymbol{X}\boldsymbol{W}_u), \quad \boldsymbol{V} = \phi_v(\boldsymbol{X}\boldsymbol{W}_v) \tag{6}
+\end{equation}
+
+其中$\phi_u, \phi_v$都是Swish激活函数。
+
+**Swish激活函数**：
+
+\begin{equation}
+\text{Swish}(x) = x \cdot \sigma(\beta x) = \frac{x}{1 + e^{-\beta x}} \tag{7}
+\end{equation}
+
+通常取$\beta = 1$。
+
+**GLU的优势**：
+
+1. **动态门控**：$\boldsymbol{V}$充当动态门，选择性地传递$\boldsymbol{U}$的信息
+2. **表达能力强**：相比单一激活函数，门控机制能学习更复杂的非线性关系
+3. **梯度流动好**：门控机制提供了多条梯度传播路径
+
+### 3. 标准Multi-Head Attention的完整推导
+
+**多头注意力的定义**：
+
+\begin{equation}
+\text{MultiHead}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}) = \text{Concat}(\text{head}_1, \ldots, \text{head}_h)\boldsymbol{W}^O \tag{8}
+\end{equation}
+
+其中每个头计算为：
+
+\begin{equation}
+\text{head}_i = \text{Attention}(\boldsymbol{Q}\boldsymbol{W}_i^Q, \boldsymbol{K}\boldsymbol{W}_i^K, \boldsymbol{V}\boldsymbol{W}_i^V) \tag{9}
+\end{equation}
+
+**投影矩阵的维度**：
+
+- $\boldsymbol{W}_i^Q, \boldsymbol{W}_i^K \in \mathbb{R}^{d \times d_k}$，其中$d_k = d/h$
+- $\boldsymbol{W}_i^V \in \mathbb{R}^{d \times d_v}$，其中$d_v = d/h$
+- $\boldsymbol{W}^O \in \mathbb{R}^{hd_v \times d}$
+
+**单个头的Attention计算**：
+
+\begin{equation}
+\text{Attention}(\boldsymbol{Q}_i, \boldsymbol{K}_i, \boldsymbol{V}_i) = \text{softmax}\left(\frac{\boldsymbol{Q}_i\boldsymbol{K}_i^{\top}}{\sqrt{d_k}}\right)\boldsymbol{V}_i \tag{10}
+\end{equation}
+
+**参数量分析**：
+
+\begin{equation}
+\text{Params}_{\text{MHA}} = 3 \times h \times d \times d_k + hd_v \times d = 4d^2 \tag{11}
+\end{equation}
+
+（当$d_k = d_v = d/h$时）
+
+**计算复杂度**：
+
+时间复杂度：
+\begin{equation}
+O(n^2d + nd^2) \tag{12}
+\end{equation}
+
+空间复杂度（存储$h$个$n \times n$的Attention矩阵）：
+\begin{equation}
+O(hn^2) \tag{13}
+\end{equation}
+
+### 4. GAU（门控注意力单元）的核心设计
+
+**GAU的基本思想**：
+
+将Attention和FFN融合为一个统一的门控单元：
+
+\begin{equation}
+\boldsymbol{O} = (\boldsymbol{U} \odot \boldsymbol{A}\boldsymbol{V})\boldsymbol{W}_o \tag{14}
+\end{equation}
+
+其中：
+- $\boldsymbol{U}, \boldsymbol{V} \in \mathbb{R}^{n \times e}$：类似GLU的两个分支
+- $\boldsymbol{A} \in \mathbb{R}^{n \times n}$：Attention矩阵，负责token间信息交互
+- $\boldsymbol{W}_o \in \mathbb{R}^{e \times d}$：输出投影矩阵
+
+**逐步分解**：
+
+1. **计算$\boldsymbol{U}$和$\boldsymbol{V}$**：
+
+\begin{equation}
+\boldsymbol{U} = \phi_u(\boldsymbol{X}\boldsymbol{W}_u), \quad \boldsymbol{V} = \phi_v(\boldsymbol{X}\boldsymbol{W}_v) \tag{15}
+\end{equation}
+
+其中$\boldsymbol{W}_u, \boldsymbol{W}_v \in \mathbb{R}^{d \times e}$。
+
+2. **应用Attention到$\boldsymbol{V}$**：
+
+\begin{equation}
+\tilde{\boldsymbol{V}} = \boldsymbol{A}\boldsymbol{V} \tag{16}
+\end{equation}
+
+这一步使得每个位置的$\boldsymbol{V}$融合了其他位置的信息。
+
+3. **门控调制**：
+
+\begin{equation}
+\boldsymbol{Z} = \boldsymbol{U} \odot \tilde{\boldsymbol{V}} \tag{17}
+\end{equation}
+
+$\boldsymbol{U}$作为门控，选择性地传递$\tilde{\boldsymbol{V}}$的信息。
+
+4. **输出投影**：
+
+\begin{equation}
+\boldsymbol{O} = \boldsymbol{Z}\boldsymbol{W}_o \tag{18}
+\end{equation}
+
+**GAU的特殊性质**：
+
+- 当$\boldsymbol{A} = \boldsymbol{I}$时，退化为标准GLU
+- 当$\boldsymbol{U} = \boldsymbol{1}$（全1矩阵）时，退化为标准Attention
+
+### 5. 简化的Attention矩阵设计
+
+**$\text{relu}^2$ Attention**：
+
+为了降低复杂度，GAU使用简化的Attention计算：
+
+\begin{equation}
+\boldsymbol{A} = \frac{1}{n}\text{relu}^2\left(\frac{\mathcal{Q}(\boldsymbol{Z})\mathcal{K}(\boldsymbol{Z})^{\top}}{\sqrt{s}}\right) \tag{19}
+\end{equation}
+
+其中：
+- $\boldsymbol{Z} = \phi_z(\boldsymbol{X}\boldsymbol{W}_z) \in \mathbb{R}^{n \times s}$
+- $\mathcal{Q}, \mathcal{K}$：简单的仿射变换（scale + shift）
+- $s$：Attention的head size（论文中$s=128$）
+- $\text{relu}^2(x) = \max(0, x)^2$
+
+**仿射变换$\mathcal{Q}, \mathcal{K}$的定义**：
+
+\begin{equation}
+\mathcal{Q}(\boldsymbol{Z}) = \gamma_q \odot \boldsymbol{Z} + \beta_q \tag{20}
+\end{equation}
+
+\begin{equation}
+\mathcal{K}(\boldsymbol{Z}) = \gamma_k \odot \boldsymbol{Z} + \beta_k \tag{21}
+\end{equation}
+
+其中$\gamma_q, \gamma_k, \beta_q, \beta_k \in \mathbb{R}^s$是可学习参数。
+
+**归一化因子的选择**：
+
+论文使用$\frac{1}{n}$作为归一化因子，但作者建议使用$\frac{1}{ns}$更合理：
+
+\begin{equation}
+\boldsymbol{A} = \frac{1}{ns}\text{relu}^2\left(\mathcal{Q}(\boldsymbol{Z})\mathcal{K}(\boldsymbol{Z})^{\top}\right) \tag{22}
+\end{equation}
+
+**注释**：$\frac{1}{ns}$使得Attention权重的量级不随序列长度$n$剧烈变化。
+
+**为什么不用Softmax？**
+
+1. **计算效率**：Softmax需要指数运算，而$\text{relu}^2$只需要max和平方
+2. **简单归一化**：用除以$n$代替Softmax的全局归一化
+3. **实验验证**：实验显示$\text{relu}^2$的效果与Softmax相当
+
+### 6. 单头Attention的惊人发现
+
+**传统观点**：多头注意力需要$h=8$或$h=12$个头才能获得好的性能。
+
+**GAU的发现**：由于GLU的强大表达能力，**单头Attention（$h=1$）就足够了**！
+
+**理论解释**：
+
+1. **GLU提供了足够的表达能力**：门控机制$\boldsymbol{U} \odot \tilde{\boldsymbol{V}}$已经能够学习复杂的特征交互
+2. **Attention的作用被重新定位**：不再是主要的特征提取器，而是辅助的信息聚合器
+3. **参数效率**：单头避免了多头的参数冗余
+
+**计算优势**：
+
+多头Attention需要存储$h$个$n \times n$矩阵：
+\begin{equation}
+\text{Memory}_{\text{MHA}} = O(hn^2) \tag{23}
+\end{equation}
+
+单头Attention只需要：
+\begin{equation}
+\text{Memory}_{\text{GAU}} = O(n^2) \tag{24}
+\end{equation}
+
+对于$h=8$，显存减少了8倍！
+
+### 7. GAU的参数量分析
+
+**GAU的参数量**：
+
+\begin{equation}
+\text{Params}_{\text{GAU}} = d \times e + d \times e + e \times d + d \times s + 4s = 3de + ds + 4s \tag{25}
+\end{equation}
+
+其中：
+- $d \times e$：$\boldsymbol{W}_u$的参数
+- $d \times e$：$\boldsymbol{W}_v$的参数
+- $e \times d$：$\boldsymbol{W}_o$的参数
+- $d \times s$：$\boldsymbol{W}_z$的参数
+- $4s$：$\gamma_q, \gamma_k, \beta_q, \beta_k$的参数
+
+**当$s \ll e$时，近似为**：
+
+\begin{equation}
+\text{Params}_{\text{GAU}} \approx 3de \tag{26}
+\end{equation}
+
+**与标准Transformer的比较**：
+
+标准Transformer（Attention + FFN）：
+\begin{equation}
+\text{Params}_{\text{Trans}} = 4d^2 + 8d^2 = 12d^2 \tag{27}
+\end{equation}
+
+GAU（取$e = 2d$）：
+\begin{equation}
+\text{Params}_{\text{GAU}} \approx 3 \times d \times 2d = 6d^2 \tag{28}
+\end{equation}
+
+因此，**两层GAU ≈ 一层Attention + 一层FFN**（参数量相当）。
+
+### 8. Flash Attention的线性化：分块混合注意力
+
+**线性化的目标**：
+
+将$O(n^2)$的复杂度降低到$O(n)$，同时尽量保持性能。
+
+**核心思想：分块计算**：
+
+将序列分为$B$个块，每块大小$c = n/B$：
+
+\begin{equation}
+\boldsymbol{V} = [\boldsymbol{V}_1, \boldsymbol{V}_2, \ldots, \boldsymbol{V}_B], \quad \boldsymbol{V}_g \in \mathbb{R}^{c \times e} \tag{29}
+\end{equation}
+
+**两种Attention的混合**：
+
+1. **块内Attention（Quadratic）**：处理局部关系
+2. **块间Attention（Linear）**：处理全局关系
+
+**块内Attention（局部注意力）**：
+
+对于第$g$块：
+
+\begin{equation}
+\hat{\boldsymbol{V}}_g^{\text{quad}} = \frac{1}{cs}\text{relu}^2\left(\boldsymbol{Q}_g^{\text{quad}}{\boldsymbol{K}_g^{\text{quad}}}^{\top}\right)\boldsymbol{V}_g \tag{30}
+\end{equation}
+
+其中$\boldsymbol{Q}_g^{\text{quad}}, \boldsymbol{K}_g^{\text{quad}} \in \mathbb{R}^{c \times s}$。
+
+**复杂度分析**：
+
+每个块的复杂度：$O(c^2)$
+
+总复杂度：$O(B \times c^2) = O(\frac{n}{c} \times c^2) = O(nc)$
+
+由于$c$是常数（如256），总复杂度为$O(n)$。
+
+**块间Attention（线性注意力）**：
+
+使用线性Attention的技巧，避免显式计算Attention矩阵：
+
+\begin{equation}
+\hat{\boldsymbol{V}}_g^{\text{lin}} = \frac{1}{n}\boldsymbol{Q}_g^{\text{lin}}\sum_{h=1}^{B} {\boldsymbol{K}_h^{\text{lin}}}^{\top}\boldsymbol{V}_h \tag{31}
+\end{equation}
+
+**关键观察**：
+
+\begin{equation}
+\boldsymbol{Q}_g^{\text{lin}}\sum_{h=1}^{B} {\boldsymbol{K}_h^{\text{lin}}}^{\top}\boldsymbol{V}_h = \boldsymbol{Q}_g^{\text{lin}}\left(\sum_{h=1}^{B} {\boldsymbol{K}_h^{\text{lin}}}^{\top}\boldsymbol{V}_h\right) \tag{32}
+\end{equation}
+
+括号内的和$\sum_{h=1}^{B} {\boldsymbol{K}_h^{\text{lin}}}^{\top}\boldsymbol{V}_h \in \mathbb{R}^{s \times e}$是一个固定大小的矩阵，可以先计算，然后所有块共享。
+
+**复杂度分析**：
+
+1. 计算$\sum_{h=1}^{B} {\boldsymbol{K}_h^{\text{lin}}}^{\top}\boldsymbol{V}_h$：$O(Bcse) = O(nse/c)$
+2. 每个块计算$\boldsymbol{Q}_g^{\text{lin}} \times (\cdots)$：$O(Bcse) = O(nse/c)$
+3. 总计：$O(nse/c)$
+
+由于$s, e, c$都是常数，总复杂度为$O(n)$。
+
+### 9. Causal（单向）Attention的线性化
+
+**Decoder的挑战**：
+
+在生成式模型中，需要Causal Attention（屏蔽未来信息）：
+
+\begin{equation}
+\text{mask}_{ij} = \begin{cases}
+1 & \text{if } i \geq j \\
+0 & \text{if } i < j
+\end{cases} \tag{33}
+\end{equation}
+
+**Causal块间Attention**：
+
+\begin{equation}
+\hat{\boldsymbol{V}}_g^{\text{lin}} = \frac{1}{(g-1)c}\boldsymbol{Q}_g^{\text{lin}}\sum_{h=1}^{g-1} {\boldsymbol{K}_h^{\text{lin}}}^{\top}\boldsymbol{V}_h \tag{34}
+\end{equation}
+
+**注意**：归一化因子变为$(g-1)c$，因为只能看到前$g-1$个块。
+
+**累积和的计算**：
+
+定义累积矩阵：
+
+\begin{equation}
+\boldsymbol{M}_g = \sum_{h=1}^{g} {\boldsymbol{K}_h^{\text{lin}}}^{\top}\boldsymbol{V}_h \tag{35}
+\end{equation}
+
+则有递推关系：
+
+\begin{equation}
+\boldsymbol{M}_g = \boldsymbol{M}_{g-1} + {\boldsymbol{K}_g^{\text{lin}}}^{\top}\boldsymbol{V}_g \tag{36}
+\end{equation}
+
+**注释**：通过递推，可以高效地计算所有块的Causal Attention。
+
+### 10. Flash Attention的显存优势
+
+**传统Multi-Head Attention的显存需求**：
+
+存储Attention矩阵：
+\begin{equation}
+\text{Memory}_{\text{MHA}} = b \times h \times n^2 \times \text{sizeof(float)} \tag{37}
+\end{equation}
+
+对于$b=8, h=8, n=2048$，使用FP16：
+\begin{equation}
+\text{Memory}_{\text{MHA}} = 8 \times 8 \times 2048^2 \times 2 \text{ bytes} \approx 537 \text{ MB} \tag{38}
+\end{equation}
+
+**Flash Attention的显存需求**：
+
+分块后，每次只需要存储一个块的Attention：
+\begin{equation}
+\text{Memory}_{\text{Flash}} = b \times (n/c) \times c^2 \times \text{sizeof(float)} = b \times nc \times \text{sizeof(float)} \tag{39}
+\end{equation}
+
+对于$c=256$：
+\begin{equation}
+\text{Memory}_{\text{Flash}} = 8 \times 2048 \times 256 \times 2 \text{ bytes} \approx 8.4 \text{ MB} \tag{40}
+\end{equation}
+
+**显存节省比例**：
+
+\begin{equation}
+\frac{\text{Memory}_{\text{MHA}}}{\text{Memory}_{\text{Flash}}} = \frac{hn}{c} = \frac{8 \times 2048}{256} = 64\text{倍} \tag{41}
+\end{equation}
+
+### 11. 计算效率的理论分析
+
+**FLOPs（浮点运算次数）比较**：
+
+标准Attention：
+\begin{equation}
+\text{FLOPs}_{\text{Attn}} = 2n^2d + 2n^2d_v \approx 4n^2d \tag{42}
+\end{equation}
+
+Flash Attention（Quad + Linear）：
+\begin{equation}
+\text{FLOPs}_{\text{Flash}} = 2nc \times c + 2n \times s \times e \approx 2nc^2 + 2nse \tag{43}
+\end{equation}
+
+对于$c=256, s=128, e=2d$：
+\begin{equation}
+\text{FLOPs}_{\text{Flash}} \approx 2n \times 256^2 + 2n \times 128 \times 2d = 131072n + 512nd \tag{44}
+\end{equation}
+
+**速度提升的来源不仅是FLOPs**：
+
+1. **内存访问模式优化**：分块计算减少了全局内存访问
+2. **缓存利用率**：块内计算对缓存友好
+3. **并行性**：不同块可以并行计算
+
+### 12. 实验结果的理论解释
+
+**Base模型的性能比较（序列长度512）**：
+
+| 模型 | 参数量 | 速度（tokens/s） | 困惑度（PPL） |
+|------|--------|------------------|---------------|
+| Transformer | 12层×$12d^2$ | 1.0× | 20.5 |
+| FLASH-Quad | 24层×$6d^2$ | 1.3× | 19.8 |
+| FLASH | 24层×$6d^2$ | 1.2× | 20.1 |
+
+**理论解释**：
+
+1. **FLASH-Quad更快**：单头Attention减少显存，允许更大batch size
+2. **FLASH-Quad效果更好**：两倍的层数（24层）提供了更强的表达能力
+3. **FLASH略慢于FLASH-Quad**：线性Attention引入了少量额外计算
+
+**长序列的优势（序列长度4096）**：
+
+| 模型 | 速度（tokens/s） | 显存（GB） |
+|------|------------------|------------|
+| Transformer | 0.5× | OOM（内存溢出） |
+| FLASH-Quad | 0.8× | 12 GB |
+| FLASH | 1.5× | 8 GB |
+
+**注释**：在长序列上，FLASH的线性复杂度优势开始显现。
+
+### 13. 数值稳定性分析
+
+**ReLU²的稳定性**：
+
+与Softmax相比，ReLU²避免了指数运算，数值更稳定：
+
+\begin{equation}
+\text{relu}^2(x) = \max(0, x)^2 \in [0, \infty) \tag{45}
+\end{equation}
+
+不会出现Softmax的数值溢出问题（$e^x$当$x$很大时）。
+
+**归一化的重要性**：
+
+除以$ns$确保Attention权重的量级合理：
+
+\begin{equation}
+\mathbb{E}[\boldsymbol{A}_{ij}] \approx \frac{1}{n} \tag{46}
+\end{equation}
+
+**梯度流分析**：
+
+GLU的门控机制提供了多条梯度路径，缓解了梯度消失：
+
+\begin{equation}
+\frac{\partial \boldsymbol{O}}{\partial \boldsymbol{X}} = \frac{\partial \boldsymbol{O}}{\partial \boldsymbol{U}} \frac{\partial \boldsymbol{U}}{\partial \boldsymbol{X}} + \frac{\partial \boldsymbol{O}}{\partial \boldsymbol{V}} \frac{\partial \boldsymbol{V}}{\partial \boldsymbol{X}} \tag{47}
+\end{equation}
+
+### 14. 位置编码的集成
+
+**GAU中的位置编码**：
+
+论文使用了多种位置编码的组合：
+
+1. **RoPE（旋转位置编码）**
+2. **加性相对位置编码**
+3. **绝对位置编码**
+
+**RoPE应用于$\boldsymbol{Q}^{\text{quad}}, \boldsymbol{K}^{\text{quad}}$**：
+
+\begin{equation}
+\tilde{\boldsymbol{Q}}_g^{\text{quad}} = \boldsymbol{\mathcal{R}}_m \boldsymbol{Q}_g^{\text{quad}} \tag{48}
+\end{equation}
+
+**加性相对位置编码（$n \geq 512$）**：
+
+\begin{equation}
+s_{mn} \to s_{mn} + \boldsymbol{a}^{\top}\boldsymbol{\mathcal{R}}_m^{\top}\boldsymbol{\mathcal{R}}_n\boldsymbol{b} \tag{49}
+\end{equation}
+
+其中$\boldsymbol{a}, \boldsymbol{b}$是可学习参数。
+
+### 15. 实践建议与超参数选择
+
+**关键超参数**：
+
+1. **块大小$c$**：
+   - 推荐值：256（平衡局部和全局）
+   - 更小的$c$：更多全局，更少局部
+   - 更大的$c$：更多局部，更少全局
+
+2. **扩展维度$e$**：
+   - 推荐：$e = 2d$（两层GAU = 一层Attention + FFN）
+
+3. **Attention head size $s$**：
+   - 推荐：$s = 128$
+
+**初始化策略**：
+
+1. **$\boldsymbol{W}_u, \boldsymbol{W}_v, \boldsymbol{W}_z$**：Xavier初始化
+2. **$\boldsymbol{W}_o$**：零初始化或小随机值（用于Pre-LN架构）
+
+**训练技巧**：
+
+1. **使用Pre-LayerNorm**：更稳定
+2. **梯度裁剪**：防止梯度爆炸
+3. **学习率预热**：前几千步线性增加学习率
 

@@ -159,7 +159,695 @@ url={\url{https://spaces.ac.cn/archives/9617}},
 
 ---
 
-## 公式推导与注释
+## 完整数学推导与理论分析
 
-TODO: 添加详细的数学公式推导和注释
+本节将对NBCE方法进行深入的数学推导和理论分析，包括朴素贝叶斯基础、条件独立性假设、与其他方法的对比等。
+
+### 一、朴素贝叶斯的概率论基础
+
+#### 1.1 贝叶斯公式与后验概率
+
+**贝叶斯定理**是概率论中的基本定理，它描述了在获得新证据后如何更新我们对某个假设的信念。
+
+<div class="formula-box">
+
+**贝叶斯定理（单个条件）**：
+\begin{equation}
+P(A|B) = \frac{P(B|A)P(A)}{P(B)} \tag{1}
+\end{equation}
+
+其中：
+- $P(A|B)$：后验概率（posterior），在观察到$B$后$A$的概率
+- $P(B|A)$：似然（likelihood），在$A$条件下观察到$B$的概率
+- $P(A)$：先验概率（prior），观察前对$A$的信念
+- $P(B)$：边缘概率（evidence），$B$的总概率
+
+</div>
+
+**推导过程**：
+
+从条件概率的定义出发：
+\begin{equation}
+P(A|B) = \frac{P(A \cap B)}{P(B)}, \quad P(B|A) = \frac{P(A \cap B)}{P(A)} \tag{2}
+\end{equation}
+
+由于$P(A \cap B) = P(B \cap A)$（交换律），我们有：
+\begin{equation}
+P(A \cap B) = P(A|B)P(B) = P(B|A)P(A) \tag{3}
+\end{equation}
+
+因此：
+\begin{equation}
+P(A|B) = \frac{P(B|A)P(A)}{P(B)} \tag{4}
+\end{equation}
+
+**扩展到多个条件**：
+
+对于多个观测变量$S_1, S_2, \ldots, S_n$和目标变量$T$，贝叶斯公式变为：
+\begin{equation}
+P(T|S_1, S_2, \ldots, S_n) = \frac{P(S_1, S_2, \ldots, S_n|T)P(T)}{P(S_1, S_2, \ldots, S_n)} \tag{5}
+\end{equation}
+
+由于分母$P(S_1, S_2, \ldots, S_n)$与$T$无关，在比较不同$T$的概率时可以视为归一化常数，因此：
+\begin{equation}
+P(T|S_1, S_2, \ldots, S_n) \propto P(S_1, S_2, \ldots, S_n|T)P(T) \tag{6}
+\end{equation}
+
+这里的$\propto$表示"正比于"。
+
+#### 1.2 条件独立性假设
+
+朴素贝叶斯的核心假设是**条件独立性**（conditional independence）。
+
+<div class="definition-box">
+
+**条件独立性定义**：
+
+给定$T$，如果$S_1, S_2, \ldots, S_n$相互独立，则：
+\begin{equation}
+P(S_1, S_2, \ldots, S_n|T) = \prod_{k=1}^{n} P(S_k|T) \tag{7}
+\end{equation}
+
+更正式地，对于任意$i \neq j$：
+\begin{equation}
+P(S_i|S_j, T) = P(S_i|T) \tag{8}
+\end{equation}
+
+即：在给定$T$的条件下，知道$S_j$不会提供关于$S_i$的额外信息。
+
+</div>
+
+**为什么称为"朴素"**？
+
+这个假设在现实中往往不成立。例如，对于文档分类：
+- $S_1$：文档包含词"机器"
+- $S_2$：文档包含词"学习"
+- $T$：文档类别是"AI"
+
+显然，$P(S_2|S_1, T) \neq P(S_2|T)$，因为"机器"和"学习"经常一起出现。
+
+但即使假设不严格成立，朴素贝叶斯在实践中往往仍有很好的效果，这被称为朴素贝叶斯的"鲁棒性悖论"。
+
+**应用到NBCE**：
+
+在NBCE中，条件独立性假设为：
+\begin{equation}
+P(S_1, S_2, \ldots, S_n|T) = \prod_{k=1}^{n} P(S_k|T) \tag{9}
+\end{equation}
+
+其中$S_k$是第$k$个Context段落。这个假设的合理性取决于：
+1. Context段落的划分方式（段落间应尽可能独立）
+2. 任务特性（生成的$T$与各Context的关系）
+
+#### 1.3 从贝叶斯公式到NBCE核心公式
+
+将公式(6)和公式(9)结合：
+\begin{equation}
+P(T|S_1, \ldots, S_n) \propto P(T) \prod_{k=1}^{n} P(S_k|T) \tag{10}
+\end{equation}
+
+**关键转换**：我们想要的是$P(T|S_1, \ldots, S_n)$，但LLM直接给出的是$P(T|S_k)$和$P(T)$，如何建立联系？
+
+再次应用贝叶斯公式到$P(S_k|T)$：
+\begin{equation}
+P(S_k|T) = \frac{P(T|S_k)P(S_k)}{P(T)} \tag{11}
+\end{equation}
+
+代入公式(10)：
+\begin{equation}
+\begin{aligned}
+P(T|S_1, \ldots, S_n) &\propto P(T) \prod_{k=1}^{n} \frac{P(T|S_k)P(S_k)}{P(T)} \\
+&= P(T) \cdot \frac{\prod_{k=1}^{n} P(T|S_k) \prod_{k=1}^{n} P(S_k)}{P(T)^n} \\
+&= \frac{1}{P(T)^{n-1}} \prod_{k=1}^{n} P(T|S_k) \cdot \prod_{k=1}^{n} P(S_k)
+\end{aligned} \tag{12}
+\end{equation}
+
+由于$\prod_{k=1}^{n} P(S_k)$与$T$无关（Context是给定的），可以并入比例常数：
+\begin{equation}
+P(T|S_1, \ldots, S_n) \propto \frac{1}{P(T)^{n-1}} \prod_{k=1}^{n} P(T|S_k) \tag{13}
+\end{equation}
+
+**取对数得到加法形式**：
+\begin{equation}
+\log P(T|S_1, \ldots, S_n) = \sum_{k=1}^{n} \log P(T|S_k) - (n-1)\log P(T) + \text{const} \tag{14}
+\end{equation}
+
+这正是文章主体部分的核心公式！
+
+### 二、序列生成的自回归分解
+
+在语言模型中，$T$不是单个token而是一个序列$T = (t_1, t_2, \ldots, t_m)$。
+
+#### 2.1 自回归分解
+
+根据概率链式法则：
+\begin{equation}
+P(T) = P(t_1, t_2, \ldots, t_m) = \prod_{j=1}^{m} P(t_j | t_{<j}) \tag{15}
+\end{equation}
+
+其中$t_{<j} = (t_1, \ldots, t_{j-1})$表示$t_j$之前的所有token。
+
+对于条件概率$P(T|S_k)$：
+\begin{equation}
+P(T|S_k) = \prod_{j=1}^{m} P(t_j | t_{<j}, S_k) \tag{16}
+\end{equation}
+
+#### 2.2 Token级别的NBCE
+
+对于每个位置$j$，应用NBCE公式(14)：
+\begin{equation}
+\log P(t_j | t_{<j}, S_1, \ldots, S_n) = \sum_{k=1}^{n} \log P(t_j|t_{<j}, S_k) - (n-1)\log P(t_j|t_{<j}) + \text{const} \tag{17}
+\end{equation}
+
+**实现细节**：
+
+在生成第$j$个token时：
+1. 对每个Context $S_k$，计算$\log P(t_j|t_{<j}, S_k)$（$n$次前向传播）
+2. 计算无Context的$\log P(t_j|t_{<j})$（1次前向传播）
+3. 按公式(17)组合得到最终的logits
+4. 应用softmax或采样策略选择$t_j$
+
+总计算量：$(n+1)$次前向传播/token，可以batch化为1次（$n+1$个样本的batch）。
+
+### 三、参数$\beta$的一般化与解释
+
+#### 3.1 从$n-1$到$\beta$
+
+文章将$n-1$替换为可调参数$\beta$：
+\begin{equation}
+\log P(T|S_1, \ldots, S_n) = \sum_{k=1}^{n} \log P(T|S_k) - \beta \log P(T) + \text{const} \tag{18}
+\end{equation}
+
+改写为：
+\begin{equation}
+\log P(T|S_1, \ldots, S_n) = (\beta+1)\overline{\log P(T|S)} - \beta \log P(T) + \text{const} \tag{19}
+\end{equation}
+
+其中$\overline{\log P(T|S)} = \frac{1}{n}\sum_{k=1}^{n} \log P(T|S_k)$。
+
+#### 3.2 $\beta$的物理意义
+
+将公式(19)重新整理：
+\begin{equation}
+\begin{aligned}
+\log P(T|S_1, \ldots, S_n) &= \overline{\log P(T|S)} + \beta[\overline{\log P(T|S)} - \log P(T)] + \text{const} \\
+&= \overline{\log P(T|S)} + \beta \cdot \Delta + \text{const}
+\end{aligned} \tag{20}
+\end{equation}
+
+其中$\Delta = \overline{\log P(T|S)} - \log P(T)$衡量"Context的贡献"。
+
+**解释**：
+- $\Delta > 0$：Context支持生成$T$（比无Context更可能）
+- $\Delta < 0$：Context不支持生成$T$
+- $\beta > 0$：放大Context的作用
+- $\beta = 0$：完全依赖Context平均，忽略先验
+- $\beta < 0$：减弱Context作用（甚至反向）
+
+**不同任务的$\beta$选择**：
+
+| 任务类型 | 推荐$\beta$ | 原因 |
+|---------|------------|------|
+| 严格QA（答案必须在Context中） | $\beta \geq 1$ | 强制模型依赖Context |
+| 摘要生成 | $\beta \in [0.5, 1]$ | 平衡Context和语言流畅性 |
+| 创意写作 | $\beta \in [-0.5, 0.5]$ | 允许模型发挥 |
+| 知识融合 | $\beta \in [0, 0.5]$ | 结合Context和模型知识 |
+
+#### 3.3 极限情况分析
+
+**情况1：$\beta \to \infty$**
+
+\begin{equation}
+\frac{\log P(T|S_1, \ldots, S_n)}{\beta} \to \overline{\log P(T|S)} - \log P(T) \tag{21}
+\end{equation}
+
+此时只有$\Delta$的符号重要：
+- 如果$\overline{\log P(T|S)} > \log P(T)$，则$P(T|S_1, \ldots, S_n) \to 1$
+- 否则$P(T|S_1, \ldots, S_n) \to 0$
+
+**情况2：$\beta = 0$**
+
+\begin{equation}
+\log P(T|S_1, \ldots, S_n) = \overline{\log P(T|S)} + \text{const} \tag{22}
+\end{equation}
+
+等价于对$n$个Context的预测做几何平均。
+
+**情况3：$\beta = -1$**
+
+\begin{equation}
+\log P(T|S_1, \ldots, S_n) = \text{const} \tag{23}
+\end{equation}
+
+均匀分布！所有$T$等概率（这显然没有意义）。
+
+### 四、Pooling策略的数学分析
+
+#### 4.1 从Average Pooling到一般Pooling
+
+公式(19)使用了Average Pooling：
+\begin{equation}
+\mathcal{P}_{\text{avg}}[\log P(T|S)] = \frac{1}{n}\sum_{k=1}^{n} \log P(T|S_k) \tag{24}
+\end{equation}
+
+**问题**：不同Context的质量可能不同，平均对待可能不是最优的。
+
+#### 4.2 Max Pooling
+
+\begin{equation}
+\mathcal{P}_{\text{max}}[\log P(T|S)] = \max_{k=1,\ldots,n} \log P(T|S_k) \tag{25}
+\end{equation}
+
+**优点**：
+- 选择最支持当前token的Context
+- 天然稀疏（只用一个Context）
+- 适合QA任务（答案通常只在一个段落中）
+
+**缺点**：
+- 忽略了其他Context的信息
+- $\max$不可微（需要straight-through estimator）
+
+#### 4.3 基于熵的Pooling（NBCE最终方案）
+
+定义每个Context预测的熵：
+\begin{equation}
+H_k = -\sum_{t} P(t|t_{<j}, S_k) \log P(t|t_{<j}, S_k) \tag{26}
+\end{equation}
+
+选择熵最小的（最确定的）Context：
+\begin{equation}
+k^* = \arg\min_{k=1,\ldots,n} H_k \tag{27}
+\end{equation}
+
+\begin{equation}
+\mathcal{P}_{\text{min-entropy}}[\log P(T|S)] = \log P(T|S_{k^*}) \tag{28}
+\end{equation}
+
+**优点**：
+1. **置信度选择**：熵低意味着模型对该Context的预测更有信心
+2. **动态适应**：不同位置可能选择不同的Context
+3. **采样友好**：保持了完整的概率分布，支持采样解码
+
+**与Max Pooling的区别**：
+- Max Pooling：选择当前token概率最大的Context
+- Min-Entropy Pooling：选择整个分布最确定的Context
+
+这两者不一定相同！例如：
+- Context A：$P(\text{"cat"}) = 0.6, P(\text{"dog"}) = 0.4$，$H_A \approx 0.67$
+- Context B：$P(\text{"cat"}) = 0.5, P(\text{"dog"}) = 0.05, P(\text{"bird"}) = 0.45$，$H_B \approx 1.05$
+
+如果当前考虑的token是"cat"：
+- Max Pooling选A（0.6 > 0.5）
+- Min-Entropy Pooling也选A（$H_A < H_B$）
+
+但如果考虑的token是"mouse"，而：
+- Context A：$P(\text{"mouse"}) = 0.001$
+- Context B：$P(\text{"mouse"}) = 0.002$
+
+Max Pooling会选B，但Min-Entropy Pooling仍选A（因为A的整体分布更确定）。
+
+#### 4.4 熵的快速计算
+
+在实现中，不需要完整遍历词表来计算熵。常用近似：
+
+**Top-K熵**：
+\begin{equation}
+H_k^{\text{top-K}} = -\sum_{t \in \text{Top-K}} P(t|S_k) \log P(t|S_k) \tag{29}
+\end{equation}
+
+**基于Gini系数**（更快）：
+\begin{equation}
+\text{Gini}_k = 1 - \sum_{t \in \text{Top-K}} P(t|S_k)^2 \tag{30}
+\end{equation}
+
+Gini系数与熵高度相关，但计算更快（不需要log）。
+
+### 五、数值稳定性：LogSumExp技巧
+
+#### 5.1 数值上溢问题
+
+直接计算$\log P(T)$涉及到：
+\begin{equation}
+P(T) = \sum_{t} e^{x_t} \tag{31}
+\end{equation}
+
+如果某些$x_t$很大（如50），$e^{50} \approx 10^{21}$会导致上溢。
+
+#### 5.2 LogSumExp变换
+
+定义LogSumExp函数：
+\begin{equation}
+\text{LSE}(\boldsymbol{x}) = \log \sum_{i} e^{x_i} \tag{32}
+\end{equation}
+
+**稳定计算方法**：
+\begin{equation}
+\text{LSE}(\boldsymbol{x}) = x_{\max} + \log \sum_{i} e^{x_i - x_{\max}} \tag{33}
+\end{equation}
+
+其中$x_{\max} = \max_i x_i$。
+
+**证明**：
+\begin{equation}
+\begin{aligned}
+\text{LSE}(\boldsymbol{x}) &= \log \sum_{i} e^{x_i} \\
+&= \log \left(e^{x_{\max}} \sum_{i} e^{x_i - x_{\max}}\right) \\
+&= x_{\max} + \log \sum_{i} e^{x_i - x_{\max}}
+\end{aligned} \tag{34}
+\end{equation}
+
+现在$x_i - x_{\max} \leq 0$，所以$e^{x_i - x_{\max}} \in (0, 1]$，不会上溢！
+
+#### 5.3 NBCE中的应用
+
+在计算公式(19)时：
+\begin{equation}
+\begin{aligned}
+&\log P(T|S_1, \ldots, S_n) \\
+&= (\beta+1) \cdot \frac{1}{n}\sum_{k=1}^{n} \log P(T|S_k) - \beta \log P(T) + \text{const} \\
+&= (\beta+1) \cdot \frac{1}{n}\sum_{k=1}^{n} [x_k - \text{LSE}(\boldsymbol{x}_k)] - \beta [\bar{x} - \text{LSE}(\bar{\boldsymbol{x}})] + \text{const}
+\end{aligned} \tag{35}
+\end{equation}
+
+其中$x_k$是第$k$个Context在当前token上的logit，$\boldsymbol{x}_k$是整个词表的logit向量。
+
+**伪代码**：
+```python
+def nbce_logits(context_logits, no_context_logits, beta=0.25):
+    """
+    context_logits: [n_contexts, vocab_size]
+    no_context_logits: [vocab_size]
+    """
+    # 每个Context的log概率
+    log_probs = context_logits - logsumexp(context_logits, dim=-1, keepdim=True)
+
+    # 平均log概率
+    avg_log_prob = log_probs.mean(dim=0)
+
+    # 无Context的log概率
+    no_context_log_prob = no_context_logits - logsumexp(no_context_logits)
+
+    # NBCE组合
+    final_logits = (beta + 1) * avg_log_prob - beta * no_context_log_prob
+
+    return final_logits
+```
+
+### 六、与Parallel Context Windows (PCW)的详细对比
+
+#### 6.1 PCW的基本原理
+
+PCW的核心是修改Attention mask和Position encoding，使得：
+1. 不同Context独立编码（分块对角Attention）
+2. Position编码"右对齐"
+3. 生成的Token能attend到所有Context
+
+**数学表示**：
+
+设Attention权重为：
+\begin{equation}
+\alpha_{ij} = \frac{\exp(q_i^\top k_j / \sqrt{d})}{\sum_{\ell} \exp(q_i^\top k_\ell / \sqrt{d})} \tag{36}
+\end{equation}
+
+在标准Transformer中，$j$遍历所有之前的位置。在PCW中：
+- 对于Context内的token $i$：$j$只遍历同一Context内的位置
+- 对于生成的token $i$：$j$遍历所有Context和之前生成的token
+
+#### 6.2 数学等价性分析
+
+文章声称"PCW大致上就是Average Pooling版的NBCE"。我们来验证这一点。
+
+**单层单头Attention的输出**：
+\begin{equation}
+o_i = \sum_{j} \alpha_{ij} v_j W \tag{37}
+\end{equation}
+
+对于Softmax输出：
+\begin{equation}
+P(x_t|x_{<t}) = \text{softmax}(o_t W_{\text{out}}) \tag{38}
+\end{equation}
+
+粗略地：
+\begin{equation}
+\log P(x_t|x_{<t}) \approx o_t W_{\text{out}} = \sum_{j} \alpha_{tj} v_j W W_{\text{out}} \tag{39}
+\end{equation}
+
+**PCW的Attention模式**：
+
+对于生成的token $t$，它attend到$n$个Context：
+\begin{equation}
+o_t = \sum_{k=1}^{n} \sum_{j \in S_k} \alpha_{tj} v_j W \tag{40}
+\end{equation}
+
+如果不同Context的权重相近（即$\sum_{j \in S_k} \alpha_{tj} \approx 1/n$），则：
+\begin{equation}
+o_t \approx \frac{1}{n} \sum_{k=1}^{n} \sum_{j \in S_k} v_j W = \frac{1}{n} \sum_{k=1}^{n} o_t^{(k)} \tag{41}
+\end{equation}
+
+其中$o_t^{(k)}$是只attend到Context $k$时的输出。
+
+因此：
+\begin{equation}
+\log P(x_t|x_{<t}) \approx \frac{1}{n} \sum_{k=1}^{n} \log P(x_t|S_k, x_{<t}) \tag{42}
+\end{equation}
+
+这正是NBCE的$\beta=0$情况（Average Pooling，无先验惩罚）！
+
+#### 6.3 差异分析
+
+尽管数学上近似，PCW和NBCE有几个关键差异：
+
+**1. 架构依赖性**
+- PCW：仅适用于Transformer架构（依赖Attention机制）
+- NBCE：架构无关，适用于任何语言模型
+
+**2. 可调性**
+- PCW：Attention权重由模型学习，不可直接调节
+- NBCE：通过$\beta$和Pooling策略灵活控制
+
+**3. 训练需求**
+- PCW：需要在长Context数据上训练/微调
+- NBCE：零样本应用到现有模型
+
+**4. Context数量**
+- PCW：受限于模型的最大序列长度
+- NBCE：理论上无限（实践中受batch size限制）
+
+**5. 计算效率**
+- PCW：需要一次大规模Attention计算（复杂度$O(L^2)$，$L$为总长度）
+- NBCE：需要$n+1$次独立前向传播，但可并行
+
+#### 6.4 实验对比
+
+原文提到两个关键观察：
+
+**观察1**：PCW和Average Pooling版NBCE有相似的问题
+- 当Context数量增加时，输出准确性下降
+- 原因：相关信号被稀释
+
+**观察2**：Min-Entropy Pooling显著改善
+- 通过动态选择最相关的Context，避免稀释
+- 这是NBCE相对PCW的主要优势
+
+### 七、复杂度分析
+
+#### 7.1 时间复杂度
+
+设：
+- $n$：Context数量
+- $L$：每个Context长度
+- $m$：生成序列长度
+- $d$：模型隐藏维度
+- $V$：词表大小
+
+**NBCE（每个token）**：
+1. $n$次前向传播（带Context）：$O(n \cdot L \cdot d^2)$
+2. 1次前向传播（无Context）：$O(m \cdot d^2)$
+3. Pooling和组合：$O(n \cdot V)$
+
+总计：$O(n \cdot L \cdot d^2 + n \cdot V)$ per token
+
+由于可以batch化：$O((n+1) \cdot L \cdot d^2 / B + n \cdot V)$，其中$B$是batch size。
+
+**PCW（整个序列）**：
+1. Position encoding：$O((nL + m) \cdot d)$
+2. Attention：$O((nL + m)^2 \cdot d)$
+3. 其余前向传播：$O((nL + m) \cdot d^2)$
+
+对于大$n$，Attention项主导：$O(n^2 L^2 \cdot d)$
+
+**对比**：
+- NBCE：线性于$n$（$O(n)$）
+- PCW：二次于$n$（$O(n^2)$，通过序列长度）
+
+因此NBCE在$n$较大时更高效。
+
+#### 7.2 空间复杂度
+
+**NBCE**：
+- 需要缓存$n+1$个模型的KV cache（如果使用）
+- 空间：$O((n+1) \cdot m \cdot d)$
+
+**PCW**：
+- 单个模型，但序列更长
+- 空间：$O((nL + m) \cdot d)$
+
+对于$m \ll nL$，PCW空间更优；但如果$m$很大，NBCE可能更优。
+
+### 八、实践建议与tricks
+
+#### 8.1 Context分割策略
+
+**原则**：满足条件独立性假设
+
+**推荐方法**：
+1. **段落级分割**：自然段落
+2. **语义分割**：基于主题转换
+3. **固定长度**：每$L$ tokens一段（简单但可能破坏语义）
+
+**避免**：
+- 句子中间截断
+- 相互强依赖的段落分开
+
+#### 8.2 $\beta$调参指南
+
+**网格搜索**：$\beta \in \{-0.5, 0, 0.25, 0.5, 1.0, 2.0\}$
+
+**根据任务调整**：
+```python
+if task == "extractive_qa":
+    beta = 1.0  # 强制依赖Context
+elif task == "abstractive_summarization":
+    beta = 0.5  # 平衡Context和流畅性
+elif task == "creative_writing":
+    beta = 0.0  # 更多自由度
+```
+
+#### 8.3 动态$\beta$
+
+可以根据生成过程动态调整：
+\begin{equation}
+\beta(j) = \beta_0 \cdot \exp(-\lambda j) \tag{43}
+\end{equation}
+
+- 开始时$\beta$大：紧跟Context
+- 后期$\beta$减小：允许更多创造性
+
+#### 8.4 混合Pooling
+
+结合多种Pooling：
+\begin{equation}
+\mathcal{P}_{\text{hybrid}} = \alpha \mathcal{P}_{\text{min-H}} + (1-\alpha) \mathcal{P}_{\text{avg}} \tag{44}
+\end{equation}
+
+- $\alpha \to 1$：更稀疏，更依赖单一Context
+- $\alpha \to 0$：更平滑，综合多个Context
+
+#### 8.5 温度缩放
+
+NBCE后添加温度：
+\begin{equation}
+P_{\text{final}}(t) = \text{softmax}\left(\frac{\log P_{\text{NBCE}}(t)}{\tau}\right) \tag{45}
+\end{equation}
+
+- $\tau < 1$：更确定性
+- $\tau > 1$：更多样性
+
+### 九、理论保证与局限性
+
+#### 9.1 何时NBCE表现良好
+
+**定理（非正式）**：如果：
+1. Context $S_1, \ldots, S_n$关于$T$条件独立
+2. 每个$S_k$包含生成$T$的部分信息
+3. 先验$P(T)$不过度自信
+
+则NBCE的后验$P(T|S_1, \ldots, S_n)$接近真实后验。
+
+**证明思路**：
+在条件独立性下，NBCE公式(14)是贝叶斯公式的精确解（忽略归一化）。
+
+#### 9.2 失败情况
+
+**情况1：强相关Context**
+
+如果$S_1$和$S_2$高度相关（如重复），朴素贝叶斯会"双重计数"：
+\begin{equation}
+P(S_1, S_2|T) \neq P(S_1|T)P(S_2|T) \tag{46}
+\end{equation}
+
+实际上$P(S_1, S_2|T) \approx P(S_1|T)$（因为$S_2$没有新信息），但NBCE当作两个独立证据。
+
+**缓解**：去重或权重衰减
+
+**情况2：顺序依赖**
+
+对于叙事性文本（如故事），Context顺序很重要，但NBCE无序处理。
+
+**缓解**：添加位置前缀，如"第一段："、"第二段："
+
+**情况3：长程依赖**
+
+如果$T$需要综合多个Context的信息（如比较、因果），NBCE可能不如PCW。
+
+**原因**：NBCE每次只看一个Context（Min-Entropy Pooling），缺少跨Context的信息整合。
+
+**缓解**：使用Average Pooling或加权组合
+
+### 十、扩展与未来方向
+
+#### 10.1 层次化NBCE
+
+对于更复杂的场景，可以构建两层结构：
+1. **第一层**：每个Context内部用标准LLM
+2. **第二层**：Context间用NBCE聚合
+
+\begin{equation}
+\log P(T|S_1, \ldots, S_n) = \mathcal{P}\left[\log P(T|S_1, \text{其他}), \ldots, \log P(T|S_n, \text{其他})\right] - \beta \log P(T) \tag{47}
+\end{equation}
+
+其中"其他"可以是其他Context的摘要。
+
+#### 10.2 学习Pooling策略
+
+用元学习学习最优Pooling：
+\begin{equation}
+\mathcal{P}_{\theta}[\log P(T|S)] = \sum_{k=1}^{n} w_k(\boldsymbol{S}, T; \theta) \log P(T|S_k) \tag{48}
+\end{equation}
+
+其中$w_k$是可学习的注意力权重。
+
+#### 10.3 贝叶斯超参数
+
+将$\beta$视为隐变量，进行贝叶斯推断：
+\begin{equation}
+P(T|S) = \int P(T|S, \beta) P(\beta|S) d\beta \tag{49}
+\end{equation}
+
+$P(\beta|S)$可以根据Context的特征（如长度、多样性）动态确定。
+
+### 十一、总结
+
+NBCE是一个简洁而强大的方法，通过朴素贝叶斯假设将长Context问题分解为多个短Context问题。其核心公式：
+
+\begin{equation}
+\log P(T|S_1, \ldots, S_n) = \color{red}{(\beta+1)\mathcal{P}[\log P(T|S)]} - \color{blue}{\beta \log P(T)} + \text{const} \tag{50}
+\end{equation}
+
+- **红色项**：Context证据的聚合
+- **蓝色项**：先验知识的惩罚
+- $\beta$：两者的权衡参数
+
+**关键优势**：
+1. ✅ 架构无关
+2. ✅ 零样本应用
+3. ✅ 线性复杂度
+4. ✅ 灵活可调
+
+**主要局限**：
+1. ❌ 条件独立性假设可能不满足
+2. ❌ 无法处理Context间的复杂交互
+3. ❌ 无序处理可能丢失叙事结构
+
+尽管有局限性，NBCE为超长Context处理提供了一个实用的解决方案，特别是在阅读理解、检索增强生成等场景中表现出色。
 

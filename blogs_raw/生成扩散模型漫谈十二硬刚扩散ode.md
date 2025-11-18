@@ -142,5 +142,337 @@ url={\url{https://spaces.ac.cn/archives/9280}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 1. ODE与可逆变换的数学基础
+
+#### 1.1 ODE定义的变换
+
+考虑一阶ODE系统：
+
+$$
+\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{f}_t(\boldsymbol{x}_t), \quad t \in [0, T] \tag{1}
+$$
+
+**存在唯一性定理**：若$\boldsymbol{f}_t$满足Lipschitz条件：
+
+$$
+\|\boldsymbol{f}_t(\boldsymbol{x}) - \boldsymbol{f}_t(\boldsymbol{y})\| \leq L\|\boldsymbol{x} - \boldsymbol{y}\| \tag{2}
+$$
+
+则给定初值$\boldsymbol{x}_0$，存在唯一解$\boldsymbol{x}_t$。
+
+**可逆性**：定义映射$\Phi_{0 \to T}: \boldsymbol{x}_0 \mapsto \boldsymbol{x}_T$。其逆映射$\Phi_{T \to 0}$由反向ODE定义：
+
+$$
+\frac{d\boldsymbol{x}_t}{dt} = -\boldsymbol{f}_t(\boldsymbol{x}_t) \tag{3}
+$$
+
+#### 1.2 离散化与概率流
+
+**Euler离散化**：
+
+$$
+\boldsymbol{x}_{t+\Delta t} = \boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t \tag{4}
+$$
+
+这定义了一系列确定性变换$\boldsymbol{T}_{\Delta t}: \boldsymbol{x}_t \mapsto \boldsymbol{x}_{t+\Delta t}$。
+
+### 2. 变量变换公式与雅可比行列式
+
+#### 2.1 概率密度的变换
+
+**定理2.1**（变量变换公式）：设$\boldsymbol{y} = \boldsymbol{g}(\boldsymbol{x})$是可逆变换，则概率密度满足：
+
+$$
+p_Y(\boldsymbol{y}) = p_X(\boldsymbol{g}^{-1}(\boldsymbol{y})) \left|\det \frac{\partial \boldsymbol{g}^{-1}}{\partial \boldsymbol{y}}\right| = p_X(\boldsymbol{x}) \left|\det \frac{\partial \boldsymbol{g}}{\partial \boldsymbol{x}}\right|^{-1} \tag{5}
+$$
+
+**推导**：从测度守恒$p_X(\boldsymbol{x})d\boldsymbol{x} = p_Y(\boldsymbol{y})d\boldsymbol{y}$出发：
+
+$$
+p_X(\boldsymbol{x})d\boldsymbol{x} = p_Y(\boldsymbol{g}(\boldsymbol{x})) \left|\det \frac{\partial \boldsymbol{g}}{\partial \boldsymbol{x}}\right| d\boldsymbol{x} \tag{6}
+$$
+
+#### 2.2 ODE诱导的雅可比
+
+**计算**：对(4)求导，记$\mathbf{J}_t = \frac{\partial \boldsymbol{f}_t}{\partial \boldsymbol{x}_t}$：
+
+$$
+\frac{\partial \boldsymbol{x}_{t+\Delta t}}{\partial \boldsymbol{x}_t} = \boldsymbol{I} + \mathbf{J}_t \Delta t \tag{7}
+$$
+
+**行列式近似**（利用$\det(\boldsymbol{I} + \epsilon \mathbf{A}) \approx 1 + \epsilon \text{Tr}(\mathbf{A})$）：
+
+$$
+\det\left(\frac{\partial \boldsymbol{x}_{t+\Delta t}}{\partial \boldsymbol{x}_t}\right) = \det(\boldsymbol{I} + \mathbf{J}_t \Delta t) \approx 1 + \text{Tr}(\mathbf{J}_t) \Delta t = 1 + (\nabla \cdot \boldsymbol{f}_t) \Delta t \tag{8}
+$$
+
+其中$\nabla \cdot \boldsymbol{f}_t = \sum_{i=1}^d \frac{\partial f_{t,i}}{\partial x_{t,i}}$是散度。
+
+**进一步近似**：
+
+$$
+1 + (\nabla \cdot \boldsymbol{f}_t) \Delta t \approx \exp\left((\nabla \cdot \boldsymbol{f}_t) \Delta t\right) \tag{9}
+$$
+
+（利用$e^x \approx 1 + x$）
+
+#### 2.3 对数密度的变化
+
+**结合(6)和(9)**：
+
+$$
+\log p_t(\boldsymbol{x}_t) = \log p_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t}) - \log \left|\det \frac{\partial \boldsymbol{x}_{t+\Delta t}}{\partial \boldsymbol{x}_t}\right| \tag{10}
+$$
+
+$$
+\log p_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t}) - \log p_t(\boldsymbol{x}_t) \approx -(\nabla_{\boldsymbol{x}_t} \cdot \boldsymbol{f}_t) \Delta t \tag{11}
+$$
+
+### 3. 从泰勒展开到Fokker-Planck方程
+
+#### 3.1 联合泰勒展开
+
+假设$p_t(\boldsymbol{x}_t)$光滑，对$\log p_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t})$在$(\boldsymbol{x}_t, t)$处泰勒展开：
+
+$$
+\begin{aligned}
+\log p_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t}) &\approx \log p_t(\boldsymbol{x}_t) + \frac{\partial \log p_t}{\partial t} \Delta t \\
+&\quad + \langle \nabla_{\boldsymbol{x}} \log p_t, \boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t \rangle + O(\Delta t^2)
+\end{aligned} \tag{12}
+$$
+
+代入$\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t = \boldsymbol{f}_t \Delta t$：
+
+$$
+\log p_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t}) - \log p_t(\boldsymbol{x}_t) \approx \frac{\partial \log p_t}{\partial t} \Delta t + \langle \nabla_{\boldsymbol{x}} \log p_t, \boldsymbol{f}_t \rangle \Delta t \tag{13}
+$$
+
+#### 3.2 匹配两种推导
+
+**对比(11)和(13)**：
+
+$$
+-(\nabla \cdot \boldsymbol{f}_t) \Delta t = \left[\frac{\partial \log p_t}{\partial t} + \langle \nabla_{\boldsymbol{x}} \log p_t, \boldsymbol{f}_t \rangle\right] \Delta t \tag{14}
+$$
+
+消去$\Delta t$：
+
+$$
+\frac{\partial \log p_t}{\partial t} + \boldsymbol{f}_t \cdot \nabla_{\boldsymbol{x}} \log p_t + \nabla_{\boldsymbol{x}} \cdot \boldsymbol{f}_t = 0 \tag{15}
+$$
+
+**整理为连续性方程**：
+
+$$
+\frac{\partial p_t}{\partial t} + \nabla_{\boldsymbol{x}} \cdot (p_t \boldsymbol{f}_t) = 0 \tag{16}
+$$
+
+这正是**Fokker-Planck方程**（扩散项$g_t = 0$的情形）。
+
+### 4. 梯度流形式与热传导方程
+
+#### 4.1 Score函数参数化
+
+**假设**：$\boldsymbol{f}_t$取梯度流形式：
+
+$$
+\boldsymbol{f}_t(\boldsymbol{x}_t) = -D_t \nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t) \tag{17}
+$$
+
+其中$D_t > 0$是扩散系数（标量）。
+
+**动机**：
+- 几何上，这是$-\log p_t$的梯度下降方向
+- 从高概率区域向低概率区域流动（前向）
+- 反向ODE则从低概率向高概率流动（生成）
+
+#### 4.2 推导热传导方程
+
+将(17)代入(16)：
+
+$$
+\frac{\partial p_t}{\partial t} = -\nabla_{\boldsymbol{x}} \cdot \left(-D_t p_t \nabla_{\boldsymbol{x}} \log p_t\right) = \nabla_{\boldsymbol{x}} \cdot \left(D_t \nabla_{\boldsymbol{x}} p_t\right) \tag{18}
+$$
+
+假设$D_t$与$\boldsymbol{x}_t$无关：
+
+$$
+\frac{\partial p_t}{\partial t} = D_t \nabla_{\boldsymbol{x}}^2 p_t \tag{19}
+$$
+
+这是经典的**热传导方程**（或扩散方程）。
+
+### 5. 热传导方程的求解
+
+#### 5.1 傅里叶变换方法
+
+**定义傅里叶变换**：
+
+$$
+\mathcal{F}_t(\boldsymbol{\omega}) = \int e^{-i\boldsymbol{\omega} \cdot \boldsymbol{x}_t} p_t(\boldsymbol{x}_t) d\boldsymbol{x}_t \tag{20}
+$$
+
+**变换性质**：$\nabla_{\boldsymbol{x}}^2 \leftrightarrow -\|\boldsymbol{\omega}\|^2$
+
+**变换后的ODE**：对(19)两边做傅里叶变换：
+
+$$
+\frac{\partial \mathcal{F}_t}{\partial t} = -D_t \|\boldsymbol{\omega}\|^2 \mathcal{F}_t \tag{21}
+$$
+
+**求解**：这是关于$t$的常微分方程，通解为：
+
+$$
+\mathcal{F}_t(\boldsymbol{\omega}) = \mathcal{F}_0(\boldsymbol{\omega}) \exp\left(-\|\boldsymbol{\omega}\|^2 \int_0^t D_s ds\right) \tag{22}
+$$
+
+定义：
+
+$$
+\sigma_t^2 := 2\int_0^t D_s ds \quad \Leftrightarrow \quad D_t = \frac{1}{2}\frac{d\sigma_t^2}{dt} = \dot{\sigma}_t \sigma_t \tag{23}
+$$
+
+（假设$\sigma_0 = 0$）
+
+则：
+
+$$
+\mathcal{F}_t(\boldsymbol{\omega}) = \mathcal{F}_0(\boldsymbol{\omega}) \exp\left(-\frac{\sigma_t^2}{2}\|\boldsymbol{\omega}\|^2\right) \tag{24}
+$$
+
+#### 5.2 逆变换与卷积
+
+**关键观察**：$\exp(-\frac{\sigma_t^2}{2}\|\boldsymbol{\omega}\|^2)$是$\mathcal{N}(\mathbf{0}, \sigma_t^2\boldsymbol{I})$的傅里叶变换。
+
+**卷积定理**：频域乘积对应空域卷积：
+
+$$
+p_t(\boldsymbol{x}_t) = \int \mathcal{N}(\boldsymbol{x}_t; \boldsymbol{x}_0, \sigma_t^2\boldsymbol{I}) p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 \tag{25}
+$$
+
+**等价表述**（随机变量形式）：
+
+$$
+\boldsymbol{x}_t = \boldsymbol{x}_0 + \sigma_t \boldsymbol{\varepsilon}, \quad \boldsymbol{x}_0 \sim p_0, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I}) \tag{26}
+$$
+
+**验证**：这正是高斯扩散过程的形式！
+
+### 6. 完整的生成模型
+
+#### 6.1 前向过程与终态分布
+
+**前向ODE**（数据→噪声）：
+
+$$
+\frac{d\boldsymbol{x}_t}{dt} = -D_t \nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t), \quad t: 0 \to T \tag{27}
+$$
+
+**终态分析**：当$\sigma_T \to \infty$时，由(26)：
+
+$$
+p_T(\boldsymbol{x}_T) = \int \mathcal{N}(\boldsymbol{x}_T; \boldsymbol{x}_0, \sigma_T^2\boldsymbol{I}) p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 \approx \mathcal{N}(\mathbf{0}, \sigma_T^2\boldsymbol{I}) \tag{28}
+$$
+
+（当$\sigma_T^2 \gg \text{Var}[p_0]$时成立）
+
+#### 6.2 反向过程与生成
+
+**反向ODE**（噪声→数据）：
+
+$$
+\frac{d\boldsymbol{x}_t}{dt} = D_t \nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t), \quad t: T \to 0 \tag{29}
+$$
+
+**采样算法**：
+1. 采样$\boldsymbol{x}_T \sim \mathcal{N}(\mathbf{0}, \sigma_T^2\boldsymbol{I})$
+2. 数值求解(29)，得到$\boldsymbol{x}_0$
+
+**核心问题**：需要知道score function $\nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t)$。
+
+### 7. 得分匹配与模型训练
+
+#### 7.1 条件得分匹配
+
+**目标**：训练神经网络$\boldsymbol{s}_\theta(\boldsymbol{x}_t, t)$逼近$\nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t)$。
+
+**条件得分的精确形式**：由(25)的条件分布：
+
+$$
+p(\boldsymbol{x}_0|\boldsymbol{x}_t) = \frac{\mathcal{N}(\boldsymbol{x}_t; \boldsymbol{x}_0, \sigma_t^2\boldsymbol{I}) p_0(\boldsymbol{x}_0)}{p_t(\boldsymbol{x}_t)} \tag{30}
+$$
+
+计算score：
+
+$$
+\nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t) = \nabla_{\boldsymbol{x}_t} \log \int \mathcal{N}(\boldsymbol{x}_t; \boldsymbol{x}_0, \sigma_t^2\boldsymbol{I}) p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 \tag{31}
+$$
+
+**条件期望表示**：
+
+$$
+\nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t) = \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\nabla_{\boldsymbol{x}_t} \log \mathcal{N}(\boldsymbol{x}_t; \boldsymbol{x}_0, \sigma_t^2\boldsymbol{I})\right] \tag{32}
+$$
+
+$$
+= \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[-\frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{\sigma_t^2}\right] = -\frac{1}{\sigma_t^2}\mathbb{E}[\boldsymbol{x}_t - \boldsymbol{x}_0 | \boldsymbol{x}_t] \tag{33}
+$$
+
+#### 7.2 训练目标
+
+**定理7.1**（去噪得分匹配）：最小化以下目标等价于得分匹配：
+
+$$
+\mathcal{L} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}}\left[\left\|\boldsymbol{s}_\theta(\boldsymbol{x}_t, t) - \nabla_{\boldsymbol{x}_t} \log \mathcal{N}(\boldsymbol{x}_t; \boldsymbol{x}_0, \sigma_t^2\boldsymbol{I})\right\|^2\right] \tag{34}
+$$
+
+其中$\boldsymbol{x}_t = \boldsymbol{x}_0 + \sigma_t \boldsymbol{\varepsilon}$，$\boldsymbol{\varepsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})$。
+
+**简化形式**（噪声预测）：
+
+$$
+\nabla_{\boldsymbol{x}_t} \log \mathcal{N}(\boldsymbol{x}_t; \boldsymbol{x}_0, \sigma_t^2\boldsymbol{I}) = -\frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{\sigma_t^2} = -\frac{\boldsymbol{\varepsilon}}{\sigma_t} \tag{35}
+$$
+
+因此等价于训练噪声预测网络$\boldsymbol{\epsilon}_\theta$：
+
+$$
+\mathcal{L}_{\text{simple}} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}}\left[\|\boldsymbol{\epsilon}_\theta(\boldsymbol{x}_0 + \sigma_t\boldsymbol{\varepsilon}, t) - \boldsymbol{\varepsilon}\|^2\right] \tag{36}
+$$
+
+### 8. 总结与洞察
+
+#### 8.1 核心公式链
+
+$$
+\text{ODE} \xrightarrow{\text{雅可比}} \text{连续性方程} \xrightarrow{\text{梯度流}} \text{热传导方程} \xrightarrow{\text{傅里叶}} \text{高斯卷积}
+$$
+
+#### 8.2 与DDIM的联系
+
+**DDIM采样公式**回顾：
+
+$$
+\boldsymbol{x}_{t-1} = \sqrt{\bar{\alpha}_{t-1}}\underbrace{\frac{\boldsymbol{x}_t - \sqrt{1-\bar{\alpha}_t}\boldsymbol{\epsilon}_\theta}{\sqrt{\bar{\alpha}_t}}}_{\text{预测的}\boldsymbol{x}_0} + \sqrt{1-\bar{\alpha}_{t-1}}\boldsymbol{\epsilon}_\theta \tag{37}
+$$
+
+**本文方法**：通过ODE直接推导，得到：
+
+$$
+d\boldsymbol{x}_t = \dot{\sigma}_t \sigma_t \nabla_{\boldsymbol{x}_t} \log p_t(\boldsymbol{x}_t) dt \approx \frac{\dot{\sigma}_t}{\sigma_t}(\boldsymbol{x}_t - \boldsymbol{x}_0) dt \tag{38}
+$$
+
+（利用$\nabla \log p_t \approx -\frac{\boldsymbol{x}_t - \mathbb{E}[\boldsymbol{x}_0|\boldsymbol{x}_t]}{\sigma_t^2}$）
+
+**统一性**：选择$\sigma_t = \sqrt{1-\bar{\alpha}_t}$时，两者一致！
+
+#### 8.3 优势
+
+1. **直接性**：无需通过SDE→ODE的转换
+2. **清晰性**：热传导方程有明确的物理解释
+3. **灵活性**：可选择不同的$\sigma_t(t)$调度
+
+---
+
+**最终总结**："硬刚"ODE提供了扩散模型的第一性原理推导，从连续微分方程出发，通过雅可比行列式和热传导方程，直接得到高斯扩散过程，绕过了SDE的随机性，强调了确定性ODE的本质。
 

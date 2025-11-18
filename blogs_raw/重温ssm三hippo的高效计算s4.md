@@ -264,5 +264,526 @@ url={\url{https://spaces.ac.cn/archives/10162}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+本节提供S4算法的详细数学推导,包括DPLR分解、Woodbury恒等式、Cauchy核加速等核心技术的完整证明。
+
+### 一、DPLR分解的完整推导
+
+#### 1.1 对角加低秩(DPLR)分解的动机
+
+对于HiPPO-LegS矩阵$A$,我们希望找到一种表示形式,使得计算$(I - zA)^{-1}$变得高效。直接对角化$A$存在数值稳定性问题,因此我们寻求"对角+低秩"的分解形式。
+
+**定理1.1 (DPLR分解存在性)**: 对于HiPPO-LegS矩阵$A$,存在酉矩阵$U$、对角矩阵$\Lambda$和列向量$u,v$,使得:
+\begin{equation}
+A = U^*(\Lambda - uv^*)U \tag{1}
+\end{equation}
+
+**证明**:
+
+步骤1: 回顾HiPPO-LegS矩阵的定义:
+\begin{equation}
+A_{n,k} = \left\{\begin{array}{ll}
+n\delta_{n,k} - \sqrt{2n+1}\sqrt{2k+1}, & k \leq n \\
+0, & k > n
+\end{array}\right. \tag{2}
+\end{equation}
+
+步骤2: 构造辅助矩阵$M = A + \frac{1}{2}vv^* + \frac{1}{2}I$,其中$v = [\sqrt{1}, \sqrt{3}, \sqrt{5}, \cdots]^T$:
+\begin{equation}
+M_{n,k} = \left\{\begin{array}{ll}
+-\frac{1}{2}\sqrt{2n+1}\sqrt{2k+1}, & k < n \\
+0, & k = n \\
+\frac{1}{2}\sqrt{2n+1}\sqrt{2k+1}, & k > n
+\end{array}\right. \tag{3}
+\end{equation}
+
+步骤3: 观察到$M$是反对称矩阵,即$M^T = -M$。反对称矩阵的关键性质:
+- 所有特征值都是纯虚数或零
+- 一定可以被酉矩阵对角化
+- 对角化后的特征值形式为$\pm i\lambda_k$
+
+步骤4: 由谱定理,存在酉矩阵$U$和对角矩阵$\tilde{\Lambda}$使得:
+\begin{equation}
+M = U^* \tilde{\Lambda} U \tag{4}
+\end{equation}
+
+步骤5: 回代得到$A$的表示:
+\begin{align}
+A &= M - \frac{1}{2}I - \frac{1}{2}vv^* \tag{5} \\
+&= U^* \tilde{\Lambda} U - \frac{1}{2}I - \frac{1}{2}vv^* \tag{6} \\
+&= U^*\left(\tilde{\Lambda} - \frac{1}{2}I - \frac{1}{2}(Uv)(Uv)^*\right)U \tag{7} \\
+&= U^*(\Lambda - uv^*)U \tag{8}
+\end{align}
+其中$\Lambda = \tilde{\Lambda} - \frac{1}{2}I$是对角矩阵,$u = Uv$。$\square$
+
+#### 1.2 DPLR分解的数值稳定性
+
+**引理1.2 (酉变换的数值稳定性)**: 酉矩阵$U$满足$U^*U = I$,其条件数$\kappa(U) = 1$,因此酉变换在数值计算中具有最优稳定性。
+
+**证明**: 对于酉矩阵$U$,有:
+\begin{equation}
+\kappa(U) = \|U\| \cdot \|U^{-1}\| = \|U\| \cdot \|U^*\| = 1 \tag{9}
+\end{equation}
+最后一个等号利用了酉矩阵的性质$\|U\| = \|U^*\| = 1$。$\square$
+
+**定理1.3 (DPLR与直接对角化的稳定性比较)**: 设$P$为对角化$A$的矩阵(即$A = P^{-1}\Lambda P$),则:
+\begin{equation}
+\kappa(P) \geq \mathcal{O}(2^{d/3}\sqrt{d}) \tag{10}
+\end{equation}
+而DPLR分解中的酉矩阵$U$满足$\kappa(U) = 1$。
+
+**证明**: 从特征向量的计算可知,矩阵$P$的列向量包含指数级别的数值衰减。具体地,对于$\lambda = d/3$的特征值,其对应的系数$S_n$满足:
+\begin{equation}
+|S_{d/3}| \sim \mathcal{O}(\sqrt{d} \cdot 2^{-4d/3}) \tag{11}
+\end{equation}
+
+这意味着$P$的不同列之间存在指数级别的尺度差异,导致:
+\begin{equation}
+\kappa(P) = \frac{\sigma_{\max}(P)}{\sigma_{\min}(P)} \geq \mathcal{O}(2^{d/3}\sqrt{d}) \tag{12}
+\end{equation}
+$\square$
+
+#### 1.3 DPLR分解的计算复杂度
+
+**定理1.4 (DPLR分解的向量乘法复杂度)**: 对于$A = U^*(\Lambda - uv^*)U$形式的矩阵,计算$Ax$的复杂度为$\mathcal{O}(d)$。
+
+**证明**: 分解计算过程:
+\begin{align}
+Ax &= U^*(\Lambda - uv^*)Ux \tag{13} \\
+&= U^*(\Lambda(Ux) - u(v^*(Ux))) \tag{14}
+\end{align}
+
+计算步骤和复杂度:
+1. 计算$y_1 = Ux$: 虽然$U$是$d \times d$矩阵,但由于FFT等快速算法,可在$\mathcal{O}(d\log d)$完成
+2. 计算$s = v^*y_1$: $\mathcal{O}(d)$(内积)
+3. 计算$y_2 = \Lambda y_1$: $\mathcal{O}(d)$(对角矩阵乘法)
+4. 计算$y_3 = us$: $\mathcal{O}(d)$(标量乘向量)
+5. 计算$y_4 = y_2 - y_3$: $\mathcal{O}(d)$
+6. 计算$Ax = U^*y_4$: $\mathcal{O}(d\log d)$
+
+总复杂度: $\mathcal{O}(d\log d)$,在实际中通常视为$\mathcal{O}(d)$。$\square$
+
+### 二、Woodbury恒等式的详细证明
+
+#### 2.1 基本Woodbury恒等式
+
+**定理2.1 (Woodbury矩阵恒等式)**: 对于$U \in \mathbb{R}^{d \times r}$,$V \in \mathbb{R}^{d \times r}$,有:
+\begin{equation}
+(I - UV^*)^{-1} = I + U(I - V^*U)^{-1}V^* \tag{15}
+\end{equation}
+
+**证明**:
+
+方法1 (直接验证): 我们验证$(I - UV^*) \cdot [I + U(I - V^*U)^{-1}V^*] = I$:
+\begin{align}
+&(I - UV^*)[I + U(I - V^*U)^{-1}V^*] \tag{16} \\
+&= I + U(I - V^*U)^{-1}V^* - UV^* - UV^*U(I - V^*U)^{-1}V^* \tag{17} \\
+&= I + U(I - V^*U)^{-1}V^* - UV^* - U(V^*U)(I - V^*U)^{-1}V^* \tag{18} \\
+&= I + U[(I - V^*U)^{-1} - (V^*U)(I - V^*U)^{-1}]V^* - UV^* \tag{19} \\
+&= I + U[(I - V^*U)(I - V^*U)^{-1}]V^* - UV^* \tag{20} \\
+&= I + UV^* - UV^* = I \tag{21}
+\end{align}
+
+方法2 (级数展开): 当$\|UV^*\| < 1$时:
+\begin{align}
+(I - UV^*)^{-1} &= \sum_{k=0}^{\infty}(UV^*)^k \tag{22} \\
+&= I + \sum_{k=1}^{\infty}(UV^*)^k \tag{23} \\
+&= I + U\left(\sum_{k=0}^{\infty}(V^*U)^k\right)V^* \tag{24} \\
+&= I + U(I - V^*U)^{-1}V^* \tag{25}
+\end{align}
+其中第(24)式利用了$(UV^*)^k = U(V^*U)^{k-1}V^*$。$\square$
+
+#### 2.2 广义Woodbury恒等式
+
+**定理2.2 (广义Woodbury恒等式)**: 对于可逆矩阵$M$和矩阵$U,V$,有:
+\begin{equation}
+(M - UV^*)^{-1} = M^{-1} + M^{-1}U(I - V^*M^{-1}U)^{-1}V^*M^{-1} \tag{26}
+\end{equation}
+
+**证明**: 分解计算:
+\begin{align}
+(M - UV^*)^{-1} &= (M(I - M^{-1}UV^*))^{-1} \tag{27} \\
+&= (I - M^{-1}UV^*)^{-1}M^{-1} \tag{28} \\
+&= [I + M^{-1}U(I - V^*M^{-1}U)^{-1}V^*]M^{-1} \tag{29} \\
+&= M^{-1} + M^{-1}U(I - V^*M^{-1}U)^{-1}V^*M^{-1} \tag{30}
+\end{align}
+第(29)式应用了基本Woodbury恒等式(15)。$\square$
+
+#### 2.3 在S4中的应用
+
+**定理2.3 (S4中的Woodbury应用)**: 对于$A = \Lambda - uv^*$,离散化矩阵$\bar{A}$满足:
+\begin{equation}
+\bar{A} = (I - \epsilon(\Lambda - uv^*)/2)^{-1}(I + \epsilon(\Lambda - uv^*)/2) \tag{31}
+\end{equation}
+可以通过Woodbury恒等式高效计算。
+
+**详细推导**:
+
+步骤1: 计算$(I - \epsilon(\Lambda - uv^*)/2)^{-1}$。令$D = \frac{2}{\epsilon}I - \Lambda$,则:
+\begin{align}
+I - \epsilon(\Lambda - uv^*)/2 &= \frac{\epsilon}{2}(D + uv^*) \tag{32}
+\end{align}
+
+步骤2: 应用Woodbury恒等式:
+\begin{align}
+(D + uv^*)^{-1} &= D^{-1} - D^{-1}u(I + v^*D^{-1}u)^{-1}v^*D^{-1} \tag{33}
+\end{align}
+
+步骤3: 注意$D$是对角矩阵,$D^{-1}$的计算为$\mathcal{O}(d)$。设:
+\begin{align}
+\alpha &= v^*D^{-1}u \quad (\text{标量,复杂度}\mathcal{O}(d)) \tag{34} \\
+\beta &= (1 + \alpha)^{-1} \quad (\text{标量倒数}) \tag{35} \\
+w &= D^{-1}u \quad (\text{向量,复杂度}\mathcal{O}(d)) \tag{36} \\
+z &= D^{-1}v \quad (\text{向量,复杂度}\mathcal{O}(d)) \tag{37}
+\end{align}
+
+步骤4: 则$(D + uv^*)^{-1}$可表示为:
+\begin{equation}
+(D + uv^*)^{-1} = D^{-1} - \beta w z^* \tag{38}
+\end{equation}
+这是"对角+秩1"的形式,总计算复杂度$\mathcal{O}(d)$。
+
+步骤5: 完整的$\bar{A}$计算:
+\begin{align}
+\bar{A} &= \frac{2}{\epsilon}(D + uv^*)^{-1}(I + \epsilon(\Lambda - uv^*)/2) \tag{39} \\
+&= \frac{2}{\epsilon}(D^{-1} - \beta wz^*)\left(\frac{\epsilon}{2}(D + uv^*) + \epsilon(\Lambda - uv^*)/2\right) \tag{40}
+\end{align}
+
+经过整理,这仍然保持"对角+低秩"形式,总复杂度$\mathcal{O}(d)$。$\square$
+
+### 三、生成函数与卷积加速
+
+#### 3.1 生成函数的基本理论
+
+**定义3.1 (序列生成函数)**: 对于序列$\{a_k\}_{k=0}^{\infty}$,其生成函数定义为:
+\begin{equation}
+\mathcal{G}(z|a) = \sum_{k=0}^{\infty}a_k z^k \tag{41}
+\end{equation}
+
+**定理3.2 (卷积定理)**: 若$c_n = \sum_{k=0}^{n}a_k b_{n-k}$是$a$和$b$的卷积,则:
+\begin{equation}
+\mathcal{G}(z|c) = \mathcal{G}(z|a) \cdot \mathcal{G}(z|b) \tag{42}
+\end{equation}
+
+**证明**:
+\begin{align}
+\mathcal{G}(z|a)\mathcal{G}(z|b) &= \left(\sum_{k=0}^{\infty}a_k z^k\right)\left(\sum_{l=0}^{\infty}b_l z^l\right) \tag{43} \\
+&= \sum_{k=0}^{\infty}\sum_{l=0}^{\infty}a_k b_l z^{k+l} \tag{44} \\
+&= \sum_{n=0}^{\infty}\left(\sum_{k=0}^{n}a_k b_{n-k}\right)z^n \tag{45} \\
+&= \sum_{n=0}^{\infty}c_n z^n = \mathcal{G}(z|c) \tag{46}
+\end{align}
+$\square$
+
+#### 3.2 SSM卷积核的生成函数
+
+**定理3.3 (SSM卷积核生成函数)**: 对于卷积核$\bar{K}_k = \bar{C}^*\bar{A}^k\bar{B}$,其生成函数为:
+\begin{equation}
+\mathcal{G}(z|\bar{K}) = \sum_{k=0}^{\infty}\bar{C}^*\bar{A}^k\bar{B}z^k = \bar{C}^*(I - z\bar{A})^{-1}\bar{B} \tag{47}
+\end{equation}
+
+**证明**: 利用几何级数:
+\begin{align}
+\mathcal{G}(z|\bar{K}) &= \sum_{k=0}^{\infty}\bar{C}^*\bar{A}^k\bar{B}z^k \tag{48} \\
+&= \bar{C}^*\left(\sum_{k=0}^{\infty}(z\bar{A})^k\right)\bar{B} \tag{49} \\
+&= \bar{C}^*(I - z\bar{A})^{-1}\bar{B} \tag{50}
+\end{align}
+其中第(49)到(50)利用了几何级数公式$\sum_{k=0}^{\infty}M^k = (I - M)^{-1}$(当$\|M\| < 1$时)。$\square$
+
+#### 3.3 截断生成函数
+
+**定义3.4 (截断生成函数)**: 对于长度为$L$的序列,截断生成函数为:
+\begin{equation}
+\mathcal{G}_L(z|\bar{K}) = \sum_{k=0}^{L-1}\bar{K}_k z^k \tag{51}
+\end{equation}
+
+**定理3.5 (截断生成函数的闭形式)**:
+\begin{equation}
+\mathcal{G}_L(z|\bar{K}) = \bar{C}^*(I - z^L\bar{A}^L)(I - z\bar{A})^{-1}\bar{B} \tag{52}
+\end{equation}
+
+**证明**: 利用几何级数的有限形式:
+\begin{align}
+\sum_{k=0}^{L-1}M^k &= (I - M^L)(I - M)^{-1} \tag{53}
+\end{align}
+
+代入$M = z\bar{A}$:
+\begin{align}
+\mathcal{G}_L(z|\bar{K}) &= \sum_{k=0}^{L-1}\bar{C}^*\bar{A}^k\bar{B}z^k \tag{54} \\
+&= \bar{C}^*\left(\sum_{k=0}^{L-1}(z\bar{A})^k\right)\bar{B} \tag{55} \\
+&= \bar{C}^*(I - z^L\bar{A}^L)(I - z\bar{A})^{-1}\bar{B} \tag{56}
+\end{align}
+$\square$
+
+### 四、离散傅里叶变换(DFT)加速
+
+#### 4.1 DFT的数学基础
+
+**定义4.1 (离散傅里叶变换)**: 对于长度为$L$的序列$\{a_k\}_{k=0}^{L-1}$,其DFT定义为:
+\begin{equation}
+\hat{a}_l = \sum_{k=0}^{L-1}a_k e^{-2\pi i kl/L}, \quad l = 0,1,\cdots,L-1 \tag{57}
+\end{equation}
+
+**定义4.2 (逆DFT, IDFT)**:
+\begin{equation}
+a_k = \frac{1}{L}\sum_{l=0}^{L-1}\hat{a}_l e^{2\pi i kl/L}, \quad k = 0,1,\cdots,L-1 \tag{58}
+\end{equation}
+
+**定理4.3 (DFT的卷积定理)**: 若$c = a * b$是卷积,则:
+\begin{equation}
+\widehat{c} = \widehat{a} \odot \widehat{b} \tag{59}
+\end{equation}
+其中$\odot$表示逐点乘法。
+
+**证明**: 设$c_n = \sum_{k=0}^{n}a_k b_{n-k}$(循环卷积):
+\begin{align}
+\hat{c}_l &= \sum_{n=0}^{L-1}c_n e^{-2\pi inl/L} \tag{60} \\
+&= \sum_{n=0}^{L-1}\left(\sum_{k=0}^{L-1}a_k b_{(n-k)\bmod L}\right)e^{-2\pi inl/L} \tag{61} \\
+&= \sum_{k=0}^{L-1}a_k e^{-2\pi ikl/L}\sum_{n=0}^{L-1}b_{(n-k)\bmod L}e^{-2\pi i(n-k)l/L} \tag{62} \\
+&= \hat{a}_l \cdot \hat{b}_l \tag{63}
+\end{align}
+$\square$
+
+#### 4.2 DFT计算生成函数
+
+**定理4.4 (生成函数与DFT的关系)**: 对于$z = e^{-2\pi il/L}$,生成函数值就是DFT:
+\begin{equation}
+\mathcal{G}(e^{-2\pi il/L}|a) = \sum_{k=0}^{L-1}a_k e^{-2\pi ikl/L} = \hat{a}_l \tag{64}
+\end{equation}
+
+**推论4.5 (通过DFT计算卷积核)**:
+\begin{align}
+\text{DFT}(\bar{K}) &= \{\mathcal{G}_L(e^{-2\pi il/L}|\bar{K})\}_{l=0}^{L-1} \tag{65} \\
+&= \left\{\bar{C}^*(I - e^{-2\pi il/L}\bar{A})^{-1}\bar{B}\right\}_{l=0}^{L-1} \tag{66}
+\end{align}
+
+其中第二个等号利用了$e^{-2\pi iL/L} = 1$,使得$(I - z^L\bar{A}^L) = (I - \bar{A}^L)$可以吸收进$\bar{C}$。
+
+#### 4.3 零填充(Zero-Padding)技术
+
+**问题**: 直接DFT会导致循环卷积,而我们需要线性卷积。
+
+**解决方案**: 零填充——将长度$L$的序列扩展为长度$2L$:
+\begin{align}
+\bar{a} &\to (\bar{a}, 0, 0, \cdots, 0) \tag{67} \\
+\bar{b} &\to (\bar{b}, 0, 0, \cdots, 0) \tag{68}
+\end{align}
+
+**定理4.6 (零填充的正确性)**: 对长度为$2L$的零填充序列进行DFT,然后逐点相乘,再IDFT,前$L$个结果正好是线性卷积。
+
+**证明**: 零填充使得循环卷积的"环绕"部分落在后$L$个位置,不影响前$L$个结果。$\square$
+
+### 五、Cauchy核加速算法
+
+#### 5.1 Cauchy核问题的定义
+
+在S4中,我们需要计算:
+\begin{equation}
+\mathcal{G}_L(e^{-2\pi il/L}|\bar{K}) = \bar{C}^*(I - e^{-2\pi il/L}\bar{A})^{-1}\bar{B}, \quad l = 0,1,\cdots,L-1 \tag{69}
+\end{equation}
+
+对于$A = \Lambda - uv^*$(对角+秩1),应用Woodbury恒等式后,核心问题变为计算Cauchy矩阵:
+
+**定义5.1 (Cauchy矩阵)**: 矩阵$C \in \mathbb{C}^{L \times d}$定义为:
+\begin{equation}
+C_{lk} = \frac{1}{\omega_l - \lambda_k} \tag{70}
+\end{equation}
+其中$\omega_l = e^{-2\pi il/L}$,$\lambda_k$是$\Lambda$的对角元素。
+
+#### 5.2 快速多极算法(FMM)加速
+
+**定理5.2 (Cauchy矩阵-向量乘法复杂度)**: 使用快速多极算法,Cauchy矩阵与向量的乘法可在$\mathcal{O}((L+d)\log^2(L+d))$完成。
+
+标准算法复杂度为$\mathcal{O}(Ld)$,FMM通过分层结构将其降低到近线性复杂度。
+
+**算法框架**:
+1. 构建$\omega$和$\lambda$的层次化分组
+2. 对每组使用多极展开近似
+3. 递归计算各层贡献
+4. 合并结果
+
+#### 5.3 与FFT复杂度的对比
+
+| 方法 | 复杂度 | 依赖性 |
+|------|--------|--------|
+| 朴素计算 | $\mathcal{O}(Ld)$ | 依赖$L$和$d$ |
+| S4+Cauchy | $\mathcal{O}((L+d)\log^2(L+d))$ | 依赖$L$和$d$ |
+| RFT+DFT | $\mathcal{O}(L\log L)$ | 仅依赖$L$ |
+
+### 六、数值稳定性分析
+
+#### 6.1 条件数与误差传播
+
+**定义6.1 (条件数)**: 矩阵$M$的条件数定义为:
+\begin{equation}
+\kappa(M) = \|M\| \cdot \|M^{-1}\| = \frac{\sigma_{\max}(M)}{\sigma_{\min}(M)} \tag{71}
+\end{equation}
+
+**定理6.3 (误差放大估计)**: 若计算$y = Mx$时输入误差为$\delta x$,则输出误差满足:
+\begin{equation}
+\frac{\|\delta y\|}{\|y\|} \leq \kappa(M)\frac{\|\delta x\|}{\|x\|} + \mathcal{O}(\epsilon_{\text{machine}}) \tag{72}
+\end{equation}
+
+#### 6.2 DPLR分解的稳定性优势
+
+**定理6.4 (DPLR的数值稳定性)**: DPLR分解$A = U^*(\Lambda - uv^*)U$中:
+\begin{align}
+\kappa(U) &= 1 \tag{73} \\
+\kappa(\Lambda) &= \frac{|\lambda_{\max}|}{|\lambda_{\min}|} \tag{74}
+\end{align}
+
+对于HiPPO-LegS,$\lambda_k \in [-1,-2,\cdots,-d]$,故$\kappa(\Lambda) = d$,远小于直接对角化的$\kappa(P) \sim 2^{d/3}$。
+
+#### 6.3 双线性变换的数值特性
+
+**定理6.5 (双线性变换的A-稳定性)**: 双线性离散化:
+\begin{equation}
+\bar{A} = (I - \epsilon A/2)^{-1}(I + \epsilon A/2) \tag{75}
+\end{equation}
+是A-稳定的,即对于$\text{Re}(\lambda(A)) < 0$的所有特征值,都有$|\lambda(\bar{A})| < 1$。
+
+**证明**: 设$\lambda$是$A$的特征值,$\text{Re}(\lambda) < 0$。对应的$\bar{A}$的特征值为:
+\begin{align}
+\bar{\lambda} &= \frac{1 + \epsilon\lambda/2}{1 - \epsilon\lambda/2} \tag{76}
+\end{align}
+
+计算模长:
+\begin{align}
+|\bar{\lambda}|^2 &= \frac{|1 + \epsilon\lambda/2|^2}{|1 - \epsilon\lambda/2|^2} \tag{77} \\
+&= \frac{(1 + \epsilon\text{Re}(\lambda)/2)^2 + (\epsilon\text{Im}(\lambda)/2)^2}{(1 - \epsilon\text{Re}(\lambda)/2)^2 + (\epsilon\text{Im}(\lambda)/2)^2} \tag{78}
+\end{align}
+
+当$\text{Re}(\lambda) < 0$时,分子$< $分母,故$|\bar{\lambda}| < 1$。$\square$
+
+### 七、完整算法流程
+
+#### 7.1 训练阶段算法
+
+**算法7.1 (S4训练)**:
+```
+输入: 序列u₀, u₁, ..., u_{L-1}
+参数: A (HiPPO-LegS), B, C, ε (步长)
+
+1. 预计算:
+   a. 对角化辅助矩阵: M = A + vv*/2 + I/2 → U, Λ̃
+   b. 构造 Λ = Λ̃ - I/2, u = Uv
+   c. 计算 Ā = (I - εA/2)⁻¹(I + εA/2) (通过Woodbury)
+   d. 计算 B̄ = ε(I - εA/2)⁻¹B
+   e. 计算 C̃ = C*(I - Ā^L)
+
+2. 生成函数计算:
+   对 l = 0, 1, ..., L-1:
+     z_l = exp(-2πil/L)
+     R_z = (2/ε)(1-z_l)/(1+z_l)I - Λ
+     应用Woodbury: G_l = (2/(1+z_l))C̃*(R_z⁻¹ - ...)B̄
+
+3. FFT加速:
+   K̂ = {G_l}_{l=0}^{L-1}
+   K = IDFT(K̂)
+
+4. 卷积计算:
+   û = DFT([u₀,...,u_{L-1}, 0,...,0])  // 零填充
+   K̂_pad = DFT([K₀,...,K_{L-1}, 0,...,0])
+   ŷ = K̂_pad ⊙ û
+   y = IDFT(ŷ)[0:L]  // 取前L个元素
+
+输出: y₀, y₁, ..., y_{L-1}
+```
+
+时间复杂度: $\mathcal{O}(L\log L + (L+d)\log^2(L+d))$
+
+#### 7.2 推理阶段算法
+
+**算法7.2 (S4推理)**:
+```
+输入: 当前输入u_k, 当前状态x_k
+参数: Ā, B̄, C̄
+
+1. 状态更新:
+   x_{k+1} = Āx_k + B̄u_k
+
+2. 输出计算:
+   y_{k+1} = C̄*x_{k+1}
+
+输出: y_{k+1}, x_{k+1}
+```
+
+时间复杂度: $\mathcal{O}(d\log d)$(利用DPLR结构)
+
+### 八、实践考虑
+
+#### 8.1 超参数选择
+
+1. **步长$\epsilon$**:
+   - 理论上$\epsilon \sim 1/L$较优
+   - 实践中可设为可学习参数
+   - 初始值: $\epsilon = 0.001 \sim 0.1$
+
+2. **状态维度$d$**:
+   - 较大的$d$提供更强表达能力
+   - 需权衡计算成本
+   - 典型值: $d = 64, 128, 256$
+
+3. **序列长度$L$**:
+   - S4支持长序列($L > 10000$)
+   - 零填充至$2L$用于FFT
+
+#### 8.2 数值技巧
+
+1. **矩阵指数计算**: 使用Padé近似或特征值方法
+2. **逆矩阵计算**: 利用Woodbury避免显式求逆
+3. **复数运算**: 注意精度损失,必要时使用高精度库
+
+#### 8.3 常见问题
+
+**问题1**: $\bar{A}^L$计算成本高
+**解决**: 训练时用$\tilde{C} = C(I - \bar{A}^L)$作为参数,推理时再恢复$C$
+
+**问题2**: 大$d$时Cauchy核计算慢
+**解决**: 使用RFT方法,完全消除对$d$的依赖
+
+**问题3**: 梯度消失/爆炸
+**解决**: 使用双线性离散化,确保A-稳定性
+
+### 九、与其他方法的对比
+
+#### 9.1 S4 vs RNN
+
+| 特性 | S4 | 传统RNN |
+|------|-----|---------|
+| 记忆衰减 | 多项式 | 指数 |
+| 并行训练 | 是(FFT) | 否 |
+| 长序列 | 优秀($L>10^4$) | 困难 |
+| 参数量 | $\mathcal{O}(d^2)$ | $\mathcal{O}(d^2)$ |
+
+#### 9.2 S4 vs Transformer
+
+| 特性 | S4 | Transformer |
+|------|-----|-------------|
+| 复杂度(训练) | $\mathcal{O}(L\log L)$ | $\mathcal{O}(L^2d)$ |
+| 复杂度(推理) | $\mathcal{O}(d)$ | $\mathcal{O}(L)$ |
+| 归纳偏置 | 线性系统 | 注意力 |
+| 长序列 | 优秀 | 受限 |
+
+### 十、总结与展望
+
+#### 10.1 核心贡献
+
+S4的关键创新:
+1. DPLR分解 — 解决HiPPO矩阵的数值稳定性
+2. Woodbury恒等式 — 实现高效逆矩阵计算
+3. Cauchy核加速 — 降低计算复杂度
+4. 理论保证 — A-稳定性和多项式记忆衰减
+
+#### 10.2 局限性
+
+1. DPLR分解仍需计算$d$维矩阵
+2. Cauchy核加速实现复杂
+3. 超参数调优需要经验
+
+#### 10.3 后续发展
+
+- **S5**: 简化为单个SSM处理多通道
+- **Mamba**: 简化$A$为对角矩阵,引入选择性机制
+- **RFT**: 完全在有理函数空间参数化
+
+S4为SSM的发展奠定了坚实的数学基础,其核心技术在后续工作中得到继承和发展。
 

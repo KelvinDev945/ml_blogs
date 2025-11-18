@@ -179,5 +179,637 @@ url={\url{https://spaces.ac.cn/archives/9152}},
 
 ## 公式推导与注释
 
-TODO: 添加详细的数学公式推导和注释
+### 1. 核心概念与理论框架
+
+#### 1.1 从传统VAE到DDPM
+
+**传统VAE的基本结构:**
+
+在变分自编码器(VAE)中,我们有:
+- **编码过程:** $\boldsymbol{x} \to \boldsymbol{z}$ (一步到位)
+- **生成过程:** $\boldsymbol{z} \to \boldsymbol{x}$ (一步到位)
+
+涉及三个核心分布:
+$$p(\boldsymbol{z}|\boldsymbol{x}): \text{编码分布}, \quad q(\boldsymbol{x}|\boldsymbol{z}): \text{生成分布}, \quad q(\boldsymbol{z}): \text{先验分布} \tag{1}$$
+
+**传统VAE的限制:**
+1. 编码和生成都只有一步,映射关系简单
+2. 通常只能建模为正态分布,表达能力有限
+3. 生成的图像往往模糊不清
+
+**DDPM的突破:**
+
+DDPM将一步变为$T$步,形成递归式的编码和生成:
+$$\begin{aligned}
+\text{编码:} \quad &\boldsymbol{x} = \boldsymbol{x}_0 \to \boldsymbol{x}_1 \to \boldsymbol{x}_2 \to \cdots \to \boldsymbol{x}_T = \boldsymbol{z} \\
+\text{生成:} \quad &\boldsymbol{z} = \boldsymbol{x}_T \to \boldsymbol{x}_{T-1} \to \boldsymbol{x}_{T-2} \to \cdots \to \boldsymbol{x}_0 = \boldsymbol{x}
+\end{aligned} \tag{2}$$
+
+**关键思想:** 每一小步只建模微小变化,仍用正态分布,但多步累积可以逼近复杂分布。
+
+**类比:** 用分段线性函数逼近复杂曲线。
+
+#### 1.2 前向扩散过程的设计
+
+**每一步的前向过程:**
+$$p(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) = \mathcal{N}(\boldsymbol{x}_t; \alpha_t\boldsymbol{x}_{t-1}, \beta_t^2\boldsymbol{I}) \tag{3}$$
+
+**关键特点:**
+1. **均值:** 只是输入乘以标量$\alpha_t$,不需要神经网络学习
+2. **方差:** 事先设定好的$\beta_t^2$,也不需要学习
+3. **目标:** 放弃编码能力,专注于生成
+
+**等价采样形式:**
+$$\boldsymbol{x}_t = \alpha_t\boldsymbol{x}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t, \quad \boldsymbol{\varepsilon}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{4}$$
+
+**反向生成过程:**
+$$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{x}_{t-1}; \boldsymbol{\mu}(\boldsymbol{x}_t), \sigma_t^2\boldsymbol{I}) \tag{5}$$
+
+其中$\boldsymbol{\mu}(\boldsymbol{x}_t)$由神经网络学习。
+
+### 2. 联合分布与KL散度
+
+#### 2.1 联合分布的构造
+
+**前向过程的联合分布:**
+$$\begin{aligned}
+p(\boldsymbol{x}_0, \boldsymbol{x}_1, \ldots, \boldsymbol{x}_T) &= p(\boldsymbol{x}_T|\boldsymbol{x}_{T-1}) \cdots p(\boldsymbol{x}_2|\boldsymbol{x}_1) p(\boldsymbol{x}_1|\boldsymbol{x}_0) \tilde{p}(\boldsymbol{x}_0) \\
+&= \tilde{p}(\boldsymbol{x}_0) \prod_{t=1}^T p(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})
+\end{aligned} \tag{6}$$
+
+其中$\tilde{p}(\boldsymbol{x}_0)$是数据分布。
+
+**反向过程的联合分布:**
+$$\begin{aligned}
+q(\boldsymbol{x}_0, \boldsymbol{x}_1, \ldots, \boldsymbol{x}_T) &= q(\boldsymbol{x}_0|\boldsymbol{x}_1) \cdots q(\boldsymbol{x}_{T-2}|\boldsymbol{x}_{T-1}) q(\boldsymbol{x}_{T-1}|\boldsymbol{x}_T) q(\boldsymbol{x}_T) \\
+&= q(\boldsymbol{x}_T) \prod_{t=1}^T q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)
+\end{aligned} \tag{7}$$
+
+其中$q(\boldsymbol{x}_T)$是先验分布(通常为$\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$)。
+
+#### 2.2 VAE的最简洁理解
+
+**核心优化目标:** 最小化两个联合分布的KL散度。
+$$\mathcal{L} = KL(p \| q) = \int p(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T) \log \frac{p(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T)}{q(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T)} d\boldsymbol{x}_0 \cdots d\boldsymbol{x}_T \tag{8}$$
+
+**展开:**
+$$\begin{aligned}
+\mathcal{L} &= \int p(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T) \left[\log p(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T) - \log q(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T)\right] d\boldsymbol{x}_0 \cdots d\boldsymbol{x}_T \\
+&= \mathbb{E}_{p(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T)}\left[\log p(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T) - \log q(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T)\right]
+\end{aligned} \tag{9}$$
+
+**代入联合分布:**
+$$\begin{aligned}
+\mathcal{L} &= \mathbb{E}_{p}\left[\log \tilde{p}(\boldsymbol{x}_0) + \sum_{t=1}^T \log p(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) - \log q(\boldsymbol{x}_T) - \sum_{t=1}^T \log q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)\right]
+\end{aligned} \tag{10}$$
+
+### 3. 目标函数的简化
+
+#### 3.1 去除常数项
+
+**观察1:** 前向分布$p(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})$不含可训练参数,相关项只贡献常数。
+
+**观察2:** 先验分布$q(\boldsymbol{x}_T) = \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$也是固定的,贡献常数。
+
+**简化后的目标:**
+$$\mathcal{L} \propto -\mathbb{E}_{p}\left[\sum_{t=1}^T \log q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)\right] = -\sum_{t=1}^T \mathbb{E}_{p}\left[\log q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)\right] \tag{11}$$
+
+#### 3.2 单个时间步的目标
+
+**对每个$t$:**
+$$\begin{aligned}
+\mathcal{L}_t &= -\int p(\boldsymbol{x}_T|\boldsymbol{x}_{T-1}) \cdots p(\boldsymbol{x}_1|\boldsymbol{x}_0) \tilde{p}(\boldsymbol{x}_0) \log q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) d\boldsymbol{x}_0 \cdots d\boldsymbol{x}_T
+\end{aligned} \tag{12}$$
+
+**关键观察:** $q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)$至多依赖到$\boldsymbol{x}_t$,因此$t+1$到$T$的积分可以先算。
+
+**积分消除:**
+$$\int p(\boldsymbol{x}_T|\boldsymbol{x}_{T-1}) \cdots p(\boldsymbol{x}_{t+1}|\boldsymbol{x}_t) d\boldsymbol{x}_{t+1} \cdots d\boldsymbol{x}_T = 1 \tag{13}$$
+
+**进一步简化:**
+$$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)$也不依赖于$\boldsymbol{x}_1, \ldots, \boldsymbol{x}_{t-2}$,可以继续消除积分。
+
+**关键公式:** 利用马尔可夫性和正态分布的叠加性:
+$$\int p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_{t-2}) \cdots p(\boldsymbol{x}_1|\boldsymbol{x}_0) d\boldsymbol{x}_1 \cdots d\boldsymbol{x}_{t-2} = p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) \tag{14}$$
+
+**最终简化形式:**
+$$\mathcal{L}_t = -\int p(\boldsymbol{x}_t|\boldsymbol{x}_{t-1}) p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) \tilde{p}(\boldsymbol{x}_0) \log q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) d\boldsymbol{x}_0 d\boldsymbol{x}_{t-1} d\boldsymbol{x}_t \tag{15}$$
+
+### 4. 正态分布叠加性的推导
+
+#### 4.1 两步情况的推导
+
+**给定:**
+- $p(\boldsymbol{x}_1|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_1; \alpha_1\boldsymbol{x}_0, \beta_1^2\boldsymbol{I})$
+- $p(\boldsymbol{x}_2|\boldsymbol{x}_1) = \mathcal{N}(\boldsymbol{x}_2; \alpha_2\boldsymbol{x}_1, \beta_2^2\boldsymbol{I})$
+
+**等价采样形式:**
+$$\boldsymbol{x}_1 = \alpha_1\boldsymbol{x}_0 + \beta_1\boldsymbol{\varepsilon}_1, \quad \boldsymbol{\varepsilon}_1 \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{16}$$
+$$\boldsymbol{x}_2 = \alpha_2\boldsymbol{x}_1 + \beta_2\boldsymbol{\varepsilon}_2, \quad \boldsymbol{\varepsilon}_2 \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{17}$$
+
+**代入消元:**
+$$\begin{aligned}
+\boldsymbol{x}_2 &= \alpha_2(\alpha_1\boldsymbol{x}_0 + \beta_1\boldsymbol{\varepsilon}_1) + \beta_2\boldsymbol{\varepsilon}_2 \\
+&= \alpha_2\alpha_1\boldsymbol{x}_0 + \alpha_2\beta_1\boldsymbol{\varepsilon}_1 + \beta_2\boldsymbol{\varepsilon}_2
+\end{aligned} \tag{18}$$
+
+**高斯噪声的和:** 两个独立高斯随机变量的和仍是高斯:
+$$\alpha_2\beta_1\boldsymbol{\varepsilon}_1 + \beta_2\boldsymbol{\varepsilon}_2 \sim \mathcal{N}(\boldsymbol{0}, (\alpha_2^2\beta_1^2 + \beta_2^2)\boldsymbol{I}) \tag{19}$$
+
+**验证方差:**
+$$\text{Var}[\alpha_2\beta_1\boldsymbol{\varepsilon}_1 + \beta_2\boldsymbol{\varepsilon}_2] = \alpha_2^2\beta_1^2\text{Var}[\boldsymbol{\varepsilon}_1] + \beta_2^2\text{Var}[\boldsymbol{\varepsilon}_2] = \alpha_2^2\beta_1^2 + \beta_2^2 \tag{20}$$
+
+**引入约束:** 为了简化形式,我们要求$\alpha_t^2 + \beta_t^2 = 1$。
+
+**则:**
+$$\begin{aligned}
+\alpha_2^2\beta_1^2 + \beta_2^2 &= \alpha_2^2\beta_1^2 + (1 - \alpha_2^2) \\
+&= \alpha_2^2\beta_1^2 + 1 - \alpha_2^2 \\
+&= \alpha_2^2(\beta_1^2 - 1) + 1 \\
+&= \alpha_2^2(-\alpha_1^2) + 1 \\
+&= 1 - \alpha_2^2\alpha_1^2
+\end{aligned} \tag{21}$$
+
+**定义累积参数:**
+$$\bar{\alpha}_2 = \alpha_1\alpha_2, \quad \bar{\beta}_2 = \sqrt{1 - \bar{\alpha}_2^2} \tag{22}$$
+
+**最终结果:**
+$$p(\boldsymbol{x}_2|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_2; \bar{\alpha}_2\boldsymbol{x}_0, \bar{\beta}_2^2\boldsymbol{I}) \tag{23}$$
+
+#### 4.2 一般情况的递推
+
+**归纳假设:** 假设$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_{t-1}; \bar{\alpha}_{t-1}\boldsymbol{x}_0, \bar{\beta}_{t-1}^2\boldsymbol{I})$成立。
+
+**递推步骤:**
+$$\boldsymbol{x}_t = \alpha_t\boldsymbol{x}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t = \alpha_t(\bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1}) + \beta_t\boldsymbol{\varepsilon}_t \tag{24}$$
+
+**整理:**
+$$\boldsymbol{x}_t = \alpha_t\bar{\alpha}_{t-1}\boldsymbol{x}_0 + (\alpha_t\bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t) \tag{25}$$
+
+**噪声项的方差:**
+$$\text{Var} = \alpha_t^2\bar{\beta}_{t-1}^2 + \beta_t^2 = \alpha_t^2(1 - \bar{\alpha}_{t-1}^2) + \beta_t^2 \tag{26}$$
+
+**利用约束$\alpha_t^2 + \beta_t^2 = 1$:**
+$$\begin{aligned}
+\text{Var} &= \alpha_t^2(1 - \bar{\alpha}_{t-1}^2) + (1 - \alpha_t^2) \\
+&= \alpha_t^2 - \alpha_t^2\bar{\alpha}_{t-1}^2 + 1 - \alpha_t^2 \\
+&= 1 - \alpha_t^2\bar{\alpha}_{t-1}^2 \\
+&= 1 - (\alpha_t\bar{\alpha}_{t-1})^2
+\end{aligned} \tag{27}$$
+
+**递推公式:**
+$$\bar{\alpha}_t = \alpha_t\bar{\alpha}_{t-1} = \alpha_1\alpha_2 \cdots \alpha_t = \prod_{i=1}^t \alpha_i \tag{28}$$
+$$\bar{\beta}_t = \sqrt{1 - \bar{\alpha}_t^2} \tag{29}$$
+
+**一般结果:**
+$$p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t\boldsymbol{x}_0, \bar{\beta}_t^2\boldsymbol{I}) \tag{30}$$
+
+**采样形式:**
+$$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}}, \quad \bar{\boldsymbol{\varepsilon}} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{31}$$
+
+### 5. 反向过程的参数化
+
+#### 5.1 负对数似然的展开
+
+**反向生成过程:**
+$$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{x}_{t-1}; \boldsymbol{\mu}(\boldsymbol{x}_t), \sigma_t^2\boldsymbol{I}) \tag{32}$$
+
+**负对数似然(忽略常数):**
+$$-\log q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) = \frac{1}{2\sigma_t^2}\|\boldsymbol{x}_{t-1} - \boldsymbol{\mu}(\boldsymbol{x}_t)\|^2 + \text{const} \tag{33}$$
+
+**优化目标(式15)变为:**
+$$\mathcal{L}_t = \frac{1}{2\sigma_t^2} \mathbb{E}_{p(\boldsymbol{x}_t|\boldsymbol{x}_{t-1})p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0)\tilde{p}(\boldsymbol{x}_0)}\left[\|\boldsymbol{x}_{t-1} - \boldsymbol{\mu}(\boldsymbol{x}_t)\|^2\right] + \text{const} \tag{34}$$
+
+#### 5.2 噪声预测的参数化
+
+**前向过程给出:**
+$$\boldsymbol{x}_t = \alpha_t\boldsymbol{x}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t \tag{35}$$
+
+**反解$\boldsymbol{x}_{t-1}$:**
+$$\boldsymbol{x}_{t-1} = \frac{1}{\alpha_t}(\boldsymbol{x}_t - \beta_t\boldsymbol{\varepsilon}_t) \tag{36}$$
+
+**启发式参数化:** 用神经网络预测噪声$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$来逼近真实噪声$\boldsymbol{\varepsilon}_t$,则均值参数化为:
+$$\boldsymbol{\mu}(\boldsymbol{x}_t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \beta_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\right) \tag{37}$$
+
+#### 5.3 损失函数的变换
+
+**代入参数化(37)到目标(34):**
+$$\mathcal{L}_t = \frac{1}{2\sigma_t^2} \mathbb{E}\left[\left\|\boldsymbol{x}_{t-1} - \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \beta_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\right)\right\|^2\right] \tag{38}$$
+
+**从前向过程,我们有:**
+- $\boldsymbol{x}_{t-1} = \bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1}$
+- $\boldsymbol{x}_t = \alpha_t\boldsymbol{x}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t$
+
+**代入第一个:**
+$$\boldsymbol{x}_t = \alpha_t(\bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1}) + \beta_t\boldsymbol{\varepsilon}_t \tag{39}$$
+
+**目标函数变为:**
+$$\begin{aligned}
+&\left\|\bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1} - \frac{1}{\alpha_t}\left(\alpha_t(\bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1}) + \beta_t\boldsymbol{\varepsilon}_t - \beta_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}\right)\right\|^2 \\
+=& \left\|\bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1} - \bar{\alpha}_{t-1}\boldsymbol{x}_0 - \bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1} - \frac{\beta_t}{\alpha_t}\boldsymbol{\varepsilon}_t + \frac{\beta_t}{\alpha_t}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}\right\|^2 \\
+=& \left\|\frac{\beta_t}{\alpha_t}(\boldsymbol{\epsilon}_{\boldsymbol{\theta}} - \boldsymbol{\varepsilon}_t)\right\|^2 \\
+=& \frac{\beta_t^2}{\alpha_t^2}\|\boldsymbol{\epsilon}_{\boldsymbol{\theta}} - \boldsymbol{\varepsilon}_t\|^2
+\end{aligned} \tag{40}$$
+
+**简化的损失函数:**
+$$\mathcal{L}_t = \frac{\beta_t^2}{2\alpha_t^2\sigma_t^2} \mathbb{E}_{\bar{\boldsymbol{\varepsilon}}_{t-1}, \boldsymbol{\varepsilon}_t, \boldsymbol{x}_0}\left[\|\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) - \boldsymbol{\varepsilon}_t\|^2\right] \tag{41}$$
+
+其中$\boldsymbol{x}_t = \alpha_t(\bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1}) + \beta_t\boldsymbol{\varepsilon}_t$。
+
+### 6. 降低方差的技巧
+
+#### 6.1 问题分析
+
+**当前形式的问题:** 期望同时涉及两个独立噪声$\bar{\boldsymbol{\varepsilon}}_{t-1}$和$\boldsymbol{\varepsilon}_t$,增加了方差。
+
+**目标:** 将其转化为单个噪声的期望。
+
+#### 6.2 重参数化技巧
+
+**回顾累积前向过程:**
+$$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}}, \quad \bar{\boldsymbol{\varepsilon}} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{42}$$
+
+**目标:** 用单个噪声$\bar{\boldsymbol{\varepsilon}}$表示$\boldsymbol{x}_t$。
+
+**从前面的推导:**
+$$\boldsymbol{x}_t = \alpha_t\bar{\alpha}_{t-1}\boldsymbol{x}_0 + (\alpha_t\bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t) \tag{43}$$
+
+**注意到:**
+$$\bar{\alpha}_t = \alpha_t\bar{\alpha}_{t-1} \tag{44}$$
+
+**噪声合成:** 定义
+$$\bar{\boldsymbol{\varepsilon}} = \frac{\alpha_t\bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t}{\bar{\beta}_t} \tag{45}$$
+
+**验证:** 需要证明$\bar{\boldsymbol{\varepsilon}} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。
+
+**方差计算:**
+$$\begin{aligned}
+\text{Var}[\bar{\boldsymbol{\varepsilon}}] &= \frac{1}{\bar{\beta}_t^2}(\alpha_t^2\bar{\beta}_{t-1}^2 + \beta_t^2) \\
+&= \frac{1}{1 - \alpha_t^2\bar{\alpha}_{t-1}^2}(\alpha_t^2(1 - \bar{\alpha}_{t-1}^2) + \beta_t^2) \\
+&= \frac{\alpha_t^2 - \alpha_t^2\bar{\alpha}_{t-1}^2 + \beta_t^2}{1 - \alpha_t^2\bar{\alpha}_{t-1}^2} \\
+&= \frac{(\alpha_t^2 + \beta_t^2) - \alpha_t^2\bar{\alpha}_{t-1}^2}{1 - \alpha_t^2\bar{\alpha}_{t-1}^2} \\
+&= \frac{1 - \alpha_t^2\bar{\alpha}_{t-1}^2}{1 - \alpha_t^2\bar{\alpha}_{t-1}^2} \\
+&= 1
+\end{aligned} \tag{46}$$
+
+**因此:**
+$$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}} \tag{47}$$
+
+#### 6.3 噪声的反解
+
+**从(47)反解噪声:**
+$$\bar{\boldsymbol{\varepsilon}} = \frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t} \tag{48}$$
+
+**代入到噪声合成公式(45):**
+$$\frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t} = \frac{\alpha_t\bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t}{\bar{\beta}_t} \tag{49}$$
+
+**因此:**
+$$\beta_t\boldsymbol{\varepsilon}_t = \boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0 - \alpha_t\bar{\beta}_{t-1}\bar{\boldsymbol{\varepsilon}}_{t-1} \tag{50}$$
+
+但这个形式仍然复杂。
+
+**更简洁的方法:** 直接用(47)的形式。
+
+#### 6.4 最终损失函数
+
+**重写损失函数:** 用单个噪声$\bar{\boldsymbol{\varepsilon}}$:
+$$\mathcal{L}_t = \frac{\beta_t^2}{2\alpha_t^2\sigma_t^2} \mathbb{E}_{\bar{\boldsymbol{\varepsilon}} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}), \boldsymbol{x}_0 \sim \tilde{p}}\left[\|\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}}, t) - \text{noise target}\|^2\right] \tag{51}$$
+
+**问题:** noise target应该是什么?
+
+**关键观察:** 在式(40)的推导中,真正的噪声目标是$\boldsymbol{\varepsilon}_t$,但我们希望用$\bar{\boldsymbol{\varepsilon}}$。
+
+**重新推导:** 从
+$$\boldsymbol{x}_t = \alpha_t\boldsymbol{x}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}} \tag{52}$$
+
+**用第二个形式代入均值:**
+$$\boldsymbol{\mu}(\boldsymbol{x}_t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \beta_t\boldsymbol{\epsilon}_{\boldsymbol{\theta}}\right) \tag{53}$$
+
+**理想情况:** 如果$\boldsymbol{\epsilon}_{\boldsymbol{\theta}} = \bar{\boldsymbol{\varepsilon}}$,则:
+$$\boldsymbol{\mu}(\boldsymbol{x}_t) = \frac{1}{\alpha_t}\left(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}} - \beta_t\bar{\boldsymbol{\varepsilon}}\right) = \frac{1}{\alpha_t}\left(\bar{\alpha}_t\boldsymbol{x}_0 + (\bar{\beta}_t - \beta_t)\bar{\boldsymbol{\varepsilon}}\right) \tag{54}$$
+
+**这不对!** 让我重新思考...
+
+**正确的理解:**
+
+从$\boldsymbol{x}_{t-1} = \frac{1}{\alpha_t}(\boldsymbol{x}_t - \beta_t\boldsymbol{\varepsilon}_t)$,如果我们预测的是$\boldsymbol{\varepsilon}_t$,这是正确的。
+
+但从累积形式$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}}$,我们实际上可以预测$\bar{\boldsymbol{\varepsilon}}$。
+
+**重新参数化:** 定义
+$$\boldsymbol{\mu}(\boldsymbol{x}_t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t}{\bar{\beta}_t}\bar{\boldsymbol{\epsilon}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\right) \tag{55}$$
+
+其中$\bar{\boldsymbol{\epsilon}}_{\boldsymbol{\theta}}$预测累积噪声$\bar{\beta}_t\bar{\boldsymbol{\varepsilon}}$。
+
+**但实践中:** DDPM论文使用更简单的形式,直接预测某种噪声,损失函数为:
+$$\mathcal{L}_{\text{simple}} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}}\left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}, t)\|^2\right] \tag{56}$$
+
+这里$\boldsymbol{\varepsilon}$就是累积噪声$\bar{\boldsymbol{\varepsilon}}$。
+
+**理论系数:** 完整的带权重的损失为:
+$$\mathcal{L}_t = \frac{\beta_t^4}{2\bar{\beta}_t^2\alpha_t^2\sigma_t^2} \mathbb{E}\left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\|^2\right] \tag{57}$$
+
+**但DDPM发现:** 去掉权重系数,使用简化损失(56)效果更好!
+
+### 7. 超参数设置与理论分析
+
+#### 7.1 方差约束的意义
+
+**约束:** $\alpha_t^2 + \beta_t^2 = 1$
+
+**目的:** 保持方差恒定。
+
+**推理:** 假设$\boldsymbol{x}_{t-1} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$(标准化假设),则:
+$$\begin{aligned}
+\text{Var}[\boldsymbol{x}_t] &= \text{Var}[\alpha_t\boldsymbol{x}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t] \\
+&= \alpha_t^2\text{Var}[\boldsymbol{x}_{t-1}] + \beta_t^2\text{Var}[\boldsymbol{\varepsilon}_t] \\
+&= \alpha_t^2 \cdot 1 + \beta_t^2 \cdot 1 \\
+&= \alpha_t^2 + \beta_t^2
+\end{aligned} \tag{58}$$
+
+如果$\alpha_t^2 + \beta_t^2 = 1$,则$\text{Var}[\boldsymbol{x}_t] = 1$,方差保持不变。
+
+#### 7.2 先验匹配条件
+
+**目标:** 希望$p(\boldsymbol{x}_T|\boldsymbol{x}_0) \approx q(\boldsymbol{x}_T) = \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。
+
+**从累积公式:**
+$$p(\boldsymbol{x}_T|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_T; \bar{\alpha}_T\boldsymbol{x}_0, \bar{\beta}_T^2\boldsymbol{I}) \tag{59}$$
+
+**要使其接近$\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$,需要:**
+1. $\bar{\alpha}_T \approx 0$(均值消失)
+2. $\bar{\beta}_T \approx 1$(方差为1)
+
+由于$\bar{\beta}_T = \sqrt{1 - \bar{\alpha}_T^2}$,条件1自动保证条件2。
+
+**因此关键是:** $\bar{\alpha}_T = \prod_{t=1}^T \alpha_t \approx 0$
+
+#### 7.3 $\alpha_t$的选择
+
+**DDPM的设置:** $\alpha_t = \sqrt{1 - \frac{0.02t}{T}}$
+
+**分析:**
+$$\bar{\alpha}_T = \prod_{t=1}^T \sqrt{1 - \frac{0.02t}{T}} \tag{60}$$
+
+**对数形式:**
+$$\log \bar{\alpha}_T = \sum_{t=1}^T \frac{1}{2}\log\left(1 - \frac{0.02t}{T}\right) \tag{61}$$
+
+**当$T$很大时,可以近似为积分:**
+$$\log \bar{\alpha}_T \approx \frac{T}{2} \int_0^1 \log(1 - 0.02\tau) d\tau \tag{62}$$
+
+**计算积分:**
+$$\int_0^1 \log(1 - 0.02\tau) d\tau = \left[(\tau - 1)\log(1 - 0.02\tau) - \tau\right]_0^1 = 0 \cdot \log(0.98) - 1 - ((-1)\log(1) - 0) = -1 \tag{63}$$
+
+因此:
+$$\log \bar{\alpha}_T \approx -\frac{T}{2} \tag{64}$$
+$$\bar{\alpha}_T \approx e^{-T/2} \tag{65}$$
+
+**当$T = 1000$时:**
+$$\bar{\alpha}_T \approx e^{-500} \approx 0 \tag{66}$$
+
+确实满足条件!
+
+#### 7.4 生成方差$\sigma_t$的选择
+
+**理论推导两个极端情况:**
+
+**情况1: 单样本数据集**
+
+假设$\tilde{p}(\boldsymbol{x}_0) = \delta(\boldsymbol{x}_0 - \boldsymbol{x}_*)$,即训练集只有一个样本$\boldsymbol{x}_*$。
+
+**最优的$\sigma_t$:** 通过最小化KL散度,可以推导出:
+$$\sigma_t^2 = \frac{\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\beta_t^2 \tag{67}$$
+
+**推导sketch:** 利用贝叶斯公式和高斯分布的性质,计算$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$,然后对$\boldsymbol{x}_0 = \boldsymbol{x}_*$固定。
+
+**情况2: 标准正态先验**
+
+假设$\tilde{p}(\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。
+
+**最优的$\sigma_t$:** 可以推导出:
+$$\sigma_t^2 = \beta_t^2 \tag{68}$$
+
+**实践:** 两种选择性能相近,DDPM使用第一种。
+
+### 8. 完整的训练与采样算法
+
+#### 8.1 训练算法
+
+**输入:** 数据集$\{\boldsymbol{x}_0^{(i)}\}_{i=1}^N$, 时间步数$T$
+
+**超参数:** $\{\alpha_t\}_{t=1}^T$满足$\alpha_t^2 + \beta_t^2 = 1$
+
+**算法:**
+```
+初始化: 随机初始化网络参数θ
+
+repeat:
+    # 采样数据
+    x0 ~ p_data
+
+    # 采样时间步
+    t ~ Uniform(1, T)
+
+    # 采样噪声
+    ε ~ N(0, I)
+
+    # 构造加噪样本
+    x_t = bar_alpha_t * x0 + bar_beta_t * ε
+
+    # 计算损失
+    loss = ||ε - ε_θ(x_t, t)||^2
+
+    # 梯度更新
+    θ ← θ - lr * ∇_θ loss
+
+until 收敛
+```
+
+#### 8.2 采样算法
+
+**输入:** 训练好的模型$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$
+
+**输出:** 生成样本$\boldsymbol{x}_0$
+
+**算法:**
+```
+# 从先验采样
+x_T ~ N(0, I)
+
+for t = T to 1:
+    # 预测噪声
+    ε_pred = ε_θ(x_t, t)
+
+    # 计算均值
+    μ = (x_t - (β_t / bar_β_t) * ε_pred) / α_t
+
+    # 采样噪声(最后一步不加)
+    if t > 1:
+        z ~ N(0, I)
+        x_{t-1} = μ + σ_t * z
+    else:
+        x_0 = μ
+
+return x_0
+```
+
+### 9. 与NVAE的联系
+
+#### 9.1 NVAE的结构
+
+**NVAE (Nouveau VAE)** 也引入了多层隐变量:
+$$\boldsymbol{z} = \{\boldsymbol{z}_1, \boldsymbol{z}_2, \ldots, \boldsymbol{z}_L\} \tag{69}$$
+
+**编码过程(非马尔可夫):**
+$$p(\boldsymbol{z}|\boldsymbol{x}) = p(\boldsymbol{z}_L|\boldsymbol{x}) \prod_{l=1}^{L-1} p(\boldsymbol{z}_l|\boldsymbol{z}_{>l}, \boldsymbol{x}) \tag{70}$$
+
+**生成过程:**
+$$q(\boldsymbol{x}|\boldsymbol{z}) = q(\boldsymbol{x}|\boldsymbol{z}_1) \prod_{l=1}^{L-1} q(\boldsymbol{z}_l|\boldsymbol{z}_{l+1}) \tag{71}$$
+
+#### 9.2 与DDPM的比较
+
+**相似之处:**
+1. 都使用多层隐变量
+2. 都是递归式的结构
+3. 都能生成清晰图像
+
+**差异:**
+
+| 特性 | DDPM | NVAE |
+|------|------|------|
+| 编码 | 马尔可夫(固定噪声) | 非马尔可夫(学习) |
+| 参数 | 只有生成网络 | 编码和生成都学习 |
+| 复杂度 | 简单(参数共享) | 复杂(多层不同网络) |
+| 理论 | 固定前向过程 | 灵活的双向 |
+
+**DDPM可以看作:** 极度简化的NVAE
+- 编码固定为简单加噪
+- 生成使用单一网络反复迭代
+- 参数共享机制
+
+### 10. 理论深度分析
+
+#### 10.1 为什么多步比单步好?
+
+**单步VAE的问题:**
+$$\boldsymbol{x} \xrightarrow{p(\boldsymbol{z}|\boldsymbol{x})} \boldsymbol{z} \xrightarrow{q(\boldsymbol{x}|\boldsymbol{z})} \boldsymbol{x}' \tag{72}$$
+
+**限制:**
+- $p(\boldsymbol{z}|\boldsymbol{x}) = \mathcal{N}(\boldsymbol{\mu}_{\text{enc}}(\boldsymbol{x}), \boldsymbol{\Sigma}_{\text{enc}}(\boldsymbol{x}))$
+- $q(\boldsymbol{x}|\boldsymbol{z}) = \mathcal{N}(\boldsymbol{\mu}_{\text{dec}}(\boldsymbol{z}), \boldsymbol{\Sigma}_{\text{dec}}(\boldsymbol{z}))$
+
+虽然$\boldsymbol{\mu}, \boldsymbol{\Sigma}$可以是任意函数,但单步变换的表达能力有限。
+
+**多步的优势:**
+
+**定理(万能逼近):** 给定任意连续分布$p_0$和$p_T$,存在充分光滑的路径:
+$$p_0 \to p_1 \to \cdots \to p_T \tag{73}$$
+
+使得每个$p_{t-1} \to p_t$可以用简单的正态分布逼近。
+
+**直觉:**
+- 大跳跃难以用简单分布建模
+- 小步连续变化容易建模
+- 类似于数值微分方程求解
+
+#### 10.2 优化景观分析
+
+**单步VAE的损失:**
+$$\mathcal{L}_{\text{VAE}} = \mathbb{E}_{p(\boldsymbol{z}|\boldsymbol{x})}\left[-\log q(\boldsymbol{x}|\boldsymbol{z})\right] + KL(p(\boldsymbol{z}|\boldsymbol{x}) \| q(\boldsymbol{z})) \tag{74}$$
+
+**问题:** KL散度项可能导致后验崩塌(posterior collapse)。
+
+**DDPM的损失:**
+$$\mathcal{L}_{\text{DDPM}} = \sum_{t=1}^T \mathbb{E}\left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\|^2\right] \tag{75}$$
+
+**优势:**
+1. 纯回归损失,优化简单
+2. 每步独立优化,无耦合
+3. 不会后验崩塌
+
+#### 10.3 生成质量的理论保证
+
+**定理:** 如果$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$完美学习噪声,即:
+$$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = \mathbb{E}[\boldsymbol{\varepsilon}|\boldsymbol{x}_t] \tag{76}$$
+
+则反向过程$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)$的最优均值为:
+$$\boldsymbol{\mu}^*(\boldsymbol{x}_t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\nabla_{\boldsymbol{x}_t}\log p_t(\boldsymbol{x}_t)\right) \tag{77}$$
+
+其中$\nabla_{\boldsymbol{x}_t}\log p_t(\boldsymbol{x}_t)$是得分函数(score function)。
+
+**证明sketch:**
+- 得分函数$\nabla_{\boldsymbol{x}_t}\log p_t(\boldsymbol{x}_t) = -\frac{\mathbb{E}[\boldsymbol{\varepsilon}|\boldsymbol{x}_t]}{\bar{\beta}_t}$
+- 代入即得
+
+**意义:** DDPM实际上在学习数据分布的得分函数!
+
+### 11. 实践技巧总结
+
+#### 11.1 训练技巧
+
+**1. 损失函数选择:**
+- 理论: 带权重的$\frac{\beta_t^4}{2\bar{\beta}_t^2\alpha_t^2\sigma_t^2}\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}\|^2$
+- 实践: 简化的$\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}\|^2$效果更好
+
+**2. 归一化:**
+- 使用Instance Norm / Layer Norm / Group Norm
+- **避免** Batch Norm(训练推理不一致)
+
+**3. 时间编码:**
+- Sinusoidal位置编码
+- 或可训练的Embedding
+
+**4. 优化器:**
+- Adam / AdamW
+- 较大学习率(如$10^{-4}$)
+
+#### 11.2 采样技巧
+
+**1. 方差选择:**
+$$\sigma_t = \frac{\bar{\beta}_{t-1}}{\bar{\beta}_t}\beta_t \quad \text{或} \quad \sigma_t = \beta_t \tag{78}$$
+
+**2. 重要性采样:**
+不同时间步$t$对最终质量的贡献不同,可以调整采样分布。
+
+**3. 降噪强度:**
+可以在最后几步减小方差,使生成更稳定。
+
+### 12. 总结与展望
+
+#### 12.1 核心贡献总结
+
+**DDPM = 自回归式VAE:**
+1. **理论:** 从VAE的联合分布KL散度出发
+2. **简化:** 固定前向过程为简单加噪
+3. **参数化:** 用噪声预测而非直接预测$\boldsymbol{x}_{t-1}$
+4. **优化:** 纯回归损失,训练稳定
+
+**优点:**
+- 生成质量高(清晰图像)
+- 训练简单稳定
+- 理论基础清晰
+
+**缺点:**
+- 采样慢($T$步迭代)
+- 无语义隐空间(不能编辑)
+
+#### 12.2 后续改进方向
+
+**已有工作:**
+1. **加速采样:** DDIM, DPM-Solver, 蒸馏
+2. **条件生成:** Classifier-Guidance, Classifier-Free
+3. **架构改进:** Latent Diffusion(在VAE隐空间做扩散)
+
+**开放问题:**
+1. 如何结合DDPM的生成质量和VAE的可编辑性?
+2. 能否设计更优的前向过程?
+3. 理论上的最优步数$T$是多少?
+4. 如何扩展到离散数据(文本)?
+
+---
+
+**参考文献:**
+- DDPM: [Denoising Diffusion Probabilistic Models](https://papers.cool/arxiv/2006.11239)
+- NVAE: [NVAE: A Deep Hierarchical Variational Autoencoder](https://papers.cool/arxiv/2007.03898)
+- Score-based: [Score-Based Generative Modeling](https://papers.cool/arxiv/2011.13456)
 
