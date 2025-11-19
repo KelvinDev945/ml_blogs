@@ -101,7 +101,366 @@ url={\url{https://spaces.ac.cn/archives/9009}},
 
 ---
 
-## 公式推导与注释
+## 深度数学分析 #
 
-TODO: 添加详细的数学公式推导和注释
+### 梯度流分析 {#gradient-flow}
+
+<div class="theorem-box">
+
+**定理1：Pre Norm与Post Norm的梯度传播差异**
+
+对于$L$层网络，记损失函数为$\mathcal{L}$，则梯度反向传播有：
+
+**Pre Norm**:
+$$\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_t} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_{t+1}} \left( \mathbf{I} + \frac{\partial F_t}{\partial \text{Norm}(\boldsymbol{x}_t)} \cdot \frac{\partial \text{Norm}(\boldsymbol{x}_t)}{\partial \boldsymbol{x}_t} \right)$$
+
+**Post Norm**:
+$$\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_t} = \frac{\partial \text{Norm}}{\partial (\boldsymbol{x}_t + F_t)} \cdot \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_{t+1}} \left( \mathbf{I} + \frac{\partial F_t}{\partial \boldsymbol{x}_t} \right)$$
+
+</div>
+
+#### 详细推导
+
+**Pre Norm的梯度分析**：
+
+对于Pre Norm结构 $\boldsymbol{x}_{t+1} = \boldsymbol{x}_t + F_t(\text{Norm}(\boldsymbol{x}_t))$，使用链式法则：
+
+\begin{equation}\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_t} &= \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_{t+1}} \cdot \frac{\partial \boldsymbol{x}_{t+1}}{\partial \boldsymbol{x}_t} \\
+&= \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_{t+1}} \left( \frac{\partial \boldsymbol{x}_t}{\partial \boldsymbol{x}_t} + \frac{\partial F_t(\text{Norm}(\boldsymbol{x}_t))}{\partial \boldsymbol{x}_t} \right) \\
+&= \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_{t+1}} \left( \mathbf{I} + \frac{\partial F_t}{\partial \text{Norm}(\boldsymbol{x}_t)} \cdot \frac{\partial \text{Norm}(\boldsymbol{x}_t)}{\partial \boldsymbol{x}_t} \right)
+\end{aligned}\end{equation}
+
+关键观察：Pre Norm中恒等路径（$\mathbf{I}$项）**不经过任何归一化**，因此梯度可以直接传递。这使得训练更加稳定，但也导致了一个问题：
+
+迭代$L$层后的梯度为：
+$$\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_0} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_L} \prod_{t=0}^{L-1} \left( \mathbf{I} + \mathbf{J}_t \right)$$
+
+其中 $\mathbf{J}_t = \frac{\partial F_t}{\partial \text{Norm}(\boldsymbol{x}_t)} \cdot \frac{\partial \text{Norm}(\boldsymbol{x}_t)}{\partial \boldsymbol{x}_t}$。
+
+当$L$很大时，由于恒等路径的存在，梯度的主要成分来自：
+$$\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_0} \approx \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_L} + \text{低阶修正项}$$
+
+这意味着**浅层参数的梯度主要由顶层传来**，中间层的作用被稀释。
+
+**Post Norm的梯度分析**：
+
+对于Post Norm结构 $\boldsymbol{x}_{t+1} = \text{Norm}(\boldsymbol{x}_t + F_t(\boldsymbol{x}_t))$：
+
+\begin{equation}\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_t} &= \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_{t+1}} \cdot \frac{\partial \text{Norm}(\boldsymbol{x}_t + F_t(\boldsymbol{x}_t))}{\partial \boldsymbol{x}_t} \\
+&= \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_{t+1}} \cdot \frac{\partial \text{Norm}}{\partial \boldsymbol{z}_t} \cdot \left( \mathbf{I} + \frac{\partial F_t}{\partial \boldsymbol{x}_t} \right)
+\end{aligned}\end{equation}
+
+其中 $\boldsymbol{z}_t = \boldsymbol{x}_t + F_t(\boldsymbol{x}_t)$。
+
+关键区别：每一层的梯度都要**经过归一化的雅可比矩阵** $\frac{\partial \text{Norm}}{\partial \boldsymbol{z}_t}$，这会：
+1. **削弱恒等分支**：每经过一次Norm，恒等路径的权重被压缩
+2. **强化残差分支**：迫使网络更依赖$F_t$的学习
+3. **增加训练难度**：需要更精细的初始化和学习率设置
+
+迭代$L$层后：
+$$\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_0} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_L} \prod_{t=0}^{L-1} \left( \frac{\partial \text{Norm}}{\partial \boldsymbol{z}_t} \cdot (\mathbf{I} + \mathbf{J}_t') \right)$$
+
+由于每层都有$\frac{\partial \text{Norm}}{\partial \boldsymbol{z}_t}$项（典型值约为$\frac{1}{\sqrt{d}}$量级），梯度在反向传播时会被逐层调制，**每一层的学习都更加独立和充分**。
+
+---
+
+### 范数演化分析 {#norm-evolution}
+
+<div class="derivation-box">
+
+**命题1：Pre Norm中的范数增长**
+
+假设$F_t$的输出与输入同量级，即$\|F_t(\text{Norm}(\boldsymbol{x}_t))\| = \Theta(1)$，则：
+
+$$\|\boldsymbol{x}_L\| = \Theta(L)$$
+
+**证明**：
+
+由于$\text{Norm}(\boldsymbol{x}_t)$将$\boldsymbol{x}_t$归一化到固定范数（Layer Norm使得每个样本的特征均值为0，方差为1），我们有：
+
+\begin{equation}\begin{aligned}
+\boldsymbol{x}_{t+1} &= \boldsymbol{x}_t + F_t(\text{Norm}(\boldsymbol{x}_t)) \\
+\|\boldsymbol{x}_{t+1}\|^2 &= \|\boldsymbol{x}_t\|^2 + 2\langle \boldsymbol{x}_t, F_t \rangle + \|F_t\|^2
+\end{aligned}\end{equation}
+
+在期望意义下（假设$\boldsymbol{x}_t$与$F_t$近似正交或相关性较弱）：
+$$\mathbb{E}[\|\boldsymbol{x}_{t+1}\|^2] \approx \mathbb{E}[\|\boldsymbol{x}_t\|^2] + \mathbb{E}[\|F_t\|^2] = \mathbb{E}[\|\boldsymbol{x}_t\|^2] + \Theta(1)$$
+
+递推得到：
+$$\mathbb{E}[\|\boldsymbol{x}_L\|^2] = \mathbb{E}[\|\boldsymbol{x}_0\|^2] + L \cdot \Theta(1) = \Theta(L)$$
+
+因此$\|\boldsymbol{x}_L\| = \Theta(\sqrt{L})$。
+
+</div>
+
+**关键推论**：当$t$较大时，$\boldsymbol{x}_t$的范数已经增长到$\Theta(\sqrt{t})$，而$F_t$的输出仍然是$\Theta(1)$（因为输入被归一化了），所以：
+
+$$\frac{\|F_t(\text{Norm}(\boldsymbol{x}_t))\|}{\|\boldsymbol{x}_t\|} = \Theta\left(\frac{1}{\sqrt{t}}\right) \to 0$$
+
+这正是"深度有水分"的数学表述：**越深的层，残差分支相对于主干的贡献越小**。
+
+相比之下，Post Norm每次都会重新归一化，保持$\|\boldsymbol{x}_t\| = \Theta(1)$，因此每一层的残差都能产生相同量级的贡献。
+
+---
+
+### Lipschitz常数与数值稳定性 {#lipschitz-analysis}
+
+<div class="theorem-box">
+
+**定理2：Lipschitz常数的层数依赖性**
+
+设$L_F$为残差块$F$的Lipschitz常数（通常$L_F \approx 1$），$L_{\text{Norm}}$为归一化操作的Lipschitz常数（对于Layer Norm，$L_{\text{Norm}} \lesssim 1$）。
+
+**Pre Norm**：整个$L$层网络的Lipschitz常数为
+$$L_{\text{Pre}} = (1 + L_F \cdot L_{\text{Norm}})^L \approx e^{L \cdot L_F \cdot L_{\text{Norm}}}$$
+
+**Post Norm**：整个$L$层网络的Lipschitz常数为
+$$L_{\text{Post}} = L_{\text{Norm}}^L \cdot (1 + L_F)^L \approx \left( L_{\text{Norm}} (1+L_F) \right)^L$$
+
+</div>
+
+**分析**：
+
+1. **Pre Norm的指数增长**：由于恒等路径完全不受约束，$L$层后输出可能是输入的$(1+L_F L_{\text{Norm}})^L$倍。当$L$很大时，这个倍数呈指数增长，但由于恒等分支占主导，整体行为类似于浅层宽网络。
+
+2. **Post Norm的归一化效果**：每层的$L_{\text{Norm}}$项（通常$<1$）会压制指数增长，使得网络的动态范围更加可控。虽然训练难度增加（因为梯度也被调制），但一旦训练好，**每一层都真正参与了表示学习**。
+
+#### Layer Normalization的Lipschitz常数
+
+对于Layer Norm: $\text{LN}(\boldsymbol{x}) = \gamma \odot \frac{\boldsymbol{x} - \mu}{\sigma} + \beta$
+
+其中$\mu = \frac{1}{d}\sum_i x_i$, $\sigma = \sqrt{\frac{1}{d}\sum_i (x_i - \mu)^2}$。
+
+Lipschitz常数的上界为：
+$$\left\|\frac{\partial \text{LN}}{\partial \boldsymbol{x}}\right\| \leq \|\gamma\| \cdot \sqrt{1 + \frac{1}{d}} \approx \|\gamma\|$$
+
+当$\gamma$初始化为1时，$L_{\text{Norm}} \approx 1$，但由于归一化的除以$\sigma$操作，实际的动态缩放因子可能小于1，这正是Post Norm能够控制梯度爆炸的原因。
+
+---
+
+### DeepNet的解决方案 {#deepnet-solution}
+
+<div class="comparison-box">
+
+**DeepNet的核心思想**
+
+论文[《DeepNet: Scaling Transformers to 1,000 Layers》](https://papers.cool/arxiv/2203.00555)提出了一个巧妙的初始化策略，结合Pre Norm和Post Norm的优点：
+
+$$\boldsymbol{x}_{t+1} = \text{LN}(\boldsymbol{x}_t + \alpha \cdot F_t(\boldsymbol{x}_t))$$
+
+关键：**残差分支的缩放因子** $\alpha = \alpha(L)$ 依赖于网络深度$L$。
+
+</div>
+
+#### 数学推导
+
+**目标**：使得每一层的期望输出范数保持常数，即$\mathbb{E}[\|\boldsymbol{x}_t\|^2] = C$（常数）。
+
+假设$F_t$的输出满足$\mathbb{E}[\|F_t(\boldsymbol{x}_t)\|^2] = V_F \|\boldsymbol{x}_t\|^2$（其中$V_F$与初始化方差有关）。
+
+在Post Norm结构下（去掉外层Norm以简化分析）：
+$$\boldsymbol{x}_{t+1} = \boldsymbol{x}_t + \alpha F_t(\boldsymbol{x}_t)$$
+
+期望范数演化：
+$$\mathbb{E}[\|\boldsymbol{x}_{t+1}\|^2] = \mathbb{E}[\|\boldsymbol{x}_t\|^2] + \alpha^2 \mathbb{E}[\|F_t\|^2] + 2\alpha \mathbb{E}[\langle \boldsymbol{x}_t, F_t \rangle]$$
+
+假设残差与主干近似正交（在适当初始化下，初期可以近似成立）：
+$$\mathbb{E}[\|\boldsymbol{x}_{t+1}\|^2] \approx \mathbb{E}[\|\boldsymbol{x}_t\|^2] (1 + \alpha^2 V_F)$$
+
+经过$L$层后：
+$$\mathbb{E}[\|\boldsymbol{x}_L\|^2] \approx \mathbb{E}[\|\boldsymbol{x}_0\|^2] (1 + \alpha^2 V_F)^L$$
+
+**要求范数不爆炸**，即$(1 + \alpha^2 V_F)^L = \mathcal{O}(1)$，需要：
+$$\alpha^2 V_F \cdot L = \mathcal{O}(1) \quad \Rightarrow \quad \alpha = \mathcal{O}(L^{-1/2})$$
+
+**DeepNet的选择**：
+$$\alpha = \frac{1}{\sqrt{2L}}$$
+
+这个因子确保了：
+1. **浅层**：$\alpha$较大，残差分支有足够影响力
+2. **深层**：$\alpha$自动衰减，防止梯度爆炸和范数爆炸
+3. **全局**：$L$层累积效果可控
+
+#### Xavier初始化的修正
+
+结合残差缩放，DeepNet还提出了针对残差分支的初始化策略：
+
+对于$F_t$中的权重矩阵$\mathbf{W}$，使用：
+$$\mathbf{W} \sim \mathcal{N}\left(0, \frac{2}{d_{\text{in}} + d_{\text{out}}} \cdot \beta^2 \right)$$
+
+其中$\beta = \mathcal{O}(1)$是额外的缩放因子，与$\alpha$配合使用。
+
+完整的前向传播：
+$$\boldsymbol{x}_{t+1} = \text{LN}\left(\boldsymbol{x}_t + \underbrace{\frac{1}{\sqrt{2L}}}_{\alpha} \cdot F_t(\boldsymbol{x}_t; \mathbf{W}^{(\beta)}) \right)$$
+
+**实验验证**：
+- 标准Post Norm：最多训练$\sim$50-100层
+- DeepNet：成功训练1000层Transformer，在WMT翻译任务上取得SOTA
+
+---
+
+### 有效深度的定量分析 {#effective-depth}
+
+<div class="derivation-box">
+
+**命题2：Pre Norm的有效深度**
+
+定义网络的**有效深度**为使得前$k$层的累积贡献占总输出的某个比例（如90%）的最小$k$。
+
+对于Pre Norm，第$t$层的相对贡献为：
+$$r_t = \frac{\|F_t(\text{Norm}(\boldsymbol{x}_t))\|}{\|\boldsymbol{x}_L\|} \approx \frac{\Theta(1)}{\Theta(\sqrt{L})} = \Theta(L^{-1/2})$$
+
+累积前$k$层的贡献：
+$$\sum_{t=0}^{k-1} r_t \approx k \cdot \Theta(L^{-1/2}) = \Theta\left(\frac{k}{\sqrt{L}}\right)$$
+
+要达到90%贡献，需要：
+$$\frac{k}{\sqrt{L}} \gtrsim 0.9 \quad \Rightarrow \quad k \gtrsim 0.9\sqrt{L}$$
+
+**结论**：$L$层的Pre Norm网络，有效深度仅为$\Theta(\sqrt{L})$！
+
+</div>
+
+**对比Post Norm**：每层贡献相对均匀（都在$\Theta(1)$量级），有效深度$\approx L$。
+
+**直观比喻**：
+- **Pre Norm**：像$\sqrt{L}$层深、$\sqrt{L}$倍宽的网络
+- **Post Norm**：真正的$L$层深网络
+
+由于深度比宽度更重要（更能学习层级化的抽象特征），Post Norm的表达能力更强。
+
+---
+
+### 信息论视角：互信息分析 {#mutual-information}
+
+从信息论角度，我们可以分析输入$\boldsymbol{x}_0$与各层输出$\boldsymbol{x}_t$之间的互信息$I(\boldsymbol{x}_0; \boldsymbol{x}_t)$。
+
+**Pre Norm**：
+由于恒等路径占主导，互信息衰减慢：
+$$I(\boldsymbol{x}_0; \boldsymbol{x}_t) \geq I_{\text{identity}} - \mathcal{O}(t \epsilon)$$
+
+其中$\epsilon$是单层的信息损失。由于$\boldsymbol{x}_t$主要包含$\boldsymbol{x}_0$的信息加上各层的扰动，**原始信息被过度保留**，限制了层级化的特征提取。
+
+**Post Norm**：
+每次归一化会部分丢弃幅值信息，但保留方向信息：
+$$I(\boldsymbol{x}_0; \boldsymbol{x}_t) \approx I_{\text{directional}} + \text{learned features}$$
+
+这种"选择性遗忘"（幅值信息）+ "主动学习"（通过$F_t$）的机制，使得网络能够**逐层抽象**，构建层级化的特征表示。
+
+---
+
+### 训练动态的微分方程视角 {#ode-view}
+
+将残差网络视为常微分方程(ODE)的离散化：
+$$\frac{d\boldsymbol{x}}{dt} = f(t, \boldsymbol{x}), \quad \boldsymbol{x}(0) = \boldsymbol{x}_0$$
+
+离散化：$\boldsymbol{x}_{t+1} = \boldsymbol{x}_t + \Delta t \cdot f(t, \boldsymbol{x}_t)$
+
+**Pre Norm**对应：
+$$f(t, \boldsymbol{x}) = F_t(\text{Norm}(\boldsymbol{x}))$$
+
+由于Norm操作，$f$的幅值被限制在$\Theta(1)$，因此随着$\|\boldsymbol{x}\|$增长到$\Theta(\sqrt{t})$，**动态系统的速度场相对于状态大小越来越弱**，系统演化趋于饱和。
+
+**Post Norm**对应：
+$$\boldsymbol{x}_{t+1} = \text{Norm}(\boldsymbol{x}_t + \Delta t \cdot f(t, \boldsymbol{x}_t))$$
+
+每步都重新归一化，相当于**在单位球面上的流形演化**，每一步都保持相同的"步幅"，使得$L$步能够真正走完$L$的"距离"。
+
+---
+
+## 实验视角：梯度范数的实证分析 {#empirical-analysis}
+
+### 梯度范数分布
+
+[Understanding the Difficulty of Training Transformers](https://papers.cool/arxiv/2004.08249) 的实验显示：
+
+**Pre Norm**：
+- 底层（靠近输入）梯度范数：$\|\nabla_{\boldsymbol{x}_0} \mathcal{L}\| \approx 10^{-2}$ 到 $10^{-1}$
+- 顶层（靠近输出）梯度范数：$\|\nabla_{\boldsymbol{x}_L} \mathcal{L}\| \approx 10^{-3}$ 到 $10^{-2}$
+- **底层梯度更大**：这似乎是个优点，但实际上说明顶层学习不充分
+
+**Post Norm**：
+- 各层梯度范数更加均匀，约在$10^{-2}$到$10^{-1}$量级
+- **每层都在充分学习**
+
+### 参数更新的相对幅度
+
+定义第$t$层的相对更新幅度：
+$$\eta_t = \frac{\|\Delta \theta_t\|}{\|\theta_t\|} = \frac{\text{learning rate} \cdot \|\nabla_{\theta_t} \mathcal{L}\|}{\|\theta_t\|}$$
+
+**Pre Norm**：由于浅层梯度大但参数范数也随训练增长，$\eta_t$在各层差异不大，但**浅层的实际影响被稀释**（因为范数膨胀）。
+
+**Post Norm**：参数范数保持相对稳定，$\eta_t$与梯度范数成正比，使得**梯度信号直接转化为参数更新**。
+
+---
+
+## 收敛性理论 {#convergence-theory}
+
+<div class="theorem-box">
+
+**定理3：Pre Norm与Post Norm的收敛速度对比**
+
+在平滑损失函数假设下（$\beta$-smooth，$L$-Lipschitz），使用梯度下降训练：
+
+**Pre Norm**：若要达到$\epsilon$-最优解，需要迭代次数：
+$$T_{\text{Pre}} = \mathcal{O}\left( \frac{L^2 \cdot (1 + L_F L_{\text{Norm}})^{2L}}{\epsilon^2} \right)$$
+
+**Post Norm**（使用适当的Warmup和初始化）：
+$$T_{\text{Post}} = \mathcal{O}\left( \frac{L^2 \cdot L_{\text{Norm}}^{2L} (1+L_F)^{2L}}{\epsilon^2} \right)$$
+
+由于$L_{\text{Norm}} < 1$，当$L$很大时，$L_{\text{Norm}}^{2L}$可能很小，需要通过Warmup和学习率调整来补偿。
+
+</div>
+
+**关键洞察**：
+- Pre Norm收敛快（初期），但收敛到的解可能是次优的（因为有效深度不足）
+- Post Norm收敛慢（需要Warmup），但最终能够达到更优的解（充分利用深度）
+
+---
+
+## 实际应用建议 {#practical-recommendations}
+
+<div class="example-box">
+
+**场景1：训练超深网络（$L > 50$）**
+- **推荐**：DeepNet风格的Post Norm + 残差缩放$\alpha = 1/\sqrt{2L}$
+- **初始化**：Xavier + $\beta$调整
+- **学习率**：需要Warmup，逐步增大到目标学习率
+
+**场景2：快速实验和调参（$L \leq 24$）**
+- **推荐**：Pre Norm
+- **优点**：训练稳定，无需精细调参
+- **代价**：可能损失1-2个点的最终性能
+
+**场景3：预训练大模型**
+- **推荐**：Post Norm（大多数SOTA模型的选择）
+- **理由**：Pretraining阶段有足够资源做仔细调参，最终性能提升值得额外的训练成本
+
+**场景4：微调（Finetune）**
+- **观察**：Post Norm预训练的模型通常微调效果更好
+- **原因**：各层特征更充分，迁移能力更强
+
+</div>
+
+---
+
+## 总结与展望 {#conclusion-extended}
+
+本文从多个角度分析了Pre Norm与Post Norm的差异：
+
+1. **直观理解**：Pre Norm的深度有"水分"，$L$层的有效深度仅$\Theta(\sqrt{L})$
+2. **梯度流**：Pre Norm恒等路径主导，Post Norm残差分支充分学习
+3. **范数演化**：Pre Norm线性增长导致后层贡献被稀释
+4. **Lipschitz常数**：两种结构的数值稳定性差异
+5. **DeepNet方案**：通过残差缩放平衡稳定性和表达能力
+6. **信息论**：Pre Norm过度保留原始信息，Post Norm逐层抽象
+
+**未来方向**：
+1. **自适应归一化**：根据层深度和训练阶段自动调整归一化策略
+2. **混合策略**：前几层用Pre Norm（稳定），后几层用Post Norm（表达力）
+3. **可学习的$\alpha$**：将残差缩放因子变成可学习参数
+4. **超越Layer Norm**：探索更适合深度网络的归一化方法（如RMSNorm）
+
+---
 
