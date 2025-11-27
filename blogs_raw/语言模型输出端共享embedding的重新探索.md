@@ -3,7 +3,7 @@ title: 语言模型输出端共享Embedding的重新探索
 slug: 语言模型输出端共享embedding的重新探索
 date: 2023-07-20
 tags: 语言模型, 初始化, 生成模型, attention, 优化
-status: pending
+status: completed
 ---
 
 # 语言模型输出端共享Embedding的重新探索

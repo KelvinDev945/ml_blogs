@@ -3,7 +3,7 @@ title: 生成扩散模型漫谈（四）：DDIM = 高观点DDPM
 slug: 生成扩散模型漫谈四ddim-高观点ddpm
 date: 2022-07-27
 tags: 详细推导, 微分方程, 生成模型, DDPM, 扩散, 生成模型
-status: pending
+status: completed
 ---
 # 生成扩散模型漫谈（四）：DDIM = 高观点DDPM
 

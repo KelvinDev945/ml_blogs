@@ -3,7 +3,7 @@ title: msign算子的Newton-Schulz迭代（下）
 slug: msign算子的newton-schulz迭代下
 date: 2025-06-05
 tags: 迭代, 近似, 优化器, muon, 生成模型
-status: pending
+status: completed
 ---
 
 # msign算子的Newton-Schulz迭代（下）

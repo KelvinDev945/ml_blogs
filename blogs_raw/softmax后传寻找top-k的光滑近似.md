@@ -3,7 +3,7 @@ title: Softmax后传：寻找Top-K的光滑近似
 slug: softmax后传寻找top-k的光滑近似
 date: 2024-09-19
 tags: 详细推导, 概率, 近似, 梯度, 光滑, 生成模型
-status: pending
+status: completed
 ---
 # Softmax后传：寻找Top-K的光滑近似
 

@@ -3,7 +3,7 @@ title: 脑洞大开：非线性RNN居然也可以并行计算？
 slug: 脑洞大开非线性rnn居然也可以并行计算
 date: 2023-09-26
 tags: 摄动, 方程, 迭代, 语言模型, RNN
-status: pending
+status: completed
 ---
 
 # 脑洞大开：非线性RNN居然也可以并行计算？

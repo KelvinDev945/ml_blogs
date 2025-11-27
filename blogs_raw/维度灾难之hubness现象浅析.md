@@ -3,7 +3,7 @@ title: “维度灾难”之Hubness现象浅析
 slug: 维度灾难之hubness现象浅析
 date: 2022-06-28
 tags: 维度, GAN, 生成模型, 生成模型, attention
-status: pending
+status: completed
 ---
 
 # “维度灾难”之Hubness现象浅析

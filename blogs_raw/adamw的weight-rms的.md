@@ -3,7 +3,7 @@ title: AdamW的Weight RMS的...
 slug: adamw的weight-rms的
 date: 2025-10-01
 tags: 估计, 梯度, 优化器, 平均场, 生成模型
-status: pending
+status: completed
 ---
 
 # AdamW的Weight RMS的...

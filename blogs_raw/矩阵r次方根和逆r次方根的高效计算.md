@@ -3,7 +3,7 @@ title: 矩阵r次方根和逆r次方根的高效计算
 slug: 矩阵r次方根和逆r次方根的高效计算
 date: 2025-07-21
 tags: 详细推导, 代数, 迭代, 矩阵, 线性, 生成模型
-status: pending
+status: completed
 ---
 # 矩阵r次方根和逆r次方根的高效计算
 

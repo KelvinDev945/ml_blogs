@@ -3,7 +3,7 @@ title: EMO：基于最优传输思想设计的分类损失函数
 slug: emo基于最优传输思想设计的分类损失函数
 date: 2023-10-13
 tags: 概率, 优化, 损失函数, 最优传输, 生成模型
-status: pending
+status: completed
 ---
 
 # EMO：基于最优传输思想设计的分类损失函数

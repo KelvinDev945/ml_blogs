@@ -3,7 +3,7 @@ title: 注意力和Softmax的两点有趣发现：鲁棒性和信息量
 slug: 注意力和softmax的两点有趣发现鲁棒性和信息量
 date: 2023-04-25
 tags: 信息, 熵, attention, 生成模型, attention
-status: pending
+status: completed
 ---
 
 # 注意力和Softmax的两点有趣发现：鲁棒性和信息量

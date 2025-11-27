@@ -4,7 +4,7 @@ slug: adamw的weight-rms的渐近估计
 date: 2025-10-01
 source: https://spaces.ac.cn/archives/11307
 tags: 详细推导, 优化
-status: pending
+status: completed
 ---
 
 # AdamW的Weight RMS的...

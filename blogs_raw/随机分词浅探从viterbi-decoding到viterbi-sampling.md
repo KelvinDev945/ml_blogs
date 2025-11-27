@@ -3,7 +3,7 @@ title: 随机分词浅探：从Viterbi Decoding到Viterbi Sampling
 slug: 随机分词浅探从viterbi-decoding到viterbi-sampling
 date: 2023-09-16
 tags: 概率, 随机, 分词, 新词发现, 生成模型
-status: pending
+status: completed
 ---
 
 # 随机分词浅探：从Viterbi Decoding到Viterbi Sampling

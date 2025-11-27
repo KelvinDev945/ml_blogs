@@ -3,7 +3,7 @@ title: 概率分布的熵归一化（Entropy Normalization）
 slug: 概率分布的熵归一化entropy-normalization
 date: 2021-12-24
 tags: 概率, 熵, 生成模型, attention, 优化
-status: pending
+status: completed
 ---
 
 # 概率分布的熵归一化（Entropy Normalization）

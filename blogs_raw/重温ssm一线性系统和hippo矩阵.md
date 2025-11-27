@@ -3,7 +3,7 @@ title: 重温SSM（一）：线性系统和HiPPO矩阵
 slug: 重温ssm一线性系统和hippo矩阵
 date: 2024-05-24
 tags: 微分方程, 线性, RNN, ssm, 生成模型
-status: pending
+status: completed
 ---
 
 # 重温SSM（一）：线性系统和HiPPO矩阵

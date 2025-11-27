@@ -3,7 +3,7 @@ title: Transformer升级之路：16、“复盘”长度外推技术
 slug: transformer升级之路16复盘长度外推技术
 date: 2024-01-26
 tags: 详细推导, attention, 位置编码, 泛化, 外推, rope
-status: pending
+status: completed
 ---
 # Transformer升级之路：16、“复盘”长度外推技术
 

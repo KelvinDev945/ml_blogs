@@ -3,7 +3,7 @@ title: 从Hessian近似看自适应学习率优化器
 slug: 从hessian近似看自适应学习率优化器
 date: 2024-11-29
 tags: 详细推导, 优化, 梯度, 学习率, 优化器, 生成模型
-status: pending
+status: completed
 ---
 # 从Hessian近似看自适应学习率优化器
 

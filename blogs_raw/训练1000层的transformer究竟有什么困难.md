@@ -3,7 +3,7 @@ title: 训练1000层的Transformer究竟有什么困难？
 slug: 训练1000层的transformer究竟有什么困难
 date: 2022-03-09
 tags: 优化, 梯度, attention, 生成模型, attention
-status: pending
+status: completed
 ---
 
 # 训练1000层的Transformer究竟有什么困难？

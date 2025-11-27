@@ -3,7 +3,7 @@ title: 通过梯度近似寻找Normalization的替代品
 slug: 通过梯度近似寻找normalization的替代品
 date: 2025-04-02
 tags: 详细推导, 函数, 分析, 梯度, 光滑, 生成模型
-status: pending
+status: completed
 ---
 # 通过梯度近似寻找Normalization的替代品
 

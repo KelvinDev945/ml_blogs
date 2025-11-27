@@ -3,7 +3,7 @@ title: 通向概率分布之路：盘点Softmax及其替代品
 slug: 通向概率分布之路盘点softmax及其替代品
 date: 2023-12-11
 tags: 详细推导, 概率, 分析, 损失函数, 梯度, 生成模型
-status: pending
+status: completed
 ---
 # 通向概率分布之路：盘点Softmax及其替代品
 

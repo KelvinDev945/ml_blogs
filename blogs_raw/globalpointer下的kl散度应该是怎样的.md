@@ -3,7 +3,7 @@ title: GlobalPointer下的“KL散度”应该是怎样的？
 slug: globalpointer下的kl散度应该是怎样的
 date: 2022-04-15
 tags: 损失函数, 对抗训练, NER, 正则化, 生成模型
-status: pending
+status: completed
 ---
 
 # GlobalPointer下的"KL散度"应该是怎样的？

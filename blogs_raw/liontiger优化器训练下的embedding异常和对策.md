@@ -3,7 +3,7 @@ title: Lion/Tiger优化器训练下的Embedding异常和对策
 slug: liontiger优化器训练下的embedding异常和对策
 date: 2023-08-28
 tags: 问题, 梯度, 优化器, 生成模型, attention
-status: pending
+status: completed
 ---
 
 # Lion/Tiger优化器训练下的Embedding异常和对策

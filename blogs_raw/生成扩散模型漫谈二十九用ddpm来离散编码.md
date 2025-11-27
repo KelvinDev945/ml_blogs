@@ -3,7 +3,7 @@ title: 生成扩散模型漫谈（二十九）：用DDPM来离散编码
 slug: 生成扩散模型漫谈二十九用ddpm来离散编码
 date: 2025-02-14
 tags: 生成模型, 编码, DDPM, 扩散, 离散化
-status: pending
+status: completed
 ---
 
 # 生成扩散模型漫谈（二十九）：用DDPM来离散编码

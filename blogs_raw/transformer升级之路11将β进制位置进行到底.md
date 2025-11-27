@@ -3,7 +3,7 @@ title: Transformer升级之路：11、将β进制位置进行到底
 slug: transformer升级之路11将β进制位置进行到底
 date: 2023-07-31
 tags: 详细推导, attention, 位置编码, 泛化, 外推, rope
-status: pending
+status: completed
 ---
 # Transformer升级之路：11、将β进制位置进行到底
 

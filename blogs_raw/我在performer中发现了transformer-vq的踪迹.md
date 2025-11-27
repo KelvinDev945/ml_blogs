@@ -3,7 +3,7 @@ title: 我在Performer中发现了Transformer-VQ的踪迹
 slug: 我在performer中发现了transformer-vq的踪迹
 date: 2023-11-29
 tags: 量子化, 语言模型, attention, 生成模型, attention
-status: pending
+status: completed
 ---
 
 # 我在Performer中发现了Transformer-VQ的踪迹

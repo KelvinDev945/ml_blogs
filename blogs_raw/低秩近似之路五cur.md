@@ -3,7 +3,7 @@ title: 低秩近似之路（五）：CUR
 slug: 低秩近似之路五cur
 date: 2025-01-12
 tags: 近似, 最优, 矩阵, 低秩, 生成模型
-status: pending
+status: completed
 ---
 
 # 低秩近似之路（五）：CUR

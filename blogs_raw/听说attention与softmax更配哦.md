@@ -3,7 +3,7 @@ title: 听说Attention与Softmax更配哦～
 slug: 听说attention与softmax更配哦
 date: 2022-04-07
 tags: 熵, 语言模型, attention, 预训练, 生成模型
-status: pending
+status: completed
 ---
 
 # 听说Attention与Softmax更配哦～

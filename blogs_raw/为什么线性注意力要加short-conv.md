@@ -4,7 +4,7 @@ slug: 为什么线性注意力要加short-conv
 date: 2025-10-05
 source: https://spaces.ac.cn/archives/11320
 tags: 详细推导, 机器学习
-status: pending
+status: completed
 ---
 
 # 为什么线性注意力要加Short C...

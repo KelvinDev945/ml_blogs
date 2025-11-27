@@ -3,7 +3,7 @@ title: 生成扩散模型漫谈（十四）：构建ODE的一般步骤（上）
 slug: 生成扩散模型漫谈十四构建ode的一般步骤上
 date: 2022-12-15
 tags: 微分方程, 生成模型, 扩散, 格林函数, 生成模型
-status: pending
+status: completed
 ---
 
 # 生成扩散模型漫谈（十四）：构建ODE的一般步骤（上）

@@ -3,7 +3,7 @@ title: Transformer升级之路：13、逆用Leaky ReRoPE
 slug: transformer升级之路13逆用leaky-rerope
 date: 2023-08-14
 tags: 详细推导, attention, 位置编码, 泛化, 外推, rope
-status: pending
+status: completed
 ---
 # Transformer升级之路：13、逆用Leaky ReRoPE
 

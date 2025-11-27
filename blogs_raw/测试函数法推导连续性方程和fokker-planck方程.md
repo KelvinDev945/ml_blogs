@@ -2,94 +2,1457 @@
 title: 测试函数法推导连续性方程和Fokker-Planck方程
 slug: 测试函数法推导连续性方程和fokker-planck方程
 date: 2023-02-11
-tags: 详细推导, 概率, 微分方程, 随机, 扩散, 生成模型
-status: pending
+tags: 详细推导, 概率, 微分方程, 随机, 扩散, 生成模型, 泛函分析, PDE理论, 弱解
+tags_reviewed: true
+status: completed
 ---
 # 测试函数法推导连续性方程和Fokker-Planck方程
 
 **原文链接**: [https://spaces.ac.cn/archives/9461](https://spaces.ac.cn/archives/9461)
 
-**发布日期**: 
+**发布日期**: 2023-02-11
 
 ---
 
-在文章[《生成扩散模型漫谈（六）：一般框架之ODE篇》](/archives/9228)中，我们推导了SDE的Fokker-Planck方程；而在[《生成扩散模型漫谈（十二）：“硬刚”扩散ODE》](/archives/9280)中，我们单独推导了ODE的连续性方程。它们都是描述随机变量沿着SDE/ODE演化的分布变化方程，连续性方程是Fokker-Planck方程的特例。在推导Fokker-Planck方程时，我们将泰勒展开硬套到了狄拉克函数上，虽然结果是对的，但未免有点不伦不类；在推导连续性方程时，我们结合了雅可比行列式和泰勒展开，方法本身比较常规，但没法用来推广到Fokker-Planck方程。
+## 引言
 
-这篇文章我们介绍“测试函数法”，它是推导连续性方程和Fokker-Planck方程的标准方法之一，其分析过程比较正规，并且适用场景也比较广。
+在文章[《生成扩散模型漫谈（六）：一般框架之ODE篇》](/archives/9228)中，我们推导了SDE的Fokker-Planck方程；而在[《生成扩散模型漫谈（十二）："硬刚"扩散ODE》](/archives/9280)中，我们单独推导了ODE的连续性方程。它们都是描述随机变量沿着SDE/ODE演化的分布变化方程，连续性方程是Fokker-Planck方程的特例。在推导Fokker-Planck方程时，我们将泰勒展开硬套到了狄拉克函数上，虽然结果是对的，但未免有点不伦不类；在推导连续性方程时，我们结合了雅可比行列式和泰勒展开，方法本身比较常规，但没法用来推广到Fokker-Planck方程。
 
-## 分部积分 #
+这篇文章我们介绍"测试函数法"，它是推导连续性方程和Fokker-Planck方程的标准方法之一，其分析过程比较正规，并且适用场景也比较广。
 
-正式推导之前，这里先介绍后面推导会用到的关键结果——分部积分法的高维推广。
+---
 
-一般教程对分部积分的介绍仅限于一维情形，即  
-\begin{equation}\int_a^b uv'dx = uv|_a^b - \int_a^b vu'dx\end{equation}  
-这里$u,v$是$x$的函数，$'$表示求函数关于$x$的导数。下面我们需要它的一个高维版本，为此，我们先回顾一维分部积分的推导过程，它依赖于求导的乘法法则：  
-\begin{equation}(uv)' = uv' + vu'\end{equation}  
-然后两边对$x$积分并移项，就得到分部积分公式。对于高维情形，我们考虑类似的公式：  
-\begin{equation}\nabla\cdot(u\boldsymbol{v}) = \boldsymbol{v}\cdot\nabla u + u\nabla \cdot\boldsymbol{v}\end{equation}  
-其中$u$是$\boldsymbol{x}$的标量函数，$\boldsymbol{v}$是$\boldsymbol{x}$的向量函数（维度跟$\boldsymbol{v}$一致），$\nabla$表示求函数关于$\boldsymbol{x}$的梯度。现在我们对两端在区域$\Omega$积分：  
-\begin{equation}\int_{\Omega}\nabla\cdot(u\boldsymbol{v})d\boldsymbol{x} = \int_{\Omega}\boldsymbol{v}\cdot\nabla u d\boldsymbol{x} + \int_{\Omega}u\nabla \cdot\boldsymbol{v} d\boldsymbol{x}\end{equation}  
-根据[高斯散度定理](https://en.wikipedia.org/wiki/Divergence_theorem)，左侧等于$\int_{\partial\Omega}u\boldsymbol{v}\cdot\hat{\boldsymbol{n}}dS$，$\partial\Omega$是$\Omega$的边界，$\hat{\boldsymbol{n}}$是边界的外向单位法向量，$dS$是面积微元。所以，移项后有  
-\begin{equation}\int_{\Omega}\boldsymbol{v}\cdot\nabla u d\boldsymbol{x} = \int_{\partial\Omega}u\boldsymbol{v}\cdot\hat{\boldsymbol{n}}dS - \int_{\Omega}u\nabla \cdot\boldsymbol{v} d\boldsymbol{x}\label{eq:int-by-parts}\end{equation}  
-这就是我们要推导的高维空间分部积分公式。特别地，对于概率密度函数$p$，那么由于非负性和积分为1的限制，无穷远处必然有$p\to 0$和$\nabla p\to \boldsymbol{0}$，所以如果$\Omega$选为全空间（没有特别注明积分区域的，默认为全空间），那么分别将$u=p$和$\boldsymbol{v}=\nabla p$代入上式，得到  
-\begin{align}\int\boldsymbol{v}\cdot\nabla p d\boldsymbol{x} =&\, - \int p\nabla \cdot\boldsymbol{v} d\boldsymbol{x}\label{eq:int-by-parts-p} \\\  
-\int u\nabla \cdot\nabla p d\boldsymbol{x} = &\,-\int\nabla p\cdot\nabla u d\boldsymbol{x}\label{eq:int-by-parts-gp}\end{align}  
-如果要进一步严格化上述结论，可以假设$p$具有紧的支撑集。不过这纯粹是数学上的严格化，事实上对于一般理解来说，直接默认在无穷远处成立$p\to 0$和$\nabla p\to \boldsymbol{0}$就够了。
+## 第1部分：核心理论、公理与历史基础
 
-## ODE演化 #
+### 1.1 理论起源与历史发展
 
-测试函数法的原理，是如果对于任意函数$\phi(\boldsymbol{x})$，都成立  
-\begin{equation}\int f(\boldsymbol{x})\phi(\boldsymbol{x})d\boldsymbol{x} = \int g(\boldsymbol{x})\phi(\boldsymbol{x})d\boldsymbol{x}\end{equation}  
-那么就成立$f(\boldsymbol{x})=g(\boldsymbol{x})$，其中$\phi(\boldsymbol{x})$就叫做测试函数。更严谨的定义需要声明$\phi(\boldsymbol{x})$的选取空间，以及等号的具体含义（如严格相等/几乎处处相等/依概率相等之类），这里我们就不引入这些细节了。
+测试函数法（test function method）是现代偏微分方程理论和泛函分析的基石，其理论根源可以追溯到20世纪中叶的**分布理论**（distribution theory）革命。这一方法的诞生不仅彻底改变了我们理解偏微分方程的方式，也为数值计算、物理建模和机器学习提供了强大的数学工具。
 
-对于ODE  
-\begin{equation}\frac{d\boldsymbol{x}_t}{dt}=\boldsymbol{f}_t(\boldsymbol{x}_t)\label{eq:ode}\end{equation}  
-我们将它离散化为  
-\begin{equation}\boldsymbol{x}_{t+\Delta t} = \boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t\label{eq:ode-diff}\end{equation}  
-那么就有  
-\begin{equation}\phi(\boldsymbol{x}_{t+\Delta t}) = \phi(\boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t)\approx \phi(\boldsymbol{x}_t) + \Delta t\,\,\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t)\end{equation}  
-两边求期望，得到：  
-\begin{equation}\int p_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t})\phi(\boldsymbol{x}_{t+\Delta t}) d\boldsymbol{x}_{t+\Delta t}\approx \int p_t(\boldsymbol{x}_t)\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t + \Delta t\int p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t\end{equation}  
-由于积分的结果不依赖于被积自变量的记号，所以左边将$\boldsymbol{x}_{t+\Delta t}$换成$\boldsymbol{x}_t$也是等价的：  
-\begin{equation}\int p_{t+\Delta t}(\boldsymbol{x}_t)\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t\approx \int p_t(\boldsymbol{x}_t)\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t + \Delta t\int p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t\label{eq:change-var}\end{equation}  
-将右边第一项移到左边，然后取$\Delta t\to 0$的极限，得到：  
-\begin{equation}\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t\label{eq:dt-0}\end{equation}  
-右端利用分部积分公式$\eqref{eq:int-by-parts-p}$得到  
-\begin{equation}\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = -\int \Big[\nabla_{\boldsymbol{x}_t}\cdot\big(p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\big)\Big]\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t\end{equation}  
-根据测试函数法的相等原理，就有  
-\begin{equation}\frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} = -\nabla_{\boldsymbol{x}_t}\cdot\big(p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\big)\end{equation}  
-这称为“[连续性方程](https://en.wikipedia.org/wiki/Continuity_equation)”。
+<div class="theorem-box">
 
-## SDE演化 #
+#### 理论起源的三大支柱
 
-对于SDE  
-\begin{equation}d\boldsymbol{x}_t = \boldsymbol{f}_t(\boldsymbol{x}_t) dt + g_t d\boldsymbol{w}\label{eq:sde}\end{equation}  
-我们离散化为  
-\begin{equation}\boldsymbol{x}_{t+\Delta t} = \boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t + g_t \sqrt{\Delta t}\boldsymbol{\varepsilon},\quad \boldsymbol{\varepsilon}\sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})\label{eq:sde-diff}\end{equation}  
-那么  
-\begin{equation}\begin{aligned}  
-\phi(\boldsymbol{x}_{t+\Delta t}) =&\, \phi(\boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t + g_t \sqrt{\Delta t}\boldsymbol{\varepsilon}) \\\  
-\approx&\, \phi(\boldsymbol{x}_t) + \left(\boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t + g_t \sqrt{\Delta t}\boldsymbol{\varepsilon}\right)\cdot \nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t) + \frac{1}{2} \left(g_t\sqrt{\Delta t}\boldsymbol{\varepsilon}\cdot \nabla_{\boldsymbol{x}_t}\right)^2\phi(\boldsymbol{x}_t)  
-\end{aligned}\end{equation}  
-两边求期望，注意右边要同时对$\boldsymbol{x}_t$和$\boldsymbol{\varepsilon}$求期望，其中$\boldsymbol{\varepsilon}$的期望可以事先求出，结果是  
-\begin{equation}\phi(\boldsymbol{x}_t) + \Delta t\,\,\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot \nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t) + \frac{1}{2} \Delta t\,g_t^2\nabla_{\boldsymbol{x}_t}\cdot\nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t)  
-\end{equation}  
-于是  
-\begin{equation}\begin{aligned}  
-&\,\int p_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t})\phi(\boldsymbol{x}_{t+\Delta t}) d\boldsymbol{x}_{t+\Delta t}\\\  
-\approx&\, \int p_t(\boldsymbol{x}_t)\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t + \Delta t\int p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t + \int\frac{1}{2} \Delta t\,g_t^2 p_t(\boldsymbol{x}_t)\nabla_{\boldsymbol{x}_t}\cdot\nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t  
-\end{aligned}\end{equation}  
-跟式$\eqref{eq:change-var}$、式$\eqref{eq:dt-0}$类似，取$\Delta\to 0$的极限，得到  
-\begin{equation}\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\cdot\nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t + \int\frac{1}{2} \,g_t^2 p_t(\boldsymbol{x}_t)\nabla_{\boldsymbol{x}_t}\cdot\nabla_{\boldsymbol{x}_t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t\end{equation}  
-对右边第一项应用式$\eqref{eq:int-by-parts-p}$、对右边第二项先应用式$\eqref{eq:int-by-parts-gp}$再应用式$\eqref{eq:int-by-parts-p}$，得到  
-\begin{equation}\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t}\phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int \left[-\nabla_{\boldsymbol{x}_t}\cdot\big(p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\big)+\frac{1}{2}g_t^2 \nabla_{\boldsymbol{x}}\cdot\nabla_{\boldsymbol{x}}p_t(\boldsymbol{x})\right]\phi(\boldsymbol{x}_t)d\boldsymbol{x}_t\end{equation}  
-根据测试函数法的相等原理得  
-\begin{equation}\frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} = -\nabla_{\boldsymbol{x}_t}\cdot\big(p_t(\boldsymbol{x}_t)\boldsymbol{f}_t(\boldsymbol{x}_t)\big)+\frac{1}{2}g_t^2 \nabla_{\boldsymbol{x}}\cdot\nabla_{\boldsymbol{x}}p_t(\boldsymbol{x})\end{equation}  
-这就是“[Fokker-Planck方程](https://en.wikipedia.org/wiki/Fokker%E2%80%93Planck_equation)”。
+**支柱1：Sobolev空间理论** (1930s)
+- **创立者**：Sergei Sobolev（苏联数学家）
+- **核心贡献**：引入弱导数（weak derivative）概念，允许导数在积分意义下存在
+- **关键洞察**：函数可以"不处处可微"但仍有"广义导数"
 
-## 文章小结 #
+**支柱2：分布理论** (1940s-1950s)
+- **创立者**：Laurent Schwartz（法国数学家，1950年菲尔兹奖得主）
+- **核心贡献**：将函数推广为"广义函数"（distributions），如狄拉克δ函数
+- **关键洞察**：函数不必处处有定义，只需"作用在测试函数上"有意义
 
-本文介绍了用于推导某些概率方程的测试函数法，主要内容包括分部积分法的高维推广，以及ODE的连续性方程和SDE的Fokker-Planck方程的推导过程。
+**支柱3：变分方法与弱解理论** (1960s)
+- **代表人物**：J.-L. Lions, E. Magenes
+- **核心贡献**：建立弱解存在唯一性理论，为有限元方法奠定基础
+- **关键洞察**：弱形式不仅是数学技巧，更是物理守恒律的本质体现
+
+</div>
+
+#### 历史里程碑
+
+<div class="timeline-box">
+
+**1934** - **Sobolev引入弱导数**
+- 背景：研究波动方程的初边值问题
+- 突破：证明弱解的存在性，即使经典解不存在
+- 影响：开创了现代PDE理论的Sobolev空间方法
+
+**1945** - **Schwartz创立分布理论**
+- 背景：量子力学中需要处理狄拉克δ函数
+- 突破：严格定义了广义函数的数学框架
+- 影响：使得"不可微函数的导数"有了严格意义
+
+**1957** - **Lax-Milgram定理**
+- 突破：给出了弱解存在唯一性的充分条件
+- 影响：成为有限元方法的理论基础
+
+**1973** - **Lions的最优控制理论**
+- 应用：将弱解理论应用于PDE约束的优化问题
+- 影响：连接了PDE理论与现代机器学习（如PDE-constrained optimization）
+
+**2020s** - **扩散模型中的应用**
+- 背景：Score-based生成模型需要理解Fokker-Planck方程
+- 应用：测试函数法用于推导得分函数的演化方程
+- 前沿：连续归一化流、神经ODE/SDE中的概率密度演化
+
+</div>
+
+### 1.2 数学公理与基础假设
+
+<div class="theorem-box">
+
+#### 公理1：测试函数空间的定义
+
+**定义（Schwartz空间）**：测试函数空间 $\mathcal{D}(\mathbb{R}^n) = C_0^\infty(\mathbb{R}^n)$ 是满足以下条件的函数 $\phi: \mathbb{R}^n \to \mathbb{R}$ 的集合：
+
+1. **无穷次可微性**：$\phi \in C^\infty(\mathbb{R}^n)$，即所有阶导数存在且连续
+2. **紧支撑性**：存在紧集 $K \subset \mathbb{R}^n$ 使得 $\phi(\boldsymbol{x}) = 0$ 对所有 $\boldsymbol{x} \notin K$
+
+**性质**：
+- 封闭性：$\phi_1, \phi_2 \in \mathcal{D} \Rightarrow \alpha\phi_1 + \beta\phi_2 \in \mathcal{D}$
+- 导数封闭性：$\phi \in \mathcal{D} \Rightarrow \partial^\alpha \phi \in \mathcal{D}$ （任意多重指标 $\alpha$）
+- 卷积封闭性：$\phi_1, \phi_2 \in \mathcal{D} \Rightarrow \phi_1 * \phi_2 \in \mathcal{D}$
+
+</div>
+
+<div class="theorem-box">
+
+#### 公理2：分布的基本引理
+
+**基本引理**（Fundamental Lemma of Calculus of Variations）：
+如果 $f \in L^1_{\text{loc}}(\mathbb{R}^n)$ 满足
+$$\int_{\mathbb{R}^n} f(\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x} = 0, \quad \forall \phi \in \mathcal{D}(\mathbb{R}^n)$$
+则 $f(\boldsymbol{x}) = 0$ 几乎处处成立。
+
+**证明思路**：
+1. 假设存在测度非零的集合 $E$ 使得 $f(\boldsymbol{x}) > \varepsilon > 0$ 在 $E$ 上
+2. 由于 $f$ 的局部可积性，可以找到紧子集 $K \subset E$ 满足 $|K| > 0$
+3. 构造非负测试函数 $\phi_K$ 使得 $\operatorname{supp}(\phi_K) \subset K$ 且 $\phi_K(\boldsymbol{x}) > 0$ 在 $K$ 内
+4. 则 $\int f\phi_K \geq \varepsilon \int_K \phi_K > 0$，与假设矛盾
+
+**意义**：这个引理是测试函数法的核心，它保证了"弱形式"和"强形式"的等价性（当解足够光滑时）。
+
+</div>
+
+<div class="theorem-box">
+
+#### 公理3：概率密度的边界条件
+
+**假设**：对于概率密度函数 $p: \mathbb{R}^n \times [0,\infty) \to [0,\infty)$，我们假设：
+
+1. **归一化条件**：
+   $$\int_{\mathbb{R}^n} p(\boldsymbol{x}, t) d\boldsymbol{x} = 1, \quad \forall t \geq 0$$
+
+2. **无穷远衰减**：
+   $$\lim_{|\boldsymbol{x}| \to \infty} p(\boldsymbol{x}, t) = 0, \quad \lim_{|\boldsymbol{x}| \to \infty} |\boldsymbol{x}|^{n+1} p(\boldsymbol{x}, t) = 0$$
+
+3. **梯度衰减**：如果 $p$ 足够光滑，则
+   $$\lim_{|\boldsymbol{x}| \to \infty} \nabla p(\boldsymbol{x}, t) = \boldsymbol{0}$$
+
+**物理意义**：这些条件确保概率质量不会"逃逸"到无穷远处，边界项在分部积分中消失。
+
+</div>
+
+### 1.3 设计哲学：为什么需要弱形式？
+
+<div class="intuition-box">
+
+#### 🧠 直觉理解：经典解的困境
+
+**类比：破碎的镜子** 🪞
+
+想象一面镜子摔碎了：
+- **经典解**：要求镜子"处处光滑"，没有裂痕
+- **现实**：镜子有裂痕（间断点），在裂痕处不可微
+- **弱解**：不要求处处光滑，只要"整体上"反射光线的效果正确
+
+**为什么经典解不够用？**
+1. **激波问题**：流体力学中，激波是间断解，经典导数不存在
+2. **初值不光滑**：如果初值只是 $L^2$ 函数，解可能永远不会变光滑
+3. **数值计算**：有限元方法基于弱形式，不需要解处处可微
+
+</div>
+
+#### 弱形式的三大优势
+
+**优势1：放松光滑性要求**
+- **经典解**：需要所有导数存在（如 $u \in C^2$ 才能定义 $\Delta u$）
+- **弱解**：只需 $u \in L^2$，导数在"积分意义"下存在
+- **举例**：$u(x) = |x|$ 在 $x=0$ 不可微，但弱导数存在且为 $\operatorname{sgn}(x)$
+
+**优势2：包含更广泛的解**
+- **激波**：Burgers方程 $u_t + uu_x = 0$ 的激波解是弱解但非经典解
+- **δ函数**：狄拉克δ可以作为分布（弱意义下的"函数"）出现
+- **测度解**：概率密度可以包含点质量（如混合分布）
+
+**优势3：自然嵌入边界条件**
+- **Dirichlet边界条件**：通过选择测试函数空间（$\phi|_{\partial\Omega} = 0$）自动满足
+- **Neumann边界条件**：通过分部积分，边界项自然出现
+- **物理守恒律**：弱形式直接反映守恒律的积分形式（如质量守恒）
+
+<div class="derivation-box">
+
+#### 示例：为什么 $|x|$ 的弱导数是 $\operatorname{sgn}(x)$？
+
+**步骤1**：回顾经典导数的定义
+$$u'(x) = \lim_{h \to 0} \frac{u(x+h) - u(x)}{h}$$
+对于 $u(x) = |x|$，在 $x=0$ 处左导数为 $-1$，右导数为 $+1$，经典导数不存在。
+
+**步骤2**：定义弱导数
+如果存在 $v \in L^1_{\text{loc}}$ 满足
+$$\int u(x) \phi'(x) dx = -\int v(x) \phi(x) dx, \quad \forall \phi \in \mathcal{D}$$
+则称 $v$ 为 $u$ 的弱导数。
+
+**步骤3**：验证 $v(x) = \operatorname{sgn}(x)$ 是 $|x|$ 的弱导数
+$$\int_{-\infty}^{\infty} |x| \phi'(x) dx = \int_{-\infty}^{0} (-x)\phi'(x) dx + \int_{0}^{\infty} x\phi'(x) dx$$
+
+分部积分（注意 $\phi(\pm\infty) = 0$）：
+$$= \left[-x\phi(x)\Big|_{-\infty}^0 + \int_{-\infty}^0 \phi(x)dx\right] + \left[x\phi(x)\Big|_0^\infty - \int_0^\infty \phi(x)dx\right]$$
+
+$$= 0 + \int_{-\infty}^0 \phi(x)dx + 0 - \int_0^\infty \phi(x)dx$$
+
+$$= -\int_{-\infty}^0 (-1)\phi(x)dx - \int_0^\infty (+1)\phi(x)dx = -\int_{-\infty}^{\infty} \operatorname{sgn}(x)\phi(x)dx$$
+
+**结论**：$\frac{d}{dx}|x| = \operatorname{sgn}(x)$ 在弱意义下成立！
+
+</div>
+
+### 1.4 与其他方法的本质区别
+
+| 方法 | 核心思想 | 适用场景 | 局限性 |
+|------|---------|---------|--------|
+| **特征线法** | 沿特征线追踪解 | 双曲型方程、守恒律 | 特征线相交处失效、不适用于扩散项 |
+| **变量替换法** | 利用雅可比行列式 | 确定性ODE流 | 无法处理随机性、需要流可逆 |
+| **Kolmogorov方程** | 直接从转移概率出发 | 马尔可夫过程 | 需要转移概率密度存在、计算复杂 |
+| **测试函数法** | 弱形式 + 分部积分 | 一般PDE、SDE、弱解 | 需要理解分布理论 |
+
+---
+
+## 第2部分：严谨的核心数学推导
+
+### 2.1 分部积分公式的高维推广
+
+在推导连续性方程和Fokker-Planck方程之前，我们需要建立分部积分法的高维版本。这是测试函数法的核心技术工具。
+
+<div class="derivation-box">
+
+#### 推导：一维分部积分的回顾
+
+**步骤1**：从乘积法则出发
+$$\frac{d}{dx}[u(x)v(x)] = u'(x)v(x) + u(x)v'(x)$$
+
+**步骤2**：两边在 $[a,b]$ 上积分
+$$\int_a^b \frac{d}{dx}[uv] dx = \int_a^b u'v\, dx + \int_a^b uv'\, dx$$
+
+**步骤3**：左边应用微积分基本定理
+$$u(b)v(b) - u(a)v(a) = \int_a^b u'v\, dx + \int_a^b uv'\, dx$$
+
+**步骤4**：移项得到分部积分公式
+$$\int_a^b uv'\, dx = uv\Big|_a^b - \int_a^b u'v\, dx$$
+
+</div>
+
+<div class="derivation-box">
+
+#### 推导：高维乘积的散度公式
+
+**目标**：推导 $\nabla \cdot (u\boldsymbol{v}) = \boldsymbol{v} \cdot \nabla u + u\nabla \cdot \boldsymbol{v}$
+
+**步骤1**：定义
+设 $u: \mathbb{R}^n \to \mathbb{R}$ 是标量函数，$\boldsymbol{v} = (v_1, \ldots, v_n): \mathbb{R}^n \to \mathbb{R}^n$ 是向量函数。
+
+标量函数与向量的乘积：$u\boldsymbol{v} = (uv_1, uv_2, \ldots, uv_n)$
+
+**步骤2**：计算散度
+$$\nabla \cdot (u\boldsymbol{v}) = \sum_{i=1}^n \frac{\partial}{\partial x_i}(uv_i)$$
+
+**步骤3**：应用一维乘积法则
+$$\frac{\partial}{\partial x_i}(uv_i) = v_i \frac{\partial u}{\partial x_i} + u\frac{\partial v_i}{\partial x_i}$$
+
+**步骤4**：代入并重新整理
+$$\nabla \cdot (u\boldsymbol{v}) = \sum_{i=1}^n \left(v_i \frac{\partial u}{\partial x_i} + u\frac{\partial v_i}{\partial x_i}\right)$$
+
+$$= \sum_{i=1}^n v_i \frac{\partial u}{\partial x_i} + u\sum_{i=1}^n \frac{\partial v_i}{\partial x_i}$$
+
+$$= \boldsymbol{v} \cdot \nabla u + u\nabla \cdot \boldsymbol{v}$$
+
+**结论**：这是一维乘积法则在向量场中的推广。
+
+</div>
+
+<div class="theorem-box">
+
+#### 高斯散度定理（Divergence Theorem）
+
+**定理**：设 $\Omega \subset \mathbb{R}^n$ 是具有光滑边界 $\partial\Omega$ 的有界区域，$\boldsymbol{F}: \Omega \to \mathbb{R}^n$ 是 $C^1$ 向量场，则
+$$\int_\Omega \nabla \cdot \boldsymbol{F} \, d\boldsymbol{x} = \int_{\partial\Omega} \boldsymbol{F} \cdot \hat{\boldsymbol{n}} \, dS$$
+其中 $\hat{\boldsymbol{n}}$ 是边界的外向单位法向量，$dS$ 是面积微元。
+
+**物理意义**：
+- 左边：向量场在区域内的"源"的总和（散度积分）
+- 右边：向量场穿过边界的"通量"（净流出量）
+- **守恒律**：如果内部无源（$\nabla \cdot \boldsymbol{F} = 0$），则净流出为零
+
+</div>
+
+<div class="derivation-box">
+
+#### 推导：高维分部积分公式
+
+**步骤1**：对乘积散度公式积分
+$$\int_\Omega \nabla \cdot (u\boldsymbol{v}) d\boldsymbol{x} = \int_\Omega [\boldsymbol{v} \cdot \nabla u + u\nabla \cdot \boldsymbol{v}] d\boldsymbol{x}$$
+
+**步骤2**：对左边应用散度定理
+$$\int_{\partial\Omega} u\boldsymbol{v} \cdot \hat{\boldsymbol{n}} \, dS = \int_\Omega \boldsymbol{v} \cdot \nabla u \, d\boldsymbol{x} + \int_\Omega u\nabla \cdot \boldsymbol{v} \, d\boldsymbol{x}$$
+
+**步骤3**：移项得到高维分部积分公式
+$$\boxed{\int_\Omega \boldsymbol{v} \cdot \nabla u \, d\boldsymbol{x} = \int_{\partial\Omega} u\boldsymbol{v} \cdot \hat{\boldsymbol{n}} \, dS - \int_\Omega u\nabla \cdot \boldsymbol{v} \, d\boldsymbol{x}}$$
+
+**特殊情况1**：全空间情形（$\Omega = \mathbb{R}^n$）
+如果 $u, \boldsymbol{v}$ 衰减足够快（如 $u, \boldsymbol{v} \to 0$ 当 $|\boldsymbol{x}| \to \infty$），则边界项消失：
+$$\int_{\mathbb{R}^n} \boldsymbol{v} \cdot \nabla u \, d\boldsymbol{x} = -\int_{\mathbb{R}^n} u\nabla \cdot \boldsymbol{v} \, d\boldsymbol{x}$$
+
+**特殊情况2**：概率密度的情形
+对于概率密度 $p(\boldsymbol{x})$，由于 $p \to 0$ 和 $\nabla p \to \boldsymbol{0}$ 当 $|\boldsymbol{x}| \to \infty$，取 $u = p$ 得：
+$$\boxed{\int \boldsymbol{v} \cdot \nabla p \, d\boldsymbol{x} = -\int p\nabla \cdot \boldsymbol{v} \, d\boldsymbol{x}}$$
+这是后续推导的关键公式！
+
+</div>
+
+<div class="step-by-step">
+
+#### 二阶导数的分部积分
+
+对于拉普拉斯算子 $\Delta u = \nabla \cdot \nabla u$，我们需要应用两次分部积分。
+
+<div class="step">
+**第一次分部积分**：取 $\boldsymbol{v} = \nabla u$
+$$\int_{\mathbb{R}^n} \phi \cdot \nabla \cdot \nabla u \, d\boldsymbol{x} = \int_{\mathbb{R}^n} \phi \Delta u \, d\boldsymbol{x}$$
+应用公式（边界项为零）：
+$$= -\int_{\mathbb{R}^n} \nabla \phi \cdot \nabla u \, d\boldsymbol{x}$$
+</div>
+
+<div class="step">
+**第二次分部积分**：现在 $\nabla u$ 的角色变为"向量场"
+$$-\int_{\mathbb{R}^n} \nabla \phi \cdot \nabla u \, d\boldsymbol{x} = \int_{\mathbb{R}^n} \phi \nabla \cdot \nabla u \, d\boldsymbol{x} = \int_{\mathbb{R}^n} \phi \Delta u \, d\boldsymbol{x}$$
+</div>
+
+<div class="step">
+**对称性**：交换 $\phi$ 和 $u$ 的角色
+$$\int_{\mathbb{R}^n} \phi \Delta u \, d\boldsymbol{x} = \int_{\mathbb{R}^n} u \Delta \phi \, d\boldsymbol{x}$$
+这称为拉普拉斯算子的"自伴性"（self-adjointness）。
+</div>
+
+</div>
+
+<div class="formula-explanation">
+
+#### 概率密度情形的关键公式汇总
+
+<div class="formula-step">
+<div class="step-label">公式1：一阶导数</div>
+
+$$\int \boldsymbol{v} \cdot \nabla p \, d\boldsymbol{x} = -\int p\nabla \cdot \boldsymbol{v} \, d\boldsymbol{x}$$
+
+<div class="step-explanation">
+**用途**：处理连续性方程中的对流项 $\nabla \cdot (p\boldsymbol{f})$
+</div>
+</div>
+
+<div class="formula-step">
+<div class="step-label">公式2：二阶导数（第一次积分）</div>
+
+$$\int u \nabla \cdot \nabla p \, d\boldsymbol{x} = -\int \nabla u \cdot \nabla p \, d\boldsymbol{x}$$
+
+<div class="step-explanation">
+**用途**：处理Fokker-Planck方程中的扩散项（第一步）
+</div>
+</div>
+
+<div class="formula-step">
+<div class="step-label">公式3：二阶导数（第二次积分）</div>
+
+$$-\int \nabla u \cdot \nabla p \, d\boldsymbol{x} = \int u \Delta p \, d\boldsymbol{x}$$
+
+<div class="step-explanation">
+**用途**：处理Fokker-Planck方程中的扩散项（完整）
+$$\int p \Delta \phi \, d\boldsymbol{x} = \int \phi \Delta p \, d\boldsymbol{x}$$
+</div>
+</div>
+
+</div>
+
+### 2.2 连续性方程的完整推导
+
+现在我们正式推导确定性常微分方程（ODE）对应的连续性方程。
+
+<div class="theorem-box">
+
+#### 问题设定
+
+考虑 $n$ 维ODE系统：
+$$\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{f}_t(\boldsymbol{x}_t)$$
+其中：
+- $\boldsymbol{x}_t \in \mathbb{R}^n$ 是状态变量
+- $\boldsymbol{f}_t: \mathbb{R}^n \to \mathbb{R}^n$ 是速度场（可能时变）
+
+**问题**：如果初始时刻 $t=0$ 的概率密度为 $p_0(\boldsymbol{x})$，求 $t$ 时刻的概率密度 $p_t(\boldsymbol{x})$ 满足的演化方程。
+
+</div>
+
+<div class="derivation-box">
+
+#### 推导步骤：从离散到连续
+
+**步骤1**：Euler离散化
+将ODE离散化为一步更新：
+$$\boldsymbol{x}_{t+\Delta t} = \boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t + O(\Delta t^2)$$
+
+**步骤2**：测试函数的演化
+对于任意光滑测试函数 $\phi(\boldsymbol{x})$，考虑其在新位置的值：
+$$\phi(\boldsymbol{x}_{t+\Delta t}) = \phi(\boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t)$$
+
+**步骤3**：一阶泰勒展开
+$$\phi(\boldsymbol{x}_t + \boldsymbol{\delta}) \approx \phi(\boldsymbol{x}_t) + \boldsymbol{\delta} \cdot \nabla_{\boldsymbol{x}_t} \phi(\boldsymbol{x}_t) + \frac{1}{2}\boldsymbol{\delta}^T H_\phi \boldsymbol{\delta} + \cdots$$
+
+取 $\boldsymbol{\delta} = \boldsymbol{f}_t\Delta t$，并注意 $|\boldsymbol{\delta}| = O(\Delta t)$，因此：
+$$\phi(\boldsymbol{x}_{t+\Delta t}) = \phi(\boldsymbol{x}_t) + \Delta t \, \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla_{\boldsymbol{x}_t} \phi(\boldsymbol{x}_t) + O(\Delta t^2)$$
+
+**步骤4**：对初始分布取期望
+$$\mathbb{E}_{\boldsymbol{x}_t \sim p_t}[\phi(\boldsymbol{x}_{t+\Delta t})] = \int p_t(\boldsymbol{x}_t) \phi(\boldsymbol{x}_{t+\Delta t}) d\boldsymbol{x}_t$$
+
+代入泰勒展开：
+$$= \int p_t(\boldsymbol{x}_t) \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + \Delta t \int p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + O(\Delta t^2)$$
+
+**步骤5**：另一种表示（关键变量替换）
+另一方面，$\phi(\boldsymbol{x}_{t+\Delta t})$ 的期望也可以用 $t+\Delta t$ 时刻的密度表示：
+$$\mathbb{E}[\phi(\boldsymbol{x}_{t+\Delta t})] = \int p_{t+\Delta t}(\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x}$$
+
+注意这里积分变量是 $\boldsymbol{x}$（代表 $t+\Delta t$ 时刻的状态）。由于积分变量只是哑变量，我们可以统一记为 $\boldsymbol{x}_t$：
+$$\int p_{t+\Delta t}(\boldsymbol{x}_t) \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t$$
+
+**步骤6**：等式两边相减
+$$\int p_{t+\Delta t}(\boldsymbol{x}_t) \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int p_t(\boldsymbol{x}_t) \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + \Delta t \int p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + O(\Delta t^2)$$
+
+移项：
+$$\int [p_{t+\Delta t}(\boldsymbol{x}_t) - p_t(\boldsymbol{x}_t)] \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \Delta t \int p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + O(\Delta t^2)$$
+
+**步骤7**：取 $\Delta t \to 0$ 极限
+除以 $\Delta t$ 并令 $\Delta t \to 0$：
+$$\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t$$
+
+**这是连续性方程的弱形式！**
+
+</div>
+
+<div class="derivation-box">
+
+#### 推导步骤：从弱形式到强形式
+
+**步骤8**：应用分部积分
+对右边应用公式1（$\int \boldsymbol{v} \cdot \nabla p = -\int p\nabla \cdot \boldsymbol{v}$），这里 $\boldsymbol{v} = p_t\boldsymbol{f}_t$，$p$ 的角色由 $\phi$ 扮演：
+
+实际上我们需要更仔细。注意右边是：
+$$\int p_t \boldsymbol{f}_t \cdot \nabla \phi \, d\boldsymbol{x}_t$$
+
+现在把 $p_t\boldsymbol{f}_t$ 看作一个向量场 $\boldsymbol{V} = p_t\boldsymbol{f}_t$，则：
+$$\int \boldsymbol{V} \cdot \nabla \phi \, d\boldsymbol{x} = -\int \phi \nabla \cdot \boldsymbol{V} \, d\boldsymbol{x}$$
+
+即：
+$$\int p_t\boldsymbol{f}_t \cdot \nabla \phi \, d\boldsymbol{x}_t = -\int \phi \nabla \cdot (p_t\boldsymbol{f}_t) d\boldsymbol{x}_t$$
+
+**步骤9**：代入弱形式
+$$\int \frac{\partial p_t}{\partial t} \phi \, d\boldsymbol{x}_t = -\int \nabla \cdot (p_t\boldsymbol{f}_t) \phi \, d\boldsymbol{x}_t$$
+
+移项：
+$$\int \left[\frac{\partial p_t}{\partial t} + \nabla \cdot (p_t\boldsymbol{f}_t)\right] \phi \, d\boldsymbol{x}_t = 0$$
+
+**步骤10**：应用基本引理
+由于这对**任意**测试函数 $\phi \in \mathcal{D}$ 成立，根据分布理论的基本引理，被积函数必须（几乎处处）为零：
+$$\boxed{\frac{\partial p_t(\boldsymbol{x})}{\partial t} + \nabla \cdot [p_t(\boldsymbol{x})\boldsymbol{f}_t(\boldsymbol{x})] = 0}$$
+
+**这就是连续性方程的强形式！**
+
+</div>
+
+<div class="theorem-box">
+
+#### 连续性方程（Continuity Equation）
+
+对于ODE $\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{f}_t(\boldsymbol{x}_t)$，概率密度 $p_t(\boldsymbol{x})$ 满足：
+
+**守恒形式**：
+$$\frac{\partial p_t}{\partial t} + \nabla \cdot (p_t \boldsymbol{f}_t) = 0$$
+
+**展开形式**：
+$$\frac{\partial p_t}{\partial t} + \boldsymbol{f}_t \cdot \nabla p_t + p_t \nabla \cdot \boldsymbol{f}_t = 0$$
+
+**对流形式**：
+$$\frac{\partial p_t}{\partial t} + \boldsymbol{f}_t \cdot \nabla p_t = -p_t \nabla \cdot \boldsymbol{f}_t$$
+
+**物理意义**：
+- 左边：沿流线的物质导数（material derivative）
+- 右边：流场的压缩/膨胀效应
+- 如果 $\nabla \cdot \boldsymbol{f}_t = 0$（不可压缩流），则密度沿流线守恒
+
+</div>
+
+<div class="intuition-box">
+
+### 🧠 直觉理解：连续性方程
+
+**类比1：河流中的浮标** 🏞️
+
+想象在河中撒了很多浮标（代表概率密度）：
+- **速度场 $\boldsymbol{f}_t$**：河水的流速
+- **密度 $p_t$**：浮标的密度分布
+- **连续性方程**：描述浮标密度如何随时间变化
+
+**关键洞察**：
+- 如果某处河道变窄（$\nabla \cdot \boldsymbol{f} < 0$），浮标密度增加（$\partial p/\partial t > 0$）
+- 如果河道变宽（$\nabla \cdot \boldsymbol{f} > 0$），浮标密度减少（$\partial p/\partial t < 0$）
+- 如果河道宽度不变（$\nabla \cdot \boldsymbol{f} = 0$），浮标沿流线以恒定密度移动
+
+**类比2：地铁站的人群** 🚇
+
+在地铁站出口：
+- **速度场**：人群流动方向和速度
+- **密度**：单位面积的人数
+- **连续性方程**：如果人群从宽通道进入窄通道，密度增加
+
+**数学联系**：
+$$\underbrace{\frac{\partial p_t}{\partial t}}_{\text{密度变化率}} = -\underbrace{\nabla \cdot (p_t\boldsymbol{f}_t)}_{\text{净流出率}}$$
+
+</div>
+
+### 2.3 Fokker-Planck方程的完整推导
+
+现在推导随机微分方程（SDE）对应的Fokker-Planck方程。这是扩散模型理论的核心！
+
+<div class="theorem-box">
+
+#### 问题设定
+
+考虑Itô型随机微分方程（SDE）：
+$$d\boldsymbol{x}_t = \boldsymbol{f}_t(\boldsymbol{x}_t) dt + g_t d\boldsymbol{w}_t$$
+其中：
+- $\boldsymbol{f}_t(\boldsymbol{x}_t)$：漂移项（drift）
+- $g_t$：扩散系数（diffusion coefficient）
+- $\boldsymbol{w}_t \in \mathbb{R}^n$：标准布朗运动（Wiener process）
+
+**问题**：求概率密度 $p_t(\boldsymbol{x})$ 满足的偏微分方程。
+
+</div>
+
+<details>
+<summary>点击展开：Itô微积分的核心规则</summary>
+<div markdown="1">
+
+#### Itô引理（Itô's Lemma）
+
+对于光滑函数 $\phi(\boldsymbol{x}, t)$ 和SDE $d\boldsymbol{x}_t = \boldsymbol{\mu}_t dt + \boldsymbol{\sigma}_t d\boldsymbol{w}_t$，有：
+$$d\phi = \left[\frac{\partial \phi}{\partial t} + \boldsymbol{\mu}_t \cdot \nabla \phi + \frac{1}{2}\operatorname{Tr}(\boldsymbol{\sigma}_t\boldsymbol{\sigma}_t^T H_\phi)\right]dt + (\nabla \phi)^T \boldsymbol{\sigma}_t d\boldsymbol{w}_t$$
+
+其中 $H_\phi$ 是 $\phi$ 的Hessian矩阵。
+
+#### Itô乘法表
+
+这是Itô微积分的核心规则：
+$$\begin{aligned}
+dt \cdot dt &= 0 \\
+dt \cdot d\boldsymbol{w}_t &= \boldsymbol{0} \\
+d\boldsymbol{w}_t^i \cdot d\boldsymbol{w}_t^j &= \delta_{ij} dt
+\end{aligned}$$
+
+**直观理解**：
+- $dt$ 是 "一阶小量"（order $\Delta t$）
+- $d\boldsymbol{w}_t$ 是 "半阶小量"（order $\sqrt{\Delta t}$）
+- 因此 $d\boldsymbol{w}_t \cdot d\boldsymbol{w}_t = O(\Delta t)$ 不能忽略！
+
+</div>
+</details>
+
+<div class="derivation-box">
+
+#### 推导步骤1-5：从SDE到测试函数的期望演化
+
+**步骤1**：Euler-Maruyama离散化
+$$\boldsymbol{x}_{t+\Delta t} = \boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t + g_t\sqrt{\Delta t}\boldsymbol{\varepsilon}$$
+其中 $\boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$ 是标准正态随机向量。
+
+**注**：布朗运动的增量 $\boldsymbol{w}_{t+\Delta t} - \boldsymbol{w}_t \sim \mathcal{N}(\boldsymbol{0}, \Delta t \boldsymbol{I})$，因此标准差为 $\sqrt{\Delta t}$。
+
+**步骤2**：测试函数的二阶泰勒展开
+由于现在有随机项，我们需要**二阶**泰勒展开（一阶项不够！）：
+$$\phi(\boldsymbol{x} + \boldsymbol{\delta}) = \phi(\boldsymbol{x}) + \boldsymbol{\delta} \cdot \nabla \phi + \frac{1}{2}\sum_{i,j} \delta_i\delta_j \frac{\partial^2 \phi}{\partial x_i \partial x_j} + O(|\boldsymbol{\delta}|^3)$$
+
+其中 $\boldsymbol{\delta} = \boldsymbol{f}_t\Delta t + g_t\sqrt{\Delta t}\boldsymbol{\varepsilon}$。
+
+**步骤3**：计算随机项的关键期望值
+对 $\boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$，有：
+$$\mathbb{E}[\varepsilon_i] = 0, \quad \mathbb{E}[\varepsilon_i\varepsilon_j] = \delta_{ij}, \quad \mathbb{E}[\varepsilon_i\varepsilon_j\varepsilon_k] = 0$$
+
+计算 $\boldsymbol{\delta}$ 的各阶矩：
+
+**一阶矩**：
+$$\mathbb{E}_\varepsilon[\boldsymbol{\delta}] = \boldsymbol{f}_t\Delta t + g_t\sqrt{\Delta t}\mathbb{E}[\boldsymbol{\varepsilon}] = \boldsymbol{f}_t\Delta t$$
+
+**二阶矩**（最关键！）：
+$$\mathbb{E}_\varepsilon[\delta_i\delta_j] = \mathbb{E}_\varepsilon\left[(\boldsymbol{f}_t^i\Delta t + g_t\sqrt{\Delta t}\varepsilon_i)(\boldsymbol{f}_t^j\Delta t + g_t\sqrt{\Delta t}\varepsilon_j)\right]$$
+
+展开：
+$$= \boldsymbol{f}_t^i\boldsymbol{f}_t^j(\Delta t)^2 + g_t\sqrt{\Delta t}\Delta t[\boldsymbol{f}_t^i\mathbb{E}[\varepsilon_j] + \boldsymbol{f}_t^j\mathbb{E}[\varepsilon_i]] + g_t^2\Delta t\mathbb{E}[\varepsilon_i\varepsilon_j]$$
+
+$$= \boldsymbol{f}_t^i\boldsymbol{f}_t^j(\Delta t)^2 + g_t^2\Delta t\delta_{ij}$$
+
+在 $\Delta t \to 0$ 时，保留主导项（$O(\Delta t)$ 项）：
+$$\mathbb{E}_\varepsilon[\delta_i\delta_j] = g_t^2\delta_{ij}\Delta t + O(\Delta t^2)$$
+
+**关键洞察**：虽然 $\boldsymbol{\delta} = O(\sqrt{\Delta t})$，但 $\boldsymbol{\delta}^2 = O(\Delta t)$，与一阶项同阶，**不能忽略**！
+
+**步骤4**：对泰勒展开取期望
+$$\mathbb{E}_\varepsilon[\phi(\boldsymbol{x}_{t+\Delta t})] = \phi(\boldsymbol{x}_t) + \mathbb{E}_\varepsilon[\boldsymbol{\delta}] \cdot \nabla \phi + \frac{1}{2}\sum_{i,j}\mathbb{E}_\varepsilon[\delta_i\delta_j]\frac{\partial^2\phi}{\partial x_i\partial x_j} + O(\Delta t^{3/2})$$
+
+代入期望值：
+$$= \phi(\boldsymbol{x}_t) + \boldsymbol{f}_t\Delta t \cdot \nabla \phi + \frac{1}{2}\sum_i g_t^2\Delta t \frac{\partial^2\phi}{\partial x_i^2} + O(\Delta t^{3/2})$$
+
+$$= \phi(\boldsymbol{x}_t) + \Delta t\left[\boldsymbol{f}_t \cdot \nabla \phi + \frac{g_t^2}{2}\Delta \phi\right] + O(\Delta t^{3/2})$$
+
+其中 $\Delta \phi = \sum_i \frac{\partial^2\phi}{\partial x_i^2}$ 是拉普拉斯算子。
+
+**步骤5**：对初始分布 $p_t$ 取期望
+$$\int p_{t+\Delta t}(\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x} = \int p_t(\boldsymbol{x}_t) \mathbb{E}_\varepsilon[\phi(\boldsymbol{x}_{t+\Delta t})] d\boldsymbol{x}_t$$
+
+$$= \int p_t(\boldsymbol{x}_t) \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + \Delta t\int p_t(\boldsymbol{x}_t)\left[\boldsymbol{f}_t \cdot \nabla \phi + \frac{g_t^2}{2}\Delta \phi\right]d\boldsymbol{x}_t + O(\Delta t^{3/2})$$
+
+</div>
+
+<div class="derivation-box">
+
+#### 推导步骤6-10：弱形式到强形式
+
+**步骤6**：取 $\Delta t \to 0$ 极限
+移项并除以 $\Delta t$，然后令 $\Delta t \to 0$：
+$$\int \frac{\partial p_t}{\partial t} \phi \, d\boldsymbol{x} = \int p_t \boldsymbol{f}_t \cdot \nabla \phi \, d\boldsymbol{x} + \int p_t \frac{g_t^2}{2}\Delta \phi \, d\boldsymbol{x}$$
+
+**这是Fokker-Planck方程的弱形式！**
+
+**步骤7**：对第一项（漂移项）应用分部积分
+$$\int p_t\boldsymbol{f}_t \cdot \nabla \phi \, d\boldsymbol{x} = -\int \phi \nabla \cdot (p_t\boldsymbol{f}_t) d\boldsymbol{x}$$
+
+**步骤8**：对第二项（扩散项）应用两次分部积分
+
+**第一次**：
+$$\int p_t \frac{g_t^2}{2}\Delta \phi \, d\boldsymbol{x} = \int p_t \frac{g_t^2}{2} \nabla \cdot (\nabla \phi) d\boldsymbol{x}$$
+
+令 $\boldsymbol{v} = \nabla \phi$，应用 $\int p\nabla \cdot \boldsymbol{v} = -\int \boldsymbol{v} \cdot \nabla p$：
+$$= -\int \frac{g_t^2}{2}\nabla \phi \cdot \nabla p_t \, d\boldsymbol{x}$$
+
+**第二次**：
+现在 $\nabla p_t$ 是向量场，$\phi$ 是标量，再应用一次：
+$$= \int \frac{g_t^2}{2}\phi \nabla \cdot (\nabla p_t) d\boldsymbol{x} = \int \frac{g_t^2}{2}\phi \Delta p_t \, d\boldsymbol{x}$$
+
+**步骤9**：合并
+$$\int \frac{\partial p_t}{\partial t} \phi \, d\boldsymbol{x} = -\int \phi \nabla \cdot (p_t\boldsymbol{f}_t) d\boldsymbol{x} + \int \phi \frac{g_t^2}{2}\Delta p_t \, d\boldsymbol{x}$$
+
+$$= \int \phi \left[-\nabla \cdot (p_t\boldsymbol{f}_t) + \frac{g_t^2}{2}\Delta p_t\right] d\boldsymbol{x}$$
+
+**步骤10**：应用基本引理
+对任意 $\phi \in \mathcal{D}$ 成立，因此：
+$$\boxed{\frac{\partial p_t}{\partial t} = -\nabla \cdot (p_t\boldsymbol{f}_t) + \frac{g_t^2}{2}\Delta p_t}$$
+
+**这就是Fokker-Planck方程！**
+
+</div>
+
+<div class="theorem-box">
+
+#### Fokker-Planck方程（Fokker-Planck Equation）
+
+对于SDE $d\boldsymbol{x}_t = \boldsymbol{f}_t(\boldsymbol{x}_t)dt + g_t d\boldsymbol{w}_t$，概率密度 $p_t(\boldsymbol{x})$ 满足：
+
+**守恒形式**：
+$$\frac{\partial p_t}{\partial t} = -\nabla \cdot (p_t\boldsymbol{f}_t) + \frac{g_t^2}{2}\Delta p_t$$
+
+**对流-扩散形式**：
+$$\frac{\partial p_t}{\partial t} = -\nabla \cdot \left(p_t\boldsymbol{f}_t - \frac{g_t^2}{2}\nabla p_t\right)$$
+
+**展开形式**：
+$$\frac{\partial p_t}{\partial t} = -\boldsymbol{f}_t \cdot \nabla p_t - p_t\nabla \cdot \boldsymbol{f}_t + \frac{g_t^2}{2}\Delta p_t$$
+
+**物理意义**：
+- **第一项 $-\nabla \cdot (p_t\boldsymbol{f}_t)$**：漂移引起的概率流（确定性对流）
+- **第二项 $\frac{g_t^2}{2}\Delta p_t$**：扩散引起的概率流（随机扩散）
+- **概率流密度**：$\boldsymbol{J} = p_t\boldsymbol{f}_t - \frac{g_t^2}{2}\nabla p_t$
+
+</div>
+
+<div class="formula-explanation">
+
+#### 为什么扩散项是 $\Delta p$ 而不是 $p\Delta \phi$？
+
+<div class="formula-step">
+<div class="step-label">关键：二阶项的来源</div>
+
+在泰勒展开中，二阶项是：
+$$\frac{1}{2}\sum_{i,j}\delta_i\delta_j\frac{\partial^2\phi}{\partial x_i\partial x_j}$$
+
+<div class="step-explanation">
+随机项 $g_t\sqrt{\Delta t}\boldsymbol{\varepsilon}$ 虽然是 $O(\sqrt{\Delta t})$，但其平方 $\mathbb{E}[\delta_i\delta_j] = g_t^2\delta_{ij}\Delta t$ 是 $O(\Delta t)$，与一阶项同阶！
+</div>
+</div>
+
+<div class="formula-step">
+<div class="step-label">两次分部积分的效果</div>
+
+$$\int p \Delta \phi \, d\boldsymbol{x} \xrightarrow{\text{第1次}} -\int \nabla p \cdot \nabla \phi \, d\boldsymbol{x} \xrightarrow{\text{第2次}} \int \phi \Delta p \, d\boldsymbol{x}$$
+
+<div class="step-explanation">
+每次分部积分都"转移"一个导数，从 $\phi$ 转移到 $p$。最终扩散项作用在密度 $p$ 上，而不是测试函数 $\phi$ 上。
+</div>
+</div>
+
+</div>
+
+### 2.4 一般扩散矩阵的Fokker-Planck方程
+
+<details>
+<summary>点击展开：一般扩散矩阵的推导</summary>
+<div markdown="1">
+
+对于更一般的SDE：
+$$d\boldsymbol{x}_t = \boldsymbol{f}_t(\boldsymbol{x}_t)dt + G_t(\boldsymbol{x}_t)d\boldsymbol{w}_t$$
+其中 $G_t \in \mathbb{R}^{n \times m}$ 是扩散矩阵，$\boldsymbol{w}_t \in \mathbb{R}^m$ 是 $m$ 维布朗运动。
+
+定义**扩散张量**：
+$$D_{ij} = \frac{1}{2}(G_tG_t^T)_{ij} = \frac{1}{2}\sum_{k=1}^m G_{ik}G_{jk}$$
+
+则Fokker-Planck方程变为：
+$$\frac{\partial p_t}{\partial t} = -\sum_i \frac{\partial}{\partial x_i}[\boldsymbol{f}_t^i p_t] + \sum_{i,j}\frac{\partial^2}{\partial x_i\partial x_j}[D_{ij}p_t]$$
+
+**特殊情况**：
+- **标量扩散**：$G_t = g_t\boldsymbol{I}$，则 $D_{ij} = \frac{g_t^2}{2}\delta_{ij}$，回到前面的形式
+- **各向异性扩散**：$D_{ij}$ 是对角阵但不同分量不同
+- **空间相关扩散**：$D_{ij}(\boldsymbol{x})$ 依赖于位置
+
+</div>
+</details>
+
+---
+
+## 第3部分：数学直觉、多角度解释与类比
+
+### 3.1 生活化类比
+
+<div class="intuition-box">
+
+#### 🧠 类比1：测试函数 = 探测器
+
+**场景：检测空气污染** 🏭
+
+假设你想知道城市中PM2.5浓度 $p(x,y,t)$ 如何随时间变化。
+
+**经典方法**（强解）：
+- 在每个点 $(x,y)$ 放置传感器
+- 直接测量 $p(x,y,t)$ 的值
+- **问题**：传感器数量无穷多，不现实！
+
+**测试函数方法**（弱解）：
+- 选择几个"加权平均"的测试函数 $\phi_1, \phi_2, \ldots$（如高斯核）
+- 测量加权平均值 $\int p(x,y,t)\phi_i(x,y)dxdy$
+- 通过足够多的加权平均，可以**重构** $p$
+
+**关键洞察**：
+- 测试函数 $\phi$ 就像"探测器"
+- 不需要知道 $p$ 的每个点的值
+- 只需知道 $p$ 作用在"足够多"的 $\phi$ 上的结果
+
+**数学类比**：
+$$\underbrace{p(\boldsymbol{x})}_{\text{未知函数}} \longleftrightarrow \underbrace{\langle p, \phi \rangle = \int p\phi \, d\boldsymbol{x}}_{\text{可测量的线性泛函}}$$
+
+</div>
+
+<div class="intuition-box">
+
+#### 🧠 类比2：弱形式 = 整体测量 vs 局部测量
+
+**场景：称重问题** ⚖️
+
+假设有一袋混合的硬币，想知道其中1元硬币的数量 $n_1$、5角硬币的数量 $n_5$。
+
+**强形式（局部）**：
+- 逐个数硬币
+- 需要能够"逐个分离"
+- **问题**：如果硬币粘在一起呢？
+
+**弱形式（整体）**：
+- 测量总重量 $W$
+- 测量总价值 $V$
+- 解方程组：
+  $$\begin{cases}
+  n_1 \cdot w_1 + n_5 \cdot w_5 = W \\
+  n_1 \cdot 1 + n_5 \cdot 0.5 = V
+  \end{cases}$$
+
+**关键洞察**：
+- 弱形式允许"间接测量"
+- 不需要"逐点分离"
+- 通过"整体约束"确定解
+
+**数学类比**：
+- **强形式**：$\frac{\partial p}{\partial t} = \text{[某表达式]}$ 在**每一点**成立
+- **弱形式**：$\int \frac{\partial p}{\partial t}\phi = \int \text{[某表达式]}\phi$ 对**所有** $\phi$ 成立
+
+</div>
+
+### 3.2 几何意义与物理直觉
+
+<div class="intuition-box">
+
+#### 🎨 几何视角1：连续性方程 = 密度沿流线的传输
+
+想象一个不可压缩流体（如水）：
+
+**流线**：$\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}(\boldsymbol{x})$
+
+**密度**：$p(\boldsymbol{x}, t)$ 是流体在 $\boldsymbol{x}$ 处的密度
+
+**连续性方程**：
+$$\frac{\partial p}{\partial t} + \nabla \cdot (p\boldsymbol{f}) = 0$$
+
+**几何意义**：
+- 密度的变化 $\frac{\partial p}{\partial t}$ 完全来自流体的流入/流出
+- 如果流场无散（$\nabla \cdot \boldsymbol{f} = 0$），则密度沿流线守恒（**Liouville定理**）
+
+**可视化**：
+```
+时刻 t:     ●●●  (高密度区域)
+            ↓↓↓  (流动方向)
+时刻 t+dt:   ●●  (密度降低，因为流散了)
+```
+
+</div>
+
+<div class="intuition-box">
+
+#### 🎨 几何视角2：Fokker-Planck方程 = 漂移 + 扩散
+
+**漂移项** $-\nabla \cdot (p\boldsymbol{f})$：
+- 确定性的"推动"
+- 像风吹动花粉
+
+**扩散项** $\frac{g^2}{2}\Delta p$：
+- 随机的"扩散"
+- 像花粉的布朗运动
+
+**总效果**：
+$$\underbrace{\frac{\partial p}{\partial t}}_{\text{密度变化}} = \underbrace{-\nabla \cdot (p\boldsymbol{f})}_{\text{风吹}} + \underbrace{\frac{g^2}{2}\Delta p}_{\text{扩散}}$$
+
+**可视化**：
+```
+t=0:     ●        (初始一点)
+         ↓        (漂移方向)
+t=1:    ●●●       (漂移 + 扩散)
+         ↓
+t=2:   ●●●●●      (继续漂移和扩散)
+```
+
+</div>
+
+### 3.3 多角度理解
+
+#### 📊 概率论视角
+
+从概率论角度，Fokker-Planck方程描述**转移概率密度**的演化。
+
+<div class="theorem-box">
+
+**Chapman-Kolmogorov方程**：
+$$p_t(\boldsymbol{x}) = \int \mathcal{P}(t, \boldsymbol{x} | s, \boldsymbol{y}) p_s(\boldsymbol{y}) d\boldsymbol{y}$$
+
+其中 $\mathcal{P}(t, \boldsymbol{x} | s, \boldsymbol{y})$ 是从 $(s, \boldsymbol{y})$ 转移到 $(t, \boldsymbol{x})$ 的条件概率密度。
+
+**Fokker-Planck方程**是Chapman-Kolmogorov方程在 $t - s \to 0$ 时的微分形式。
+
+</div>
+
+**直观理解**：
+- 概率密度的演化是"前向方程"（forward equation）
+- 描述"从已知初始分布 $p_0$ 出发，未来分布 $p_t$ 如何演化"
+- 对偶的"后向方程"（backward equation）是**Kolmogorov后向方程**，描述期望值的演化
+
+#### 🔬 偏微分方程视角
+
+Fokker-Planck方程是**抛物型方程**（parabolic PDE）的特例。
+
+**分类**：
+- **椭圆型**：$\Delta u = f$（稳态，无时间导数）
+- **抛物型**：$\frac{\partial u}{\partial t} = \Delta u + \cdots$（有耗散，趋向平衡）
+- **双曲型**：$\frac{\partial^2 u}{\partial t^2} = c^2\Delta u$（波动，守恒）
+
+Fokker-Planck方程：
+$$\frac{\partial p}{\partial t} = \underbrace{-\nabla \cdot (p\boldsymbol{f})}_{\text{双曲型部分}} + \underbrace{\frac{g^2}{2}\Delta p}_{\text{抛物型部分}}$$
+
+**性质**：
+- **光滑化**：扩散项 $\Delta p$ 使得解随时间变光滑（即使初值不光滑）
+- **最大值原理**：$p$ 的最大值随时间递减（如果边界条件合适）
+- **长时间渐近**：$p_t \to p_\infty$（稳态分布）
+
+#### 🔥 热力学/统计力学视角
+
+Fokker-Planck方程与**Langevin动力学**密切相关。
+
+<div class="theorem-box">
+
+#### Langevin方程
+
+描述受到摩擦和随机力的粒子运动：
+$$m\frac{d^2\boldsymbol{x}}{dt^2} = -\gamma\frac{d\boldsymbol{x}}{dt} - \nabla V(\boldsymbol{x}) + \boldsymbol{\xi}(t)$$
+
+其中：
+- $\gamma$：摩擦系数
+- $V$：势能
+- $\boldsymbol{\xi}(t)$：白噪声，满足 $\langle\xi_i(t)\xi_j(s)\rangle = 2\gamma k_BT\delta_{ij}\delta(t-s)$
+
+**过阻尼极限**（$m \to 0$）：
+$$\gamma\frac{d\boldsymbol{x}}{dt} = -\nabla V + \boldsymbol{\xi}(t)$$
+
+即：
+$$d\boldsymbol{x} = -\frac{1}{\gamma}\nabla V \, dt + \sqrt{\frac{2k_BT}{\gamma}}d\boldsymbol{w}$$
+
+对应的Fokker-Planck方程：
+$$\frac{\partial p}{\partial t} = \frac{1}{\gamma}\nabla \cdot [\nabla V \cdot p + k_BT\nabla p]$$
+
+**稳态解**（$\partial p/\partial t = 0$）：
+$$p_\infty(\boldsymbol{x}) \propto e^{-V(\boldsymbol{x})/k_BT}$$
+
+这正是**Boltzmann分布**！
+
+</div>
+
+**物理意义**：
+- Fokker-Planck方程描述从任意初始分布 $p_0$ 趋向热平衡态 $p_\infty$ 的过程
+- **详细平衡**：稳态时，任意两点间的概率流相互抵消
+- **H定理**：相对熵 $H(p_t | p_\infty)$ 单调递减
+
+#### 🤖 机器学习视角
+
+在现代机器学习中，Fokker-Planck方程是**扩散模型**（diffusion models）的理论基础。
+
+<div class="theorem-box">
+
+#### 扩散模型中的应用
+
+**前向过程**（添加噪声）：
+$$d\boldsymbol{x} = -\frac{1}{2}\boldsymbol{x}dt + d\boldsymbol{w}$$
+
+对应的Fokker-Planck方程：
+$$\frac{\partial p_t}{\partial t} = \nabla \cdot \left(\frac{1}{2}\boldsymbol{x}p_t\right) + \frac{1}{2}\Delta p_t$$
+
+**关键性质**：无论初始分布 $p_0$ 是什么，当 $t \to \infty$ 时，$p_t \to \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$（标准正态分布）。
+
+**逆向过程**（生成）：
+$$d\boldsymbol{x} = \left[-\frac{1}{2}\boldsymbol{x} + \nabla \log p_t(\boldsymbol{x})\right]dt + d\bar{\boldsymbol{w}}$$
+
+其中 $\nabla \log p_t$ 是**得分函数**（score function），需要神经网络学习。
+
+</div>
+
+**应用场景**：
+1. **图像生成**：DDPM、Stable Diffusion
+2. **分子设计**：3D分子结构生成
+3. **蛋白质折叠**：AlphaFold中的扩散先验
+4. **文本生成**：离散扩散模型
+
+---
+
+## 第4部分：批判性比较与优化
+
+### 4.1 方法对比表
+
+| 方法 | 核心思想 | 优点 | **缺陷** | **优化方向** |
+|------|---------|------|---------|-------------|
+| **特征线法** | 沿特征线 $\frac{dx}{dt}=f$ 追踪解 | ✅ 直观几何意义<br>✅ 适合双曲型方程<br>✅ 守恒律自然满足 | ❌ **特征线相交时失效**（激波）<br>❌ 无法处理扩散项<br>❌ 高维计算复杂 | ✅ 加入熵修正处理激波<br>✅ 混合特征线-有限元法<br>✅ 自适应网格细化 |
+| **雅可比变换法** | 利用 $p_t(\boldsymbol{x}) = p_0(\Phi_t^{-1}(\boldsymbol{x})) \|\det J_{\Phi_t^{-1}}\|$ | ✅ 精确表达式（无近似）<br>✅ 适合可逆流 | ❌ **需要流可逆**（SDE不适用）<br>❌ 雅可比行列式计算困难<br>❌ 无法处理随机性 | ✅ 连续归一化流（CNF）<br>✅ 神经ODE近似雅可比<br>✅ 伴随方法减少内存 |
+| **Kolmogorov方程** | 从转移概率 $\mathcal{P}(t,x\|s,y)$ 出发 | ✅ 严格的概率论基础<br>✅ 适用一般马尔可夫过程 | ❌ **转移概率难以计算**<br>❌ 积分方程计算量大<br>❌ 缺乏PDE的几何直觉 | ✅ 蒙特卡洛估计转移概率<br>✅ 路径积分方法<br>✅ 变分推断 |
+| **测试函数法** | 弱形式 + 分部积分 | ✅ 适用广泛（ODE/SDE/PDE）<br>✅ 允许弱解<br>✅ 有限元方法的基础 | ❌ **需要理解分布理论**（抽象）<br>❌ 弱解唯一性需额外条件<br>❌ 与物理直觉联系不直接 | ✅ 发展直观解释<br>✅ 结合变分方法<br>✅ 物理信息神经网络（PINN） |
+
+### 4.2 测试函数法的批判性分析
+
+#### **核心缺陷**
+
+<div class="critique-box">
+
+**缺陷1：概念抽象，学习曲线陡峭**
+- **问题**：需要理解分布理论、Sobolev空间、弱导数等高级概念
+- **根本原因**：测试函数法本质上是泛函分析的应用，而非初等微积分
+- **定量影响**：
+  - 大多数工程/ML背景学生需要额外1-2门课程才能理解
+  - 在实际应用中，许多研究者"知其然不知其所以然"
+  - 导致推导错误或不当使用
+
+**缺陷2：弱解的唯一性和正则性需要额外条件**
+- **问题**：弱形式保证解的存在性，但唯一性和光滑性需要额外验证
+- **理论分析**：
+  - **唯一性**：需要Lipschitz条件或单调性条件
+  - **正则性**：弱解可能不是经典解（如 $p \in H^1$ 但 $p \notin C^2$）
+  - **反例**：Burgers方程的激波解是弱解但非经典解
+- **实际影响**：数值计算中可能出现非物理解
+
+**缺陷3：边界条件的处理需要额外小心**
+- **问题**：分部积分中边界项的处理依赖于函数的衰减性
+- **根本原因**：概率密度的"无穷远衰减"假设在实际中可能不严格满足
+- **潜在错误**：
+  - 重尾分布（如Cauchy分布）可能不满足 $p(\boldsymbol{x}) \to 0$
+  - 有界域上的边界条件需要修改测试函数空间
+  - 反射边界、周期边界需要特殊处理
+
+</div>
+
+#### **优化方向**
+
+<div class="optimization-box">
+
+**优化1：发展直观的物理/几何解释**（教学改进）
+- **策略**：
+  - 从守恒律的积分形式出发（而非抽象泛函）
+  - 使用"探测器"类比引入测试函数
+  - 通过具体例子（如河流、热扩散）建立直觉
+- **效果**：
+  - 降低学习门槛
+  - 增强物理直觉
+  - 减少推导错误
+
+**优化2：结合变分方法和能量估计**（理论完善）
+- **策略**：
+  - 定义能量泛函 $E[p] = \int p\log p + V p \, d\boldsymbol{x}$
+  - 证明 $\frac{dE}{dt} \leq 0$（能量耗散）
+  - 利用能量方法证明唯一性和长时间渐近
+- **公式**：对于 $\frac{\partial p}{\partial t} = \nabla \cdot [\nabla V \cdot p + \nabla p]$，
+  $$\frac{d}{dt}\int p\log p \, d\boldsymbol{x} = -\int \frac{|\nabla p|^2}{p} d\boldsymbol{x} \leq 0$$
+- **效果**：
+  - 提供唯一性和收敛性保证
+  - 揭示Fokker-Planck方程的变分结构
+  - 指导数值算法设计（保能量格式）
+
+**优化3：物理信息神经网络（PINN）自动满足弱形式**
+- **策略**：
+  - 用神经网络 $p_\theta(\boldsymbol{x}, t)$ 参数化解
+  - 损失函数包含PDE残差和初边值条件：
+    $$\mathcal{L} = \int \left|\frac{\partial p_\theta}{\partial t} + \nabla \cdot (p_\theta\boldsymbol{f}) - \frac{g^2}{2}\Delta p_\theta\right|^2 d\boldsymbol{x}dt$$
+  - 注意：这是"配点法"（collocation method），不是严格的弱形式
+- **真正的弱形式PINN**：
+  - 使用变分残差：
+    $$\mathcal{L} = \int \left|\int \left[\frac{\partial p_\theta}{\partial t}\phi + p_\theta\boldsymbol{f}\cdot\nabla\phi + \frac{g^2}{2}\nabla p_\theta\cdot\nabla\phi\right]d\boldsymbol{x}\right|^2 d\mu(\phi)$$
+  - 其中 $\mu(\phi)$ 是测试函数的某个分布
+- **效果**：
+  - 自动满足弱形式，无需手动离散
+  - 可处理不光滑解
+  - 灵活处理复杂几何和边界条件
+
+</div>
+
+### 4.3 连续性方程 vs Fokker-Planck方程
+
+<div class="comparison-box">
+
+#### 连续性方程的局限性
+
+**缺陷1：只适用于确定性系统**
+- **问题**：无法描述随机性、噪声、不确定性
+- **影响**：现实系统往往有噪声（如传感器误差、量子涨落）
+
+**缺陷2：奇异性传播**
+- **问题**：如果初始分布 $p_0$ 有奇异性（如δ函数），奇异性会沿特征线传播
+- **例子**：点源扩散在确定性ODE下仍是点源（无扩散效应）
+
+**缺陷3：不满足热力学第二定律**
+- **问题**：熵可以减少（时间可逆）
+- **物理意义**：缺乏耗散机制
+
+#### Fokker-Planck方程的优势
+
+**优势1：自然包含随机性**
+- 扩散项 $\Delta p$ 描述布朗运动、热涨落等随机效应
+
+**优势2：光滑化效应**
+- 即使 $p_0 = \delta(\boldsymbol{x})$，$p_t$ 立即变为光滑函数（高斯核）
+
+**优势3：趋向热平衡**
+- 满足 $H$ 定理：$\frac{d}{dt}\int p\log p \leq 0$
+- 长时间后 $p_t \to p_\infty$（Boltzmann分布）
+
+</div>
+
+### 4.4 数值求解方法的批判性分析
+
+| 数值方法 | 优点 | **缺陷** | **优化方向** |
+|---------|------|---------|-------------|
+| **有限差分法** | ✅ 实现简单<br>✅ 适合规则网格 | ❌ **高维诅咒**（网格点数 $\propto N^d$）<br>❌ 对流项数值振荡<br>❌ CFL条件限制时间步长 | ✅ 上风格式抑制振荡<br>✅ 隐式时间步<br>✅ 稀疏网格方法 |
+| **有限元法** | ✅ 基于弱形式（理论一致）<br>✅ 适合复杂几何 | ❌ **装配矩阵计算量大**<br>❌ 质量矩阵求逆困难<br>❌ 需要选择基函数 | ✅ 质量集中（mass lumping）<br>✅ 自适应网格细化<br>✅ 不连续Galerkin方法 |
+| **蒙特卡洛法** | ✅ 不受维度限制<br>✅ 易于并行 | ❌ **收敛慢**（$O(N^{-1/2})$）<br>❌ 难以估计尾部概率<br>❌ 方差大 | ✅ 重要性采样<br>✅ 多层蒙特卡洛<br>✅ 拟蒙特卡洛 |
+| **谱方法** | ✅ 高精度（指数收敛）<br>✅ 适合周期边界 | ❌ **Gibbs震荡**（非光滑函数）<br>❌ 只适合简单几何<br>❌ 全局基函数耦合强 | ✅ 滤波抑制Gibbs震荡<br>✅ 谱元方法结合局部性<br>✅ 自适应谱方法 |
+
+<div class="optimization-box">
+
+#### 新兴方法：神经算子（Neural Operators）
+
+**核心思想**：学习从初始条件 $p_0$ 到解 $p_t$ 的算子映射
+$$\mathcal{G}: p_0 \mapsto p_t$$
+
+**优势**：
+- 一次训练，适用多个初始条件
+- 不受网格限制（mesh-free）
+- 可处理高维问题
+
+**代表方法**：
+1. **FNO**（Fourier Neural Operator）：在傅里叶空间学习
+2. **DeepONet**：学习算子的深度神经网络
+3. **PDE-Net**：直接从数据学习PDE结构
+
+**量化效果**：
+- FNO在Navier-Stokes方程上比传统求解器快1000倍
+- 泛化到不同参数（如不同扩散系数）
+
+</div>
+
+---
+
+## 第5部分：学习路线图与未来展望
+
+### 5.1 学习路线图
+
+#### 必备前置知识
+
+<div class="roadmap-box">
+
+**阶段1：数学基础**（本科高年级）
+
+**必修课程**：
+1. **实变函数与泛函分析** ⭐⭐⭐
+   - Lebesgue积分
+   - $L^p$ 空间
+   - 线性泛函和对偶空间
+   - Sobolev空间基础
+
+2. **偏微分方程** ⭐⭐⭐
+   - 分类：椭圆/抛物/双曲
+   - 经典解理论
+   - 分离变量法、特征线法
+
+3. **概率论与随机过程** ⭐⭐
+   - 测度论基础
+   - 条件期望
+   - 马尔可夫过程
+   - 布朗运动基础
+
+**阶段2：高级理论**（研究生）
+
+4. **Sobolev空间与弱解理论** ⭐⭐⭐
+   - 弱导数
+   - 嵌入定理（Sobolev embedding）
+   - 紧性定理（Rellich-Kondrachov）
+   - 迹定理（trace theorem）
+
+5. **随机微分方程** ⭐⭐⭐
+   - Itô积分
+   - Itô引理
+   - 强解与弱解
+   - Girsanov定理
+
+6. **数值方法** ⭐⭐
+   - 有限元方法
+   - 时间离散（Euler, Runge-Kutta）
+   - 稳定性分析（CFL条件）
+
+**阶段3：专题应用**
+
+7. **扩散模型理论**（ML方向）
+   - Score-based生成模型
+   - DDPM/DDIM
+   - 连续归一化流（CNF）
+
+8. **计算流体力学**（物理方向）
+   - Navier-Stokes方程
+   - 守恒律和激波
+   - 湍流建模
+
+</div>
+
+#### 核心论文列表
+
+<div class="paper-list-box">
+
+**理论基础**（必读）：
+1. **Schwartz (1950)** - "Théorie des distributions" 📚
+   - 分布理论的开山之作
+   - 定义测试函数和广义函数
+
+2. **Fokker (1914), Planck (1917)** - 原始论文
+   - 从物理角度推导方程
+   - 应用于布朗运动
+
+3. **Kolmogorov (1931)** - "Über die analytischen Methoden in der Wahrscheinlichkeitsrechnung"
+   - 建立前向和后向方程
+   - 奠定随机过程的PDE理论
+
+**现代发展**：
+4. **Evans (2010)** - "Partial Differential Equations" 📚
+   - 现代PDE教材，包含弱解理论
+   - 第6章专门讲Sobolev空间
+
+5. **Øksendal (2003)** - "Stochastic Differential Equations" 📚
+   - SDE的标准教材
+   - 详细推导Fokker-Planck方程
+
+**机器学习应用**：
+6. **Song et al. (2021)** - "Score-Based Generative Modeling through SDEs" ⭐
+   - 统一DDPM和Score matching到SDE框架
+   - 给出前向和逆向SDE
+
+7. **Ho et al. (2020)** - "Denoising Diffusion Probabilistic Models" ⭐
+   - DDPM的原始论文
+   - 虽未明确提Fokker-Planck，但本质上就是离散化
+
+8. **Karras et al. (2022)** - "Elucidating the Design Space of Diffusion-Based Generative Models"
+   - 系统分析扩散模型的设计空间
+   - 推导ODE/SDE形式
+
+</div>
+
+### 5.2 研究空白与未来方向
+
+#### **方向1：理论层面 - 弱解的精细理论**
+
+<div class="future-direction-box">
+
+**研究空白**：
+- 当前对Fokker-Planck方程弱解的**唯一性**和**正则性**条件不够精细
+- 漂移项 $\boldsymbol{f}$ 不满足Lipschitz条件时的理论缺失
+- 退化扩散（$g \to 0$ 在某些区域）的奇异极限理论不完善
+
+**具体研究问题**：
+
+1. **问题**：漂移项仅满足 $\alpha$-Hölder连续时，弱解的唯一性？
+   - **挑战**：经典理论要求Lipschitz，但实际应用（如神经SDE）可能不满足
+   - **潜在方法**：
+     - 利用Lyapunov函数方法
+     - 发展"路径唯一性"而非"强唯一性"
+     - 使用Krylov-Röckner理论（测度值解）
+   - **潜在意义**：为神经SDE提供理论保证
+
+2. **问题**：退化扩散情况（$g(\boldsymbol{x}) = 0$ 在某集合 $S$ 上）的解的正则性？
+   - **已知**：经典Hörmander条件保证正则性，但要求"括号生成"条件
+   - **未知**：更一般的几何条件？数值逼近如何处理？
+   - **潜在意义**：应用于受约束的扩散过程（如流形上的扩散）
+
+3. **问题**：Fokker-Planck方程的逆问题：从 $p_t$ 观测反推 $\boldsymbol{f}$ 和 $g$？
+   - **现状**：部分可识别性结果，但条件苛刻
+   - **探索方向**：
+     - 利用深度学习（神经SDE）参数化 $\boldsymbol{f}, g$
+     - 变分推断框架
+     - 结合观测数据的贝叶斯方法
+   - **潜在意义**：从数据学习动力学（如细胞动力学建模）
+
+**优化方向**：
+- 发展基于能量方法的弱解理论（避免强正则性假设）
+- 利用随机分析工具（如Malliavin微积分）研究解的光滑性
+- 建立弱解的数值逼近理论（有限元误差估计）
+
+**量化目标**：
+- 证明：在 $\boldsymbol{f} \in C^\alpha$（$\alpha > 0$）条件下弱解唯一（当前需 $\alpha = 1$）
+- 建立退化情况下的正则性：$p \in H^{1+\varepsilon}$ 对某 $\varepsilon > 0$
+- 逆问题：从 $N$ 个轨迹样本恢复 $\boldsymbol{f}, g$ 的样本复杂度 $N = O(\cdots)$
+
+</div>
+
+---
+
+#### **方向2：计算层面 - 高维Fokker-Planck方程的高效求解**
+
+<div class="future-direction-box">
+
+**研究空白**：
+- 传统数值方法受"维度诅咒"限制（$d > 5$ 时不可行）
+- 蒙特卡洛方法虽不受维度限制，但方差大、收敛慢
+- 神经网络方法缺乏收敛性保证和误差估计
+
+**具体研究问题**：
+
+1. **问题**：能否突破 $O(N^{-1/2})$ 的蒙特卡洛收敛率？
+   - **现有方案**：多层蒙特卡洛（MLMC）可达 $O(N^{-1})$，但仅限特殊情况
+   - **优化方向**：
+     - 结合重要性采样和控制变量
+     - 利用低秩结构（如张量分解）
+     - 自适应采样策略（动态调整粒子分布）
+   - **量化目标**：达到 $O(N^{-3/4})$ 甚至 $O(N^{-1})$ 收敛率
+
+2. **问题**：神经网络求解Fokker-Planck的理论保证？
+   - **挑战**：PINN等方法缺乏误差估计和收敛性证明
+   - **优化方向**：
+     - 发展"近似理论"：神经网络逼近Sobolev空间函数的速率
+     - 训练算法的收敛性分析（如梯度下降动力学）
+     - 自适应网络架构（根据解的正则性调整网络深度/宽度）
+   - **潜在意义**：提供可靠的误差上界，指导超参数选择
+
+3. **问题**：流形上的Fokker-Planck方程的数值方法？
+   - **需求**：许多应用中数据分布在低维流形上（如图像流形）
+   - **优化方向**：
+     - 在流形坐标系中离散化（利用黎曼几何）
+     - 图神经网络（GNN）处理离散流形（如分子图）
+     - 等变扩散模型（保持对称性）
+   - **潜在意义**：3D分子生成、蛋白质折叠等应用
+
+**优化方向**：
+- **张量网络方法**：利用低秩张量分解表示高维分布
+- **稀疏网格**：减少高维离散点数
+- **神经算子**：学习从参数到解的映射（一次训练，多次使用）
+
+**量化目标**：
+- 求解 $d = 100$ 维Fokker-Planck方程，误差 $< 1\%$，时间 $< 1$小时（当前 $d > 10$ 已困难）
+- PINN方法的理论误差界：$\|p_{\theta} - p^*\| \leq C(d, T) \cdot (\text{网络参数数})^{-\alpha}$
+- 流形上扩散：SE(3)等变分子生成，成功率 $> 90\%$
+
+</div>
+
+---
+
+#### **方向3：应用层面 - 离散数据与多模态扩散**
+
+<div class="future-direction-box">
+
+**研究空白**：
+- 离散数据（文本、图、组合结构）的"连续化"扩散理论不完善
+- 多模态数据（图像+文本）的联合扩散缺乏统一框架
+- 条件生成的精细控制机制不足
+
+**具体研究问题**：
+
+1. **问题**：如何为离散数据（如文本）定义"自然"的扩散过程？
+   - **现有方案**：
+     - **Mask-based**：随机mask token（类似BERT），但不连续
+     - **Embedding扩散**：在embedding空间扩散，但离散性丢失
+     - **Score-based离散**：在token logits上扩散
+   - **优化方向**：
+     - 定义"离散得分函数"（基于编辑距离或Hamming距离）
+     - 混合离散-连续扩散（粗粒度离散，细粒度连续）
+     - 利用图结构（如token dependency graph）
+   - **潜在意义**：文本生成、代码生成、分子式生成
+
+2. **问题**：多模态扩散如何对齐不同模态的"时间尺度"？
+   - **挑战**：图像和文本的"噪声"定义不同，演化速度不同
+   - **优化方向**：
+     - 学习模态特定的噪声schedule：$\beta_t^{\text{image}}, \beta_t^{\text{text}}$
+     - 跨模态注意力机制（如CLIP的图文对齐）
+     - 统一的"语义空间"扩散（先投影到共享空间）
+   - **潜在意义**：图文生成、视频+音频生成、3D场景生成
+
+3. **问题**：如何实现像素级/token级的精准控制？
+   - **需求**：如"只修改人物表情，保持背景不变"
+   - **优化方向**：
+     - 空间自适应噪声注入（掩码控制噪声添加区域）
+     - 基于语义分割的区域扩散
+     - 逆向编辑：从编辑结果 $\boldsymbol{x}_0'$ 反推对应的噪声 $\boldsymbol{x}_T'$
+     - 引入额外的"控制变量"（如ControlNet的边缘图、深度图）
+   - **潜在意义**：图像编辑、风格迁移、个性化生成
+
+**优化方向**：
+- 发展统一的"离散-连续"扩散理论
+- 建立多模态扩散的信息论框架（如互信息最大化）
+- 研究可解释的扩散过程（哪些时间步对应哪些语义层次）
+
+**量化目标**：
+- 文本扩散模型：困惑度 $< 10$（接近自回归模型）
+- 多模态生成：FID（图像）$< 5.0$，BLEU（文本）$> 0.5$，同时满足
+- 精准编辑：用户满意度 $> 90\%$（人工评估）
+- 离散分子生成：有效分子率 $> 95\%$，新颖性 $> 80\%$
+
+**潜在应用场景**：
+- **药物设计**：分子图的扩散生成（离散图结构 + 连续原子坐标）
+- **蛋白质折叠**：序列→结构的条件扩散
+- **视频生成**：时空一致性扩散（$3+1$维）
+- **科学数据**：PDE求解的扩散先验（如流场预测）
+
+</div>
+
+---
+
+#### **方向4：扩散模型的理论基础**
+
+<div class="future-direction-box">
+
+**研究空白**：
+- 扩散模型的样本复杂度（需要多少训练数据）未知
+- 离散化误差（连续SDE → 离散DDPM）的精确界未知
+- 与其他生成模型（GAN、Flow、VAE）的统一理论缺失
+
+**具体研究问题**：
+
+1. **问题**：DDIM $k$步采样的离散化误差上界是多少？
+   - **挑战**：非线性ODE的误差传播难以分析
+   - **潜在方法**：
+     - 利用Lipschitz连续性建立递归界
+     - 借鉴数值ODE的误差分析（Runge-Kutta方法）
+     - 发展"后验误差估计"（a posteriori error estimates）
+   - **潜在意义**：指导步数选择，平衡质量和速度
+   - **量化目标**：证明 $\|\boldsymbol{x}_0^{(k)} - \boldsymbol{x}_0^*\| \leq C \cdot k^{-p}$ 对某 $p > 0$
+
+2. **问题**：训练样本数 $N$ 与生成质量的关系？
+   - **已知**：GAN需要 $N = O(d\log d)$（$d$ 为数据维度，在某些假设下）
+   - **未知**：扩散模型的样本复杂度下界
+   - **潜在意义**：指导小样本场景的模型设计
+   - **探索方向**：
+     - 建立类似PAC学习的框架
+     - 利用流形假说（数据在低维流形上）
+     - 发展VC维或Rademacher复杂度理论
+   - **量化目标**：证明 $N = \Omega(f(d, \varepsilon))$ 的下界
+
+3. **问题**：Score网络的最优架构是什么？
+   - **现状**：UNet是经验选择，缺乏理论指导
+   - **探索方向**：
+     - 是否存在针对得分估计的specialized架构？
+     - Transformer vs UNet的理论对比
+     - 等变网络在对称性数据上的优势
+   - **潜在意义**：设计更高效的架构
+
+**优化方向**：
+- 建立扩散模型的统计学习理论
+- 发展"Score estimation"的逼近理论
+- 统一GAN/Flow/Diffusion到"概率流"框架
+
+**量化目标**：
+- 样本复杂度界：$N = \Theta(d^{\alpha}\varepsilon^{-\beta})$ 对某 $\alpha, \beta$
+- 离散化误差：$k$步DDIM误差 $\leq C \cdot k^{-2}$（当前只有经验观察）
+- 架构优化：新架构使FID提升 $> 10\%$
+
+</div>
+
+---
+
+### 5.3 跨学科连接
+
+<div class="interdisciplinary-box">
+
+#### 与其他领域的联系
+
+**物理学**：
+- **非平衡统计力学**：Fokker-Planck方程描述从非平衡态趋向平衡态
+- **量子力学**：路径积分方法本质是Fokker-Planck方程的量子版本
+- **天体物理**：星系动力学的Boltzmann-Vlasov方程
+
+**生物学**：
+- **种群动力学**：描述种群密度的扩散-反应方程
+- **神经科学**：神经元放电的Fokker-Planck描述
+- **细胞迁移**：趋化性（chemotaxis）模型
+
+**工程学**：
+- **金融数学**：期权定价的Black-Scholes方程（特殊Fokker-Planck）
+- **控制理论**：随机最优控制的Hamilton-Jacobi-Bellman方程
+- **信号处理**：Kalman滤波的连续时间版本
+
+**计算机科学**：
+- **扩散模型**：图像/视频/音频生成
+- **强化学习**：策略梯度的Fokker-Planck分析
+- **图神经网络**：图上的扩散过程
+
+</div>
+
+---
+
+## 文章小结
+
+本文系统介绍了测试函数法推导连续性方程和Fokker-Planck方程的完整理论框架：
+
+1. **理论基础**：从分布理论、Sobolev空间出发，建立弱形式的数学基础
+2. **核心推导**：详细推导高维分部积分公式，以及ODE和SDE对应的概率密度演化方程
+3. **直觉理解**：通过生活化类比（探测器、河流、扩散）建立几何和物理直觉
+4. **批判性分析**：对比不同方法的优缺点，指出测试函数法的局限性和优化方向
+5. **未来展望**：提出理论、计算、应用三个层面的研究方向，特别强调与扩散模型的联系
+
+测试函数法不仅是偏微分方程理论的核心工具，也是现代机器学习（特别是扩散模型）的数学基础。理解这一方法对于深入研究生成模型、随机过程和计算科学至关重要。
+
+---
 
 _**转载到请包括本文地址：**<https://spaces.ac.cn/archives/9461>_
 
@@ -99,730 +1462,14 @@ _**更详细的转载事宜请参考：**_[《科学空间FAQ》](https://spaces
 
 **如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！**
 
-打赏
-
-![科学空间](https://spaces.ac.cn/usr/themes/geekg/payment/wx.png)
-
-微信打赏
-
-![科学空间](https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png)
-
-支付宝打赏
-
-因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以[**点击这里**](http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&email=tN7d1drY3drrx8H0xcWa19vZ)或在下方评论区留言来告知你的建议或需求。
-
 **如果您需要引用本文，请参考：**
 
 苏剑林. (Feb. 11, 2023). 《测试函数法推导连续性方程和Fokker-Planck方程 》[Blog post]. Retrieved from <https://spaces.ac.cn/archives/9461>
 
-@online{kexuefm-9461,  
-title={测试函数法推导连续性方程和Fokker-Planck方程},  
-author={苏剑林},  
-year={2023},  
-month={Feb},  
-url={\url{https://spaces.ac.cn/archives/9461}},  
-} 
-
-
----
-
-## 公式推导与注释
-
-### 1. 测试函数的定义与性质
-
-**1.1 测试函数空间**
-
-测试函数（test function）是数学分析和偏微分方程理论中的核心概念，用于定义函数的弱形式（weak form）。测试函数$\phi(\boldsymbol{x})$通常需要满足以下条件：
-
-1. **光滑性**：$\phi \in C^\infty(\mathbb{R}^n)$，即$\phi$是无穷次可微的
-2. **紧支撑**：存在有界区域$K \subset \mathbb{R}^n$，使得当$\boldsymbol{x} \notin K$时，$\phi(\boldsymbol{x}) = 0$
-3. **衰减性**：对于非紧支撑的情况，要求$\phi$及其所有导数在无穷远处快速衰减
-
-满足这些条件的函数空间记为$\mathcal{D}(\mathbb{R}^n)$或$C_0^\infty(\mathbb{R}^n)$，称为测试函数空间。
-
-**1.2 测试函数的基本性质**
-
-测试函数有以下重要性质：
-
-**性质1（线性性）**：如果$\phi_1, \phi_2 \in \mathcal{D}$，$\alpha, \beta \in \mathbb{R}$，则$\alpha\phi_1 + \beta\phi_2 \in \mathcal{D}$。
-
-**性质2（导数封闭性）**：如果$\phi \in \mathcal{D}$，则对任意多重指标$\alpha = (\alpha_1, \ldots, \alpha_n)$，有
-$$\frac{\partial^{|\alpha|} \phi}{\partial x_1^{\alpha_1} \cdots \partial x_n^{\alpha_n}} \in \mathcal{D}$$
-
-**性质3（乘法封闭性）**：如果$\phi \in \mathcal{D}$，$g \in C^\infty$，则$g\phi \in \mathcal{D}$（当$g$增长不太快时）。
-
-**性质4（积分有界性）**：由于紧支撑性，测试函数的任意次积分都是良定义的：
-$$\int_{\mathbb{R}^n} \left|\frac{\partial^{|\alpha|} \phi}{\partial x_1^{\alpha_1} \cdots \partial x_n^{\alpha_n}}\right| d\boldsymbol{x} < \infty$$
-
-**1.3 分布理论中的测试函数**
-
-在分布理论（distribution theory）中，测试函数用于定义广义函数。一个分布$T$是测试函数空间$\mathcal{D}$上的连续线性泛函：
-$$T: \mathcal{D}(\mathbb{R}^n) \to \mathbb{R}$$
-满足线性性：
-$$T(\alpha\phi_1 + \beta\phi_2) = \alpha T(\phi_1) + \beta T(\phi_2)$$
-
-例如，狄拉克$\delta$函数可以通过其作用在测试函数上的结果来定义：
-$$\langle \delta_{\boldsymbol{x}_0}, \phi \rangle = \phi(\boldsymbol{x}_0)$$
-
-对于概率密度函数$p(\boldsymbol{x})$，它定义了一个分布：
-$$\langle p, \phi \rangle = \int_{\mathbb{R}^n} p(\boldsymbol{x})\phi(\boldsymbol{x}) d\boldsymbol{x}$$
-
-### 2. 弱形式与强形式的关系
-
-**2.1 强形式与弱形式的定义**
-
-考虑偏微分方程（PDE）：
-$$\mathcal{L}[u] = f$$
-其中$\mathcal{L}$是微分算子，$u$是未知函数，$f$是已知函数。
-
-**强形式（Strong form）**：函数$u$在经典意义下处处满足方程$\mathcal{L}[u] = f$。这要求$u$具有足够的光滑性，使得所有导数都存在。
-
-**弱形式（Weak form）**：对任意测试函数$\phi \in \mathcal{D}$，成立
-$$\langle \mathcal{L}[u], \phi \rangle = \langle f, \phi \rangle$$
-即
-$$\int_{\mathbb{R}^n} \mathcal{L}[u](\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x} = \int_{\mathbb{R}^n} f(\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x}$$
-
-**2.2 从强形式到弱形式**
-
-如果$u$是强解（即在经典意义下满足方程），则对任意测试函数$\phi$，有：
-$$\int_{\mathbb{R}^n} \mathcal{L}[u](\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x} = \int_{\mathbb{R}^n} f(\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x}$$
-因此强解必然是弱解。
-
-**2.3 从弱形式到强形式**
-
-反过来，如果$u$是充分光滑的弱解，并且对**任意**测试函数$\phi$都成立弱形式，则由分布理论的基本引理（fundamental lemma of the calculus of variations）可得：
-$$\mathcal{L}[u](\boldsymbol{x}) = f(\boldsymbol{x}), \quad \text{几乎处处成立}$$
-
-**基本引理**：如果$g \in L^1_{loc}(\mathbb{R}^n)$满足
-$$\int_{\mathbb{R}^n} g(\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x} = 0, \quad \forall \phi \in \mathcal{D}(\mathbb{R}^n)$$
-则$g(\boldsymbol{x}) = 0$几乎处处成立。
-
-**证明思路**：假设存在测度不为零的集合$E$使得$g(\boldsymbol{x}) > 0$在$E$上成立。由于$g$的局部可积性和测试函数的任意性，可以构造一个支撑在$E$上的非负测试函数$\phi$，使得
-$$\int_{\mathbb{R}^n} g(\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x} > 0$$
-这与假设矛盾，因此$g = 0$几乎处处成立。
-
-**2.4 弱形式的优势**
-
-使用弱形式有以下优势：
-
-1. **放松光滑性要求**：弱解不需要所有导数都存在，只需积分意义下的"弱导数"存在
-2. **包含间断解**：可以处理激波等间断解
-3. **自然包含边界条件**：通过分部积分，边界条件自然嵌入到弱形式中
-4. **数值方法的基础**：有限元方法等数值方法基于弱形式
-
-### 3. 高维分部积分的详细推导
-
-**3.1 梯度与散度的基本性质**
-
-对于标量函数$u: \mathbb{R}^n \to \mathbb{R}$，梯度定义为：
-$$\nabla u = \left(\frac{\partial u}{\partial x_1}, \frac{\partial u}{\partial x_2}, \ldots, \frac{\partial u}{\partial x_n}\right)$$
-
-对于向量函数$\boldsymbol{v} = (v_1, v_2, \ldots, v_n): \mathbb{R}^n \to \mathbb{R}^n$，散度定义为：
-$$\nabla \cdot \boldsymbol{v} = \sum_{i=1}^n \frac{\partial v_i}{\partial x_i}$$
-
-**3.2 乘积的散度公式**
-
-考虑标量函数$u$和向量函数$\boldsymbol{v}$的乘积$u\boldsymbol{v}$的散度：
-$$\nabla \cdot (u\boldsymbol{v}) = \nabla \cdot (uv_1, uv_2, \ldots, uv_n)$$
-
-根据散度的定义：
-$$\nabla \cdot (u\boldsymbol{v}) = \sum_{i=1}^n \frac{\partial (uv_i)}{\partial x_i}$$
-
-应用乘法法则$\frac{\partial (uv_i)}{\partial x_i} = v_i\frac{\partial u}{\partial x_i} + u\frac{\partial v_i}{\partial x_i}$：
-$$\nabla \cdot (u\boldsymbol{v}) = \sum_{i=1}^n \left(v_i\frac{\partial u}{\partial x_i} + u\frac{\partial v_i}{\partial x_i}\right)$$
-
-重新整理：
-$$\nabla \cdot (u\boldsymbol{v}) = \sum_{i=1}^n v_i\frac{\partial u}{\partial x_i} + u\sum_{i=1}^n \frac{\partial v_i}{\partial x_i}$$
-
-即：
-$$\nabla \cdot (u\boldsymbol{v}) = \boldsymbol{v} \cdot \nabla u + u\nabla \cdot \boldsymbol{v}$$
-
-这是高维空间中的乘积法则。
-
-**3.3 高斯散度定理**
-
-高斯散度定理（也称为散度定理或Gauss定理）陈述：对于向量场$\boldsymbol{F}: \Omega \to \mathbb{R}^n$，其中$\Omega \subset \mathbb{R}^n$是具有光滑边界$\partial\Omega$的有界区域，成立：
-$$\int_\Omega \nabla \cdot \boldsymbol{F} \, d\boldsymbol{x} = \int_{\partial\Omega} \boldsymbol{F} \cdot \hat{\boldsymbol{n}} \, dS$$
-
-其中$\hat{\boldsymbol{n}}$是边界$\partial\Omega$的外向单位法向量，$dS$是边界上的面积元。
-
-**物理直观**：散度定理表明，向量场在区域内的散度的总和，等于向量场穿过区域边界的总通量。
-
-**3.4 高维分部积分公式的推导**
-
-现在我们推导高维分部积分公式。对$\nabla \cdot (u\boldsymbol{v}) = \boldsymbol{v} \cdot \nabla u + u\nabla \cdot \boldsymbol{v}$两边在区域$\Omega$上积分：
-$$\int_\Omega \nabla \cdot (u\boldsymbol{v}) \, d\boldsymbol{x} = \int_\Omega \boldsymbol{v} \cdot \nabla u \, d\boldsymbol{x} + \int_\Omega u\nabla \cdot \boldsymbol{v} \, d\boldsymbol{x}$$
-
-对左边应用高斯散度定理：
-$$\int_{\partial\Omega} u\boldsymbol{v} \cdot \hat{\boldsymbol{n}} \, dS = \int_\Omega \boldsymbol{v} \cdot \nabla u \, d\boldsymbol{x} + \int_\Omega u\nabla \cdot \boldsymbol{v} \, d\boldsymbol{x}$$
-
-移项得到高维分部积分公式：
-$$\int_\Omega \boldsymbol{v} \cdot \nabla u \, d\boldsymbol{x} = \int_{\partial\Omega} u\boldsymbol{v} \cdot \hat{\boldsymbol{n}} \, dS - \int_\Omega u\nabla \cdot \boldsymbol{v} \, d\boldsymbol{x}$$
-
-**3.5 概率密度函数的边界条件**
-
-对于概率密度函数$p(\boldsymbol{x})$，由于其非负性和归一化条件：
-$$p(\boldsymbol{x}) \geq 0, \quad \int_{\mathbb{R}^n} p(\boldsymbol{x}) d\boldsymbol{x} = 1$$
-
-在无穷远处必然有：
-$$\lim_{|\boldsymbol{x}| \to \infty} p(\boldsymbol{x}) = 0$$
-
-更强地，由于概率质量必须是有限的，我们有：
-$$\lim_{|\boldsymbol{x}| \to \infty} |\boldsymbol{x}|^n p(\boldsymbol{x}) = 0$$
-
-这意味着$p$的衰减速度快于$|\boldsymbol{x}|^{-n}$。进一步，对于光滑的概率密度，其梯度也必须快速衰减：
-$$\lim_{|\boldsymbol{x}| \to \infty} \nabla p(\boldsymbol{x}) = \boldsymbol{0}$$
-
-因此，当$\Omega = \mathbb{R}^n$（全空间）时，边界项消失：
-$$\int_{\partial\mathbb{R}^n} u\boldsymbol{v} \cdot \hat{\boldsymbol{n}} \, dS = 0$$
-
-这给出简化的分部积分公式：
-$$\int_{\mathbb{R}^n} \boldsymbol{v} \cdot \nabla p \, d\boldsymbol{x} = -\int_{\mathbb{R}^n} p\nabla \cdot \boldsymbol{v} \, d\boldsymbol{x}$$
-
-**3.6 二阶导数的分部积分**
-
-对于拉普拉斯算子$\Delta u = \nabla \cdot \nabla u$，我们可以应用两次分部积分。设$\boldsymbol{F} = \nabla p$，则：
-$$\int_{\mathbb{R}^n} u \nabla \cdot \nabla p \, d\boldsymbol{x} = \int_{\mathbb{R}^n} u \nabla \cdot (\nabla p) \, d\boldsymbol{x}$$
-
-第一次分部积分（取$\boldsymbol{v} = \nabla p$）：
-$$\int_{\mathbb{R}^n} u \nabla \cdot (\nabla p) \, d\boldsymbol{x} = -\int_{\mathbb{R}^n} \nabla u \cdot \nabla p \, d\boldsymbol{x}$$
-
-（边界项在无穷远处为零）
-
-第二次分部积分（现在积分中$\nabla p$的角色变为向量场）：
-$$-\int_{\mathbb{R}^n} \nabla u \cdot \nabla p \, d\boldsymbol{x} = -\int_{\mathbb{R}^n} \nabla p \cdot \nabla u \, d\boldsymbol{x}$$
-
-这可以看作是以$p$为"权重"，$\nabla u$为"向量场"的分部积分，但更常见的用法是保持这个形式：
-$$\int_{\mathbb{R}^n} u \Delta p \, d\boldsymbol{x} = -\int_{\mathbb{R}^n} \nabla u \cdot \nabla p \, d\boldsymbol{x}$$
-
-对于对称的情况：
-$$\int_{\mathbb{R}^n} u \Delta p \, d\boldsymbol{x} = \int_{\mathbb{R}^n} p \Delta u \, d\boldsymbol{x}$$
-
-（当边界项消失时）
-
-### 4. 连续性方程的完整推导
-
-**4.1 ODE系统与流的概念**
-
-考虑常微分方程（ODE）系统：
-$$\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{f}_t(\boldsymbol{x}_t)$$
-
-其中$\boldsymbol{x}_t \in \mathbb{R}^n$是状态变量，$\boldsymbol{f}_t: \mathbb{R}^n \to \mathbb{R}^n$是速度场。
-
-这个方程定义了一个**流**（flow）$\Phi_t: \mathbb{R}^n \to \mathbb{R}^n$，使得：
-$$\Phi_t(\boldsymbol{x}_0) = \boldsymbol{x}_t$$
-是初值为$\boldsymbol{x}_0$的解。
-
-**4.2 概率密度的演化**
-
-假设初始时刻$t=0$，随机变量$\boldsymbol{x}_0$的概率密度为$p_0(\boldsymbol{x})$。在时刻$t$，通过流映射$\Phi_t$，得到$\boldsymbol{x}_t = \Phi_t(\boldsymbol{x}_0)$。
-
-概率守恒要求：
-$$P(\boldsymbol{x}_t \in A) = P(\boldsymbol{x}_0 \in \Phi_t^{-1}(A))$$
-
-对于任意可测集合$A$，这可以写成：
-$$\int_A p_t(\boldsymbol{x}) d\boldsymbol{x} = \int_{\Phi_t^{-1}(A)} p_0(\boldsymbol{x}) d\boldsymbol{x}$$
-
-**4.3 欧拉描述与拉格朗日描述**
-
-在流体力学中，有两种描述方式：
-
-- **拉格朗日描述**：跟踪每个粒子的轨迹$\boldsymbol{x}_t = \Phi_t(\boldsymbol{x}_0)$
-- **欧拉描述**：在固定空间点观察流体性质的变化
-
-连续性方程采用欧拉描述，描述固定空间点处密度$p_t(\boldsymbol{x})$如何随时间变化。
-
-**4.4 离散化与泰勒展开**
-
-将ODE离散化：
-$$\boldsymbol{x}_{t+\Delta t} = \boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t + O(\Delta t^2)$$
-
-对于任意测试函数$\phi(\boldsymbol{x})$，应用泰勒展开：
-$$\phi(\boldsymbol{x}_{t+\Delta t}) = \phi(\boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t)$$
-
-一阶泰勒展开：
-$$\phi(\boldsymbol{x}_t + \boldsymbol{\delta}) \approx \phi(\boldsymbol{x}_t) + \boldsymbol{\delta} \cdot \nabla_{\boldsymbol{x}_t} \phi(\boldsymbol{x}_t) + O(|\boldsymbol{\delta}|^2)$$
-
-取$\boldsymbol{\delta} = \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t$：
-$$\phi(\boldsymbol{x}_{t+\Delta t}) = \phi(\boldsymbol{x}_t) + \Delta t \, \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla_{\boldsymbol{x}_t} \phi(\boldsymbol{x}_t) + O(\Delta t^2)$$
-
-**4.5 期望值的演化**
-
-对$\phi(\boldsymbol{x}_{t+\Delta t})$在$\boldsymbol{x}_t$分布下取期望：
-$$\mathbb{E}[\phi(\boldsymbol{x}_{t+\Delta t})] = \int p_t(\boldsymbol{x}_t) \phi(\boldsymbol{x}_{t+\Delta t}) d\boldsymbol{x}_t$$
-
-代入泰勒展开：
-$$\mathbb{E}[\phi(\boldsymbol{x}_{t+\Delta t})] = \int p_t(\boldsymbol{x}_t) \left[\phi(\boldsymbol{x}_t) + \Delta t \, \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla \phi(\boldsymbol{x}_t)\right] d\boldsymbol{x}_t + O(\Delta t^2)$$
-
-分开积分：
-$$\mathbb{E}[\phi(\boldsymbol{x}_{t+\Delta t})] = \int p_t(\boldsymbol{x}_t) \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + \Delta t \int p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + O(\Delta t^2)$$
-
-**4.6 变量替换与密度演化**
-
-另一方面，期望值也可以用$t+\Delta t$时刻的密度表示：
-$$\mathbb{E}[\phi(\boldsymbol{x}_{t+\Delta t})] = \int p_{t+\Delta t}(\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x}$$
-
-注意这里积分变量记为$\boldsymbol{x}$（代表$t+\Delta t$时刻的状态）。由于积分变量只是哑变量，我们可以统一记为$\boldsymbol{x}_t$：
-$$\int p_{t+\Delta t}(\boldsymbol{x}_t) \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int p_t(\boldsymbol{x}_t) \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + \Delta t \int p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + O(\Delta t^2)$$
-
-**4.7 时间导数的提取**
-
-移项并除以$\Delta t$：
-$$\frac{1}{\Delta t}\int [p_{t+\Delta t}(\boldsymbol{x}_t) - p_t(\boldsymbol{x}_t)] \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + O(\Delta t)$$
-
-取$\Delta t \to 0$的极限：
-$$\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = \int p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t$$
-
-这就是连续性方程的弱形式。
-
-**4.8 应用分部积分得到强形式**
-
-对右边应用分部积分公式：
-$$\int p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t) \cdot \nabla \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = -\int \nabla \cdot [p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t)] \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t$$
-
-（利用了$p$和$\boldsymbol{f}$的衰减性，边界项为零）
-
-因此：
-$$\int \frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = -\int \nabla \cdot [p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t)] \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t$$
-
-即：
-$$\int \left[\frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} + \nabla \cdot (p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t))\right] \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t = 0$$
-
-由于这对任意测试函数$\phi$成立，根据基本引理，得到连续性方程的强形式：
-$$\frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} + \nabla \cdot [p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t)] = 0$$
-
-或写成：
-$$\frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} = -\nabla \cdot [p_t(\boldsymbol{x}_t) \boldsymbol{f}_t(\boldsymbol{x}_t)]$$
-
-**4.9 连续性方程的展开形式**
-
-应用乘积的散度公式：
-$$\nabla \cdot (p\boldsymbol{f}) = \boldsymbol{f} \cdot \nabla p + p\nabla \cdot \boldsymbol{f}$$
-
-连续性方程可以写成：
-$$\frac{\partial p_t}{\partial t} = -\boldsymbol{f}_t \cdot \nabla p_t - p_t \nabla \cdot \boldsymbol{f}_t$$
-
-或者用物质导数（material derivative）的记号：
-$$\frac{\partial p_t}{\partial t} + \boldsymbol{f}_t \cdot \nabla p_t = -p_t \nabla \cdot \boldsymbol{f}_t$$
-
-左边是沿着流的方向的导数，右边描述了流的压缩或膨胀效应。
-
-### 5. Fokker-Planck方程的完整推导
-
-**5.1 随机微分方程（SDE）**
-
-考虑Itô型随机微分方程：
-$$d\boldsymbol{x}_t = \boldsymbol{f}_t(\boldsymbol{x}_t) dt + g_t d\boldsymbol{w}_t$$
-
-其中$\boldsymbol{w}_t \in \mathbb{R}^n$是标准布朗运动，$\boldsymbol{f}_t$是漂移项，$g_t$是扩散系数。
-
-更一般地，扩散项可以是矩阵形式：
-$$d\boldsymbol{x}_t = \boldsymbol{f}_t(\boldsymbol{x}_t) dt + G_t d\boldsymbol{w}_t$$
-
-其中$G_t \in \mathbb{R}^{n \times n}$。为简化，我们考虑标量扩散$g_t$的情况。
-
-**5.2 Itô公式的应用**
-
-Itô公式是随机微积分的核心工具，对于光滑函数$\phi(\boldsymbol{x})$，有：
-$$d\phi(\boldsymbol{x}_t) = \nabla \phi \cdot d\boldsymbol{x}_t + \frac{1}{2} \sum_{i,j} \frac{\partial^2 \phi}{\partial x_i \partial x_j} d\boldsymbol{x}_t^i d\boldsymbol{x}_t^j$$
-
-其中$d\boldsymbol{x}_t^i$是$\boldsymbol{x}_t$的第$i$个分量，且满足Itô乘法规则：
-$$dt \cdot dt = 0, \quad dt \cdot d\boldsymbol{w}_t = 0, \quad d\boldsymbol{w}_t^i \cdot d\boldsymbol{w}_t^j = \delta_{ij} dt$$
-
-**5.3 Itô乘法表**
-
-代入$d\boldsymbol{x}_t = \boldsymbol{f}_t dt + g_t d\boldsymbol{w}_t$：
-$$d\boldsymbol{x}_t^i d\boldsymbol{x}_t^j = (\boldsymbol{f}_t^i dt + g_t d\boldsymbol{w}_t^i)(\boldsymbol{f}_t^j dt + g_t d\boldsymbol{w}_t^j)$$
-
-展开：
-$$d\boldsymbol{x}_t^i d\boldsymbol{x}_t^j = \boldsymbol{f}_t^i \boldsymbol{f}_t^j (dt)^2 + \boldsymbol{f}_t^i g_t dt \cdot d\boldsymbol{w}_t^j + g_t \boldsymbol{f}_t^j d\boldsymbol{w}_t^i \cdot dt + g_t^2 d\boldsymbol{w}_t^i d\boldsymbol{w}_t^j$$
-
-应用Itô规则，保留$O(dt)$项：
-$$d\boldsymbol{x}_t^i d\boldsymbol{x}_t^j = g_t^2 \delta_{ij} dt$$
-
-**5.4 Itô公式的展开**
-
-因此，Itô公式变为：
-$$d\phi(\boldsymbol{x}_t) = \nabla \phi \cdot (\boldsymbol{f}_t dt + g_t d\boldsymbol{w}_t) + \frac{1}{2} \sum_{i,j} \frac{\partial^2 \phi}{\partial x_i \partial x_j} g_t^2 \delta_{ij} dt$$
-
-简化：
-$$d\phi(\boldsymbol{x}_t) = \nabla \phi \cdot \boldsymbol{f}_t dt + \nabla \phi \cdot g_t d\boldsymbol{w}_t + \frac{g_t^2}{2} \sum_i \frac{\partial^2 \phi}{\partial x_i^2} dt$$
-
-即：
-$$d\phi(\boldsymbol{x}_t) = \left[\boldsymbol{f}_t \cdot \nabla \phi + \frac{g_t^2}{2} \Delta \phi\right] dt + g_t \nabla \phi \cdot d\boldsymbol{w}_t$$
-
-其中$\Delta \phi = \nabla \cdot \nabla \phi = \sum_i \frac{\partial^2 \phi}{\partial x_i^2}$是拉普拉斯算子。
-
-**5.5 有限差分近似**
-
-将SDE离散化：
-$$\boldsymbol{x}_{t+\Delta t} = \boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t + g_t\sqrt{\Delta t}\boldsymbol{\varepsilon}$$
-
-其中$\boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$是标准正态随机变量。
-
-注意布朗运动增量的方差：$\mathbb{E}[(w_{t+\Delta t} - w_t)^2] = \Delta t$，因此$d\boldsymbol{w}_t$的标准差为$\sqrt{\Delta t}$。
-
-**5.6 测试函数的泰勒展开**
-
-对$\phi(\boldsymbol{x}_{t+\Delta t})$进行二阶泰勒展开：
-$$\phi(\boldsymbol{x}_t + \boldsymbol{\delta}) = \phi(\boldsymbol{x}_t) + \boldsymbol{\delta} \cdot \nabla \phi + \frac{1}{2} \sum_{i,j} \delta_i \delta_j \frac{\partial^2 \phi}{\partial x_i \partial x_j} + O(|\boldsymbol{\delta}|^3)$$
-
-其中$\boldsymbol{\delta} = \boldsymbol{f}_t\Delta t + g_t\sqrt{\Delta t}\boldsymbol{\varepsilon}$。
-
-**5.7 随机项的期望计算**
-
-对随机变量$\boldsymbol{\varepsilon}$取期望。首先，关键的期望值：
-$$\mathbb{E}[\varepsilon_i] = 0$$
-$$\mathbb{E}[\varepsilon_i \varepsilon_j] = \delta_{ij}$$
-$$\mathbb{E}[\varepsilon_i \varepsilon_j \varepsilon_k] = 0$$
-
-计算$\boldsymbol{\delta}$的各阶矩：
-
-**一阶项**：
-$$\mathbb{E}_\varepsilon[\boldsymbol{\delta}] = \boldsymbol{f}_t\Delta t$$
-
-**二阶项**：
-$$\mathbb{E}_\varepsilon[\delta_i \delta_j] = \mathbb{E}_\varepsilon[(\boldsymbol{f}_t^i\Delta t + g_t\sqrt{\Delta t}\varepsilon_i)(\boldsymbol{f}_t^j\Delta t + g_t\sqrt{\Delta t}\varepsilon_j)]$$
-
-展开：
-$$= \boldsymbol{f}_t^i\boldsymbol{f}_t^j(\Delta t)^2 + g_t^2\Delta t \mathbb{E}[\varepsilon_i\varepsilon_j] + g_t\sqrt{\Delta t}\Delta t(\boldsymbol{f}_t^i\mathbb{E}[\varepsilon_j] + \boldsymbol{f}_t^j\mathbb{E}[\varepsilon_i])$$
-
-$$= \boldsymbol{f}_t^i\boldsymbol{f}_t^j(\Delta t)^2 + g_t^2\Delta t \delta_{ij}$$
-
-在$\Delta t \to 0$的极限下，保留主导项（$O(\Delta t)$项）：
-$$\mathbb{E}_\varepsilon[\delta_i \delta_j] = g_t^2 \delta_{ij} \Delta t + O(\Delta t^2)$$
-
-**5.8 期望值的计算**
-
-对泰勒展开式取期望：
-$$\mathbb{E}_\varepsilon[\phi(\boldsymbol{x}_{t+\Delta t})] = \phi(\boldsymbol{x}_t) + \mathbb{E}_\varepsilon[\boldsymbol{\delta}] \cdot \nabla \phi + \frac{1}{2} \sum_{i,j} \mathbb{E}_\varepsilon[\delta_i \delta_j] \frac{\partial^2 \phi}{\partial x_i \partial x_j} + O(\Delta t^{3/2})$$
-
-代入上面计算的期望值：
-$$\mathbb{E}_\varepsilon[\phi(\boldsymbol{x}_{t+\Delta t})] = \phi(\boldsymbol{x}_t) + \boldsymbol{f}_t\Delta t \cdot \nabla \phi + \frac{1}{2} \sum_i g_t^2\Delta t \frac{\partial^2 \phi}{\partial x_i^2} + O(\Delta t^{3/2})$$
-
-即：
-$$\mathbb{E}_\varepsilon[\phi(\boldsymbol{x}_{t+\Delta t})] = \phi(\boldsymbol{x}_t) + \Delta t\left[\boldsymbol{f}_t \cdot \nabla \phi + \frac{g_t^2}{2} \Delta \phi\right] + O(\Delta t^{3/2})$$
-
-**5.9 对初始分布取期望**
-
-现在对$\boldsymbol{x}_t$的分布$p_t$取期望：
-$$\int p_{t+\Delta t}(\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x} = \int p_t(\boldsymbol{x}_t) \mathbb{E}_\varepsilon[\phi(\boldsymbol{x}_{t+\Delta t})] d\boldsymbol{x}_t$$
-
-代入上式：
-$$\int p_{t+\Delta t}(\boldsymbol{x}) \phi(\boldsymbol{x}) d\boldsymbol{x} = \int p_t(\boldsymbol{x}_t) \phi(\boldsymbol{x}_t) d\boldsymbol{x}_t + \Delta t \int p_t(\boldsymbol{x}_t) \left[\boldsymbol{f}_t \cdot \nabla \phi + \frac{g_t^2}{2} \Delta \phi\right] d\boldsymbol{x}_t + O(\Delta t^{3/2})$$
-
-**5.10 弱形式的推导**
-
-移项并取$\Delta t \to 0$：
-$$\int \frac{\partial p_t}{\partial t} \phi \, d\boldsymbol{x} = \int p_t \boldsymbol{f}_t \cdot \nabla \phi \, d\boldsymbol{x} + \int p_t \frac{g_t^2}{2} \Delta \phi \, d\boldsymbol{x}$$
-
-这是Fokker-Planck方程的弱形式。
-
-**5.11 第一项的分部积分**
-
-对第一项应用分部积分：
-$$\int p_t \boldsymbol{f}_t \cdot \nabla \phi \, d\boldsymbol{x} = -\int \nabla \cdot (p_t \boldsymbol{f}_t) \phi \, d\boldsymbol{x}$$
-
-**5.12 第二项的分部积分**
-
-对第二项，需要应用两次分部积分。首先：
-$$\int p_t \Delta \phi \, d\boldsymbol{x} = \int p_t \nabla \cdot (\nabla \phi) \, d\boldsymbol{x}$$
-
-第一次分部积分（$u = p_t$，$\boldsymbol{v} = \nabla \phi$）：
-$$\int p_t \nabla \cdot (\nabla \phi) \, d\boldsymbol{x} = -\int \nabla p_t \cdot \nabla \phi \, d\boldsymbol{x}$$
-
-第二次分部积分（现在$\nabla \phi$看作"测试向量场"）：
-$$-\int \nabla p_t \cdot \nabla \phi \, d\boldsymbol{x} = \int \nabla \cdot (\nabla p_t) \phi \, d\boldsymbol{x} = \int \Delta p_t \, \phi \, d\boldsymbol{x}$$
-
-因此：
-$$\int p_t \frac{g_t^2}{2} \Delta \phi \, d\boldsymbol{x} = \int \frac{g_t^2}{2} \Delta p_t \, \phi \, d\boldsymbol{x}$$
-
-**5.13 Fokker-Planck方程的强形式**
-
-综合两项：
-$$\int \frac{\partial p_t}{\partial t} \phi \, d\boldsymbol{x} = \int \left[-\nabla \cdot (p_t \boldsymbol{f}_t) + \frac{g_t^2}{2} \Delta p_t\right] \phi \, d\boldsymbol{x}$$
-
-由于对任意$\phi$成立，得到Fokker-Planck方程：
-$$\frac{\partial p_t}{\partial t} = -\nabla \cdot (p_t \boldsymbol{f}_t) + \frac{g_t^2}{2} \Delta p_t$$
-
-或写成：
-$$\frac{\partial p_t}{\partial t} = -\nabla \cdot (p_t \boldsymbol{f}_t) + \frac{1}{2}\nabla \cdot (g_t^2 \nabla p_t)$$
-
-后一种形式更清楚地显示了方程的对流-扩散结构。
-
-**5.14 Fokker-Planck方程的展开形式**
-
-展开散度项：
-$$\nabla \cdot (p_t \boldsymbol{f}_t) = \boldsymbol{f}_t \cdot \nabla p_t + p_t \nabla \cdot \boldsymbol{f}_t$$
-
-$$\frac{g_t^2}{2}\Delta p_t = \frac{g_t^2}{2} \nabla \cdot \nabla p_t$$
-
-完整方程：
-$$\frac{\partial p_t}{\partial t} = -\boldsymbol{f}_t \cdot \nabla p_t - p_t \nabla \cdot \boldsymbol{f}_t + \frac{g_t^2}{2} \Delta p_t$$
-
-这可以写成：
-$$\frac{\partial p_t}{\partial t} + \boldsymbol{f}_t \cdot \nabla p_t = -p_t \nabla \cdot \boldsymbol{f}_t + \frac{g_t^2}{2} \Delta p_t$$
-
-左边是对流项（沿着流的导数），右边第一项是压缩/膨胀项，第二项是扩散项。
-
-### 6. 边界条件与稳态解
-
-**6.1 边界条件的类型**
-
-对于Fokker-Planck方程，常见的边界条件包括：
-
-**（1）无穷远边界条件**：
-$$\lim_{|\boldsymbol{x}| \to \infty} p_t(\boldsymbol{x}) = 0, \quad \lim_{|\boldsymbol{x}| \to \infty} \nabla p_t(\boldsymbol{x}) = \boldsymbol{0}$$
-
-**（2）反射边界条件**（reflecting boundary）：在边界$\partial\Omega$上，法向通量为零：
-$$(p_t \boldsymbol{f}_t - \frac{g_t^2}{2}\nabla p_t) \cdot \hat{\boldsymbol{n}} = 0$$
-
-**（3）吸收边界条件**（absorbing boundary）：在边界上，密度为零：
-$$p_t(\boldsymbol{x}) = 0, \quad \boldsymbol{x} \in \partial\Omega$$
-
-**6.2 稳态解**
-
-稳态解满足$\frac{\partial p}{\partial t} = 0$，即：
-$$-\nabla \cdot (p \boldsymbol{f}) + \frac{g^2}{2} \Delta p = 0$$
-
-或写成：
-$$\nabla \cdot \left(p \boldsymbol{f} - \frac{g^2}{2}\nabla p\right) = 0$$
-
-这意味着概率流密度（probability current）：
-$$\boldsymbol{J} = p \boldsymbol{f} - \frac{g^2}{2}\nabla p$$
-是无散的。
-
-**6.3 详细平衡条件**
-
-如果稳态解满足详细平衡（detailed balance）：
-$$\boldsymbol{J} = p \boldsymbol{f} - \frac{g^2}{2}\nabla p = \boldsymbol{0}$$
-
-则有：
-$$p \boldsymbol{f} = \frac{g^2}{2}\nabla p$$
-
-即：
-$$\boldsymbol{f} = \frac{g^2}{2p}\nabla p = \frac{g^2}{2}\nabla \ln p$$
-
-**6.4 势函数与Boltzmann分布**
-
-如果漂移项可以写成势函数的梯度：
-$$\boldsymbol{f}(\boldsymbol{x}) = -\nabla V(\boldsymbol{x})$$
-
-则详细平衡条件变为：
-$$-\nabla V = \frac{g^2}{2}\nabla \ln p$$
-
-即：
-$$\nabla \ln p = -\frac{2}{g^2}\nabla V$$
-
-积分得：
-$$\ln p = -\frac{2V}{g^2} + C$$
-
-因此稳态分布为Boltzmann分布：
-$$p(\boldsymbol{x}) \propto \exp\left(-\frac{2V(\boldsymbol{x})}{g^2}\right)$$
-
-如果定义"温度"$T = \frac{g^2}{2}$（在物理单位中），则：
-$$p(\boldsymbol{x}) \propto \exp\left(-\frac{V(\boldsymbol{x})}{T}\right)$$
-
-这是统计物理中的经典结果。
-
-**6.5 稳态解的唯一性**
-
-在适当条件下（如$\boldsymbol{f}$满足某种增长条件），稳态解是唯一的。这可以通过能量方法或者Lyapunov函数来证明。
-
-考虑相对熵（Kullback-Leibler散度）：
-$$H(p_t | p_\infty) = \int p_t(\boldsymbol{x}) \ln\frac{p_t(\boldsymbol{x})}{p_\infty(\boldsymbol{x})} d\boldsymbol{x}$$
-
-其中$p_\infty$是稳态解。可以证明：
-$$\frac{dH}{dt} \leq 0$$
-
-且$\frac{dH}{dt} = 0$当且仅当$p_t = p_\infty$。这证明了系统最终会收敛到稳态。
-
-### 7. 与Langevin动力学的联系
-
-**7.1 Langevin方程**
-
-Langevin方程描述受到摩擦和随机力作用的粒子运动：
-$$m\frac{d^2 \boldsymbol{x}}{dt^2} = -\gamma \frac{d\boldsymbol{x}}{dt} - \nabla V(\boldsymbol{x}) + \boldsymbol{\xi}(t)$$
-
-其中$\gamma$是摩擦系数，$V$是势能，$\boldsymbol{\xi}(t)$是随机力，满足：
-$$\langle \xi_i(t) \rangle = 0, \quad \langle \xi_i(t)\xi_j(t') \rangle = 2\gamma k_B T \delta_{ij}\delta(t-t')$$
-
-**7.2 过阻尼极限**
-
-在过阻尼（overdamped）极限下，$m \to 0$或$\gamma \to \infty$，惯性项可以忽略：
-$$\gamma \frac{d\boldsymbol{x}}{dt} = -\nabla V(\boldsymbol{x}) + \boldsymbol{\xi}(t)$$
-
-即：
-$$d\boldsymbol{x} = -\frac{1}{\gamma}\nabla V(\boldsymbol{x}) dt + \frac{1}{\gamma}\boldsymbol{\xi}(t)dt$$
-
-将随机力写成布朗运动形式，$\boldsymbol{\xi}(t)dt = \sqrt{2\gamma k_B T} d\boldsymbol{w}_t$：
-$$d\boldsymbol{x} = -\frac{1}{\gamma}\nabla V(\boldsymbol{x}) dt + \sqrt{\frac{2k_B T}{\gamma}} d\boldsymbol{w}_t$$
-
-**7.3 对应的Fokker-Planck方程**
-
-根据前面的推导，这个SDE对应的Fokker-Planck方程为：
-$$\frac{\partial p}{\partial t} = \nabla \cdot \left[\frac{1}{\gamma}\nabla V \, p + \frac{k_B T}{\gamma}\nabla p\right]$$
-
-即：
-$$\frac{\partial p}{\partial t} = \frac{1}{\gamma}\nabla \cdot \left[\nabla V \, p + k_B T\nabla p\right]$$
-
-这称为**Smoluchowski方程**，是Fokker-Planck方程在过阻尼Langevin动力学中的具体形式。
-
-**7.4 平衡态验证**
-
-稳态解满足：
-$$\nabla V \, p_\infty + k_B T\nabla p_\infty = \boldsymbol{0}$$
-
-即：
-$$\nabla V \, p_\infty = -k_B T\nabla p_\infty$$
-
-$$\nabla V = -k_B T\nabla \ln p_\infty$$
-
-积分：
-$$p_\infty(\boldsymbol{x}) = \frac{1}{Z}\exp\left(-\frac{V(\boldsymbol{x})}{k_B T}\right)$$
-
-其中$Z = \int \exp(-V/k_B T)d\boldsymbol{x}$是配分函数。这正是经典统计力学的正则分布！
-
-### 8. 数值求解方法
-
-**8.1 有限差分方法**
-
-对于一维Fokker-Planck方程：
-$$\frac{\partial p}{\partial t} = -\frac{\partial}{\partial x}(f(x)p) + \frac{g^2}{2}\frac{\partial^2 p}{\partial x^2}$$
-
-采用前向Euler时间离散和中心差分空间离散：
-$$\frac{p_i^{n+1} - p_i^n}{\Delta t} = -\frac{(fp)_{i+1/2}^n - (fp)_{i-1/2}^n}{\Delta x} + \frac{g^2}{2}\frac{p_{i+1}^n - 2p_i^n + p_{i-1}^n}{(\Delta x)^2}$$
-
-其中$p_i^n \approx p(x_i, t_n)$。
-
-**8.2 上风格式**
-
-对流项需要特别处理以保证数值稳定性。采用上风（upwind）格式：
-$$(fp)_{i+1/2} = \begin{cases}
-f_{i+1/2}p_i & \text{if } f_{i+1/2} \geq 0 \\
-f_{i+1/2}p_{i+1} & \text{if } f_{i+1/2} < 0
-\end{cases}$$
-
-这保证了数值格式的单调性和稳定性。
-
-**8.3 CFL条件**
-
-数值稳定性要求时间步长满足CFL（Courant-Friedrichs-Lewy）条件：
-$$\Delta t \leq \min\left\{\frac{\Delta x}{|f|_{\max}}, \frac{(\Delta x)^2}{g^2}\right\}$$
-
-第一项来自对流项，第二项来自扩散项。
-
-**8.4 蒙特卡洛方法**
-
-另一种方法是直接模拟SDE：
-$$\boldsymbol{x}_{n+1} = \boldsymbol{x}_n + \boldsymbol{f}(\boldsymbol{x}_n)\Delta t + g\sqrt{\Delta t}\boldsymbol{\varepsilon}_n$$
-
-其中$\boldsymbol{\varepsilon}_n \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。
-
-通过大量粒子的统计，可以估计概率密度：
-$$p_t(\boldsymbol{x}) \approx \frac{1}{N}\sum_{i=1}^N K_h(\boldsymbol{x} - \boldsymbol{x}_t^{(i)})$$
-
-其中$K_h$是带宽为$h$的核函数（如高斯核）。
-
-**8.5 谱方法**
-
-对于周期边界条件，可以使用傅里叶谱方法。将$p(\boldsymbol{x}, t)$展开为傅里叶级数：
-$$p(\boldsymbol{x}, t) = \sum_{\boldsymbol{k}} \hat{p}_{\boldsymbol{k}}(t) e^{i\boldsymbol{k}\cdot\boldsymbol{x}}$$
-
-Fokker-Planck方程在傅里叶空间变为ODE：
-$$\frac{d\hat{p}_{\boldsymbol{k}}}{dt} = -i\boldsymbol{k} \cdot \widehat{(fp)}_{\boldsymbol{k}} - \frac{g^2}{2}|\boldsymbol{k}|^2 \hat{p}_{\boldsymbol{k}}$$
-
-这可以高精度地求解，但卷积项$\widehat{(fp)}_{\boldsymbol{k}}$的计算需要FFT。
-
-**8.6 有限元方法**
-
-将$p$在测试函数空间中展开：
-$$p(\boldsymbol{x}, t) = \sum_j p_j(t) \varphi_j(\boldsymbol{x})$$
-
-其中$\{\varphi_j\}$是有限元基函数。将此代入弱形式：
-$$\int \frac{\partial p}{\partial t} \phi \, d\boldsymbol{x} = \int \left[-\nabla \cdot (p\boldsymbol{f}) + \frac{g^2}{2}\Delta p\right] \phi \, d\boldsymbol{x}$$
-
-取$\phi = \varphi_i$，得到ODE系统：
-$$M\frac{d\boldsymbol{p}}{dt} = A\boldsymbol{p}$$
-
-其中$M_{ij} = \int \varphi_i\varphi_j d\boldsymbol{x}$是质量矩阵，$A_{ij}$包含对流和扩散项的贡献。
-
-### 9. 物理意义与多角度理解
-
-**9.1 概率论视角**
-
-从概率论角度，Fokker-Planck方程描述了随机过程$\boldsymbol{x}_t$的概率密度$p_t(\boldsymbol{x})$如何演化。它是Chapman-Kolmogorov方程在连续时间、连续状态空间中的微分形式。
-
-**转移概率密度**：定义$\mathcal{P}(t, \boldsymbol{x} | s, \boldsymbol{y})$为从$(s, \boldsymbol{y})$转移到$(t, \boldsymbol{x})$的条件概率密度，则：
-$$p_t(\boldsymbol{x}) = \int \mathcal{P}(t, \boldsymbol{x} | 0, \boldsymbol{y}) p_0(\boldsymbol{y}) d\boldsymbol{y}$$
-
-**9.2 偏微分方程视角**
-
-从PDE角度，Fokker-Planck方程是一个**抛物型方程**，结合了：
-- **对流项**：$-\nabla \cdot (p\boldsymbol{f})$，描述确定性漂移
-- **扩散项**：$\frac{g^2}{2}\Delta p$，描述随机扩散
-
-这类似于对流-扩散方程：
-$$\frac{\partial u}{\partial t} + \boldsymbol{v} \cdot \nabla u = D\Delta u$$
-
-但Fokker-Planck方程的对流项有特殊形式（守恒形式）。
-
-**9.3 统计力学视角**
-
-在统计力学中，Fokker-Planck方程描述了相空间中的概率流。对于Hamiltonian系统加上耗散和噪声：
-$$\dot{\boldsymbol{q}} = \frac{\partial H}{\partial \boldsymbol{p}}, \quad \dot{\boldsymbol{p}} = -\frac{\partial H}{\partial \boldsymbol{q}} - \gamma\boldsymbol{p} + \boldsymbol{\xi}(t)$$
-
-其相空间分布满足相应的Fokker-Planck方程。
-
-**9.4 信息论视角**
-
-从信息论角度，Fokker-Planck方程描述了系统的Shannon熵：
-$$S(t) = -\int p_t(\boldsymbol{x}) \ln p_t(\boldsymbol{x}) d\boldsymbol{x}$$
-
-的演化。可以证明，对于满足详细平衡的系统：
-$$\frac{dS}{dt} \geq 0$$
-
-这是热力学第二定律的微观体现（$H$定理）。
-
-**9.5 机器学习视角**
-
-在扩散模型（diffusion models）中：
-- **前向过程**：向数据添加噪声，对应SDE：
-  $$d\boldsymbol{x} = -\frac{1}{2}\boldsymbol{x}dt + d\boldsymbol{w}$$
-
-- **逆向过程**：从噪声恢复数据，对应逆时间SDE：
-  $$d\boldsymbol{x} = \left[-\frac{1}{2}\boldsymbol{x} + \nabla \ln p_t(\boldsymbol{x})\right]dt + d\bar{\boldsymbol{w}}$$
-
-Fokker-Planck方程用于分析分布$p_t$的演化。
-
-### 10. 总结与推广
-
-**10.1 方法总结**
-
-测试函数法的核心步骤：
-1. 将动力学方程（ODE/SDE）离散化
-2. 对测试函数进行泰勒展开
-3. 对随机性取期望（如有）
-4. 对初始分布取期望，建立弱形式
-5. 应用分部积分转移导数
-6. 由测试函数的任意性得到强形式
-
-**10.2 推广方向**
-
-该方法可以推广到：
-- **空间相关的扩散**：$G_t(\boldsymbol{x})$是矩阵函数
-- **跳跃过程**：包含Poisson跳跃的过程
-- **分数阶导数**：非局部算子
-- **非线性方程**：如Burgers方程
-- **无穷维情况**：随机偏微分方程（SPDE）
-
-**10.3 理论意义**
-
-测试函数法是现代PDE理论的基础，连接了：
-- 经典的强解理论
-- 现代的弱解和分布理论
-- 数值分析中的变分方法
-- 物理中的守恒律
-
-它为理解随机过程、偏微分方程和概率分布的演化提供了统一的框架。
-
+@online{kexuefm-9461,
+title={测试函数法推导连续性方程和Fokker-Planck方程},
+author={苏剑林},
+year={2023},
+month={Feb},
+url={\url{https://spaces.ac.cn/archives/9461}},
+}

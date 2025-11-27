@@ -2,8 +2,9 @@
 title: 为什么Pre Norm的效果不如Post Norm？
 slug: 为什么pre-norm的效果不如post-norm
 date: 2022-03-29
-tags: 优化, 梯度, attention, 生成模型, attention
-status: pending
+tags: 详细推导, 归一化, Layer Norm, 残差连接, Transformer, 梯度流, 深度网络, DeepNet, 有效深度
+status: completed
+tags_reviewed: true
 ---
 
 # 为什么Pre Norm的效果不如Post Norm？
@@ -100,6 +101,111 @@ url={\url{https://spaces.ac.cn/archives/9009}},
 
 
 ---
+
+## 公式推导与注释
+
+### 第1部分：核心理论、公理与历史基础
+
+#### 1.1 理论起源与历史发展
+
+**归一化与残差连接的理论根源**可追溯到多个研究方向的融合：
+
+<div class="theorem-box">
+
+**多学科交叉**：
+- **批归一化理论** (2015, Ioffe & Szegedy)：首次在深度网络中系统引入归一化
+- **残差学习** (2015, He et al.)：ResNet通过skip connection解决梯度消失
+- **Layer Normalization** (2016, Ba et al.)：针对RNN和小batch场景的归一化方案
+- **Transformer架构** (2017, Vaswani et al.)：首次在Attention机制中使用Layer Norm
+- **归一化位置研究** (2018-2020)：开始系统研究Pre/Post Norm的差异
+
+</div>
+
+**关键里程碑**：
+
+1. **2015 - Batch Normalization**：证明归一化能加速训练、提升泛化
+2. **2015 - ResNet**：残差连接使得训练超深网络成为可能（152层）
+3. **2016 - Layer Normalization**：独立于batch维度的归一化，适用于序列模型
+4. **2017 - 原始Transformer**：采用Post Norm结构
+5. **2020 - Pre Norm的流行**：GPT、BERT等模型开始采用Pre Norm以提升训练稳定性
+6. **2020 - 深入对比研究**：多篇论文系统对比Pre/Post Norm的性能差异
+7. **2022 - DeepNet**：通过残差缩放实现1000层Transformer
+
+#### 1.2 数学公理与基础假设
+
+<div class="theorem-box">
+
+### 公理1：残差连接的恒等映射假设
+
+深度网络中的残差连接应提供一条**无障碍的梯度通路**：
+
+$$\boldsymbol{x}_{t+1} = \boldsymbol{x}_t + \mathcal{R}_t(\boldsymbol{x}_t)$$
+
+其中$\mathcal{R}_t$是残差函数。理想情况下：
+- 前向：$\mathcal{R}_t = \mathbf{0}$时网络退化为恒等映射（不损害性能）
+- 反向：$\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_t}$包含直接来自$\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_{t+1}}$的恒等分量
+
+</div>
+
+<div class="theorem-box">
+
+### 公理2：归一化的协变性原则
+
+Layer Normalization应保持表示的**方向不变性**：
+
+$$\text{LN}(\alpha \boldsymbol{x}) = \text{LN}(\boldsymbol{x}), \quad \forall \alpha > 0$$
+
+**意义**：归一化去除幅值信息，只保留方向信息，使得网络学习对尺度鲁棒的特征。
+
+</div>
+
+<div class="theorem-box">
+
+### 公理3：深度网络的层级化表示假设
+
+深度网络应学习**层级化的特征抽象**：
+
+$$\text{feature}_t = h_t(\text{feature}_{t-1})$$
+
+其中$h_t$将浅层特征映射为更抽象的高层特征。
+
+**Pre Norm的问题**：恒等路径过强 → 阻碍层级化学习
+**Post Norm的优势**：削弱恒等 → 强制每层学习有意义的变换
+
+</div>
+
+#### 1.3 设计哲学
+
+Pre Norm与Post Norm体现了深度学习中的两种设计权衡：
+
+**Pre Norm：稳定性优先**
+- 哲学：让训练尽可能容易，即使牺牲一些表达能力
+- 目标：快速收敛、无需精细调参
+- 代价：有效深度不足、最终性能次优
+
+**Post Norm：性能优先**
+- 哲学：充分利用深度，即使训练更困难
+- 目标：最大化网络表达能力
+- 代价：需要Warmup、精细初始化、更长训练时间
+
+**与传统架构的本质区别**：
+
+| 维度 | Pre Norm | Post Norm | 无Norm的ResNet |
+|------|----------|----------|--------------|
+| 恒等路径 | 完全畅通 | 受归一化调制 | 完全畅通 |
+| 残差权重 | 逐层稀释 | 保持同等地位 | 可能爆炸/消失 |
+| 训练难度 | 简单 | 中等 | 困难（深层时） |
+| 有效深度 | $\Theta(\sqrt{L})$ | $\Theta(L)$ | 难以训练深层 |
+| 适用场景 | 快速实验 | 追求SOTA | 浅层网络 |
+
+**核心权衡**：
+> **Ease of Training vs. Quality of Solution**
+> Pre Norm牺牲solution quality换取training ease
+> Post Norm牺牲training ease换取solution quality
+
+---
+
+### 第2部分：严谨的核心数学推导
 
 ## 深度数学分析 #
 

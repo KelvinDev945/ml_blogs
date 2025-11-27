@@ -3,7 +3,7 @@ title: 低秩近似之路（三）：CR
 slug: 低秩近似之路三cr
 date: 2024-10-11
 tags: 近似, 最优, 矩阵, 低秩, 生成模型
-status: pending
+status: completed
 ---
 
 # 低秩近似之路（三）：CR

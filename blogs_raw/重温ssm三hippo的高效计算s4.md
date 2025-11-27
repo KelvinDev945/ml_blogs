@@ -3,7 +3,7 @@ title: 重温SSM（三）：HiPPO的高效计算（S4）
 slug: 重温ssm三hippo的高效计算s4
 date: 2024-06-20
 tags: 矩阵, 线性, RNN, ssm, 生成模型
-status: pending
+status: completed
 ---
 
 # 重温SSM（三）：HiPPO的高效计算（S4）

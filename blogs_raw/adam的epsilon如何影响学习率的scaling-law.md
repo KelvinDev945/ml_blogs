@@ -3,7 +3,7 @@ title: Adam的epsilon如何影响学习率的Scaling Law？
 slug: adam的epsilon如何影响学习率的scaling-law
 date: 2024-11-18
 tags: 详细推导, 梯度, 学习率, 优化器, 尺度定律, 生成模型
-status: pending
+status: completed
 ---
 # Adam的epsilon如何影响学习率的Scaling Law？
 

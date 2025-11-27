@@ -3,7 +3,7 @@ title: Google新作试图“复活”RNN：RNN能否再次辉煌？
 slug: google新作试图复活rnnrnn能否再次辉煌
 date: 2023-03-28
 tags: 语言模型, RNN, 生成模型, attention, 生成模型
-status: pending
+status: completed
 ---
 
 # Google新作试图“复活”RNN：RNN能否再次辉煌？

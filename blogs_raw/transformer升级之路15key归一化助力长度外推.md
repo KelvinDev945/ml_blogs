@@ -3,7 +3,7 @@ title: Transformer升级之路：15、Key归一化助力长度外推
 slug: transformer升级之路15key归一化助力长度外推
 date: 2023-11-20
 tags: 详细推导, attention, 位置编码, 泛化, 外推, 生成模型
-status: pending
+status: completed
 ---
 # Transformer升级之路：15、Key归一化助力长度外推
 

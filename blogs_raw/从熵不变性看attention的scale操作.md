@@ -3,7 +3,7 @@ title: 从熵不变性看Attention的Scale操作
 slug: 从熵不变性看attention的scale操作
 date: 2021-12-21
 tags: 概率, 熵, attention, 生成模型, attention
-status: pending
+status: completed
 ---
 
 # 从熵不变性看Attention的Scale操作

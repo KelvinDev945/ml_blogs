@@ -3,7 +3,7 @@ title: 从JL引理看熵不变性Attention
 slug: 从jl引理看熵不变性attention
 date: 2023-04-10
 tags: 熵, attention, 生成模型, attention, 优化
-status: pending
+status: completed
 ---
 
 # 从JL引理看熵不变性Attention

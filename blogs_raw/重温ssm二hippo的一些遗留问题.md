@@ -3,7 +3,7 @@ title: 重温SSM（二）：HiPPO的一些遗留问题
 slug: 重温ssm二hippo的一些遗留问题
 date: 2024-06-05
 tags: 线性, 差分, RNN, 梯度, ssm
-status: pending
+status: completed
 ---
 
 # 重温SSM（二）：HiPPO的一些遗留问题

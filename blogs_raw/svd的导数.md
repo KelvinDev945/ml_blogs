@@ -3,7 +3,7 @@ title: SVD的导数
 slug: svd的导数
 date: 2025-04-26
 tags: 详细推导, 微积分, 分析, 矩阵, SVD, 梯度
-status: pending
+status: completed
 ---
 # SVD的导数
 

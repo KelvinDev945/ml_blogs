@@ -3,7 +3,7 @@ title: 重新思考学习率与Batch Size（二）：平均场
 slug: 重新思考学习率与batch-size二平均场
 date: 2025-09-10
 tags: 详细推导, 学习率, 优化器, 尺度定律, 平均场, 生成模型
-status: pending
+status: completed
 ---
 # 重新思考学习率与Batch Size（二）：平均场
 

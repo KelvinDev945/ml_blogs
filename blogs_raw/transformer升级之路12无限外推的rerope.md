@@ -3,7 +3,7 @@ title: Transformer升级之路：12、无限外推的ReRoPE？
 slug: transformer升级之路12无限外推的rerope
 date: 2023-08-07
 tags: 详细推导, attention, 位置编码, 泛化, 外推, rope
-status: pending
+status: completed
 ---
 # Transformer升级之路：12、无限外推的ReRoPE？
 

@@ -3,7 +3,7 @@ title: 流形上的最速下降：4. Muon + 谱球面
 slug: 流形上的最速下降4-muon-谱球面
 date: 2025-08-21
 tags: 详细推导, 矩阵, 优化器, muon, 约束, 最速下降
-status: pending
+status: completed
 ---
 # 流形上的最速下降：4. Muon + 谱球面
 

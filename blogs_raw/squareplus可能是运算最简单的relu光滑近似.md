@@ -3,7 +3,7 @@ title: SquarePlus：可能是运算最简单的ReLU光滑近似
 slug: squareplus可能是运算最简单的relu光滑近似
 date: 2021-12-29
 tags: 函数, 近似, 分析, 生成模型, attention
-status: pending
+status: completed
 ---
 
 # SquarePlus：可能是运算最简单的ReLU光滑近似

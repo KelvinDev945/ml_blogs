@@ -3,7 +3,7 @@ title: 为什么Adam的Update RMS是0.2？
 slug: 为什么adam的update-rms是02
 date: 2025-09-02
 tags: 详细推导, 分析, 梯度, 优化器, 平均场, 生成模型
-status: pending
+status: completed
 ---
 # 为什么Adam的Update RMS是0.2？
 

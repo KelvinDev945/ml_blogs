@@ -3,7 +3,7 @@ title: Tiger：一个“抠”到极致的优化器
 slug: tiger一个抠到极致的优化器
 date: 2023-03-07
 tags: 模型, 优化, 优化器, 生成模型, attention
-status: pending
+status: completed
 ---
 
 # Tiger：一个“抠”到极致的优化器
