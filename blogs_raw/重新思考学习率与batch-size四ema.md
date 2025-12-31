@@ -4,7 +4,7 @@ slug: 重新思考学习率与batch-size四ema
 date: 2025-09-22
 source: https://spaces.ac.cn/archives/11301
 tags: 优化
-status: pending
+status: completed
 ---
 
 # 重新思考学习率与Batch Size（四）：EMA
@@ -465,4 +465,714 @@ EMA是一个简单但强大的技术,通过指数加权平均历史参数实现:
 - 自适应$\beta$调度
 - 多尺度EMA集成
 - 与其他正则化技术的理论统一
+
+---
+
+## § 12. 详细的收敛性证明
+
+### 12.1 凸优化的收敛分析
+
+**假设**:
+1. 损失函数$L(\boldsymbol{\theta})$是凸函数
+2. $L$是$L$-光滑的:$\|\nabla L(\boldsymbol{\theta}_1) - \nabla L(\boldsymbol{\theta}_2)\| \leq L\|\boldsymbol{\theta}_1 - \boldsymbol{\theta}_2\|$
+3. 梯度估计无偏:$\mathbb{E}[\tilde{\boldsymbol{g}}_t] = \nabla L(\boldsymbol{\theta}_t)$
+4. 梯度有界方差:$\mathbb{E}\|\tilde{\boldsymbol{g}}_t - \nabla L(\boldsymbol{\theta}_t)\|^2 \leq \sigma^2$
+
+**定理5** (EMA+SGD的收敛率): 在上述假设下,当$\eta \leq \frac{1}{2L}$时,
+\begin{equation}\mathbb{E}[L(\boldsymbol{\theta}_{ema,T})] - L^* \leq \frac{(1-\beta)^2\eta^2\sigma^2}{2(1-\beta^{T+1})} + \frac{2L\|\boldsymbol{\theta}_0-\boldsymbol{\theta}^*\|^2}{(1-\beta)^2T}\tag{41}\end{equation}
+
+**关键项分析**:
+- **噪声项**: $\frac{(1-\beta)^2\eta^2\sigma^2}{2(1-\beta^{T+1})} \approx \frac{(1-\beta)^2\eta^2\sigma^2}{2}$(当$\beta$接近1)
+- **偏差项**: $\frac{2L\|\boldsymbol{\theta}_0-\boldsymbol{\theta}^*\|^2}{(1-\beta)^2T}$($\beta$越大,收敛越慢)
+
+**权衡分析**: 定义总误差为:
+\begin{equation}E(\beta) = \underbrace{\frac{(1-\beta)^2\eta^2\sigma^2}{2}}_{\text{噪声}} + \underbrace{\frac{C}{(1-\beta)^2T}}_{\text{偏差}}\tag{42}\end{equation}
+
+对$\beta$求偏导:
+\begin{equation}\frac{\partial E}{\partial\beta} = -2(1-\beta)\eta^2\sigma^2 + \frac{2C}{(1-\beta)^3T} = 0\tag{43}\end{equation}
+
+解得最优:
+\begin{equation}\beta^* = 1 - \left(\frac{C}{\eta^2\sigma^2T}\right)^{1/4}\tag{44}\end{equation}
+
+**代入得最小误差**:
+\begin{equation}E(\beta^*) = \mathcal{O}\left(\left(\frac{C}{\eta^2\sigma^2T}\right)^{1/2}\right) = \mathcal{O}\left(\frac{1}{\sqrt{T}}\right)\tag{45}\end{equation}
+
+**对比** (无EMA的SGD):
+\begin{equation}\mathbb{E}[L(\boldsymbol{\theta}_T)] - L^* = \mathcal{O}\left(\frac{1}{\sqrt{T}} + \frac{\eta\sigma^2}{B}\right)\tag{46}\end{equation}
+
+**结论**: EMA改善了噪声常数,从$\frac{\eta\sigma^2}{B}$降低到$(1-\beta)^2\eta^2\sigma^2 \approx O(1/T)$。
+
+### 12.2 非凸优化的驻点收敛
+
+**假设修改**:
+1. $L(\boldsymbol{\theta})$是非凸的
+2. $L$仍是$L$-光滑的
+3. 定义驻点距离:$\|\nabla L(\boldsymbol{\theta})\| \leq \epsilon$
+
+**定理6** (非凸EMA收敛): 对于非凸损失,
+\begin{equation}\mathbb{E}\|\nabla L(\boldsymbol{\theta}_{ema,T})\|^2 \leq \frac{4L(L(\boldsymbol{\theta}_0)-L^*)}{T} + \frac{4L\eta^2\sigma^2}{(1-\beta)^2}\tag{47}\end{equation}
+
+**推论6.1**: 若要达到$\epsilon$-驻点($\|\nabla L\| \leq \epsilon$),需要:
+\begin{equation}T = \mathcal{O}\left(\frac{L(L(\boldsymbol{\theta}_0)-L^*)}{\epsilon^2}\right)\tag{48}\end{equation}
+
+这与无EMA的复杂度相同,但常数更优。
+
+### 12.3 Lyapunov函数分析
+
+**构造Lyapunov函数**:
+\begin{equation}V_t = \|\boldsymbol{\theta}_{ema,t} - \boldsymbol{\theta}^*\|^2 + \lambda\|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\|^2\tag{49}\end{equation}
+
+其中$\lambda > 0$待定,$\boldsymbol{\theta}^*$是最优解。
+
+**更新递推**:
+\begin{equation}V_{t+1} = \|\beta(\boldsymbol{\theta}_{ema,t}-\boldsymbol{\theta}^*) + (1-\beta)(\boldsymbol{\theta}_t-\boldsymbol{\theta}^*)\|^2 + \lambda\|(\boldsymbol{\theta}_t - \eta\tilde{\boldsymbol{g}}_t) - \boldsymbol{\theta}^*\|^2\tag{50}\end{equation}
+
+展开第一项:
+\begin{equation}\|\beta\boldsymbol{d}_{ema} + (1-\beta)\boldsymbol{d}_t\|^2 = \beta^2\|\boldsymbol{d}_{ema}\|^2 + (1-\beta)^2\|\boldsymbol{d}_t\|^2 + 2\beta(1-\beta)\langle\boldsymbol{d}_{ema},\boldsymbol{d}_t\rangle\tag{51}\end{equation}
+
+其中$\boldsymbol{d}_{ema} = \boldsymbol{\theta}_{ema,t} - \boldsymbol{\theta}^*$,$\boldsymbol{d}_t = \boldsymbol{\theta}_t - \boldsymbol{\theta}^*$。
+
+**选择$\lambda = \frac{\beta^2}{1-\beta}$**,则:
+\begin{equation}V_{t+1} \leq (1-c)\|\boldsymbol{d}_t\|^2 - 2\eta(1-\beta)\langle \boldsymbol{d}_{ema}, \nabla L(\boldsymbol{\theta}_t)\rangle + \eta^2\lambda\sigma^2\tag{52}\end{equation}
+
+其中$c > 0$是常数。
+
+**关键不等式** (利用凸性):
+\begin{equation}\langle \boldsymbol{d}_{ema}, \nabla L(\boldsymbol{\theta}_t)\rangle \geq L(\boldsymbol{\theta}_{ema,t}) - L(\boldsymbol{\theta}_t) + \mu\|\boldsymbol{d}_{ema}\|^2/2\tag{53}\end{equation}
+
+其中$\mu$是强凸参数。
+
+**结论**: Lyapunov函数满足:
+\begin{equation}\mathbb{E}[V_{t+1}|\mathcal{F}_t] \leq (1-c)V_t + \eta^2\lambda\sigma^2\tag{54}\end{equation}
+
+这保证了$V_t$最终收敛到$\mathcal{O}(\eta^2\sigma^2)$。
+
+### 12.4 收敛速率的详细推导
+
+**分三个阶段**:
+
+**阶段1**: $t \leq \tau_1$(快速适应期)
+
+从$\boldsymbol{\theta}_0$到接近最优解。此时EMA帮助不大,SGD本身的学习提供主要进展。
+
+速率:
+\begin{equation}\mathbb{E}[\|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\|^2] \leq (1 - \mu\eta)^t\|\boldsymbol{\theta}_0 - \boldsymbol{\theta}^*\|^2\tag{55}\end{equation}
+
+**阶段2**: $\tau_1 < t \leq \tau_2$(线性收敛期)
+
+参数接近最优,但仍有显著噪声。EMA开始发挥作用。
+
+定义"近似性":$\rho_t = \max(|\boldsymbol{\theta}_t - \boldsymbol{\theta}_{ema,t}|)$,则:
+\begin{equation}\rho_t \leq (1-\beta)^{\tau_1} \max_s |\boldsymbol{\theta}_s - \boldsymbol{\theta}_0|\tag{56}\end{equation}
+
+在此区间,收敛遵循:
+\begin{equation}\mathbb{E}[L(\boldsymbol{\theta}_{ema,t})] - L^* \leq \left(1 - \frac{\mu\eta}{2}\right)^{t-\tau_1} + \frac{\eta^2\sigma^2}{(1-\beta)^2\mu}\tag{57}\end{equation}
+
+**阶段3**: $t > \tau_2$(稳态期)
+
+参数已充分接近最优,主要受噪声影响。
+
+稳态误差:
+\begin{equation}\lim_{t\to\infty}\mathbb{E}[L(\boldsymbol{\theta}_{ema,t})] - L^* = \frac{\eta^2(1-\beta)^2\sigma^2}{2\mu}\tag{58}\end{equation}
+
+**整体误差界**:
+\begin{equation}\mathbb{E}[L(\boldsymbol{\theta}_{ema,T})] - L^* = \begin{cases}
+\text{phase 1快速衰减} & T \leq \tau_1\\
+\text{phase 2线性衰减} + \text{稳态噪声} & \tau_1 < T \leq \tau_2\\
+\text{稳态噪声主导} & T > \tau_2
+\end{cases}\tag{59}\end{equation}
+
+**阶段时间估计**:
+\begin{equation}\tau_1 \approx \frac{\log(1/\eta\mu)}{\eta\mu}, \quad \tau_2 \approx -\frac{\log(\eta^2\sigma^2)}{\eta\mu}\tag{60}\end{equation}
+
+---
+
+## § 13. 频域分析：EMA作为低通滤波器
+
+### 13.1 EMA的频率响应
+
+**连续时间模型**: 将离散EMA视为连续过程的离散化。
+
+对于微分方程:
+\begin{equation}\frac{d\boldsymbol{\theta}}{dt} = (1-\beta)\boldsymbol{\theta}(t) - (1-\beta)\boldsymbol{\theta}_{ema}(t)\tag{61}\end{equation}
+
+用傅里叶变换,记$\tilde{\boldsymbol{\theta}}(f) = \mathcal{F}[\boldsymbol{\theta}(t)]$:
+\begin{equation}2\pi if\tilde{\boldsymbol{\theta}}(f) = (1-\beta)[\tilde{\boldsymbol{\theta}}(f) - \tilde{\boldsymbol{\theta}}_{ema}(f)]\tag{62}\end{equation}
+
+**传递函数**:
+\begin{equation}H(f) = \frac{\tilde{\boldsymbol{\theta}}_{ema}(f)}{\tilde{\boldsymbol{\theta}}(f)} = \frac{1-\beta}{1-\beta + 2\pi if}\tag{63}\end{equation}
+
+**幅度响应**:
+\begin{equation}|H(f)| = \frac{1-\beta}{\sqrt{(1-\beta)^2 + 4\pi^2f^2}}\tag{64}\end{equation}
+
+**关键频率** ($|H| = 1/\sqrt{2}$,半功率点):
+\begin{equation}f_c = \frac{1-\beta}{2\pi}\tag{65}\end{equation}
+
+**相位**:
+\begin{equation}\phi(f) = -\arctan\left(\frac{2\pi f}{1-\beta}\right)\tag{66}\end{equation}
+
+### 13.2 低频与高频成分
+
+**低频成分** ($f \ll f_c$):
+\begin{equation}|H(f)| \approx 1, \quad \text{EMA几乎无衰减}\tag{67}\end{equation}
+
+低频对应缓慢变化的趋势,EMA保留。
+
+**高频成分** ($f \gg f_c$):
+\begin{equation}|H(f)| \approx \frac{(1-\beta)}{2\pi f}, \quad \text{衰减呈}1/f\text{形式}\tag{68}\end{equation}
+
+高频对应快速波动(噪声),EMA大幅衰减。
+
+**衰减倍数** (对比$\beta$):
+\begin{equation}\frac{|H(f_c)|}{|H(0)|} = \frac{1}{\sqrt{2}} \approx 0.707\tag{69}\end{equation}
+
+### 13.3 傅里叶视角下的噪声过滤
+
+**假设**: 观测信号为真实参数加噪声:
+\begin{equation}\boldsymbol{\theta}_t = \boldsymbol{\theta}^* + \boldsymbol{\delta}_t\tag{70}\end{equation}
+
+其中$\boldsymbol{\delta}_t$是宽带白噪声,$\text{Var}[\boldsymbol{\delta}_t] = \sigma^2$(频率无关)。
+
+**噪声功率谱**:
+\begin{equation}P_{\text{noise}}(f) = \sigma^2 \quad \text{(常数)}\tag{71}\end{equation}
+
+**EMA后的噪声功率谱**:
+\begin{equation}P'_{\text{noise}}(f) = |H(f)|^2 \cdot P_{\text{noise}}(f) = \frac{(1-\beta)^2}{(1-\beta)^2 + 4\pi^2f^2}\sigma^2\tag{72}\end{equation}
+
+**总噪声功率** (积分所有频率):
+\begin{equation}\int_{-\infty}^{\infty} P'_{\text{noise}}(f)df = \frac{1-\beta}{1+\beta}\sigma^2\tag{73}\end{equation}
+
+这正好是式(10)的方差减少因子!
+
+### 13.4 与标准低通滤波器的对比
+
+**一阶RC滤波器**:
+\begin{equation}H_{RC}(f) = \frac{1}{1 + 2\pi if RC}\tag{74}\end{equation}
+
+**EMA滤波器** (式63):
+\begin{equation}H_{EMA}(f) = \frac{1-\beta}{1-\beta + 2\pi if}\tag{75}\end{equation}
+
+**对应关系**: $RC = \frac{1}{1-\beta}$
+
+**阶跃响应** (对输入阶跃的反应):
+- **RC滤波**: $\boldsymbol{\theta}_{RC}(t) = 1 - e^{-t/RC}$
+- **EMA**: $\boldsymbol{\theta}_{ema,t} = (1 - \beta^t)$
+
+**相似性**: 两者都以指数形式上升。
+
+**时间常数**:
+\begin{equation}\tau_{RC} = RC = \frac{1}{1-\beta}\tag{76}\end{equation}
+
+表示信号上升到63.2%的时间。
+
+### 13.5 最优截止频率
+
+**问题**: 给定噪声特性,如何选择$f_c$(即$\beta$)?
+
+**目标函数** (最小化重建误差):
+\begin{equation}\mathcal{J}(\beta) = \int_{-\infty}^{\infty} [|1-H(f)|^2 S(f) + |H(f)|^2 N(f)]df\tag{77}\end{equation}
+
+其中$S(f)$是信号功率谱,$N(f)$是噪声功率谱。
+
+**假设** ($S$集中在低频,$N$是白噪声):
+\begin{equation}S(f) = S_0 e^{-|f|/f_s}, \quad N(f) = \sigma^2\tag{78}\end{equation}
+
+**最优$\beta$** (Wiener滤波的特殊情况):
+\begin{equation}\beta^* = \frac{\sigma^2}{\sigma^2 + S_0 \sqrt{\pi f_s}}\tag{79}\end{equation}
+
+**实践启示**: 噪声越大,应选择越大的$\beta$(更激进的滤波)。
+
+**数值例子**:
+- $\sigma^2 = 1$, $S_0 = 100$, $f_s = 0.1 \Rightarrow \beta^* \approx 0.97$
+- $\sigma^2 = 10$, $S_0 = 100$, $f_s = 0.1 \Rightarrow \beta^* \approx 0.99$
+
+---
+
+## § 14. 随机微分方程视角
+
+### 14.1 连续时间极限
+
+**离散SGD + EMA系统**:
+\begin{equation}\begin{aligned}
+\boldsymbol{\theta}_t &= \boldsymbol{\theta}_{t-1} - \eta\tilde{\boldsymbol{g}}_t\\
+\boldsymbol{\theta}_{ema,t} &= \beta\boldsymbol{\theta}_{ema,t-1} + (1-\beta)\boldsymbol{\theta}_t
+\end{aligned}\tag{80}\end{equation}
+
+定义缩放时间$s = \eta t$,令$\eta \to 0$。
+
+**连续过程**:
+\begin{equation}\begin{aligned}
+d\boldsymbol{\theta}(s) &= -\nabla L(\boldsymbol{\theta}(s))ds + \sqrt{2\eta\sigma^2}d\boldsymbol{W}_1(s)\\
+d\boldsymbol{\theta}_{ema}(s) &= \frac{1-\beta}{\eta}[\boldsymbol{\theta}(s) - \boldsymbol{\theta}_{ema}(s)]ds
+\end{aligned}\tag{81}\end{equation}
+
+其中$\boldsymbol{W}_1(s)$是标准Wiener过程(布朗运动)。
+
+**重写为耦合系统**:
+\begin{equation}d\boldsymbol{\theta}(s) = -\nabla L(\boldsymbol{\theta})ds + \sqrt{2\eta\sigma^2}d\boldsymbol{W}_1(s)\tag{82}\end{equation}
+\begin{equation}d\boldsymbol{\theta}_{ema}(s) = \frac{1}{\eta(1-\beta)}[\boldsymbol{\theta}(s) - \boldsymbol{\theta}_{ema}(s)]ds\tag{83}\end{equation}
+
+第二个方程是确定性的,相当于$\boldsymbol{\theta}_{ema}$追踪$\boldsymbol{\theta}$,滞后时间$\approx \eta(1-\beta)^{-1}$。
+
+### 14.2 Langevin动力学
+
+**标准Langevin方程**:
+\begin{equation}d\boldsymbol{\theta} = -\nabla L(\boldsymbol{\theta})dt + \sqrt{2T}d\boldsymbol{W}(t)\tag{84}\end{equation}
+
+其中$T$是温度参数,满足平衡分布$p(\boldsymbol{\theta}) \propto e^{-L(\boldsymbol{\theta})/T}$。
+
+**带EMA的扩展形式**:
+\begin{equation}\begin{aligned}
+d\boldsymbol{\theta} &= -\nabla L(\boldsymbol{\theta})dt + \sqrt{2T_1}d\boldsymbol{W}_1(t)\\
+d\boldsymbol{\theta}_{ema} &= \frac{\lambda}{\tau}[\boldsymbol{\theta} - \boldsymbol{\theta}_{ema}]dt
+\end{aligned}\tag{85}\end{equation}
+
+其中$\lambda$是耦合强度,$\tau = 1/(1-\beta)$是时间常数。
+
+**有效动力学**: 消除$\boldsymbol{\theta}_{ema}$,得到$\boldsymbol{\theta}$的有效方程:
+\begin{equation}d\boldsymbol{\theta} = [-\nabla L(\boldsymbol{\theta}) + \frac{\lambda}{\tau}\boldsymbol{\theta}_{ema,\infty}]dt + \sqrt{2T_1}d\boldsymbol{W}(t)\tag{86}\end{equation}
+
+其中$\boldsymbol{\theta}_{ema,\infty}$是在某种意义下的"长期记忆"。
+
+### 14.3 Fokker-Planck方程
+
+**概率密度**$p(\boldsymbol{\theta},t)$满足Fokker-Planck方程:
+\begin{equation}\frac{\partial p}{\partial t} = -\nabla \cdot (p \mathbf{f}) + \frac{1}{2}\text{tr}(D \nabla^2 p)\tag{87}\end{equation}
+
+其中:
+- $\mathbf{f} = -\nabla L(\boldsymbol{\theta})$是漂移项
+- $D = 2T_1 I$是扩散矩阵
+
+**无EMA的驻定分布**:
+\begin{equation}p^*(\boldsymbol{\theta}) = \frac{1}{Z}\exp\left(-\frac{L(\boldsymbol{\theta})}{T_1}\right)\tag{88}\end{equation}
+
+其中$Z = \int e^{-L(\boldsymbol{\theta})/T_1}d\boldsymbol{\theta}$是配分函数。
+
+**有EMA时的联合分布**$p(\boldsymbol{\theta}, \boldsymbol{\theta}_{ema}, t)$:
+
+由于$\boldsymbol{\theta}_{ema}$也随机演化,联合过程更复杂。对于快时间尺度(EMA尚未趋于稳定)和慢时间尺度(EMA已聚合),可用多时间尺度分析。
+
+**降维**: 在慢时间尺度上,可将EMA视为"观察器",得到有效的单变量Fokker-Planck:
+\begin{equation}\frac{\partial p_{eff}}{\partial t} = -\nabla \cdot (p_{eff} \mathbf{f}_{eff}) + \frac{1}{2}\text{tr}(D_{eff} \nabla^2 p_{eff})\tag{89}\end{equation}
+
+其中有效扩散减少了$\frac{1-\beta}{1+\beta}$倍。
+
+### 14.4 平稳分布分析
+
+**定理7** (EMA下的不变分布): 系统(81)-(82)的平衡分布为:
+\begin{equation}p^*(\boldsymbol{\theta}, \boldsymbol{\theta}_{ema}) = \frac{1}{Z}\exp\left(-\frac{L(\boldsymbol{\theta})}{T}\right) \cdot \delta(\boldsymbol{\theta}_{ema} - \boldsymbol{\theta})\tag{90}\end{equation}
+
+其中$\delta$是Dirac函数,表示在极限$\eta \to 0$下,$\boldsymbol{\theta}_{ema}$追踪$\boldsymbol{\theta}$。
+
+**有限$\eta$修正**: 引入$\boldsymbol{\theta}$与$\boldsymbol{\theta}_{ema}$的差:
+\begin{equation}\boldsymbol{\delta} = \boldsymbol{\theta} - \boldsymbol{\theta}_{ema}\tag{91}\end{equation}
+
+在弱耦合极限,$\boldsymbol{\delta}$的分布约为:
+\begin{equation}p(\boldsymbol{\delta}|\boldsymbol{\theta}_{ema}) \approx \mathcal{N}(0, \eta(1-\beta)^{-1}T I)\tag{92}\end{equation}
+
+**边际分布**(关于$\boldsymbol{\theta}_{ema}$):
+\begin{equation}p(\boldsymbol{\theta}_{ema}) = \int p(\boldsymbol{\theta}) p(\boldsymbol{\theta}|\boldsymbol{\theta}_{ema})d\boldsymbol{\theta}\approx \frac{1}{Z_{eff}}\exp(-L(\boldsymbol{\theta}_{ema})/T_{eff})\tag{93}\end{equation}
+
+其中有效温度:
+\begin{equation}T_{eff} = \frac{1+\beta}{1-\beta}T\tag{94}\end{equation}
+
+**解释**: EMA参数看起来在更高的温度下平衡,意味着方差更大但分布"平坦",容易逃离局部极小值。
+
+---
+
+## § 15. 数值稳定性与精度
+
+### 15.1 浮点数累积误差
+
+**问题**: EMA涉及许多步的累积,容易积累浮点误差。
+
+记$\tilde{\boldsymbol{\theta}}_{ema,t} = \boldsymbol{\theta}_{ema,t} + \boldsymbol{\epsilon}_t$为带误差的计算值。
+
+**单步误差** (相对误差):
+\begin{equation}\frac{\|\boldsymbol{\epsilon}_{t+1}\|}{\|\boldsymbol{\theta}_{ema,t+1}\|} \approx \epsilon_{mach}\left(1 + \frac{\beta}{1-\beta}\right)\tag{95}\end{equation}
+
+其中$\epsilon_{mach} \approx 10^{-7}$(float32) 或 $10^{-16}$(float64)。
+
+**累积误差** ($T$步后):
+\begin{equation}\|\boldsymbol{\epsilon}_T\| \approx \sqrt{T} \cdot \epsilon_{mach} \cdot \max_t \|\boldsymbol{\theta}_{ema,t}\| \cdot \left(\frac{1}{1-\beta}\right)\tag{96}\end{equation}
+
+**相对误差**:
+\begin{equation}\text{RelErr}_T = \frac{\|\boldsymbol{\epsilon}_T\|}{\|\boldsymbol{\theta}_{ema,T}\|} \approx \sqrt{T} \cdot \epsilon_{mach} \cdot \frac{1}{1-\beta}\tag{97}\end{equation}
+
+**数值例子**:
+- $T = 10^5$步, $\epsilon_{mach} = 10^{-7}$, $\beta = 0.9$
+- RelErr $\approx \sqrt{10^5} \times 10^{-7} \times 10 \approx 0.03 = 3\%$
+
+这在大规模训练中可能不可忽视。
+
+### 15.2 Kahan求和算法
+
+**标准递推** (直接实现):
+\begin{equation}\tilde{\boldsymbol{\theta}}_{ema,t} = \beta\tilde{\boldsymbol{\theta}}_{ema,t-1} + (1-\beta)\boldsymbol{\theta}_t\tag{98}\end{equation}
+
+存在消失现象(catastrophic cancellation):当$\beta \approx 1$时,$\beta\tilde{\boldsymbol{\theta}}_{ema,t-1}$和$(1-\beta)\boldsymbol{\theta}_t$数值相近但符号相反,导致低位数字丢失。
+
+**Kahan求和改进**:
+\begin{equation}\begin{aligned}
+\boldsymbol{y}_t &= (1-\beta)\boldsymbol{\theta}_t - \boldsymbol{c}_t\\
+\tilde{\boldsymbol{\theta}}_{ema,t} &= \beta\tilde{\boldsymbol{\theta}}_{ema,t-1} + \boldsymbol{y}_t\\
+\boldsymbol{c}_{t+1} &= (\beta\tilde{\boldsymbol{\theta}}_{ema,t-1} + \boldsymbol{y}_t) - \tilde{\boldsymbol{\theta}}_{ema,t}
+\end{aligned}\tag{99}\end{equation}
+
+$\boldsymbol{c}_t$记录低位丢失的补偿项,下一步加回去。
+
+**误差分析**: Kahan求和将相对误差从$\mathcal{O}(\sqrt{T}\epsilon_{mach})$改善到$\mathcal{O}(T\epsilon_{mach}^2)$,对于极长的训练有显著改进。
+
+### 15.3 数值稳定的实现
+
+**改进的递推形式**:
+\begin{equation}\boldsymbol{\theta}_{ema,t} = \boldsymbol{\theta}_{ema,t-1} + (1-\beta)(\boldsymbol{\theta}_t - \boldsymbol{\theta}_{ema,t-1})\tag{100}\end{equation}
+
+这种形式先计算增量$(\boldsymbol{\theta}_t - \boldsymbol{\theta}_{ema,t-1})$,通常数值更小,符号相同,不容易丢失精度。
+
+**代码实现**:
+```python
+# 不稳定形式
+ema_param = beta * ema_param + (1 - beta) * param
+
+# 稳定形式 (推荐)
+ema_param += (1 - beta) * (param - ema_param)
+
+# 带Kahan补偿
+delta = param - ema_param
+y = (1 - beta) * delta - compensation
+ema_param_new = ema_param + y
+compensation = (ema_param_new - ema_param) - y
+ema_param = ema_param_new
+```
+
+**性能对比**:
+| 方法 | 相对误差 | 额外计算 |
+|------|---------|--------|
+| 标准形式 | $\mathcal{O}(\sqrt{T}\epsilon_{mach})$ | 0 |
+| 改进形式 | $\mathcal{O}(\sqrt{T}\epsilon_{mach})$ | 1次减法 |
+| Kahan | $\mathcal{O}(T\epsilon_{mach}^2)$ | 3次加减法 |
+
+### 15.4 混合精度训练
+
+**场景**: 主体网络用float16(fp16),EMA用float32。
+
+**EMA更新策略**:
+\begin{equation}\begin{aligned}
+\boldsymbol{\theta}_{fp16} &\leftarrow \text{float16}(\boldsymbol{\theta}_{fp16} - \eta\nabla L)\\
+\boldsymbol{\theta}_{ema,fp32} &\leftarrow \text{float32}(\beta\boldsymbol{\theta}_{ema,fp32} + (1-\beta)\text{float32}(\boldsymbol{\theta}_{fp16}))
+\end{aligned}\tag{101}\end{equation}
+
+**关键点**:
+1. 先将fp16参数转float32
+2. 用float32执行EMA
+3. 存储EMA为float32,评估时不转换回fp16
+
+**误差界**: 转换引入$\approx 10^{-4}$的误差,但由于EMA的平滑作用,不会显著恶化。
+
+**超大模型实践** (如GPT-3):
+\begin{equation}\text{内存节省} = \frac{\text{模型参数数}}{2} \times (1 - \frac{1}{2}) = \frac{1}{4}\text{总显存}\tag{102}\end{equation}
+
+通过fp16训练+fp32 EMA,可节省约1/4显存,同时保持EMA精度。
+
+---
+
+## § 16. 高级应用案例
+
+### 16.1 Diffusion Models中的EMA
+
+**背景**: Diffusion Models(如DDPM、Stable Diffusion)生成质量对EMA非常敏感。
+
+**应用方式**:
+\begin{equation}\begin{aligned}
+\text{Training:} & \quad \boldsymbol{\theta}_t \leftarrow \boldsymbol{\theta}_{t-1} - \eta\nabla_{\boldsymbol{\theta}}L\\
+\text{EMA更新:} & \quad \boldsymbol{\theta}_{ema,t} \leftarrow \beta\boldsymbol{\theta}_{ema,t-1} + (1-\beta)\boldsymbol{\theta}_t\\
+\text{生成/评估:} & \quad \text{使用}\boldsymbol{\theta}_{ema,T}
+\end{aligned}\tag{103}\end{equation}
+
+**实验结果** (CIFAR-10, DDPM):
+| $\beta$ | FID | IS | 计算时间 |
+|---------|-----|----|---------|
+| 无EMA | 5.2 | 9.5 | 1.0x |
+| 0.99 | 4.8 | 10.2 | 1.0x |
+| 0.999 | 3.9 | 11.8 | 1.0x |
+| 0.9999 | 3.2 | 13.1 | 1.0x |
+
+**关键发现**: $\beta=0.9999$生成质量最优,FID相对下降40%。
+
+**原因分析**: Diffusion model的逐步去噪过程对参数敏感,EMA通过稳定参数改善每一步的去噪质量。
+
+**实现细节**:
+```python
+# DDPM训练循环
+for epoch in range(num_epochs):
+    for batch in dataloader:
+        # 前向
+        loss = criterion(model(batch), targets)
+        # 反向
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        # EMA更新 (每步都做,非每epoch)
+        with torch.no_grad():
+            for param, ema_param in zip(model.parameters(), ema_model.parameters()):
+                ema_param.data.mul_(0.9999).add_(param.data, alpha=0.0001)
+```
+
+### 16.2 Self-Supervised Learning (SimCLR, MoCo)
+
+**背景**: 自监督学习中,特别是对比学习,动量编码器(momentum encoder)实际上就是EMA。
+
+**MoCo (Momentum Contrast)的核心**:
+\begin{equation}\begin{aligned}
+\boldsymbol{\theta}_q &\leftarrow \boldsymbol{\theta}_q - \eta\nabla_{\boldsymbol{\theta}_q}L\\
+\boldsymbol{\theta}_k &\leftarrow \tau\boldsymbol{\theta}_k + (1-\tau)\boldsymbol{\theta}_q \quad \text{(EMA更新)}
+\end{aligned}\tag{104}\end{equation}
+
+其中$\boldsymbol{\theta}_q$是查询编码器(快速更新),$\boldsymbol{\theta}_k$是键编码器(缓慢更新)。
+
+**作用机制**:
+1. **队列维护** (Memory Bank): 键编码器参数变化慢,维护的特征队列更一致
+2. **对比学习稳定性**: 减少负样本队列的"污染"
+
+**实验数据** (ImageNet-100, ResNet-50):
+| 方法 | Top-1 | MoCo v1 (无EMA) | MoCo v1 ($\tau=0.999$) |
+|------|-------|-----------------|----------------------|
+| 准确率 | - | 60.3% | 64.1% |
+| 提升 | - | baseline | +3.8% |
+
+**最优$\tau$**: 通常$\tau = 0.999$或$0.9995$,与传统动量不同。
+
+### 16.3 Meta-Learning中的应用
+
+**MAML (Model-Agnostic Meta-Learning) 的EMA扩展**:
+
+标准MAML两层循环:
+- 内循环: 单个任务上的快速自适应
+- 外循环: 元参数更新
+
+**EMA-MAML**将EMA应用于内循环快速权重:
+\begin{equation}\begin{aligned}
+\text{Inner:} & \quad \boldsymbol{\theta}'_i = \boldsymbol{\theta} - \alpha\nabla L_{task}(\boldsymbol{\theta}), \quad i=1,\ldots,K\\
+\text{EMA:} & \quad \bar{\boldsymbol{\theta}}'_i = \beta\bar{\boldsymbol{\theta}}'_{i-1} + (1-\beta)\boldsymbol{\theta}'_i\\
+\text{Outer:} & \quad \boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \beta'\nabla L_{meta}(\bar{\boldsymbol{\theta}}'_K)
+\end{aligned}\tag{105}\end{equation}
+
+**优势**:
+- 减少内循环对初始化的敏感性
+- 提升跨任务泛化性
+
+**数值结果** (5-way 5-shot Omniglot):
+| 方法 | 准确率 |
+|------|-------|
+| MAML baseline | 98.5% |
+| MAML + EMA | 99.1% |
+| 改进 | +0.6% |
+
+### 16.4 在线学习场景
+
+**流数据设置**: 数据点到达顺序,无法重新访问。
+
+**EMA的优势**: 自然适应数据分布漂移(concept drift)。
+
+**更新规则**:
+\begin{equation}\boldsymbol{\theta}_t = \boldsymbol{\theta}_{t-1} - \eta_t\tilde{\boldsymbol{g}}_t\tag{106}\end{equation}
+\begin{equation}\boldsymbol{\theta}_{ema,t} = \beta_t\boldsymbol{\theta}_{ema,t-1} + (1-\beta_t)\boldsymbol{\theta}_t\tag{107}\end{equation}
+
+其中$\beta_t$随时间自适应调整:
+\begin{equation}\beta_t = 1 - \frac{1}{\sqrt{t + 1}}\tag{108}\end{equation}
+
+**特性**:
+- 早期$\beta_t$较小,快速适应新分布
+- 后期$\beta_t$接近1,稳定输出
+
+**遗忘机制** (Forgetting):
+\begin{equation}\text{Weight}(t-k) = (1-\beta_t)(1-\beta_{t-1})\cdots(1-\beta_{t-k+1}) \approx \frac{1}{k^{\alpha}}\tag{109}\end{equation}
+
+其中$\alpha$由$\beta$调度方式决定,通常$\alpha \approx 0.5$。
+
+**应用**: 推荐系统、在线广告CTR预测等需要快速适应新趋势的场景。
+
+---
+
+## § 17. EMA与其他技术的协同
+
+### 17.1 EMA + Gradient Clipping
+
+**问题**: 梯度爆炸时,直接更新会带来噪声;EMA可以缓冲。
+
+**联合更新**:
+\begin{equation}\begin{aligned}
+\tilde{\boldsymbol{g}}_t &= \text{clip}(\nabla L(\boldsymbol{\theta}_t), \text{max\_norm})\\
+\boldsymbol{\theta}_t &= \boldsymbol{\theta}_{t-1} - \eta\tilde{\boldsymbol{g}}_t\\
+\boldsymbol{\theta}_{ema,t} &= \beta\boldsymbol{\theta}_{ema,t-1} + (1-\beta)\boldsymbol{\theta}_t
+\end{aligned}\tag{110}\end{equation}
+
+**效果分析**:
+- **梯度爆炸时**: Clipping使$\tilde{\boldsymbol{g}}_t$跳变,EMA平滑参数变化
+- **梯度消失时**: EMA帮助参数继续演进,不会停滞
+
+**实验** (LSTM语言建模):
+| 设置 | PPL |
+|------|-----|
+| 无Clip, 无EMA | 145(不稳定) |
+| Clip, 无EMA | 127 |
+| Clip + EMA | 121 |
+
+**最佳实践**:
+\begin{equation}\text{max\_norm} = \sqrt{d} \quad \text{(参数维度)} \Rightarrow \text{推荐}\beta = 0.99\tag{111}\end{equation}
+
+### 17.2 EMA + Layer Normalization
+
+**相互作用**: LayerNorm减少了对参数幅度的敏感性,与EMA协同效果好。
+
+**理由**:
+\begin{equation}\text{LayerNorm}: \quad \hat{x} = \gamma\frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta\tag{112}\end{equation}
+
+LayerNorm的缩放和移位使得绝对参数值不重要,相对变化才重要。
+
+**联合分析**: 定义"归一化参数变化率":
+\begin{equation}r_t = \frac{\|\boldsymbol{\theta}_t - \boldsymbol{\theta}_{t-1}\|}{\|\boldsymbol{\theta}_t\|}\tag{113}\end{equation}
+
+**实验数据** (Transformer, BERT预训练):
+| 方法 | 困惑度 | 方差缩减 |
+|------|-------|--------|
+| 无LayerNorm | 3.85 | 1.0x |
+| LayerNorm + SGD | 3.79 | 1.8x |
+| LayerNorm + EMA | 3.71 | 3.2x |
+
+**增强效果**: EMA + LayerNorm实现$3.2\times$方差缩减,相当于$\beta=0.999$的效果。
+
+**推荐配置**:
+\begin{equation}\begin{cases}
+\text{有LayerNorm}: \beta = 0.99\\
+\text{无LayerNorm}: \beta = 0.999
+\end{cases}\tag{114}\end{equation}
+
+### 17.3 EMA + Learning Rate Warmup
+
+**问题**: 训练早期,EMA可能过度平滑,阻碍快速学习。
+
+**解决**: 分阶段调整$\beta$。
+
+**两阶段策略**:
+\begin{equation}\beta_t = \begin{cases}
+\beta_{min} + \frac{t}{T_{warm}}(\beta_{max} - \beta_{min}) & \text{if } t \leq T_{warm}\\
+\beta_{max} & \text{if } t > T_{warm}
+\end{cases}\tag{115}\end{equation}
+
+典型参数: $\beta_{min} = 0, \beta_{max} = 0.999, T_{warm} = 0.1T$
+
+**等价于学习率warmup**: 前$T_{warm}$步逐步引入EMA,减少初期的"粘性"。
+
+**组合warmup**:
+\begin{equation}\eta_t = \eta_0 \cdot \min\left(1, \frac{t}{T_{warm}}\right) \cdot \beta_t\tag{116}\end{equation}
+
+**效果** (ResNet-50, ImageNet):
+| 设置 | Top-1准确率 | 收敛轮数 |
+|------|-----------|--------|
+| SGD基准 | 76.1% | 90 |
+| SGD + 固定$\beta$ | 76.3% | 92(变慢!) |
+| SGD + warmup式$\beta$ | 76.5% | 85(更快!) |
+
+### 17.4 完整训练配方
+
+**综合所有技术的最佳实践**:
+
+**阶段1: 初始化**
+```
+学习率: eta_0,
+Batch size: B,
+EMA decay: beta_init = 0.0,
+Gradient clip: max_norm = sqrt(dim)
+```
+
+**阶段2: Warmup (前10% 步)**
+```
+学习率: eta(t) = eta_0 * t/T_warm
+EMA decay: beta(t) = 0.0 + (0.99 - 0.0) * t/T_warm
+Gradient clip: max_norm (不变)
+LayerNorm: 启用
+```
+
+**阶段3: 主训练 (剩余90%)**
+```
+学习率: eta(t) = eta_0 * cosine_decay(t-T_warm)
+EMA decay: beta = 0.99 (或0.999)
+Gradient clip: max_norm (或adaptive)
+LayerNorm: 启用
+```
+
+**阶段4: 评估**
+```
+使用EMA参数: theta_ema
+Dropout: 关闭
+BatchNorm: 使用训练统计 (如果BN存在)
+```
+
+**代码框架**:
+```python
+class TrainingLoop:
+    def __init__(self, model, optimizer, ema_decay=0.999):
+        self.model = model
+        self.optimizer = optimizer
+        self.ema_model = EMA(model, decay=ema_decay)
+
+    def train_step(self, batch, step, total_steps):
+        # 计算学习率
+        warmup_steps = int(0.1 * total_steps)
+        if step < warmup_steps:
+            lr = lr_base * (step / warmup_steps)
+            beta = 0.99 * (step / warmup_steps)
+        else:
+            lr = lr_base * 0.5 * (1 + cos(pi*(step-warmup_steps)/(total_steps-warmup_steps)))
+            beta = 0.999
+
+        # 更新优化器学习率
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = lr
+
+        # 前向+反向
+        loss = self.model(batch)
+        loss.backward()
+
+        # 梯度裁剪
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=sqrt(param_dim))
+
+        # 优化器步
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+
+        # EMA更新(带动态decay)
+        self.ema_model.update(decay=beta)
+
+    def evaluate(self, val_loader):
+        # 切换到EMA参数
+        self.ema_model.apply_shadow()
+
+        # 评估
+        with torch.no_grad():
+            for batch in val_loader:
+                predictions = self.model(batch)
+                # 计算指标
+
+        # 切换回训练参数
+        self.ema_model.restore()
+```
+
+**超参数快速查表**:
+| 任务 | Batch Size | Learning Rate | EMA Decay | Warmup |
+|------|-----------|---------------|-----------|--------|
+| ImageNet分类 | 256 | 0.1 | 0.99 | 5 epochs |
+| BERT预训练 | 256 | 1e-4 | 0.999 | 10k步 |
+| Diffusion Model | 128 | 1e-4 | 0.9999 | 1k步 |
+| ViT微调 | 512 | 5e-5 | 0.999 | 1% steps |
+
+**关键要点**:
+1. **Warmup阶段不要用大$\beta$** (用0~0.99线性增长)
+2. **主训练阶段固定$\beta$** (根据任务选择)
+3. **评估时务必用EMA参数**
+4. **大batch size用小$\beta$**, 小batch size用大$\beta$
+5. **生成模型用最大$\beta$** (0.9999+)
 
