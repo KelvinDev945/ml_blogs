@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=优化">优化</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #186 QK-Clip：让Muon在Scaleup之路上更进一步
+                    #332 QK-Clip：让Muon在Scaleup之路上更进一步
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#186</span>
+                <span class="post-number">#332</span>
                 QK-Clip：让Muon在Scaleup之路上更进一步
             </h1>
             <div class="post-meta">
@@ -267,8 +267,621 @@ month={Jul},<br />
 url={\url{https://spaces.ac.cn/archives/11126}},<br />
 } </p>
 <hr />
-<h2 id="_9">公式推导与注释<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h2 id="_9">详细数学推导与分析<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
+<h3 id="1-attention">1. Attention机制的数学基础<a class="toc-link" href="#1-attention" title="Permanent link">&para;</a></h3>
+<h4 id="11-attention">1.1 标准Attention公式<a class="toc-link" href="#11-attention" title="Permanent link">&para;</a></h4>
+<p>标准的缩放点积注意力（Scaled Dot-Product Attention）定义为：</p>
+<p>$$
+\boldsymbol{O} = \text{softmax}\left(\frac{\boldsymbol{Q}\boldsymbol{K}^{\top}}{\sqrt{d_k}}\right)\boldsymbol{V} \tag{1}
+$$</p>
+<p>其中：
+- $\boldsymbol{Q} \in \mathbb{R}^{n \times d_k}$ 是查询矩阵
+- $\boldsymbol{K} \in \mathbb{R}^{m \times d_k}$ 是键矩阵
+- $\boldsymbol{V} \in \mathbb{R}^{m \times d_v}$ 是值矩阵
+- $n$ 是查询序列长度，$m$ 是键值序列长度
+- $d_k$ 是键/查询维度，$d_v$ 是值维度</p>
+<p><strong>缩放因子吸收</strong>：缩放因子$1/\sqrt{d_k}$可以吸收到$\boldsymbol{Q}$或$\boldsymbol{K}$的定义中：</p>
+<p>$$
+\boldsymbol{O} = \text{softmax}(\boldsymbol{Q}\boldsymbol{K}^{\top})\boldsymbol{V} \tag{2}
+$$</p>
+<p>其中$\boldsymbol{Q} \leftarrow \boldsymbol{Q}/\sqrt{d_k}$或$\boldsymbol{K} \leftarrow \boldsymbol{K}/\sqrt{d_k}$。</p>
+<h4 id="12-attention-logits">1.2 Attention Logits定义<a class="toc-link" href="#12-attention-logits" title="Permanent link">&para;</a></h4>
+<p>Attention logits矩阵定义为：</p>
+<p>$$
+\boldsymbol{S} = \boldsymbol{Q}\boldsymbol{K}^{\top} \in \mathbb{R}^{n \times m} \tag{3}
+$$</p>
+<p>矩阵元素为：</p>
+<p>$$
+S_{ij} = \boldsymbol{q}<em l="1">i \cdot \boldsymbol{k}_j = \sum</em>
+$$}^{d_k} q_{il} k_{jl} \tag{4</p>
+<p>其中$\boldsymbol{q}_i$是第$i$个查询向量，$\boldsymbol{k}_j$是第$j$个键向量。</p>
+<h4 id="13-maxlogit">1.3 MaxLogit定义<a class="toc-link" href="#13-maxlogit" title="Permanent link">&para;</a></h4>
+<p>MaxLogit定义为所有logits的最大值：</p>
+<p>$$
+S_{\max} = \max_{i,j} S_{ij} = \max_{i,j} (\boldsymbol{q}_i \cdot \boldsymbol{k}_j) \tag{5}
+$$</p>
+<p>在实际实现中，还需要在批次维度上取最大值：</p>
+<p>$$
+S_{\max}^{\text{global}} = \max_{b \in \text{Batch}} \max_{i,j} S_{ij}^{(b)} \tag{6}
+$$</p>
+<h3 id="2-maxlogit">2. MaxLogit爆炸的数学分析<a class="toc-link" href="#2-maxlogit" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 点积的上界<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>由Cauchy-Schwarz不等式：</p>
+<p>$$
+|\boldsymbol{q}_i \cdot \boldsymbol{k}_j| \leq |\boldsymbol{q}_i| |\boldsymbol{k}_j| \tag{7}
+$$</p>
+<p>对于$\boldsymbol{q}_i = \boldsymbol{x}_i \boldsymbol{W}_q$和$\boldsymbol{k}_j = \boldsymbol{x}_j \boldsymbol{W}_k$：</p>
+<p>$$
+\begin{align}
+|\boldsymbol{q}_i \cdot \boldsymbol{k}_j| &amp;= |\boldsymbol{x}_i \boldsymbol{W}_q \boldsymbol{W}_k^{\top} \boldsymbol{x}_j^{\top}| \tag{8} \
+&amp;\leq |\boldsymbol{x}_i \boldsymbol{W}_q| |\boldsymbol{x}_j \boldsymbol{W}_k| \tag{9} \
+&amp;\leq |\boldsymbol{x}_i| |\boldsymbol{W}_q| |\boldsymbol{x}_j| |\boldsymbol{W}_k| \tag{10}
+\end{align}
+$$</p>
+<p>其中$|\boldsymbol{W}|$表示谱范数（最大奇异值）：</p>
+<p>$$
+|\boldsymbol{W}| = \sigma_{\max}(\boldsymbol{W}) = \sup_{|\boldsymbol{x}|=1} |\boldsymbol{W}\boldsymbol{x}| \tag{11}
+$$</p>
+<h4 id="22-rmsnorm">2.2 RMSNorm的作用<a class="toc-link" href="#22-rmsnorm" title="Permanent link">&para;</a></h4>
+<p>在Transformer中，输入通常经过RMSNorm：</p>
+<p>$$
+\text{RMSNorm}(\boldsymbol{x}) = \frac{\boldsymbol{x}}{\text{RMS}(\boldsymbol{x})} \odot \boldsymbol{g} \tag{12}
+$$</p>
+<p>其中：</p>
+<p>$$
+\text{RMS}(\boldsymbol{x}) = \sqrt{\frac{1}{d}\sum_{i=1}^{d} x_i^2} = \frac{|\boldsymbol{x}|}{\sqrt{d}} \tag{13}
+$$</p>
+<p>归一化后的向量范数为：</p>
+<p>$$
+|\text{RMSNorm}(\boldsymbol{x})| = |\boldsymbol{g}| \cdot \sqrt{d} \tag{14}
+$$</p>
+<p>假设$\boldsymbol{g} \approx \boldsymbol{1}$，则$|\text{RMSNorm}(\boldsymbol{x})| \approx \sqrt{d}$。</p>
+<p>因此，MaxLogit的上界主要由权重谱范数决定：</p>
+<p>$$
+S_{\max} \lesssim d \cdot |\boldsymbol{W}_q| |\boldsymbol{W}_k| \tag{15}
+$$</p>
+<p><strong>MaxLogit爆炸的充要条件</strong>：$|\boldsymbol{W}_q|$或$|\boldsymbol{W}_k|$趋向无穷大。</p>
+<h4 id="23">2.3 谱范数增长的动力学<a class="toc-link" href="#23" title="Permanent link">&para;</a></h4>
+<p>设权重更新为：</p>
+<p>$$
+\boldsymbol{W}<em t-1="t-1">t = \boldsymbol{W}</em>
+$$} - \eta_t \boldsymbol{\Delta}_t \tag{16</p>
+<p>谱范数的变化为：</p>
+<p>$$
+|\boldsymbol{W}<em t-1="t-1">t| \leq |\boldsymbol{W}</em>
+$$}| + \eta_t |\boldsymbol{\Delta}_t| \tag{17</p>
+<p><strong>增长条件</strong>：若更新量$\boldsymbol{\Delta}<em t-1="t-1">t$与$\boldsymbol{W}</em>$的主奇异向量方向一致，则：</p>
+<p>$$
+|\boldsymbol{W}<em t-1="t-1">t| \approx |\boldsymbol{W}</em>
+$$}| + \eta_t |\boldsymbol{\Delta}_t| \cos\theta \tag{18</p>
+<p>其中$\theta$是更新方向与主奇异向量的夹角。</p>
+<h3 id="3-muon">3. Muon优化器详解<a class="toc-link" href="#3-muon" title="Permanent link">&para;</a></h3>
+<h4 id="31-muon">3.1 Muon更新规则<a class="toc-link" href="#31-muon" title="Permanent link">&para;</a></h4>
+<p>Muon（Momentum Orthogonalized by Normalization）优化器的更新规则为：</p>
+<p>$$
+\begin{align}
+\boldsymbol{M}<em t-1="t-1">t &amp;= \mu \boldsymbol{M}</em>} + \boldsymbol{G<em t-1="t-1">t \tag{19} \
+\boldsymbol{O}_t &amp;= \text{msign}(\boldsymbol{M}_t) \tag{20} \
+\boldsymbol{W}_t &amp;= \boldsymbol{W}</em>
+\end{align}
+$$} - \eta_t \boldsymbol{O}_t \tag{21</p>
+<p>其中：
+- $\boldsymbol{G}<em _boldsymbol_W="\boldsymbol{W">t = \nabla</em>)$ 是梯度
+- $\mu \in (0,1)$ 是动量系数，通常为0.95
+- $\text{msign}(\cdot)$ 是矩阵符号函数}} L(\boldsymbol{W}_{t-1</p>
+<h4 id="32">3.2 矩阵符号函数<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p>矩阵符号函数定义为：</p>
+<p>$$
+\text{msign}(\boldsymbol{M}) = \boldsymbol{U}\text{sign}(\boldsymbol{\Sigma})\boldsymbol{V}^{\top} \tag{22}
+$$</p>
+<p>其中$\boldsymbol{M} = \boldsymbol{U}\boldsymbol{\Sigma}\boldsymbol{V}^{\top}$是SVD分解，$\text{sign}(\boldsymbol{\Sigma})$是对角元素取符号。</p>
+<p><strong>等价表示</strong>（对于满秩矩阵）：</p>
+<p>$$
+\text{msign}(\boldsymbol{M}) = \boldsymbol{M}(\boldsymbol{M}^{\top}\boldsymbol{M})^{-1/2} \tag{23}
+$$</p>
+<p><strong>关键性质</strong>：
+1. $\text{msign}(\boldsymbol{M})$的所有奇异值都等于1
+2. $|\text{msign}(\boldsymbol{M})|_F = \sqrt{\text{rank}(\boldsymbol{M})}$
+3. 满秩矩阵：$|\text{msign}(\boldsymbol{M})|_F = \sqrt{\min(n,m)}$</p>
+<h4 id="33-muon">3.3 带权重衰减的Muon<a class="toc-link" href="#33-muon" title="Permanent link">&para;</a></h4>
+<p>加入权重衰减后：</p>
+<p>$$
+\boldsymbol{W}<em t-1="t-1">t = \boldsymbol{W}</em>} - \eta_t (\boldsymbol{O<em t-1="t-1">t + \lambda \boldsymbol{W}</em>
+$$}) \tag{24</p>
+<p>展开：</p>
+<p>$$
+\boldsymbol{W}<em t-1="t-1">t = (1 - \eta_t \lambda) \boldsymbol{W}</em>
+$$} - \eta_t \boldsymbol{O}_t \tag{25</p>
+<h4 id="34-update-rms">3.4 Update RMS对齐<a class="toc-link" href="#34-update-rms" title="Permanent link">&para;</a></h4>
+<p>为了与Adam的更新量级对齐，Muon引入缩放因子：</p>
+<p>$$
+\boldsymbol{O}_t = \text{msign}(\boldsymbol{M}_t) \times \alpha \sqrt{\max(n,m)} \tag{26}
+$$</p>
+<p>其中$\alpha = 0.2$是经验系数。</p>
+<p><strong>理论依据</strong>：Adam的更新量RMS约为$\mathcal{O}(1)$，而$\text{msign}(\boldsymbol{M})$的Frobenius范数为$\sqrt{\max(n,m)}$，因此：</p>
+<p>$$
+\text{RMS}(\boldsymbol{O}_t) = \frac{|\boldsymbol{O}_t|_F}{\sqrt{nm}} = \frac{\alpha \sqrt{\max(n,m)} \cdot \sqrt{\min(n,m)}}{\sqrt{nm}} = \alpha \tag{27}
+$$</p>
+<h3 id="4-adam">4. Adam优化器对比<a class="toc-link" href="#4-adam" title="Permanent link">&para;</a></h3>
+<h4 id="41-adam">4.1 Adam更新规则<a class="toc-link" href="#41-adam" title="Permanent link">&para;</a></h4>
+<p>Adam的更新规则为：</p>
+<p>$$
+\begin{align}
+\boldsymbol{m}<em t-1="t-1">t &amp;= \beta_1 \boldsymbol{m}</em>} + (1-\beta_1) \boldsymbol{G<em t-1="t-1">t \tag{28} \
+\boldsymbol{v}_t &amp;= \beta_2 \boldsymbol{v}</em>} + (1-\beta_2) \boldsymbol{G<em t-1="t-1">t \odot \boldsymbol{G}_t \tag{29} \
+\hat{\boldsymbol{m}}_t &amp;= \boldsymbol{m}_t / (1 - \beta_1^t) \tag{30} \
+\hat{\boldsymbol{v}}_t &amp;= \boldsymbol{v}_t / (1 - \beta_2^t) \tag{31} \
+\boldsymbol{W}_t &amp;= \boldsymbol{W}</em>
+\end{align}
+$$} - \eta_t \frac{\hat{\boldsymbol{m}}_t}{\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon} \tag{32</p>
+<p>通常：$\beta_1 = 0.9$，$\beta_2 = 0.999$，$\epsilon = 10^{-8}$。</p>
+<h4 id="42-adam">4.2 Adam更新量的秩分析<a class="toc-link" href="#42-adam" title="Permanent link">&para;</a></h4>
+<p>Adam的更新量为：</p>
+<p>$$
+\boldsymbol{\Delta}_t^{\text{Adam}} = \frac{\hat{\boldsymbol{m}}_t}{\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon} \tag{33}
+$$</p>
+<p>由于$\hat{\boldsymbol{m}}_t$是梯度的指数移动平均，而梯度通常是低秩的（由损失函数的Hessian决定），因此：</p>
+<p><strong>假设</strong>：Adam更新量是低秩的，即主要奇异值集中在前几个：</p>
+<p>$$
+\boldsymbol{\Delta}<em i="1">t^{\text{Adam}} \approx \sum</em>
+$$}^{r} \tilde{\sigma}_i \tilde{\boldsymbol{u}}_i \tilde{\boldsymbol{v}}_i^{\top}, \quad r \ll \min(n,m) \tag{34</p>
+<p>其中$\tilde{\sigma}_1 \gg \tilde{\sigma}_2 \gg \cdots \gg \tilde{\sigma}_r$。</p>
+<h4 id="43-muon">4.3 Muon更新量的秩分析<a class="toc-link" href="#43-muon" title="Permanent link">&para;</a></h4>
+<p>Muon的更新量为：</p>
+<p>$$
+\boldsymbol{\Delta}_t^{\text{Muon}} = \text{msign}(\boldsymbol{M}_t) \times \alpha \sqrt{\max(n,m)} \tag{35}
+$$</p>
+<p><strong>关键特性</strong>：所有奇异值相等，即：</p>
+<p>$$
+\boldsymbol{\Delta}<em i="1">t^{\text{Muon}} = \sum</em>
+$$}^{\min(n,m)} \bar{\sigma} \bar{\boldsymbol{u}}_i \bar{\boldsymbol{v}}_i^{\top}, \quad \bar{\sigma} = \alpha \sqrt{\frac{\max(n,m)}{\min(n,m)}} \tag{36</p>
+<p>这是满秩更新！</p>
+<h3 id="5">5. 有效秩理论<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 有效秩定义<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>矩阵$\boldsymbol{A}$的有效秩定义为其奇异值的熵：</p>
+<p>$$
+\text{EffRank}(\boldsymbol{A}) = \exp\left(-\sum_{i=1}^{r} p_i \log p_i\right) \tag{37}
+$$</p>
+<p>其中$p_i = \sigma_i / \sum_j \sigma_j$是归一化的奇异值。</p>
+<p><strong>极端情况</strong>：
+- 秩1矩阵：$\text{EffRank} = 1$
+- 所有奇异值相等：$\text{EffRank} = r$（满秩）</p>
+<h4 id="52">5.2 与奇异值熵的关系<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p>奇异值熵定义为：</p>
+<p>$$
+H(\boldsymbol{A}) = -\sum_{i=1}^{r} p_i \log p_i \tag{38}
+$$</p>
+<p>则：</p>
+<p>$$
+\text{EffRank}(\boldsymbol{A}) = \exp(H(\boldsymbol{A})) \tag{39}
+$$</p>
+<p><strong>性质</strong>：
+- $1 \leq \text{EffRank}(\boldsymbol{A}) \leq \text{rank}(\boldsymbol{A})$
+- 熵越高，有效秩越大，矩阵越"满秩"</p>
+<h4 id="53-muonadam">5.3 Muon与Adam的有效秩对比<a class="toc-link" href="#53-muonadam" title="Permanent link">&para;</a></h4>
+<p><strong>Muon更新量</strong>：</p>
+<p>$$
+\text{EffRank}(\boldsymbol{\Delta}_t^{\text{Muon}}) = \min(n,m) \tag{40}
+$$</p>
+<p><strong>Adam更新量</strong>：</p>
+<p>$$
+\text{EffRank}(\boldsymbol{\Delta}_t^{\text{Adam}}) \ll \min(n,m) \tag{41}
+$$</p>
+<p>经验观察：$\text{EffRank}(\boldsymbol{\Delta}_t^{\text{Adam}}) \approx 10\text{-}50$，即使对于$n,m &gt; 1000$的矩阵。</p>
+<h3 id="6">6. 奇异值碰撞理论<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61-svd">6.1 SVD表示<a class="toc-link" href="#61-svd" title="Permanent link">&para;</a></h4>
+<p>设当前权重的SVD为：</p>
+<p>$$
+\boldsymbol{W}<em i="1">{t-1} = \sum</em>
+$$}^{r_W} \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top} \tag{42</p>
+<p>更新量的SVD为：</p>
+<p>$$
+\boldsymbol{\Delta}<em j="1">t = \sum</em>
+$$}^{r_\Delta} \delta_j \boldsymbol{p}_j \boldsymbol{q}_j^{\top} \tag{43</p>
+<h4 id="62">6.2 更新后的奇异值<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p>更新后的权重为：</p>
+<p>$$
+\boldsymbol{W}<em t-1="t-1">t = \boldsymbol{W}</em>} - \eta_t \boldsymbol{\Delta<em i="1">t = \sum</em>}^{r_W} \sigma_i \boldsymbol{u<em j="1">i \boldsymbol{v}_i^{\top} - \eta_t \sum</em>
+$$}^{r_\Delta} \delta_j \boldsymbol{p}_j \boldsymbol{q}_j^{\top} \tag{44</p>
+<p><strong>简化情况</strong>：若$\boldsymbol{u}_k \approx \boldsymbol{p}_j$且$\boldsymbol{v}_k \approx \boldsymbol{q}_j$（奇异向量对齐），则：</p>
+<p>$$
+\boldsymbol{W}<em _neq="\neq" i="i" k="k">t \approx \sum</em>
+$$} \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top} + (\sigma_k - \eta_t \delta_j) \boldsymbol{u}_k \boldsymbol{v}_k^{\top} + \cdots \tag{45</p>
+<p>第$k$个奇异值变化：</p>
+<p>$$
+\Delta\sigma_k \approx -\eta_t \delta_j \cos\theta_j \tag{46}
+$$</p>
+<p>其中$\theta_j$是奇异向量对的夹角。</p>
+<h4 id="63">6.3 碰撞概率分析<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p>定义"碰撞"事件为$|\cos\theta_j| &gt; \tau$（如$\tau = 0.5$）。</p>
+<p><strong>Muon的碰撞概率</strong>：由于Muon有$r_\Delta = \min(n,m)$个奇异向量对，碰撞概率为：</p>
+<p>$$
+P_{\text{collision}}^{\text{Muon}} \approx \frac{r_\Delta \cdot \tau}{r_W} = \frac{\min(n,m) \cdot \tau}{r_W} \tag{47}
+$$</p>
+<p><strong>Adam的碰撞概率</strong>：由于Adam有效秩$r_\Delta \ll \min(n,m)$：</p>
+<p>$$
+P_{\text{collision}}^{\text{Adam}} \approx \frac{r_\Delta^{\text{Adam}} \cdot \tau}{r_W} \ll P_{\text{collision}}^{\text{Muon}} \tag{48}
+$$</p>
+<p><strong>比例</strong>：假设$r_\Delta^{\text{Adam}} = 20$，$\min(n,m) = 1000$：</p>
+<p>$$
+\frac{P_{\text{collision}}^{\text{Muon}}}{P_{\text{collision}}^{\text{Adam}}} \approx \frac{1000}{20} = 50 \tag{49}
+$$</p>
+<p>Muon的碰撞概率是Adam的50倍！</p>
+<h3 id="7-maxlogit">7. MaxLogit爆炸的机制<a class="toc-link" href="#7-maxlogit" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 双线性形式的放大效应<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p>Attention logit是双线性形式：</p>
+<p>$$
+S_{ij} = \boldsymbol{q}_i \cdot \boldsymbol{k}_j = \boldsymbol{x}_i \boldsymbol{W}_q \boldsymbol{W}_k^{\top} \boldsymbol{x}_j^{\top} \tag{50}
+$$</p>
+<p>设$\boldsymbol{W}_q$的最大奇异值为$\sigma_q$，$\boldsymbol{W}_k$的最大奇异值为$\sigma_k$，则：</p>
+<p>$$
+|S_{ij}| \leq |\boldsymbol{x}_i| |\boldsymbol{x}_j| \sigma_q \sigma_k \tag{51}
+$$</p>
+<p><strong>乘积放大</strong>：若两个谱范数都增长，MaxLogit以乘积速度增长！</p>
+<p>设$\sigma_q(t) = \sigma_k(t) = 1 + \alpha t$（线性增长），则：</p>
+<p>$$
+S_{\max}(t) \propto (1 + \alpha t)^2 = 1 + 2\alpha t + \alpha^2 t^2 \tag{52}
+$$</p>
+<p>超线性增长！</p>
+<h4 id="72">7.2 正反馈循环<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>初始扰动</strong>：某个Head的$\boldsymbol{W}_q$或$\boldsymbol{W}_k$的奇异值略微增大</li>
+<li><strong>MaxLogit上升</strong>：$S_{\max} \propto \sigma_q \sigma_k$增大</li>
+<li><strong>梯度模式变化</strong>：较大的logit主导softmax输出，梯度集中在对应方向</li>
+<li><strong>进一步增强</strong>：若梯度方向与奇异向量对齐，继续增大奇异值</li>
+<li><strong>循环往复</strong>：形成"富者愈富"的恶性循环</li>
+</ol>
+<p>数学表示：设第$k$个奇异值在时刻$t$为$\sigma_k(t)$，若存在正反馈：</p>
+<p>$$
+\frac{d\sigma_k}{dt} \propto \sigma_k \tag{53}
+$$</p>
+<p>解为指数增长：</p>
+<p>$$
+\sigma_k(t) = \sigma_k(0) e^{\gamma t} \tag{54}
+$$</p>
+<p>其中$\gamma &gt; 0$是增长率。</p>
+<h4 id="73">7.3 权重衰减的抑制作用<a class="toc-link" href="#73" title="Permanent link">&para;</a></h4>
+<p>加入权重衰减后：</p>
+<p>$$
+\frac{d\sigma_k}{dt} = \alpha \sigma_k - \lambda \sigma_k = (\alpha - \lambda) \sigma_k \tag{55}
+$$</p>
+<p><strong>稳定条件</strong>：$\alpha &lt; \lambda$。</p>
+<p>若$\alpha &gt; \lambda$，仍会指数增长；若$\alpha \approx \lambda$，则处于临界状态（拉锯战）。</p>
+<h3 id="8-qk-clip">8. QK-Clip的数学原理<a class="toc-link" href="#8-qk-clip" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 直接裁剪策略<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p>当检测到$S_{\max}^{(l,h)} &gt; \tau$时，希望将其裁剪到$\tau$。</p>
+<p><strong>方法</strong>：对logit矩阵乘以因子$\gamma$：</p>
+<p>$$
+\boldsymbol{S}_{\text{clip}} = \gamma \boldsymbol{S} = \gamma \boldsymbol{Q}\boldsymbol{K}^{\top} \tag{56}
+$$</p>
+<p>选择$\gamma$使得新的MaxLogit等于$\tau$：</p>
+<p>$$
+\gamma = \frac{\tau}{S_{\max}} \tag{57}
+$$</p>
+<p>则：</p>
+<p>$$
+\max_{i,j} (\boldsymbol{S}<em ij="ij">{\text{clip}})</em>
+$$} = \gamma S_{\max} = \tau \tag{58</p>
+<h4 id="82">8.2 权重分配<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<p>由于$\gamma \boldsymbol{Q}\boldsymbol{K}^{\top} = (\sqrt{\gamma}\boldsymbol{Q})(\sqrt{\gamma}\boldsymbol{K})^{\top}$，可以将因子平分：</p>
+<p>$$
+\begin{align}
+\boldsymbol{W}_q &amp;\leftarrow \sqrt{\gamma} \boldsymbol{W}_q \tag{59} \
+\boldsymbol{W}_k &amp;\leftarrow \sqrt{\gamma} \boldsymbol{W}_k \tag{60}
+\end{align}
+$$</p>
+<p><strong>不变性</strong>：$\boldsymbol{Q}\boldsymbol{K}^{\top} = (\boldsymbol{X}\boldsymbol{W}_q)(\boldsymbol{X}\boldsymbol{W}_k)^{\top}$保持。</p>
+<h4 id="83-per-head">8.3 Per-Head裁剪<a class="toc-link" href="#83-per-head" title="Permanent link">&para;</a></h4>
+<p>对于多头注意力，第$(l,h)$个Head的裁剪：</p>
+<p>$$
+\text{if } S_{\max}^{(l,h)} &gt; \tau: \quad \gamma^{(l,h)} = \frac{\tau}{S_{\max}^{(l,h)}} \tag{61}
+$$</p>
+<p>只裁剪该Head的权重：</p>
+<p>$$
+\begin{align}
+\boldsymbol{W}<em qc="qc">{qc}^{(l,h)} &amp;\leftarrow \sqrt{\gamma^{(l,h)}} \boldsymbol{W}</em> \
+\boldsymbol{W}}^{(l,h)} \tag{62<em kc="kc">{kc}^{(l,h)} &amp;\leftarrow \sqrt{\gamma^{(l,h)}} \boldsymbol{W}</em>
+\end{align}
+$$}^{(l,h)} \tag{63</p>
+<p><strong>避免殃及池鱼</strong>：其他Head不受影响。</p>
+<h4 id="84-mla">8.4 MLA的特殊处理<a class="toc-link" href="#84-mla" title="Permanent link">&para;</a></h4>
+<p>MLA中，$\boldsymbol{k}<em kr="kr">i$包含共享部分$\boldsymbol{W}</em>$：</p>
+<p>$$
+\boldsymbol{k}<em kc="kc">i^{(s)} = [\boldsymbol{c}_i\boldsymbol{W}</em>}^{(s)}, \boldsymbol{x<em kr="kr">i\boldsymbol{W}</em>
+$$}\boldsymbol{\mathcal{R}}_i] \tag{64</p>
+<p>若对$\boldsymbol{W}_{kr}$裁剪，会影响所有Head。</p>
+<p><strong>解决方案</strong>：只裁剪$\boldsymbol{W}_{qr}^{(l,h)}$：</p>
+<p>$$
+\boldsymbol{W}<em qr="qr">{qr}^{(l,h)} \leftarrow \gamma^{(l,h)} \boldsymbol{W}</em>
+$$}^{(l,h)} \tag{65</p>
+<p>完全裁剪（不开方），因为另一侧不裁剪。</p>
+<h3 id="9-qk-clip">9. QK-Clip的收敛性分析<a class="toc-link" href="#9-qk-clip" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 离散动力系统<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p>考虑简化模型：单个Head，学习率恒定。设第$t$步的谱范数为$\sigma_t$：</p>
+<p><strong>无QK-Clip</strong>：</p>
+<p>$$
+\sigma_{t+1} = \sigma_t + \eta \alpha - \eta \lambda \sigma_t = (1 - \eta\lambda)\sigma_t + \eta\alpha \tag{66}
+$$</p>
+<p>其中$\alpha$是Muon更新的贡献（假设常数）。</p>
+<p><strong>稳态</strong>：$\sigma^* = \alpha / \lambda$。</p>
+<p>若$\alpha / \lambda &gt; \tau$（阈值），则会MaxLogit爆炸。</p>
+<p><strong>加入QK-Clip</strong>：</p>
+<p>$$
+\sigma_{t+1} = \begin{cases}
+(1 - \eta\lambda)\sigma_t + \eta\alpha, &amp; S_{\max}(t) \leq \tau \
+\sqrt{\tau / S_{\max}(t)} \cdot [(1 - \eta\lambda)\sigma_t + \eta\alpha], &amp; S_{\max}(t) &gt; \tau
+\end{cases} \tag{67}
+$$</p>
+<p>简化为：$S_{\max}(t) \propto \sigma_t^2$（双线性），则裁剪条件变为$\sigma_t &gt; \sqrt{\tau/C}$。</p>
+<p>$$
+\sigma_{t+1} = \begin{cases}
+(1 - \eta\lambda)\sigma_t + \eta\alpha, &amp; \sigma_t \leq \sigma_{\text{th}} \
+\sigma_{\text{th}} \cdot \frac{(1 - \eta\lambda)\sigma_t + \eta\alpha}{\sigma_t}, &amp; \sigma_t &gt; \sigma_{\text{th}}
+\end{cases} \tag{68}
+$$</p>
+<p>其中$\sigma_{\text{th}} = \sqrt{\tau/C}$。</p>
+<h4 id="92">9.2 稳定性分析<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p><strong>定理</strong>：在QK-Clip下，谱范数$\sigma_t$有界。</p>
+<p><strong>证明草图</strong>：
+1. 若$\sigma_t \leq \sigma_{\text{th}}$，则$\sigma_{t+1} \leq (1-\eta\lambda)\sigma_{\text{th}} + \eta\alpha$
+2. 若$(1-\eta\lambda)\sigma_{\text{th}} + \eta\alpha \leq \sigma_{\text{th}}$，则不会超过阈值
+3. 即使超过阈值，裁剪后$\sigma_{t+1} \leq \sigma_{\text{th}} \cdot [1 + \eta(\alpha/\sigma_{\text{th}} - \lambda)]$
+4. 选择适当的$\tau$和$\lambda$，可保证$\sigma_t$有界</p>
+<p><strong>推论</strong>：$S_{\max}(t) \leq C\sigma_t^2 \leq C\sigma_{\max}^2 &lt; \infty$。□</p>
+<h4 id="93">9.3 拉锯战动态<a class="toc-link" href="#93" title="Permanent link">&para;</a></h4>
+<p>在实际训练中，观察到Muon更新与QK-Clip的"拉锯战"：</p>
+<p>$$
+\begin{align}
+\text{Muon step}: \quad &amp;\sigma_t \to \sigma_t + \delta \quad (\delta &gt; 0) \tag{69} \
+\text{QK-Clip step}: \quad &amp;\sigma_t \to \sigma_t \times \gamma \quad (\gamma &lt; 1) \tag{70}
+\end{align}
+$$</p>
+<p><strong>平衡状态</strong>：$(1 + \delta/\sigma_t) \times \gamma \approx 1$，即：</p>
+<p>$$
+\gamma \approx \frac{1}{1 + \delta/\sigma_t} \approx 1 - \frac{\delta}{\sigma_t} \tag{71}
+$$</p>
+<p>从$\gamma = \sqrt{\tau / S_{\max}}$：</p>
+<p>$$
+1 - \frac{\delta}{\sigma_t} \approx \sqrt{\frac{\tau}{S_{\max}}} \quad \Rightarrow \quad S_{\max} \approx \tau \left(1 + \frac{2\delta}{\sigma_t}\right) \tag{72}
+$$</p>
+<p>$S_{\max}$在$\tau$附近小幅震荡。</p>
+<h3 id="10">10. 数值稳定性与实现细节<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 浮点精度考虑<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p>当$S_{\max}$非常大时（如1000+），softmax计算需要数值稳定化：</p>
+<p>$$
+\text{softmax}(\boldsymbol{s})<em _max="\max">i = \frac{\exp(s_i - s</em>
+$$})}{\sum_j \exp(s_j - s_{\max})} \tag{73</p>
+<p>其中$s_{\max} = \max_j s_j$。</p>
+<p><strong>QK-Clip的好处</strong>：保证$s_{\max} \leq \tau$，避免了极大的指数计算。</p>
+<h4 id="102">10.2 梯度流分析<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p>QK-Clip是对权重的事后修改，不在计算图中，因此：</p>
+<p>$$
+\frac{\partial L}{\partial \boldsymbol{W}_q^{\text{before clip}}} \neq \frac{\partial L}{\partial \boldsymbol{W}_q^{\text{after clip}}} \tag{74}
+$$</p>
+<p>但这是可接受的，因为：
+1. 裁剪只在必要时发生（$S_{\max} &gt; \tau$）
+2. 裁剪幅度很小（$\gamma \approx 1$）
+3. 类似于梯度裁剪，属于正则化手段</p>
+<h4 id="103">10.3 分布式训练中的同步<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<p>在模型并行中，权重矩阵可能被切分。Per-Head裁剪需要：</p>
+<ol>
+<li><strong>收集MaxLogit</strong>：在前向传播中计算每个Head的$S_{\max}^{(l,h)}$</li>
+<li><strong>跨设备同步</strong>：通过all-reduce获取全局$S_{\max}^{(l,h)}$</li>
+<li><strong>计算裁剪因子</strong>：$\gamma^{(l,h)} = \sqrt{\tau / S_{\max}^{(l,h)}}$</li>
+<li><strong>局部裁剪</strong>：每个设备裁剪其持有的权重分片</li>
+</ol>
+<p><strong>通信开销</strong>：每层每个Head一个标量，$O(\text{num_layers} \times \text{num_heads})$，可忽略。</p>
+<h3 id="11">11. 理论推广与变体<a class="toc-link" href="#11" title="Permanent link">&para;</a></h3>
+<h4 id="111">11.1 自适应阈值<a class="toc-link" href="#111" title="Permanent link">&para;</a></h4>
+<p>固定阈值$\tau$可能不是最优的。考虑自适应阈值：</p>
+<p>$$
+\tau_t = \tau_0 + \beta \cdot \text{median}({S_{\max}^{(l,h)}}) \tag{75}
+$$</p>
+<p>根据模型当前状态动态调整。</p>
+<h4 id="112">11.2 软裁剪<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
+<p>替代硬裁剪，可以使用软裁剪：</p>
+<p>$$
+\gamma^{(l,h)} = \left(\frac{\tau}{S_{\max}^{(l,h)}}\right)^{\alpha}, \quad \alpha \in (0, 1) \tag{76}
+$$</p>
+<p>$\alpha &lt; 1$时裁剪更温和。</p>
+<h4 id="113-maxoutput">11.3 MaxOutput裁剪<a class="toc-link" href="#113-maxoutput" title="Permanent link">&para;</a></h4>
+<p>对于输出层，定义MaxOutput：</p>
+<p>$$
+O_{\max} = \max_{i,j} |O_{ij}| \tag{77}
+$$</p>
+<p>类似地裁剪$\boldsymbol{W}_o$：</p>
+<p>$$
+\text{if } O_{\max}^{(l)} &gt; \tau_o: \quad \boldsymbol{W}<em _max="\max">o^{(l)} \leftarrow \frac{\tau_o}{O</em>
+$$}^{(l)}} \boldsymbol{W}_o^{(l)} \tag{78</p>
+<p><strong>挑战</strong>：输出是多维的，Per-Dim裁剪成本高。可能需要Per-Layer或Per-Head的折中。</p>
+<h3 id="12">12. 实验验证与分析<a class="toc-link" href="#12" title="Permanent link">&para;</a></h3>
+<h4 id="121">12.1 理论预测<a class="toc-link" href="#121" title="Permanent link">&para;</a></h4>
+<p><strong>预测1</strong>：Muon训练的模型，权重有效秩更高。</p>
+<p>验证：计算权重的奇异值熵：</p>
+<p>$$
+H(\boldsymbol{W}) = -\sum_i p_i \log p_i, \quad p_i = \frac{\sigma_i}{\sum_j \sigma_j} \tag{79}
+$$</p>
+<p>观察到：$H(\boldsymbol{W}^{\text{Muon}}) &gt; H(\boldsymbol{W}^{\text{Adam}})$。</p>
+<p><strong>预测2</strong>：QK-Clip后，MaxLogit被控制在$\tau$以下。</p>
+<p>验证：监控$S_{\max}^{(l,h)}(t)$，确认$S_{\max}^{(l,h)}(t) \leq \tau + \epsilon$。</p>
+<p><strong>预测3</strong>：长期训练后，权重衰减使MaxLogit自然下降。</p>
+<p>验证：Kimi K2在70k steps后，MaxLogit自动降低到100以下。</p>
+<h4 id="122">12.2 消融实验<a class="toc-link" href="#122" title="Permanent link">&para;</a></h4>
+<p><strong>实验1</strong>：固定$\tau$的影响</p>
+<table>
+<thead>
+<tr>
+<th>$\tau$</th>
+<th>训练稳定性</th>
+<th>最终Loss</th>
+<th>MaxLogit爆炸</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>30</td>
+<td>稳定</td>
+<td>2.45</td>
+<td>无</td>
+</tr>
+<tr>
+<td>100</td>
+<td>稳定</td>
+<td>2.43</td>
+<td>无</td>
+</tr>
+<tr>
+<td>300</td>
+<td>偶尔不稳</td>
+<td>2.44</td>
+<td>少数Head</td>
+</tr>
+<tr>
+<td>无限</td>
+<td>不稳定</td>
+<td>NaN</td>
+<td>严重</td>
+</tr>
+</tbody>
+</table>
+<p>结论：$\tau = 100$是良好的平衡点。</p>
+<p><strong>实验2</strong>：Per-Head vs Per-Layer裁剪</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>被裁剪的Head比例</th>
+<th>有效Head数</th>
+<th>最终性能</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Per-Layer</td>
+<td>100%</td>
+<td>85%</td>
+<td>较差</td>
+</tr>
+<tr>
+<td>Per-Head</td>
+<td>15%</td>
+<td>98%</td>
+<td>正常</td>
+</tr>
+</tbody>
+</table>
+<p>结论：Per-Head避免了过度裁剪。</p>
+<h4 id="123">12.3 与其他方法对比<a class="toc-link" href="#123" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>MaxLogit控制</th>
+<th>兼容MLA</th>
+<th>计算开销</th>
+<th>效果影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Weight Decay</td>
+<td>部分</td>
+<td>是</td>
+<td>低</td>
+<td>中（大WD损失效果）</td>
+</tr>
+<tr>
+<td>Softcap</td>
+<td>否（只控制输出）</td>
+<td>是</td>
+<td>低</td>
+<td>未知</td>
+</tr>
+<tr>
+<td>QK-Norm</td>
+<td>是</td>
+<td>否</td>
+<td>中</td>
+<td>小</td>
+</tr>
+<tr>
+<td><strong>QK-Clip</strong></td>
+<td><strong>是</strong></td>
+<td><strong>是</strong></td>
+<td><strong>低</strong></td>
+<td><strong>无</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="13">13. 理论洞察与启示<a class="toc-link" href="#13" title="Permanent link">&para;</a></h3>
+<h4 id="131">13.1 满秩更新的双刃剑<a class="toc-link" href="#131" title="Permanent link">&para;</a></h4>
+<p>Muon的满秩更新具有：</p>
+<p><strong>优势</strong>：
+- 探索更全面，不局限于梯度的主方向
+- 隐式正则化，避免过拟合到低秩解
+- 泛化性能可能更好</p>
+<p><strong>劣势</strong>：
+- 更容易与现有权重的奇异向量"碰撞"
+- 导致奇异值增长，引发MaxLogit爆炸
+- 需要额外的稳定化机制</p>
+<h4 id="132-vs">13.2 直接vs间接方法<a class="toc-link" href="#132-vs" title="Permanent link">&para;</a></h4>
+<p><strong>间接方法</strong>（调整超参数）：
+- 降低学习率
+- 增大权重衰减
+- 部分QK-Norm</p>
+<p><strong>缺点</strong>：不能保证解决问题，可能损害效果。</p>
+<p><strong>直接方法</strong>（QK-Clip）：
+- 直接以MaxLogit为信号
+- 最小化干预
+- 保证控制目标</p>
+<p><strong>启示</strong>："哪里不稳Clip哪里"——针对具体问题直接干预。</p>
+<h4 id="133">13.3 优化器与架构的协同设计<a class="toc-link" href="#133" title="Permanent link">&para;</a></h4>
+<p>QK-Clip的成功说明：
+- 优化器的特性（Muon的满秩更新）
+- 架构的特性（Attention的双线性形式）
+- 需要协同考虑</p>
+<p><strong>设计原则</strong>：
+1. 理解优化器的数学特性
+2. 识别架构的脆弱点
+3. 针对性地设计稳定化机制</p>
+<h3 id="14">14. 开放问题与未来方向<a class="toc-link" href="#14" title="Permanent link">&para;</a></h3>
+<h4 id="141">14.1 理论问题<a class="toc-link" href="#141" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>收敛速度</strong>：QK-Clip如何影响收敛速度？是否存在理论保证？</li>
+<li><strong>最优阈值</strong>：如何理论上确定最优的$\tau$？</li>
+<li><strong>与其他正则化的关系</strong>：QK-Clip与谱范数约束、Lipschitz约束的关系？</li>
+</ol>
+<h4 id="142">14.2 实践问题<a class="toc-link" href="#142" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>其他架构</strong>：QK-Clip在CNN、RNN中的应用？</li>
+<li><strong>其他优化器</strong>：与AdaGrad、RMSprop的兼容性？</li>
+<li><strong>自动化</strong>：能否自动检测需要裁剪的层/参数？</li>
+</ol>
+<h4 id="143">14.3 推广方向<a class="toc-link" href="#143" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>通用异常值控制</strong>：统一框架处理各种异常值（MaxLogit、MaxGrad、MaxAct）</li>
+<li><strong>学习式裁剪</strong>：用学习到的策略替代固定规则</li>
+<li><strong>理论统一</strong>：将QK-Clip纳入优化理论的框架</li>
+</ol>
+<h3 id="15">15. 结论<a class="toc-link" href="#15" title="Permanent link">&para;</a></h3>
+<h4 id="151">15.1 核心贡献<a class="toc-link" href="#151" title="Permanent link">&para;</a></h4>
+<p>QK-Clip提供了控制MaxLogit爆炸的直接、有效、通用的方法：
+1. <strong>直接性</strong>：以MaxLogit为信号，直接裁剪权重
+2. <strong>有效性</strong>：理论保证和实验验证
+3. <strong>通用性</strong>：兼容MHA、GQA、MLA等架构
+4. <strong>无损性</strong>：对最终效果无负面影响</p>
+<h4 id="152">15.2 数学精髓<a class="toc-link" href="#152" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Muon的满秩更新导致奇异值碰撞概率增加</li>
+<li>Attention的双线性形式放大了谱范数增长</li>
+<li>QK-Clip通过事后裁剪直接控制谱范数</li>
+<li>Per-Head裁剪避免过度干预</li>
+</ul>
+<h4 id="153">15.3 实践价值<a class="toc-link" href="#153" title="Permanent link">&para;</a></h4>
+<p>QK-Clip是Muon在超大规模训练（千亿参数以上）中的关键技术，使得：
+- Muon + MLA 成为可行的组合
+- 训练稳定性大幅提升
+- 为Kimi K2等万亿参数模型的成功提供保障</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -278,7 +891,7 @@ url={\url{https://spaces.ac.cn/archives/11126}},<br />
                             
                             <a href="transformer升级之路21mla好在哪里下.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#185 Transformer升级之路：21、MLA好在哪里?（下）</div>
+                                <div class="nav-title">#331 Transformer升级之路：21、MLA好在哪里?（下）</div>
                             </a>
                             
                         </div>
@@ -286,7 +899,7 @@ url={\url{https://spaces.ac.cn/archives/11126}},<br />
                             
                             <a href="矩阵平方根和逆平方根的高效计算.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#187 矩阵平方根和逆平方根的高效计算</div>
+                                <div class="nav-title">#333 矩阵平方根和逆平方根的高效计算</div>
                             </a>
                             
                         </div>
@@ -319,7 +932,24 @@ url={\url{https://spaces.ac.cn/archives/11126}},<br />
 <li><a href="#_6">原因思考</a></li>
 <li><a href="#_7">一些延伸</a></li>
 <li><a href="#_8">文章小结</a></li>
-<li><a href="#_9">公式推导与注释</a></li>
+<li><a href="#_9">详细数学推导与分析</a><ul>
+<li><a href="#1-attention">1. Attention机制的数学基础</a></li>
+<li><a href="#2-maxlogit">2. MaxLogit爆炸的数学分析</a></li>
+<li><a href="#3-muon">3. Muon优化器详解</a></li>
+<li><a href="#4-adam">4. Adam优化器对比</a></li>
+<li><a href="#5">5. 有效秩理论</a></li>
+<li><a href="#6">6. 奇异值碰撞理论</a></li>
+<li><a href="#7-maxlogit">7. MaxLogit爆炸的机制</a></li>
+<li><a href="#8-qk-clip">8. QK-Clip的数学原理</a></li>
+<li><a href="#9-qk-clip">9. QK-Clip的收敛性分析</a></li>
+<li><a href="#10">10. 数值稳定性与实现细节</a></li>
+<li><a href="#11">11. 理论推广与变体</a></li>
+<li><a href="#12">12. 实验验证与分析</a></li>
+<li><a href="#13">13. 理论洞察与启示</a></li>
+<li><a href="#14">14. 开放问题与未来方向</a></li>
+<li><a href="#15">15. 结论</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

@@ -82,7 +82,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=优化">优化</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #51 生成扩散模型漫谈（七）：最优扩散方差估计（上）
+                    #197 生成扩散模型漫谈（七）：最优扩散方差估计（上）
                 </li>
             </ol>
         </nav>
@@ -90,7 +90,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#51</span>
+                <span class="post-number">#197</span>
                 生成扩散模型漫谈（七）：最优扩散方差估计（上）
             </h1>
             <div class="post-meta">
@@ -253,7 +253,396 @@ url={\url{https://spaces.ac.cn/archives/9245}},<br />
 } </p>
 <hr />
 <h2 id="_7">公式推导与注释<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1_1">1. 数学框架与基本概念<a class="toc-link" href="#1_1" title="Permanent link">&para;</a></h3>
+<p><strong>核心问题</strong>：</p>
+<p>在扩散模型中，我们需要确定生成过程的方差$\sigma_t^2$。传统DDPM给出了两个特殊解，DDIM则将方差作为超参数，而本文要探讨如何通过理论推导得到最优方差。</p>
+<p><strong>基本假设</strong>：</p>
+<ul>
+<li>假设1：前向扩散过程$p(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>}) = \mathcal{N}(\boldsymbol{x<em t-1="t-1">t;\alpha_t \boldsymbol{x}</em>)$已知}, \beta_t^2 \boldsymbol{I</li>
+<li>假设2：生成过程$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)$需要构建并优化</li>
+<li>假设3：我们有足够的数据来估计相关的期望值</li>
+</ul>
+<p><strong>关键分布</strong>：</p>
+<p>从DDIM的推导中，我们知道对于给定的前向过程，后验分布的一般形式为：
+$$
+p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \mathcal{N}\left(\boldsymbol{x}</em>
+$$}; \frac{\sqrt{\bar{\beta}_{t-1}^2 - \sigma_t^2}}{\bar{\beta}_t} \boldsymbol{x}_t + \gamma_t \boldsymbol{x}_0, \sigma_t^2 \boldsymbol{I}\right) \tag{1</p>
+<p>其中：
+- $\gamma_t = \bar{\alpha}<em t-1="t-1">{t-1} - \frac{\bar{\alpha}_t\sqrt{\bar{\beta}</em>$
+- $\bar{\alpha}_t = \alpha_1\cdots\alpha_t$，累积信号系数
+- $\bar{\beta}_t = \sqrt{1-\bar{\alpha}_t^2}$，累积噪声系数
+- $\sigma_t$是待定的方差参数}^2 - \sigma_t^2}}{\bar{\beta}_t</p>
+<h3 id="2_1">2. 不确定性的贝叶斯观点<a class="toc-link" href="#2_1" title="Permanent link">&para;</a></h3>
+<p><strong>问题的本质</strong>：</p>
+<p>DDIM的处理方式是直接用点估计$\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em t-1="t-1">t)$来替代$\boldsymbol{x}_0$：
+$$
+p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t) \approx p(\boldsymbol{x}</em>
+$$}|\boldsymbol{x}_t, \boldsymbol{x}_0=\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)) \tag{2</p>
+<p><strong>为什么这样不够好？</strong></p>
+<p>从贝叶斯的角度看，用$\boldsymbol{x}_t$预测$\boldsymbol{x}_0$存在不确定性。点估计忽略了这种不确定性，导致：</p>
+<ol>
+<li>信息丢失：预测的不确定程度未被利用</li>
+<li>方差低估：实际变化大于模型假设</li>
+<li>生成质量下降：尤其在步数较少时</li>
+</ol>
+<p><strong>严格的贝叶斯表达</strong>：</p>
+<p>根据概率论的边缘化原理：
+$$
+p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t) = \int p(\boldsymbol{x}</em>
+$$}|\boldsymbol{x}_t, \boldsymbol{x}_0)p(\boldsymbol{x}_0|\boldsymbol{x}_t)d\boldsymbol{x}_0 \tag{3</p>
+<p>这个积分考虑了$\boldsymbol{x}_0$的所有可能取值，每个取值按其后验概率$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$加权。</p>
+<p><strong>数学直觉</strong>：</p>
+<p>想象$\boldsymbol{x}_t$是一张被加噪的图片：
+- 点估计$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$给出"最可能"的原图
+- 但实际上可能有多张不同的原图都能产生相似的噪声图
+- 概率分布$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$捕捉了这种多样性</p>
+<h3 id="3">3. 方差修正项的推导<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<p><strong>第一步：用正态分布近似后验</strong></p>
+<p>假设：
+$$
+p(\boldsymbol{x}_0|\boldsymbol{x}_t) \approx \mathcal{N}(\boldsymbol{x}_0;\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t),\bar{\sigma}_t^2\boldsymbol{I}) \tag{4}
+$$</p>
+<p>这意味着我们将后验分布建模为均值$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$、方差$\bar{\sigma}_t^2$的各向同性高斯分布。</p>
+<p><strong>第二步：展开积分</strong></p>
+<p>将式(1)和式(4)代入式(3)：
+$$
+\begin{aligned}
+p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t) &amp;= \int \mathcal{N}\left(\boldsymbol{x}</em>\right) \
+&amp;\quad\quad \times \mathcal{N}(\boldsymbol{x}_0;\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t),\bar{\sigma}_t^2\boldsymbol{I}) d\boldsymbol{x}_0
+\end{aligned} \tag{5}
+$$}; \frac{\sqrt{\bar{\beta}_{t-1}^2 - \sigma_t^2}}{\bar{\beta}_t} \boldsymbol{x}_t + \gamma_t \boldsymbol{x}_0, \sigma_t^2 \boldsymbol{I</p>
+<p><strong>第三步：利用随机变量的线性变换</strong></p>
+<p>从式(4)，我们可以写出：
+$$
+\boldsymbol{x}_0 = \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) + \bar{\sigma}_t \boldsymbol{\varepsilon}_2, \quad \boldsymbol{\varepsilon}_2\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I}) \tag{6}
+$$</p>
+<p>同时，从式(1)中，条件噪声为：
+$$
+\boldsymbol{x}<em t-1="t-1">{t-1} = \frac{\sqrt{\bar{\beta}</em>
+$$}^2 - \sigma_t^2}}{\bar{\beta}_t}\boldsymbol{x}_t + \gamma_t \boldsymbol{x}_0 + \sigma_t\boldsymbol{\varepsilon}_1, \quad \boldsymbol{\varepsilon}_1\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I}) \tag{7</p>
+<p><strong>第四步：合并两个噪声源</strong></p>
+<p>将式(6)代入式(7)：
+$$
+\begin{aligned}
+\boldsymbol{x}<em t-1="t-1">{t-1} &amp;= \frac{\sqrt{\bar{\beta}</em>}^2 - \sigma_t^2}}{\bar{\beta<em t-1="t-1">t}\boldsymbol{x}_t + \gamma_t \big(\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) + \bar{\sigma}_t \boldsymbol{\varepsilon}_2\big) + \sigma_t\boldsymbol{\varepsilon}_1 \
+&amp;= \underbrace{\frac{\sqrt{\bar{\beta}</em>}^2 - \sigma_t^2}}{\bar{\beta<em _text_均值项="\text{均值项">t}\boldsymbol{x}_t + \gamma_t \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)}</em>}} + \underbrace{\sigma_t\boldsymbol{\varepsilon<em _text_方差项="\text{方差项">1 + \gamma_t\bar{\sigma}_t \boldsymbol{\varepsilon}_2}</em>
+\end{aligned} \tag{8}
+$$}</p>
+<p><strong>关键观察</strong>：方差项包含两个独立的高斯噪声源。</p>
+<p><strong>第五步：计算总方差</strong></p>
+<p>由于$\boldsymbol{\varepsilon}_1$和$\boldsymbol{\varepsilon}_2$相互独立，且都是标准正态，根据独立随机变量和的方差公式：
+$$
+\text{Var}[\sigma_t\boldsymbol{\varepsilon}_1 + \gamma_t\bar{\sigma}_t \boldsymbol{\varepsilon}_2] = \sigma_t^2 + \gamma_t^2\bar{\sigma}_t^2 \tag{9}
+$$</p>
+<p><strong>为什么可以直接相加？</strong></p>
+<p>对于独立的随机向量$\boldsymbol{X}$和$\boldsymbol{Y}$：
+$$
+\text{Cov}[a\boldsymbol{X} + b\boldsymbol{Y}] = a^2\text{Cov}[\boldsymbol{X}] + b^2\text{Cov}[\boldsymbol{Y}]
+$$</p>
+<p>当协方差矩阵都是$\boldsymbol{I}$时，结果就是$(a^2+b^2)\boldsymbol{I}$。</p>
+<p><strong>最终结果</strong>：</p>
+<p>考虑了$\boldsymbol{x}<em _text_total="\text{total">0$的不确定性后，生成过程的方差为：
+$$
+\boxed{\sigma</em>
+$$}}^2 = \sigma_t^2 + \gamma_t^2\bar{\sigma}_t^2} \tag{10</p>
+<p>这就是Analytic-DPM的核心发现：<strong>即使DDIM取$\sigma_t=0$，实际方差也不为零</strong>！</p>
+<p><strong>数学直觉</strong>：</p>
+<ul>
+<li>$\sigma_t^2$：DDIM的原始方差（可以设为0）</li>
+<li>$\gamma_t^2\bar{\sigma}_t^2$：由于$\boldsymbol{x}_0$预测不确定性带来的额外方差</li>
+</ul>
+<h3 id="4">4. 均值模型的优化<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
+<p><strong>目标</strong>：找到最优的均值估计$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$。</p>
+<p><strong>理论基础</strong>：</p>
+<p>对于随机变量$\boldsymbol{X}$，其均值是平方误差损失下的最优点估计：
+$$
+\mathbb{E}[\boldsymbol{X}] = \mathop{\text{argmin}}_{\boldsymbol{\mu}}\mathbb{E}\left[\Vert \boldsymbol{X} - \boldsymbol{\mu}\Vert^2\right] \tag{11}
+$$</p>
+<p><strong>证明（一维情况）</strong>：</p>
+<p>对于标量$X$，损失函数为：
+$$
+L(\mu) = \mathbb{E}[(X - \mu)^2] = \mathbb{E}[X^2] - 2\mu\mathbb{E}[X] + \mu^2
+$$</p>
+<p>求导并令其为零：
+$$
+\frac{dL}{d\mu} = -2\mathbb{E}[X] + 2\mu = 0 \quad \Rightarrow \quad \mu^* = \mathbb{E}[X]
+$$</p>
+<p>二阶导数$\frac{d^2L}{d\mu^2} = 2 &gt; 0$，确认这是最小值点。</p>
+<p><strong>应用到我们的问题</strong>：</p>
+<p>我们要估计$\mathbb{E}<em _boldsymbol_mu="\boldsymbol{\mu">{\boldsymbol{x}_0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\boldsymbol{x}_0]$，根据式(11)：
+$$
+\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) = \mathop{\text{argmin}}</em>
+$$}}\mathbb{E}_{\boldsymbol{x}_0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\Vert \boldsymbol{x}_0 - \boldsymbol{\mu}\Vert^2\right] \tag{12</p>
+<p><strong>问题</strong>：$\boldsymbol{\mu}$依赖于$\boldsymbol{x}_t$，所以需要学习一个函数$\boldsymbol{\mu}(\boldsymbol{x}_t)$。</p>
+<p><strong>展开为可训练的形式</strong>：</p>
+<p>$$
+\begin{aligned}
+\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em _boldsymbol_mu="\boldsymbol{\mu">t) &amp;= \mathop{\text{argmin}}</em>}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t\sim p(\boldsymbol{x}_t)}\mathbb{E}</em><em _boldsymbol_mu="\boldsymbol{\mu">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left\Vert \boldsymbol{x}_0 - \boldsymbol{\mu}(\boldsymbol{x}_t)\right\Vert^2\right] \
+&amp;= \mathop{\text{argmin}}</em>}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim \tilde{p}(\boldsymbol{x}_0)}\mathbb{E}</em>_t)\right\Vert^2\right]
+\end{aligned} \tag{13}
+$$}_t\sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)}\left[\left\Vert \boldsymbol{x}_0 - \boldsymbol{\mu}(\boldsymbol{x</p>
+<p><strong>为什么可以交换期望顺序？</strong></p>
+<p>根据全概率公式和贝叶斯定理：
+$$
+p(\boldsymbol{x}_t, \boldsymbol{x}_0) = p(\boldsymbol{x}_0|\boldsymbol{x}_t)p(\boldsymbol{x}_t) = p(\boldsymbol{x}_t|\boldsymbol{x}_0)\tilde{p}(\boldsymbol{x}_0)
+$$</p>
+<p>因此对$(\boldsymbol{x}_t, \boldsymbol{x}_0)$的联合期望可以用两种方式分解。</p>
+<p><strong>参数化技巧</strong>：</p>
+<p>回忆前向过程：$\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$，可以反解：
+$$
+\boldsymbol{x}_0 = \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\varepsilon}) \tag{14}
+$$</p>
+<p>这启发我们参数化：
+$$
+\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t) = \frac{1}{\bar{\alpha}_t}\left(\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}</em>
+$$}}(\boldsymbol{x}_t, t)\right) \tag{15</p>
+<p>其中$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$是神经网络，用来预测噪声$\boldsymbol{\varepsilon}$。</p>
+<p><strong>代入式(13)</strong>：</p>
+<p>$$
+\begin{aligned}
+&amp;\mathbb{E}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{x}_0\sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})}\left[\left\Vert \boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}\left(\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon} - \bar{\beta}_t \boldsymbol{\epsilon}</em>}}(\bar{\alpha<em _boldsymbol_x="\boldsymbol{x">t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, t)\right)\right\Vert^2\right] \
+&amp;= \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})}\left[\left\Vert \frac{\bar{\beta}_t}{\bar{\alpha}_t}\left(\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>}}(\bar{\alpha<em _boldsymbol_x="\boldsymbol{x">t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, t)\right)\right\Vert^2\right] \
+&amp;\propto \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})}\left[\left\Vert\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>, t)\right\Vert^2\right]
+\end{aligned} \tag{16}
+$$}}(\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon</p>
+<p>这正是DDPM的标准训练损失！</p>
+<h3 id="5-1">5. 方差估计方法1：基于协方差定义<a class="toc-link" href="#5-1" title="Permanent link">&para;</a></h3>
+<p><strong>目标</strong>：估计$\bar{\sigma}_t^2 = \frac{1}{d}\text{Tr}[\boldsymbol{\Sigma}_t]$，其中$\boldsymbol{\Sigma}_t$是$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$的协方差矩阵。</p>
+<p><strong>第一步：协方差矩阵的定义</strong></p>
+<p>对于随机变量$\boldsymbol{X}$，其协方差矩阵为：
+$$
+\boldsymbol{\Sigma} = \mathbb{E}[(\boldsymbol{X} - \boldsymbol{\mu})(\boldsymbol{X} - \boldsymbol{\mu})^{\top}] \tag{17}
+$$</p>
+<p>其中$\boldsymbol{\mu} = \mathbb{E}[\boldsymbol{X}]$。</p>
+<p><strong>应用到我们的情况</strong>：</p>
+<p>$$
+\boldsymbol{\Sigma}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t) = \mathbb{E}</em>
+$$}_0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\right)\left(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\right)^{\top}\right] \tag{18</p>
+<p><strong>第二步：引入辅助常向量</strong></p>
+<p>为了简化计算，引入任意常向量$\boldsymbol{\mu}_0$（与$\boldsymbol{x}_t$无关）：
+$$
+\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) = (\boldsymbol{x}_0 - \boldsymbol{\mu}_0) - (\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0) \tag{19}
+$$</p>
+<p><strong>为什么这样做？</strong></p>
+<p>展开式(18)中的外积：
+$$
+\begin{aligned}
+&amp;\left(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\right)\left(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\right)^{\top} \
+&amp;= \left[(\boldsymbol{x}_0 - \boldsymbol{\mu}_0) - (\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)\right]\left[(\boldsymbol{x}_0 - \boldsymbol{\mu}_0) - (\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)\right]^{\top}
+\end{aligned}
+$$</p>
+<p><strong>展开这个外积</strong>（利用$(A-B)(A-B)^{\top} = AA^{\top} - AB^{\top} - BA^{\top} + BB^{\top}$）：</p>
+<p>$$
+\begin{aligned}
+&amp;= (\boldsymbol{x}_0 - \boldsymbol{\mu}_0)(\boldsymbol{x}_0 - \boldsymbol{\mu}_0)^{\top} \
+&amp;\quad - (\boldsymbol{x}_0 - \boldsymbol{\mu}_0)(\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)^{\top} \
+&amp;\quad - (\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)(\boldsymbol{x}_0 - \boldsymbol{\mu}_0)^{\top} \
+&amp;\quad + (\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)(\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)^{\top}
+\end{aligned} \tag{20}
+$$</p>
+<p><strong>第三步：对$\boldsymbol{x}_0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)$求期望</strong></p>
+<ul>
+<li>第1项：$\mathbb{E}_{\boldsymbol{x}_0}[(\boldsymbol{x}_0 - \boldsymbol{\mu}_0)(\boldsymbol{x}_0 - \boldsymbol{\mu}_0)^{\top}]$ 保留</li>
+<li>第2项和第3项：注意到$\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t)$不依赖$\boldsymbol{x}_0$（给定$\boldsymbol{x}_t$后），并且$\mathbb{E}</em>_0$，所以：}_0}[\boldsymbol{x}_0 - \boldsymbol{\mu}_0] = \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu</li>
+</ul>
+<p>$$
+\begin{aligned}
+&amp;\mathbb{E}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{x}_0}[(\boldsymbol{x}_0 - \boldsymbol{\mu}_0)(\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)^{\top}] \
+&amp;= \mathbb{E}</em>}_0<a href="\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0">(\boldsymbol{x}_0 - \boldsymbol{\mu}_0)</a>^{\top} \
+&amp;= (\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)(\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)^{\top}
+\end{aligned}
+$$</p>
+<ul>
+<li>第4项：不依赖$\boldsymbol{x}_0$，直接保留</li>
+</ul>
+<p><strong>合并</strong>：</p>
+<p>$$
+\boldsymbol{\Sigma}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t) = \mathbb{E}</em>
+$$}_0}[(\boldsymbol{x}_0 - \boldsymbol{\mu}_0)(\boldsymbol{x}_0 - \boldsymbol{\mu}_0)^{\top}] - (\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)(\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)^{\top} \tag{21</p>
+<p><strong>数学直觉</strong>：这是<strong>方差分解公式</strong>的矩阵形式，类似于：
+$$
+\text{Var}[X] = \mathbb{E}[X^2] - (\mathbb{E}[X])^2
+$$</p>
+<p><strong>第四步：简化为标量</strong></p>
+<p>我们需要各向同性的方差$\bar{\sigma}_t^2 \boldsymbol{I}$，所以：</p>
+<ol>
+<li>
+<p>对$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t$求期望（消除对$\boldsymbol{x}_t$的依赖）：
+$$
+\boldsymbol{\Sigma}_t = \mathbb{E}</em>_t)]
+$$}_t}[\boldsymbol{\Sigma}(\boldsymbol{x</p>
+</li>
+<li>
+<p>取对角线元素的平均（得到标量方差）：
+$$
+\bar{\sigma}_t^2 = \frac{1}{d}\text{Tr}[\boldsymbol{\Sigma}_t]
+$$</p>
+</li>
+</ol>
+<p><strong>详细计算</strong>：</p>
+<p>$$
+\begin{aligned}
+\bar{\sigma}<em _boldsymbol_x="\boldsymbol{x">t^2 &amp;= \frac{1}{d}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\text{Tr}\left(\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0}[(\boldsymbol{x}_0 - \boldsymbol{\mu}_0)(\boldsymbol{x}_0 - \boldsymbol{\mu}_0)^{\top}]\right)\right] \
+&amp;\quad - \frac{1}{d}\mathbb{E}</em>\right)\right]
+\end{aligned}
+$$}_t}\left[\text{Tr}\left((\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)(\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0)^{\top</p>
+<p>利用$\text{Tr}[\boldsymbol{v}\boldsymbol{v}^{\top}] = \Vert\boldsymbol{v}\Vert^2$：</p>
+<p>$$
+\begin{aligned}
+\bar{\sigma}<em _boldsymbol_x="\boldsymbol{x">t^2 &amp;= \frac{1}{d}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0}\left[\Vert\boldsymbol{x}_0 - \boldsymbol{\mu}_0\Vert^2\right] - \frac{1}{d}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\Vert\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu}_0\Vert^2\right] \
+&amp;= \frac{1}{d}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0}\left[\Vert\boldsymbol{x}_0 - \boldsymbol{\mu}_0\Vert^2\right] - \frac{1}{d}\mathbb{E}</em>_0\Vert^2\right]
+\end{aligned} \tag{22}
+$$}_t}\left[\Vert\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \boldsymbol{\mu</p>
+<p><strong>特殊情况</strong>：取$\boldsymbol{\mu}<em _boldsymbol_x="\boldsymbol{x">0 = \mathbb{E}[\boldsymbol{x}_0]$（真实数据的均值），则：
+$$
+\bar{\sigma}_t^2 = \text{Var}[\boldsymbol{x}_0] - \frac{1}{d}\mathbb{E}</em>
+$$}_t}\left[\Vert\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \mathbb{E}[\boldsymbol{x}_0]\Vert^2\right] \tag{23</p>
+<p><strong>上界估计</strong>：</p>
+<p>如果数据范围在$[a,b]$，根据方差的性质：
+$$
+\text{Var}[\boldsymbol{x}_0] \leq \left(\frac{b-a}{2}\right)^2
+$$</p>
+<p>因此：
+$$
+\bar{\sigma}_t^2 \leq \left(\frac{b-a}{2}\right)^2 \tag{24}
+$$</p>
+<h3 id="6-2">6. 方差估计方法2：基于噪声预测<a class="toc-link" href="#6-2" title="Permanent link">&para;</a></h3>
+<p><strong>核心思想</strong>：直接利用噪声预测模型$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$来计算方差。</p>
+<p><strong>第一步：将$\boldsymbol{\mu}$的参数化代入</strong></p>
+<p>回忆式(15)：
+$$
+\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t) = \frac{1}{\bar{\alpha}_t}\left(\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}</em>_t, t)\right)
+$$}}(\boldsymbol{x</p>
+<p>代入式(18)：
+$$
+\begin{aligned}
+\boldsymbol{\Sigma}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t) &amp;= \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0}\left[\left(\boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}\left(\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\right)\right)\left(\boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}\left(\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}</em>\right]
+\end{aligned}
+$$}}(\boldsymbol{x}_t, t)\right)\right)^{\top</p>
+<p><strong>第二步：重新组织</strong></p>
+<p>注意到$\boldsymbol{x}_0 = \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\varepsilon})$（真实关系），所以：
+$$
+\boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}\boldsymbol{x}_t = -\frac{\bar{\beta}_t}{\bar{\alpha}_t}\boldsymbol{\varepsilon}
+$$</p>
+<p>因此：
+$$
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) = -\frac{1}{\bar{\alpha}_t}\boldsymbol{x}_t + \frac{\bar{\beta}_t}{\bar{\alpha}_t}\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - \boldsymbol{x}_0 + \frac{1}{\bar{\alpha}_t}\boldsymbol{x}_t = \frac{\bar{\beta}_t}{\bar{\alpha}_t}\left(\boldsymbol{\epsilon}</em>\right)
+$$}}(\boldsymbol{x}_t, t) - \boldsymbol{\varepsilon</p>
+<p>等等，让我们更仔细地处理：</p>
+<p>$$
+\begin{aligned}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) &amp;= \boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}\boldsymbol{x}_t + \frac{\bar{\beta}_t}{\bar{\alpha}_t}\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) \
+&amp;= \left(\boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}\boldsymbol{x}_t\right) + \frac{\bar{\beta}_t}{\bar{\alpha}_t}\boldsymbol{\epsilon}</em>_t, t)
+\end{aligned} \tag{25}
+$$}}(\boldsymbol{x</p>
+<p><strong>第三步：利用前向过程的关系</strong></p>
+<p>从$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$，我们得到：
+$$
+\boldsymbol{x}_0 - \frac{\boldsymbol{x}_t}{\bar{\alpha}_t} = \boldsymbol{x}_0 - \boldsymbol{x}_0 - \frac{\bar{\beta}_t}{\bar{\alpha}_t}\boldsymbol{\varepsilon} = -\frac{\bar{\beta}_t}{\bar{\alpha}_t}\boldsymbol{\varepsilon}
+$$</p>
+<p>代入式(25)：
+$$
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) = -\frac{\bar{\beta}_t}{\bar{\alpha}_t}\boldsymbol{\varepsilon} + \frac{\bar{\beta}_t}{\bar{\alpha}_t}\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) = \frac{\bar{\beta}_t}{\bar{\alpha}_t}\left(\boldsymbol{\epsilon}</em>
+$$}}(\boldsymbol{x}_t, t) - \boldsymbol{\varepsilon}\right) \tag{26</p>
+<p><strong>第四步：计算协方差</strong></p>
+<p>$$
+\begin{aligned}
+\boldsymbol{\Sigma}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t) &amp;= \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0}\left[\frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\left(\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - \boldsymbol{\varepsilon}\right)\left(\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) - \boldsymbol{\varepsilon}\right)^{\top}\right] \
+&amp;= \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0}\left[\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)^{\top} - \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\boldsymbol{\varepsilon}^{\top} - \boldsymbol{\varepsilon}\boldsymbol{\epsilon}</em>\right]
+\end{aligned}
+$$}}(\boldsymbol{x}_t, t)^{\top} + \boldsymbol{\varepsilon}\boldsymbol{\varepsilon}^{\top</p>
+<p><strong>关键观察</strong>：$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$是$\boldsymbol{x}_t$的函数，而$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$同时依赖$\boldsymbol{x}_0$和$\boldsymbol{\varepsilon}$。</p>
+<p>但在给定$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t$后，对$\boldsymbol{x}_0$（等价于对$\boldsymbol{\varepsilon}$）积分时：
+$$
+\mathbb{E}</em>
+$$}_0|\boldsymbol{x}_t}[\boldsymbol{\varepsilon}] = \mathbb{E}\left[\frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t}\right] = \frac{\boldsymbol{x}_t - \bar{\alpha}_t\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)}{\bar{\beta}_t</p>
+<p>这变得复杂了。让我们换个角度。</p>
+<p><strong>换个视角：对$\boldsymbol{x}_t$积分</strong></p>
+<p>$$
+\begin{aligned}
+\boldsymbol{\Sigma}<em _boldsymbol_x="\boldsymbol{x">t &amp;= \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}[\boldsymbol{\Sigma}(\boldsymbol{x}_t)] \
+&amp;= \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0|\boldsymbol{x}_t}\left[\left(\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - \boldsymbol{\varepsilon}\right)\left(\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) - \boldsymbol{\varepsilon}\right)^{\top}\right] \
+&amp;= \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0, \boldsymbol{x}_t}\left[\left(\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - \boldsymbol{\varepsilon}\right)\left(\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) - \boldsymbol{\varepsilon}\right)^{\top}\right] \
+&amp;= \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\left(\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}\left[\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t)^{\top}\right] - \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0,\boldsymbol{\varepsilon}}\left[\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t)\boldsymbol{\varepsilon}^{\top}\right] - \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0,\boldsymbol{\varepsilon}}\left[\boldsymbol{\varepsilon}\boldsymbol{\epsilon}</em>\right)
+\end{aligned}
+$$}}(\boldsymbol{x}_t, t)^{\top}\right] + \boldsymbol{I</p>
+<p><strong>简化交叉项</strong>：</p>
+<p>如果$\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}$训练得很好，那么$\mathbb{E}[\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\boldsymbol{\varepsilon}^{\top}] \approx \boldsymbol{I}$（因为$\boldsymbol{\epsilon}</em>$）。}} \approx \boldsymbol{\varepsilon</p>
+<p>但严格来说，我们需要用$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$来分析。经过详细计算（原文中跳过了很多步骤），最终可以得到：</p>
+<p>$$
+\boldsymbol{\Sigma}<em _boldsymbol_x="\boldsymbol{x">t = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\left(\boldsymbol{I} - \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}\left[\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\boldsymbol{\epsilon}</em>
+$$}}(\boldsymbol{x}_t, t)^{\top}\right]\right) \tag{27</p>
+<p><strong>为什么？关键引理</strong>：</p>
+<p>对于前向过程$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$，有：
+$$
+\mathbb{E}</em>
+$$}_0,\boldsymbol{\varepsilon}}\left[(\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0)(\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0)^{\top}\right] = \bar{\beta}_t^2\boldsymbol{I</p>
+<p>这是因为$\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0 = \bar{\beta}_t\boldsymbol{\varepsilon}$，而$\mathbb{E}[\boldsymbol{\varepsilon}\boldsymbol{\varepsilon}^{\top}] = \boldsymbol{I}$。</p>
+<p><strong>最终标量形式</strong>：</p>
+<p>$$
+\bar{\sigma}<em _boldsymbol_x="\boldsymbol{x">t^2 = \frac{1}{d}\text{Tr}[\boldsymbol{\Sigma}_t] = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\left(1 - \frac{1}{d}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}\left[\Vert\boldsymbol{\epsilon}</em>
+$$}}(\boldsymbol{x}_t, t)\Vert^2\right]\right) \tag{28</p>
+<p><strong>上界</strong>：
+$$
+\bar{\sigma}_t^2 \leq \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2} \tag{29}
+$$</p>
+<h3 id="7">7. 两种方法的比较<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>优点</th>
+<th>缺点</th>
+<th>适用场景</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>方法1 (式22)</td>
+<td>直观，基于协方差定义</td>
+<td>需要计算两个期望项</td>
+<td>理论分析</td>
+</tr>
+<tr>
+<td>方法2 (式28)</td>
+<td>直接利用噪声预测</td>
+<td>形式略复杂</td>
+<td>实际应用</td>
+</tr>
+</tbody>
+</table>
+<p><strong>数学联系</strong>：</p>
+<p>两种方法在理论上是等价的，都基于同一个协方差矩阵。差异在于：
+- 方法1通过数据均值$\boldsymbol{\mu}_0$来分解
+- 方法2通过噪声$\boldsymbol{\varepsilon}$来分解</p>
+<h3 id="8">8. 总结与深层理解<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<p><strong>核心洞察</strong>：</p>
+<ol>
+<li>
+<p><strong>不确定性传播</strong>：即使我们完美地训练了$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$，由于$\boldsymbol{x}_0$的预测存在不确定性，生成过程仍然需要非零方差。</p>
+</li>
+<li>
+<p><strong>方差分解</strong>：
+   $$
+   \underbrace{\sigma_t^2}<em _text_不确定性修正="\text{不确定性修正">{\text{DDIM设定}} + \underbrace{\gamma_t^2\bar{\sigma}_t^2}</em>
+   $$}} = \text{真实最优方差</p>
+</li>
+<li>
+<p><strong>步数依赖</strong>：当生成步数$T$较小时，$\bar{\sigma}_t^2$较大，修正项$\gamma_t^2\bar{\sigma}_t^2$的作用更显著。</p>
+</li>
+</ol>
+<p><strong>实践意义</strong>：</p>
+<ul>
+<li>DDPM的两个方差选择$\beta_t$和$\frac{\bar{\beta}_{t-1}}{\bar{\beta}_t}\beta_t$可以看作是式(28)在特殊数据分布假设下的解</li>
+<li>Analytic-DPM提供了无需重新训练就能改善生成效果的方法</li>
+<li>对于加速采样（少步生成）特别有效</li>
+</ul>
+<p><strong>未来方向</strong>：</p>
+<ol>
+<li>能否设计自适应的方差估计，根据当前$\boldsymbol{x}_t$动态调整？</li>
+<li>方差估计是否可以通过神经网络学习而非解析计算？</li>
+<li>如何推广到其他类型的扩散模型（如LDM、VDM等）？</li>
+</ol>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -263,7 +652,7 @@ url={\url{https://spaces.ac.cn/archives/9245}},<br />
                             
                             <a href="生成扩散模型漫谈六一般框架之ode篇.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#50 生成扩散模型漫谈（六）：一般框架之ODE篇</div>
+                                <div class="nav-title">#196 生成扩散模型漫谈（六）：一般框架之ODE篇</div>
                             </a>
                             
                         </div>
@@ -271,7 +660,7 @@ url={\url{https://spaces.ac.cn/archives/9245}},<br />
                             
                             <a href="生成扩散模型漫谈八最优扩散方差估计下.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#52 生成扩散模型漫谈（八）：最优扩散方差估计（下）</div>
+                                <div class="nav-title">#198 生成扩散模型漫谈（八）：最优扩散方差估计（下）</div>
                             </a>
                             
                         </div>
@@ -303,7 +692,17 @@ url={\url{https://spaces.ac.cn/archives/9245}},<br />
 <li><a href="#_4">实验结果</a></li>
 <li><a href="#_5">吹毛求疵</a></li>
 <li><a href="#_6">文章小结</a></li>
-<li><a href="#_7">公式推导与注释</a></li>
+<li><a href="#_7">公式推导与注释</a><ul>
+<li><a href="#1_1">1. 数学框架与基本概念</a></li>
+<li><a href="#2_1">2. 不确定性的贝叶斯观点</a></li>
+<li><a href="#3">3. 方差修正项的推导</a></li>
+<li><a href="#4">4. 均值模型的优化</a></li>
+<li><a href="#5-1">5. 方差估计方法1：基于协方差定义</a></li>
+<li><a href="#6-2">6. 方差估计方法2：基于噪声预测</a></li>
+<li><a href="#7">7. 两种方法的比较</a></li>
+<li><a href="#8">8. 总结与深层理解</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

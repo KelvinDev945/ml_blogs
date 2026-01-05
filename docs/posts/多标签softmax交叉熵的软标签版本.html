@@ -82,7 +82,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=优化">优化</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #36 多标签“Softmax+交叉熵”的软标签版本
+                    #182 多标签“Softmax+交叉熵”的软标签版本
                 </li>
             </ol>
         </nav>
@@ -90,7 +90,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#36</span>
+                <span class="post-number">#182</span>
                 多标签“Softmax+交叉熵”的软标签版本
             </h1>
             <div class="post-meta">
@@ -203,8 +203,554 @@ month={May},<br />
 url={\url{https://spaces.ac.cn/archives/9064}},<br />
 } </p>
 <hr />
-<h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h2 id="_6">详细数学推导与理论分析<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
+<h3 id="1">1. 多标签分类的基础理论<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<p><strong>问题设定</strong>：给定输入$x$，预测多个标签的概率分布。</p>
+<p>对于第$i$个标签，模型输出score $s_i\in\mathbb{R}$。传统方法使用sigmoid激活：
+\begin{equation}
+p_i = \sigma(s_i) = \frac{1}{1 + e^{-s_i}} \tag{1}
+\end{equation}</p>
+<p><strong>传统多标签损失</strong>（多个独立的二分类交叉熵）：
+\begin{equation}
+\mathcal{L}<em j_in_Omega__text_pos="j\in\Omega_{\text{pos">{\text{BCE}} = -\sum</em>
+\end{equation}}}} \log\sigma(s_j) - \sum_{i\in\Omega_{\text{neg}}} \log(1-\sigma(s_i)) \tag{2</p>
+<p>其中$\Omega_{\text{pos}}$是正类集合，$\Omega_{\text{neg}}$是负类集合。</p>
+<h3 id="2-bcesoftmax">2. 从BCE到多标签Softmax损失的转换<a class="toc-link" href="#2-bcesoftmax" title="Permanent link">&para;</a></h3>
+<p><strong>展开sigmoid函数</strong>：
+\begin{equation}
+\sigma(s) = \frac{1}{1+e^{-s}} = \frac{e^s}{1+e^s}, \quad 1-\sigma(s) = \frac{1}{1+e^s} \tag{3}
+\end{equation}</p>
+<p><strong>将BCE损失改写</strong>：
+\begin{equation}
+\begin{aligned}
+\mathcal{L}<em j_in_Omega__text_pos="j\in\Omega_{\text{pos">{\text{BCE}} &amp;= -\sum</em> \
+&amp;= \sum_{j\in\Omega_{\text{pos}}} \log(1+e^{-s_j}) + \sum_{i\in\Omega_{\text{neg}}} \log(1+e^{s_i})
+\end{aligned} \tag{4}
+\end{equation}}}} \log\frac{1}{1+e^{-s_j}} - \sum_{i\in\Omega_{\text{neg}}} \log\frac{1}{1+e^{s_i}</p>
+<p><strong>利用对数性质</strong> $\log\prod_i a_i = \sum_i \log a_i$：
+\begin{equation}
+\mathcal{L}<em j_in_Omega__text_pos="j\in\Omega_{\text{pos">{\text{BCE}} = \log\prod</em>
+\end{equation}}}}(1+e^{-s_j}) + \log\prod_{i\in\Omega_{\text{neg}}}(1+e^{s_i}) \tag{5</p>
+<p><strong>展开乘积</strong>（关键步骤）：</p>
+<p>对于正类项：
+\begin{equation}
+\prod_{j\in\Omega_{\text{pos}}}(1+e^{-s_j}) = 1 + \sum_{j\in\Omega_{\text{pos}}} e^{-s_j} + \sum_{j_1&lt;j_2} e^{-s_{j_1}-s_{j_2}} + \cdots \tag{6}
+\end{equation}</p>
+<p>这包含了$2^{|\Omega_{\text{pos}}|}$项！类似地，对于负类项也有$2^{|\Omega_{\text{neg}}|}$项。</p>
+<p><strong>关键观察</strong>：当正负类极不平衡时（如$|\Omega_{\text{pos}}| \ll |\Omega_{\text{neg}}|$），负类的高阶项：
+\begin{equation}
+\sum_{i_1&lt;i_2&lt;\cdots&lt;i_k} e^{s_{i_1}+s_{i_2}+\cdots+s_{i_k}} \tag{7}
+\end{equation}
+会占据主导地位，导致优化困难。</p>
+<p><strong>多标签Softmax损失</strong>（只保留一阶项）：
+\begin{equation}
+\mathcal{L}<em i_in_Omega__text_neg="i\in\Omega_{\text{neg">{\text{ML-Softmax}} = \log\left(1 + \sum</em>
+\end{equation}}}} e^{s_i}\right) + \log\left(1 + \sum_{j\in\Omega_{\text{pos}}} e^{-s_j}\right) \tag{8</p>
+<p>这正是原文的式(1)！</p>
+<h3 id="3">3. 软标签版本的推导<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<p><strong>软标签的动机</strong>：
+- 硬标签：$t_i \in {0, 1}$
+- 软标签：$t_i \in [0, 1]$，表示属于该类的置信度</p>
+<p><strong>二分类交叉熵的软标签版本</strong>：
+\begin{equation}
+\mathcal{L}_{\text{soft-BCE}}(s, t) = -t\log\sigma(s) - (1-t)\log(1-\sigma(s)) \tag{9}
+\end{equation}</p>
+<p><strong>推广到多标签</strong>（每个标签有软标签$t_i\in[0,1]$）：
+\begin{equation}
+\mathcal{L} = -\sum_i t_i\log\sigma(s_i) - \sum_i (1-t_i)\log(1-\sigma(s_i)) \tag{10}
+\end{equation}</p>
+<p><strong>改写为对数形式</strong>：
+\begin{equation}
+\mathcal{L} = \sum_i t_i\log(1+e^{-s_i}) + \sum_i (1-t_i)\log(1+e^{s_i}) \tag{11}
+\end{equation}</p>
+<p><strong>转换为乘积形式</strong>：
+\begin{equation}
+\mathcal{L} = \log\prod_i (1+e^{-s_i})^{t_i} + \log\prod_i (1+e^{s_i})^{1-t_i} \tag{12}
+\end{equation}</p>
+<p><strong>二项式展开</strong>（关键步骤）：</p>
+<p>对于$(1+x)^t$，当$t\in(0,1)$时，使用二项式定理的推广：
+\begin{equation}
+(1+x)^t = 1 + tx + \frac{t(t-1)}{2!}x^2 + \frac{t(t-1)(t-2)}{3!}x^3 + \cdots \tag{13}
+\end{equation}</p>
+<p>因此：
+\begin{equation}
+(1+e^{-s_i})^{t_i} = 1 + t_i e^{-s_i} + \frac{t_i(t_i-1)}{2}e^{-2s_i} + \cdots \tag{14}
+\end{equation}</p>
+<p><strong>乘积展开</strong>：
+\begin{equation}
+\prod_i (1+t_i e^{-s_i} + \cdots) = 1 + \sum_i t_i e^{-s_i} + \text{(高阶项)} \tag{15}
+\end{equation}</p>
+<p>高阶项包括：
+- 二阶项：$\sum_{i&lt;j} t_i t_j e^{-s_i-s_j}$，$\sum_i \frac{t_i(t_i-1)}{2}e^{-2s_i}$
+- 更高阶项...</p>
+<p><strong>软标签多标签Softmax损失</strong>（只保留一阶项）：
+\begin{equation}
+\boxed{\mathcal{L}_{\text{soft}} = \log\left(1 + \sum_i t_i e^{-s_i}\right) + \log\left(1 + \sum_i (1-t_i)e^{s_i}\right)} \tag{16}
+\end{equation}</p>
+<p>这正是原文的式(7)！</p>
+<p><strong>验证</strong>：当$t_i\in{0,1}$时：
+- 若$t_i=1$：第一项包含$e^{-s_i}$，第二项不含$e^{s_i}$
+- 若$t_i=0$：第一项不含$e^{-s_i}$，第二项包含$e^{s_i}$</p>
+<p>恰好退化为式(8)！</p>
+<h3 id="4-2s_i">4. 最优解的推导：σ(2s_i)公式<a class="toc-link" href="#4-2s_i" title="Permanent link">&para;</a></h3>
+<p><strong>损失函数的梯度</strong>：</p>
+<p>对$s_i$求偏导：
+\begin{equation}
+\begin{aligned}
+\frac{\partial \mathcal{L}_{\text{soft}}}{\partial s_i} &amp;= \frac{\partial}{\partial s_i}\left[\log\left(1 + \sum_j t_j e^{-s_j}\right) + \log\left(1 + \sum_j (1-t_j)e^{s_j}\right)\right] \
+&amp;= \frac{-t_i e^{-s_i}}{1 + \sum_j t_j e^{-s_j}} + \frac{(1-t_i)e^{s_i}}{1 + \sum_j (1-t_j)e^{s_j}}
+\end{aligned} \tag{17}
+\end{equation}</p>
+<p><strong>最优条件</strong>：$\frac{\partial \mathcal{L}_{\text{soft}}}{\partial s_i} = 0$ 对所有$i$成立。</p>
+<p>即：
+\begin{equation}
+\frac{t_i e^{-s_i}}{1 + \sum_j t_j e^{-s_j}} = \frac{(1-t_i)e^{s_i}}{1 + \sum_j (1-t_j)e^{s_j}} \tag{18}
+\end{equation}</p>
+<p><strong>关键观察</strong>：注意到如果对所有$i$都有：
+\begin{equation}
+t_i e^{-s_i} = (1-t_i)e^{s_i} \tag{19}
+\end{equation}</p>
+<p>那么：
+\begin{equation}
+\sum_j t_j e^{-s_j} = \sum_j (1-t_j)e^{s_j} \tag{20}
+\end{equation}</p>
+<p>代入式(18)的左右两边，自动满足！</p>
+<p><strong>求解式(19)</strong>：
+\begin{equation}
+\begin{aligned}
+t_i e^{-s_i} &amp;= (1-t_i)e^{s_i} \
+t_i &amp;= (1-t_i)e^{2s_i} \
+\frac{t_i}{1-t_i} &amp;= e^{2s_i} \
+e^{2s_i} &amp;= \frac{t_i}{1-t_i}
+\end{aligned} \tag{21}
+\end{equation}</p>
+<p><strong>反解$t_i$</strong>：
+\begin{equation}
+\begin{aligned}
+e^{2s_i}(1-t_i) &amp;= t_i \
+e^{2s_i} - e^{2s_i}t_i &amp;= t_i \
+e^{2s_i} &amp;= t_i(1 + e^{2s_i}) \
+t_i &amp;= \frac{e^{2s_i}}{1 + e^{2s_i}}
+\end{aligned} \tag{22}
+\end{equation}</p>
+<p><strong>最终结果</strong>：
+\begin{equation}
+\boxed{t_i = \sigma(2s_i) = \frac{1}{1 + e^{-2s_i}}} \tag{23}
+\end{equation}</p>
+<p>这是一个非常优雅的结果！</p>
+<h3 id="5-2s_i">5. σ(2s_i)的深层理解<a class="toc-link" href="#5-2s_i" title="Permanent link">&para;</a></h3>
+<p><strong>为什么是2倍？</strong></p>
+<p>从式(21)可以看出：
+\begin{equation}
+\log\frac{t_i}{1-t_i} = 2s_i \tag{24}
+\end{equation}</p>
+<p>左边是<strong>logit函数</strong>（sigmoid的反函数）：
+\begin{equation}
+\text{logit}(t_i) = \log\frac{t_i}{1-t_i} \tag{25}
+\end{equation}</p>
+<p>因此：
+\begin{equation}
+s_i = \frac{1}{2}\text{logit}(t_i) \tag{26}
+\end{equation}</p>
+<p><strong>几何解释</strong>：
+- 在logit空间中，$s_i$是$t_i$的logit值的一半
+- 在概率空间中，需要将$s_i$放大2倍才能还原$t_i$</p>
+<p><strong>对称性分析</strong>：</p>
+<p>注意到式(19)具有对称性：
+\begin{equation}
+t_i e^{-s_i} = (1-t_i)e^{s_i} \tag{27}
+\end{equation}</p>
+<p>可以改写为：
+\begin{equation}
+\frac{t_i}{1-t_i} = e^{2s_i} \tag{28}
+\end{equation}</p>
+<p>这说明<strong>odds ratio</strong>（赔率）等于$e^{2s_i}$。</p>
+<h3 id="6">6. 梯度的详细分析<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<p><strong>损失函数的Hessian矩阵</strong>：</p>
+<p>二阶导数：
+\begin{equation}
+\frac{\partial^2 \mathcal{L}<em i="i" j_neq="j\neq">{\text{soft}}}{\partial s_i^2} = \frac{t_i e^{-s_i}(1+\sum</em>
+\end{equation}} t_j e^{-s_j})}{(1+\sum_j t_j e^{-s_j})^2} + \frac{(1-t_i)e^{s_i}(1+\sum_{j\neq i}(1-t_j)e^{s_j})}{(1+\sum_j(1-t_j)e^{s_j})^2} \tag{29</p>
+<p>注意到：
+\begin{equation}
+\frac{\partial^2 \mathcal{L}_{\text{soft}}}{\partial s_i^2} &gt; 0 \tag{30}
+\end{equation}</p>
+<p>说明损失函数是<strong>凸函数</strong>！</p>
+<p><strong>交叉导数</strong>（$i\neq j$）：
+\begin{equation}
+\frac{\partial^2 \mathcal{L}_{\text{soft}}}{\partial s_i \partial s_j} = \frac{t_i t_j e^{-s_i-s_j}}{(1+\sum_k t_k e^{-s_k})^2} - \frac{(1-t_i)(1-t_j)e^{s_i+s_j}}{(1+\sum_k(1-t_k)e^{s_k})^2} \tag{31}
+\end{equation}</p>
+<p><strong>最优点处的Hessian</strong>（在$t_i = \sigma(2s_i)$处）：</p>
+<p>利用式(20)，记$Z = 1 + \sum_j t_j e^{-s_j} = 1 + \sum_j (1-t_j)e^{s_j}$，则：
+\begin{equation}
+\frac{\partial^2 \mathcal{L}<em _text_opt="\text{opt">{\text{soft}}}{\partial s_i^2}\bigg|</em>
+\end{equation}}} = \frac{t_i e^{-s_i}(Z-t_i e^{-s_i})}{Z^2} + \frac{(1-t_i)e^{s_i}(Z-(1-t_i)e^{s_i})}{Z^2} \tag{32</p>
+<p>利用$t_i e^{-s_i} = (1-t_i)e^{s_i}$，记$w_i = t_i e^{-s_i}$，则：
+\begin{equation}
+\frac{\partial^2 \mathcal{L}<em _text_opt="\text{opt">{\text{soft}}}{\partial s_i^2}\bigg|</em>
+\end{equation}}} = \frac{2w_i(Z-w_i)}{Z^2} = \frac{2w_i}{Z} - \frac{2w_i^2}{Z^2} \tag{33</p>
+<p>这保证了最优点是<strong>局部极小值</strong>。</p>
+<h3 id="7">7. 与知识蒸馏的联系<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<p><strong>知识蒸馏回顾</strong>：</p>
+<p>在知识蒸馏中，教师模型输出软标签$t_i^{\text{teacher}}$，学生模型学习这些软标签。</p>
+<p><strong>温度缩放</strong>：</p>
+<p>对于单标签分类，教师的软标签通常定义为：
+\begin{equation}
+t_i^{\text{teacher}} = \frac{e^{z_i/T}}{\sum_j e^{z_j/T}} \tag{34}
+\end{equation}</p>
+<p>其中$T$是温度参数，$z_i$是教师的logits。</p>
+<p><strong>Dark Knowledge</strong>：</p>
+<p>温度$T&gt;1$时，软标签更加"平滑"，包含了类别间的相似性信息。这被称为<strong>暗知识</strong>（Dark Knowledge）。</p>
+<p><strong>与我们的公式的对比</strong>：</p>
+<p>在我们的多标签设定中，软标签$t_i$直接给定，学生模型学习$s_i$使得$\sigma(2s_i) \approx t_i$。</p>
+<p>这相当于<strong>隐式的温度参数$T=0.5$</strong>：
+\begin{equation}
+t_i = \sigma\left(\frac{s_i}{0.5}\right) = \sigma(2s_i) \tag{35}
+\end{equation}</p>
+<p><strong>为什么是0.5而不是1？</strong></p>
+<p>因为在多标签设定中，每个类别是独立的二分类，不需要像单标签那样在类别间进行归一化。因子2来自于式(19)的对称性条件。</p>
+<h3 id="8">8. 数值稳定性分析<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<p><strong>数值溢出问题</strong>：</p>
+<p>当$s_i$很大时：
+- $e^{s_i}$会溢出（超过浮点数上限）
+- $e^{-s_i}$会下溢（接近0）</p>
+<p><strong>LogSumExp技巧</strong>：</p>
+<p>对于$\log(1 + \sum_i e^{x_i})$，使用：
+\begin{equation}
+\log\left(1 + \sum_i e^{x_i}\right) = \log\left(e^{x_{\max}}\left(e^{-x_{\max}} + \sum_i e^{x_i - x_{\max}}\right)\right) = x_{\max} + \log\left(e^{-x_{\max}} + \sum_i e^{x_i - x_{\max}}\right) \tag{36}
+\end{equation}</p>
+<p>其中$x_{\max} = \max_i x_i$。</p>
+<p><strong>应用到我们的损失</strong>：</p>
+<p>第一项：
+\begin{equation}
+\log\left(1 + \sum_i t_i e^{-s_i}\right) = \log\left(1 + \sum_i e^{\log t_i - s_i}\right) \tag{37}
+\end{equation}</p>
+<p>记$x_i = \log t_i - s_i$，应用LogSumExp。</p>
+<p><strong>处理$t_i=0$或$t_i=1$的情况</strong>：</p>
+<p>当$t_i=0$时，$\log t_i = -\infty$，需要特殊处理：
+- 在第一项中，直接排除$t_i=0$的项
+- 在第二项中，$1-t_i=1$，保留$e^{s_i}$项</p>
+<p>当$t_i=1$时，$\log(1-t_i) = -\infty$：
+- 在第一项中，保留$e^{-s_i}$项
+- 在第二项中，直接排除$t_i=1$的项</p>
+<p><strong>Clip操作</strong>：</p>
+<p>实践中，设置$\epsilon = 10^{-7}$：
+\begin{equation}
+t_i' = \begin{cases}
+\epsilon, &amp; t_i &lt; \epsilon \
+t_i, &amp; \epsilon \leq t_i \leq 1-\epsilon \
+1-\epsilon, &amp; t_i &gt; 1-\epsilon
+\end{cases} \tag{38}
+\end{equation}</p>
+<p>但需要额外处理mask，如原文所述。</p>
+<h3 id="9">9. 实现细节<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<p><strong>改写为等价形式</strong>：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{soft}} = \log\left(1 + \sum_i e^{-s_i + \log t_i}\right) + \log\left(1 + \sum_i e^{s_i + \log(1-t_i)}\right) \tag{39}
+\end{equation}</p>
+<p><strong>处理mask</strong>：</p>
+<p>对于被mask的位置（$s_i = -\infty$）：
+1. 若$t_i &lt; \epsilon$：手动将$-s_i$置为大负数
+2. 若$t_i &gt; 1-\epsilon$：手动将$s_i$置为大负数</p>
+<p><strong>伪代码</strong>：</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">multilabel_categorical_crossentropy_soft</span><span class="p">(</span><span class="n">y_true</span><span class="p">,</span> <span class="n">y_pred</span><span class="p">,</span> <span class="n">epsilon</span><span class="o">=</span><span class="mf">1e-7</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    y_true: 软标签，shape [batch_size, num_labels]</span>
+<span class="sd">    y_pred: logits，shape [batch_size, num_labels]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Clip soft labels</span>
+    <span class="n">y_true</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">clip_by_value</span><span class="p">(</span><span class="n">y_true</span><span class="p">,</span> <span class="n">epsilon</span><span class="p">,</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">epsilon</span><span class="p">)</span>
+
+    <span class="c1"># 第一项：log(1 + sum(t_i * exp(-s_i)))</span>
+    <span class="c1"># 等价于：log(1 + sum(exp(log(t_i) - s_i)))</span>
+    <span class="n">neg_logits</span> <span class="o">=</span> <span class="o">-</span><span class="n">y_pred</span> <span class="o">+</span> <span class="n">tf</span><span class="o">.</span><span class="n">math</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">y_true</span><span class="p">)</span>
+    <span class="c1"># 对于 t_i &lt; epsilon 的位置，手动mask</span>
+    <span class="n">mask_neg</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">y_true</span> <span class="o">&lt;</span> <span class="n">epsilon</span><span class="p">,</span> <span class="n">tf</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">neg_logits</span> <span class="o">=</span> <span class="n">neg_logits</span> <span class="o">-</span> <span class="n">mask_neg</span> <span class="o">*</span> <span class="mf">1e12</span>
+    <span class="n">loss1</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">reduce_logsumexp</span><span class="p">(</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">tf</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">neg_logits</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">1</span><span class="p">]),</span> <span class="n">neg_logits</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+        <span class="n">axis</span><span class="o">=</span><span class="mi">1</span>
+    <span class="p">)</span>
+
+    <span class="c1"># 第二项：log(1 + sum((1-t_i) * exp(s_i)))</span>
+    <span class="n">pos_logits</span> <span class="o">=</span> <span class="n">y_pred</span> <span class="o">+</span> <span class="n">tf</span><span class="o">.</span><span class="n">math</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">y_true</span><span class="p">)</span>
+    <span class="c1"># 对于 t_i &gt; 1-epsilon 的位置，手动mask</span>
+    <span class="n">mask_pos</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="n">y_true</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">epsilon</span><span class="p">,</span> <span class="n">tf</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">pos_logits</span> <span class="o">=</span> <span class="n">pos_logits</span> <span class="o">-</span> <span class="n">mask_pos</span> <span class="o">*</span> <span class="mf">1e12</span>
+    <span class="n">loss2</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">reduce_logsumexp</span><span class="p">(</span>
+        <span class="n">tf</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">tf</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">pos_logits</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">1</span><span class="p">]),</span> <span class="n">pos_logits</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+        <span class="n">axis</span><span class="o">=</span><span class="mi">1</span>
+    <span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">loss1</span> <span class="o">+</span> <span class="n">loss2</span>
+</code></pre></div>
+
+<h3 id="10-mixuplabel-smoothing">10. 与Mixup和Label Smoothing的结合<a class="toc-link" href="#10-mixuplabel-smoothing" title="Permanent link">&para;</a></h3>
+<p><strong>Label Smoothing</strong>：</p>
+<p>对于硬标签$y_i\in{0,1}$，label smoothing定义软标签为：
+\begin{equation}
+t_i = (1-\alpha)y_i + \alpha \cdot \frac{1}{2} = \begin{cases}
+\alpha/2, &amp; y_i = 0 \
+1 - \alpha/2, &amp; y_i = 1
+\end{cases} \tag{40}
+\end{equation}</p>
+<p>其中$\alpha\in(0,1)$是平滑系数（例如$\alpha=0.1$）。</p>
+<p><strong>Mixup</strong>：</p>
+<p>对于两个样本$(x_1, y_1)$和$(x_2, y_2)$，mixup生成新样本：
+\begin{equation}
+\tilde{x} = \lambda x_1 + (1-\lambda)x_2, \quad \tilde{y} = \lambda y_1 + (1-\lambda)y_2 \tag{41}
+\end{equation}</p>
+<p>其中$\lambda \sim \text{Beta}(\alpha, \alpha)$。</p>
+<p><strong>与我们的损失结合</strong>：</p>
+<p>生成的软标签$\tilde{y}<em _text_soft="\text{soft">i \in [0, 1]$可以直接用于我们的损失函数$\mathcal{L}</em>$！}</p>
+<p>这是硬标签版本（式8）无法做到的。</p>
+<h3 id="11">11. 理论性质总结<a class="toc-link" href="#11" title="Permanent link">&para;</a></h3>
+<p><strong>性质1：凸性</strong>
+\begin{equation}
+\mathcal{L}_{\text{soft}}(s) \text{ 是 } s \text{ 的凸函数} \tag{42}
+\end{equation}</p>
+<p>证明：Hessian矩阵半正定（见式29-33）。</p>
+<p><strong>性质2：可还原性</strong>
+\begin{equation}
+t_i = \sigma(2s_i^<em>) \quad \text{其中 } s^</em> = \arg\min_s \mathcal{L}_{\text{soft}}(s) \tag{43}
+\end{equation}</p>
+<p>证明：见式(23)。</p>
+<p><strong>性质3：退化性</strong>
+\begin{equation}
+t_i \in {0,1} \Rightarrow \mathcal{L}<em _text_ML-Softmax="\text{ML-Softmax">{\text{soft}} = \mathcal{L}</em>
+\end{equation}}} \tag{44</p>
+<p>证明：直接验证。</p>
+<p><strong>性质4：梯度有界性</strong></p>
+<p>对于$t_i\in[\epsilon, 1-\epsilon]$和有界的$s_i$：
+\begin{equation}
+\left|\frac{\partial \mathcal{L}_{\text{soft}}}{\partial s_i}\right| \leq C \tag{45}
+\end{equation}</p>
+<p>其中$C$是常数，这保证了梯度不会爆炸。</p>
+<h3 id="12-globalpointer">12. GlobalPointer中的应用<a class="toc-link" href="#12-globalpointer" title="Permanent link">&para;</a></h3>
+<p><strong>GlobalPointer背景</strong>：</p>
+<p>在命名实体识别中，GlobalPointer将实体识别建模为"选择头尾位置对"的多标签分类问题。</p>
+<p><strong>打分函数</strong>：</p>
+<p>对于位置对$(i,j)$，定义打分：
+\begin{equation}
+s_{ij} = \boldsymbol{q}_i^{\top} \boldsymbol{k}_j \tag{46}
+\end{equation}</p>
+<p><strong>Mask处理</strong>：</p>
+<p>对于无效的位置对（如$i&gt;j$），设置$s_{ij} = -\infty$（实际中用$-10^7$）。</p>
+<p><strong>软标签场景</strong>：</p>
+<p>在部分标注、远程监督等场景下，标签可能是不确定的，可以用软标签$t_{ij}\in(0,1)$表示置信度。</p>
+<p>使用我们的损失：
+\begin{equation}
+\mathcal{L} = \log\left(1 + \sum_{(i,j)} t_{ij} e^{-s_{ij}}\right) + \log\left(1 + \sum_{(i,j)} (1-t_{ij})e^{s_{ij}}\right) \tag{47}
+\end{equation}</p>
+<p><strong>预测</strong>：</p>
+<p>训练后，对于位置对$(i,j)$，预测概率为：
+\begin{equation}
+p_{ij} = \sigma(2s_{ij}) = \frac{1}{1 + e^{-2s_{ij}}} \tag{48}
+\end{equation}</p>
+<h3 id="13-focal-loss">13. 与Focal Loss的对比<a class="toc-link" href="#13-focal-loss" title="Permanent link">&para;</a></h3>
+<p><strong>Focal Loss回顾</strong>：</p>
+<p>Focal Loss用于处理类别不平衡，定义为：
+\begin{equation}
+\mathcal{L}_{\text{focal}} = -\alpha_t (1-p_t)^\gamma \log p_t \tag{49}
+\end{equation}</p>
+<p>其中$p_t$是真实类别的预测概率，$\gamma&gt;0$是聚焦参数。</p>
+<p><strong>对比分析</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>处理不平衡的方式</th>
+<th>适用场景</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Focal Loss</td>
+<td>降低易分样本的权重</td>
+<td>单标签分类，目标检测</td>
+</tr>
+<tr>
+<td>我们的方法</td>
+<td>去掉高阶项，线性化求和</td>
+<td>多标签分类</td>
+</tr>
+</tbody>
+</table>
+<p><strong>能否结合？</strong></p>
+<p>理论上可以，定义：
+\begin{equation}
+\mathcal{L}_{\text{soft-focal}} = (1-p_i)^\gamma \left[\log\left(1 + \sum_i t_i e^{-s_i}\right) + \log\left(1 + \sum_i (1-t_i)e^{s_i}\right)\right] \tag{50}
+\end{equation}</p>
+<p>其中$p_i = \sigma(2s_i)$。但这需要更多实验验证。</p>
+<h3 id="14">14. 计算复杂度分析<a class="toc-link" href="#14" title="Permanent link">&para;</a></h3>
+<p><strong>时间复杂度</strong>：</p>
+<p>对于$n$个标签：
+- 前向传播：$O(n)$（两次求和）
+- 反向传播：$O(n)$（梯度计算）</p>
+<p>与标准BCE相同！</p>
+<p><strong>空间复杂度</strong>：</p>
+<p>需要存储：
+- $s_i$：$O(n)$
+- $t_i$：$O(n)$
+- 中间结果（两个求和）：$O(1)$</p>
+<p>总计：$O(n)$</p>
+<p><strong>与硬标签版本对比</strong>：</p>
+<p>完全相同的复杂度！软标签版本没有引入额外开销。</p>
+<h3 id="15">15. 实验建议<a class="toc-link" href="#15" title="Permanent link">&para;</a></h3>
+<p><strong>超参数选择</strong>：</p>
+<ol>
+<li><strong>Clip阈值$\epsilon$</strong>：建议$\epsilon \in [10^{-8}, 10^{-6}]$</li>
+<li><strong>学习率</strong>：与BCE相似，建议从$10^{-4}$开始</li>
+<li><strong>软标签生成</strong>：
+   - Label smoothing: $\alpha \in [0.05, 0.2]$
+   - Mixup: $\alpha \in [0.2, 0.4]$（Beta分布参数）</li>
+</ol>
+<p><strong>调试技巧</strong>：</p>
+<ol>
+<li><strong>检查梯度</strong>：确保梯度不为NaN</li>
+<li><strong>监控损失</strong>：损失应该单调下降</li>
+<li><strong>验证$\sigma(2s_i)$</strong>：在验证集上，检查$\sigma(2s_i) \approx t_i$是否成立</li>
+</ol>
+<p><strong>消融实验</strong>：</p>
+<p>对比以下变体：
+1. 硬标签 + BCE
+2. 硬标签 + 我们的损失（式8）
+3. 软标签 + BCE
+4. 软标签 + 我们的损失（式16）</p>
+<h3 id="16">16. 信息论视角<a class="toc-link" href="#16" title="Permanent link">&para;</a></h3>
+<p><strong>互信息最大化</strong>：</p>
+<p>我们的损失可以理解为最大化标签$T$和预测$S$之间的互信息：
+\begin{equation}
+I(T; S) = H(T) - H(T|S) \tag{51}
+\end{equation}</p>
+<p>其中$H(T|S)$是条件熵。</p>
+<p><strong>KL散度解释</strong>：</p>
+<p>最小化我们的损失等价于最小化真实分布$q(t)$和模型分布$p(t|s)$之间的KL散度：
+\begin{equation}
+\mathbb{E}<em _text_soft="\text{soft">{(s,t)\sim\mathcal{D}}[\mathcal{L}</em>
+\end{equation}}}(s, t)] \approx \text{KL}(q(t) | p(t|s)) + \text{const} \tag{52</p>
+<p><strong>熵的分解</strong>：</p>
+<p>对于二分类，熵可以分解为：
+\begin{equation}
+H(t) = -t\log t - (1-t)\log(1-t) \tag{53}
+\end{equation}</p>
+<p>这是BCE的"目标熵"，我们的损失通过式(16)的结构隐含地优化这个目标。</p>
+<h3 id="17">17. 概率论视角<a class="toc-link" href="#17" title="Permanent link">&para;</a></h3>
+<p><strong>最大似然估计</strong>：</p>
+<p>我们的损失可以理解为负对数似然：
+\begin{equation}
+\mathcal{L}_{\text{soft}} = -\log p(t|s; \theta) \tag{54}
+\end{equation}</p>
+<p>其中$\theta$是模型参数。</p>
+<p><strong>贝叶斯解释</strong>：</p>
+<p>如果我们对$t_i$有先验分布$p(t_i)$，那么后验分布为：
+\begin{equation}
+p(t_i | s_i) \propto p(s_i | t_i) p(t_i) \tag{55}
+\end{equation}</p>
+<p>在均匀先验下，MAP估计等价于MLE。</p>
+<p><strong>生成模型视角</strong>：</p>
+<p>可以将多标签分类视为生成模型：
+\begin{equation}
+p(t, s) = p(s)p(t|s) = p(t)p(s|t) \tag{56}
+\end{equation}</p>
+<p>我们的损失优化$p(t|s)$，而知识蒸馏可以理解为用教师的$p(t)$作为先验。</p>
+<h3 id="18">18. 几何解释<a class="toc-link" href="#18" title="Permanent link">&para;</a></h3>
+<p><strong>Logit空间</strong>：</p>
+<p>在logit空间中，$s_i$和$\text{logit}(t_i)$的关系为：
+\begin{equation}
+s_i = \frac{1}{2}\text{logit}(t_i) \tag{57}
+\end{equation}</p>
+<p>这是一个<strong>线性关系</strong>，比例系数为1/2。</p>
+<p><strong>概率单纯形</strong>：</p>
+<p>在$n$维概率单纯形$\Delta^n = {t \in \mathbb{R}^n : t_i \geq 0, \sum_i t_i = 1}$上，我们的损失定义了一个<strong>Bregman散度</strong>。</p>
+<p><strong>流形结构</strong>：</p>
+<p>$\sigma(2s)$定义了从$\mathbb{R}^n$（score空间）到$(0,1)^n$（概率空间）的微分同胚。</p>
+<h3 id="19">19. 与其他多标签损失的对比<a class="toc-link" href="#19" title="Permanent link">&para;</a></h3>
+<p><strong>Asymmetric Loss</strong>（ASL）：
+\begin{equation}
+\mathcal{L}<em i_in_Omega__text_pos="i\in\Omega_{\text{pos">{\text{ASL}} = -\sum</em>
+\end{equation}}}} (1-p_i)^{\gamma_+} \log p_i - \sum_{i\in\Omega_{\text{neg}}} p_i^{\gamma_-} \log(1-p_i) \tag{58</p>
+<p><strong>Circle Loss</strong>：
+\begin{equation}
+\mathcal{L}<em i_in_Omega__text_neg="i\in\Omega_{\text{neg">{\text{Circle}} = \log\left[1 + \sum</em>
+\end{equation}}}} e^{\gamma(s_i - \Delta_n)}\right] + \log\left[1 + \sum_{j\in\Omega_{\text{pos}}} e^{\gamma(\Delta_p - s_j)}\right] \tag{59</p>
+<p><strong>对比表</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>损失函数</th>
+<th>软标签支持</th>
+<th>理论保证</th>
+<th>计算复杂度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BCE</td>
+<td>是</td>
+<td>Fisher一致性</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td>我们的硬标签版本</td>
+<td>否</td>
+<td>凸性</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td>我们的软标签版本</td>
+<td>是</td>
+<td>凸性 + 可还原性</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td>ASL</td>
+<td>部分</td>
+<td>经验有效</td>
+<td>O(n)</td>
+</tr>
+<tr>
+<td>Circle Loss</td>
+<td>否</td>
+<td>几何意义</td>
+<td>O(n)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="20">20. 开放问题与未来方向<a class="toc-link" href="#20" title="Permanent link">&para;</a></h3>
+<p><strong>问题1</strong>：能否为式(16)找到更紧的理论界？</p>
+<p>目前我们只知道它是凸的，但具体的收敛速度如何？</p>
+<p><strong>问题2</strong>：$\sigma(2s_i)$的因子2是否最优？</p>
+<p>能否推广到$\sigma(\beta s_i)$，其中$\beta$是可学习的参数？</p>
+<p><strong>问题3</strong>：如何扩展到有序多标签分类？</p>
+<p>当标签之间有依赖关系时，如何修改我们的损失？</p>
+<p><strong>问题4</strong>：与对比学习的结合？</p>
+<p>能否将我们的损失与对比学习框架结合，用于表示学习？</p>
+<p><strong>未来方向</strong>：
+1. 自适应温度参数
+2. 层次化多标签分类
+3. 长尾分布下的改进
+4. 理论收敛性分析
+5. 与元学习的结合</p>
+<hr />
+<h2 id="_7">参考文献<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Lin et al., "Focal Loss for Dense Object Detection", ICCV 2017</li>
+<li>Zhang et al., "Generalized Cross Entropy Loss for Training Deep Neural Networks with Noisy Labels", NeurIPS 2018</li>
+<li>Sun et al., "Circle Loss: A Unified Perspective of Pair Similarity Optimization", CVPR 2020</li>
+<li>Ridnik et al., "Asymmetric Loss For Multi-Label Classification", ICCV 2021</li>
+<li>Hinton et al., "Distilling the Knowledge in a Neural Network", NIPS 2014 Workshop</li>
+</ol>
+<h2 id="_8">总结<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
+<p>本文详细推导了多标签Softmax交叉熵的软标签版本，关键贡献包括：</p>
+<ol>
+<li><strong>理论推导</strong>：从BCE出发，通过去除高阶项得到软标签版本</li>
+<li><strong>最优解</strong>：证明了$t_i = \sigma(2s_i)$的优雅结果</li>
+<li><strong>实现细节</strong>：处理数值稳定性和mask的技巧</li>
+<li><strong>多角度理解</strong>：信息论、概率论、几何等视角</li>
+<li><strong>实践指导</strong>：超参数选择、调试技巧、应用场景</li>
+</ol>
+<p>这个损失函数将多标签分类推向了软标签时代，为label smoothing、mixup等技术在多标签场景的应用铺平了道路。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -214,7 +760,7 @@ url={\url{https://spaces.ac.cn/archives/9064}},<br />
                             
                             <a href="在bert4keras中使用混合精度和xla加速训练.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#35 在bert4keras中使用混合精度和XLA加速训练</div>
+                                <div class="nav-title">#181 在bert4keras中使用混合精度和XLA加速训练</div>
                             </a>
                             
                         </div>
@@ -222,7 +768,7 @@ url={\url{https://spaces.ac.cn/archives/9064}},<br />
                             
                             <a href="logsumexp运算的几个不等式.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#37 logsumexp运算的几个不等式</div>
+                                <div class="nav-title">#183 logsumexp运算的几个不等式</div>
                             </a>
                             
                         </div>
@@ -252,7 +798,31 @@ url={\url{https://spaces.ac.cn/archives/9064}},<br />
 <li><a href="#_3">证明结果</a></li>
 <li><a href="#_4">实现技巧</a></li>
 <li><a href="#_5">文章小结</a></li>
-<li><a href="#_6">公式推导与注释</a></li>
+<li><a href="#_6">详细数学推导与理论分析</a><ul>
+<li><a href="#1">1. 多标签分类的基础理论</a></li>
+<li><a href="#2-bcesoftmax">2. 从BCE到多标签Softmax损失的转换</a></li>
+<li><a href="#3">3. 软标签版本的推导</a></li>
+<li><a href="#4-2s_i">4. 最优解的推导：σ(2s_i)公式</a></li>
+<li><a href="#5-2s_i">5. σ(2s_i)的深层理解</a></li>
+<li><a href="#6">6. 梯度的详细分析</a></li>
+<li><a href="#7">7. 与知识蒸馏的联系</a></li>
+<li><a href="#8">8. 数值稳定性分析</a></li>
+<li><a href="#9">9. 实现细节</a></li>
+<li><a href="#10-mixuplabel-smoothing">10. 与Mixup和Label Smoothing的结合</a></li>
+<li><a href="#11">11. 理论性质总结</a></li>
+<li><a href="#12-globalpointer">12. GlobalPointer中的应用</a></li>
+<li><a href="#13-focal-loss">13. 与Focal Loss的对比</a></li>
+<li><a href="#14">14. 计算复杂度分析</a></li>
+<li><a href="#15">15. 实验建议</a></li>
+<li><a href="#16">16. 信息论视角</a></li>
+<li><a href="#17">17. 概率论视角</a></li>
+<li><a href="#18">18. 几何解释</a></li>
+<li><a href="#19">19. 与其他多标签损失的对比</a></li>
+<li><a href="#20">20. 开放问题与未来方向</a></li>
+</ul>
+</li>
+<li><a href="#_7">参考文献</a></li>
+<li><a href="#_8">总结</a></li>
 </ul>
 </li>
 </ul>

@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=优化">优化</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #46 不成功的尝试：将多标签交叉熵推广到“n个m分类”上去
+                    #192 不成功的尝试：将多标签交叉熵推广到“n个m分类”上去
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#46</span>
+                <span class="post-number">#192</span>
                 不成功的尝试：将多标签交叉熵推广到“n个m分类”上去
             </h1>
             <div class="post-meta">
@@ -189,7 +189,405 @@ url={\url{https://spaces.ac.cn/archives/9158}},<br />
 } </p>
 <hr />
 <h2 id="_5">公式推导与注释<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1">1. 问题背景与动机<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<p><strong>问题1.1 (多标签分类回顾)</strong></p>
+<p>多标签分类本质上是$n$个二分类问题。对于样本$x$，我们需要预测$n$个标签${y_1, \ldots, y_n}$，每个$y_i \in {0, 1}$。</p>
+<p><strong>标准方法</strong>: 使用$n$个独立的sigmoid二分类：
+\begin{equation}
+L_{binary} = -\sum_{i=1}^n \left[y_i\log\sigma(s_i) + (1-y_i)\log(1-\sigma(s_i))\right]
+\tag{1}
+\end{equation}</p>
+<p>其中$s_i$是第$i$个类别的logit，$\sigma(x) = 1/(1+e^{-x})$。</p>
+<p><strong>问题</strong>: 当正负样本严重不平衡时（例如$n=1000$，但只有3个正类），式(1)的表现会急剧下降。</p>
+<p><strong>改进方案 (多标签交叉熵)</strong>: 在之前的工作中，我们提出：
+\begin{equation}
+L_{multilabel} = \log\left(1 + \sum_{i \in \Omega_{neg}} e^{s_i}\right) + \log\left(1 + \sum_{j \in \Omega_{pos}} e^{-s_j}\right)
+\tag{2}
+\end{equation}</p>
+<p>其中$\Omega_{pos}$是正类索引集，$\Omega_{neg}$是负类索引集。</p>
+<h3 id="2-m">2. 从二分类到m分类的推广<a class="toc-link" href="#2-m" title="Permanent link">&para;</a></h3>
+<p><strong>问题2.1 (推广目标)</strong></p>
+<p>现在考虑更一般的情况：有$n$个任务，每个任务是$m$分类问题（而不是二分类）。记：
+- $s_{i,j}$: 第$i$个任务（$i=1,\ldots,n$）的第$j$个类别（$j=1,\ldots,m$）的logit
+- $t_{i,j}$: 对应的标签（硬标签时为0或1，软标签时为$[0,1]$区间的实数）</p>
+<p><strong>目标</strong>: 设计一个损失函数，使得：
+1. 具有类别不平衡自动调节能力（类似式(2)）
+2. 支持软标签优化
+3. 存在解析解</p>
+<h3 id="3">3. 第一次尝试：直接类比<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<p><strong>推导3.1 (从Softmax交叉熵出发)</strong></p>
+<p>标准的$n$个$m$分类的softmax交叉熵为：
+\begin{equation}
+L_{softmax} = -\sum_{i=1}^n \sum_{j=1}^m t_{i,j} \log p_{i,j}
+\tag{3}
+\end{equation}</p>
+<p>其中$p_{i,j} = \text{softmax}(s_{i,j}) = \frac{e^{s_{i,j}}}{\sum_{k=1}^m e^{s_{i,k}}}$。</p>
+<p><strong>展开</strong>:
+\begin{equation}
+\begin{aligned}
+-\sum_i \sum_j t_{i,j} \log p_{i,j} &amp;= -\sum_i \sum_j t_{i,j} \left(s_{i,j} - \log\sum_{k=1}^m e^{s_{i,k}}\right) \
+&amp;= \sum_i \sum_j t_{i,j} \log\sum_{k=1}^m e^{s_{i,k}} - \sum_i \sum_j t_{i,j} s_{i,j} \
+&amp;= \sum_i \log\sum_{k=1}^m e^{s_{i,k}} - \sum_i \sum_j t_{i,j} s_{i,j}
+\end{aligned}
+\tag{4}
+\end{equation}</p>
+<p>最后一步利用了$\sum_{j=1}^m t_{i,j} = 1$（概率归一化）。</p>
+<p><strong>改写形式</strong>:
+\begin{equation}
+-\sum_i \sum_j t_{i,j} \log p_{i,j} = \sum_i \sum_j t_{i,j} \log\left(1 + \sum_{k \neq j} e^{s_{i,k} - s_{i,j}}\right)
+\tag{5}
+\end{equation}</p>
+<p><strong>证明</strong>:
+\begin{equation}
+\begin{aligned}
+\log p_{i,j}^{-1} &amp;= \log\frac{\sum_k e^{s_{i,k}}}{e^{s_{i,j}}} \
+&amp;= \log\left(\frac{e^{s_{i,j}} + \sum_{k \neq j} e^{s_{i,k}}}{e^{s_{i,j}}}\right) \
+&amp;= \log\left(1 + \sum_{k \neq j} e^{s_{i,k} - s_{i,j}}\right)
+\end{aligned}
+\tag{6}
+\end{equation}</p>
+<h3 id="4">4. 一阶截断近似<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
+<p><strong>引理4.1 (乘积的对数展开)</strong></p>
+<p>对于小量$\epsilon$，有：
+\begin{equation}
+\log(1 + \epsilon) \approx \epsilon \quad \text{（一阶Taylor展开）}
+\tag{7}
+\end{equation}</p>
+<p><strong>应用到多个乘积</strong>:
+\begin{equation}
+\begin{aligned}
+\log \prod_{i=1}^n (1 + a_i) &amp;= \sum_{i=1}^n \log(1 + a_i) \
+&amp;= \log\left(1 + \sum_i a_i + \sum_{i&lt;j} a_i a_j + \cdots\right) \
+&amp;\approx \log\left(1 + \sum_i a_i\right)
+\end{aligned}
+\tag{8}
+\end{equation}</p>
+<p>截断高阶项（交叉项）后得到一阶近似。</p>
+<p><strong>定理4.1 (类比推广的损失函数)</strong></p>
+<p>将式(5)改写并应用一阶截断：
+\begin{equation}
+\begin{aligned}
+L_1 &amp;= \sum_j \log \prod_i \left(1 + \sum_{k \neq j} e^{s_{i,k} - s_{i,j}}\right)^{t_{i,j}} \
+&amp;= \sum_j \log\left(1 + \sum_i t_{i,j} \sum_{k \neq j} e^{s_{i,k} - s_{i,j}} + \text{高阶项}\right) \
+&amp;\approx \sum_j \log\left(1 + \sum_i \sum_{k \neq j} t_{i,j} e^{s_{i,k} - s_{i,j}}\right)
+\end{aligned}
+\tag{9}
+\end{equation}</p>
+<p><strong>重新整理</strong>:
+\begin{equation}
+L_1 = \sum_{j=1}^m \log\left(1 + \sum_{i=1}^n \sum_{k \neq j} t_{i,j} e^{s_{i,k} - s_{i,j}}\right)
+\tag{10}
+\end{equation}</p>
+<h3 id="5">5. 梯度计算与解析解分析<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
+<p><strong>定理5.1 (损失函数梯度)</strong></p>
+<p>对$s_{i,j}$求偏导：
+\begin{equation}
+\frac{\partial L_1}{\partial s_{i,j}} = \sum_{h \neq j} \frac{t_{i,h} e^{s_{i,j} - s_{i,h}}}{1 + \sum_{i,k \neq h} t_{i,k} e^{s_{i,k} - s_{i,h}}} - \frac{t_{i,j} e^{-s_{i,j}} \sum_{k \neq j} e^{s_{i,k}}}{1 + \sum_{i,k \neq j} t_{i,k} e^{s_{i,k} - s_{i,j}}}
+\tag{11}
+\end{equation}</p>
+<p><strong>推导</strong>: 注意$s_{i,j}$出现在两个地方：
+1. 作为分子：在第$j$项的$\sum_{k \neq j} t_{i,j} e^{s_{i,k} - s_{i,j}}$中
+2. 作为分母：在所有$h \neq j$项的$\sum_{i,k \neq h} t_{i,k} e^{s_{i,k} - s_{i,h}}$中</p>
+<p>对第一部分：
+\begin{equation}
+\frac{\partial}{\partial s_{i,j}} \log\left(1 + \sum_i \sum_{k \neq j} t_{i,k} e^{s_{i,k} - s_{i,j}}\right) = \frac{-t_{i,j} e^{-s_{i,j}} \sum_{k \neq j} e^{s_{i,k}}}{1 + \sum_{i,k \neq j} t_{i,k} e^{s_{i,k} - s_{i,j}}}
+\tag{12}
+\end{equation}</p>
+<p>对第二部分（所有$h \neq j$）：
+\begin{equation}
+\sum_{h \neq j} \frac{\partial}{\partial s_{i,j}} \log\left(1 + \sum_i \sum_{k \neq h} t_{i,k} e^{s_{i,k} - s_{i,h}}\right) = \sum_{h \neq j} \frac{t_{i,h} e^{s_{i,j} - s_{i,h}}}{1 + \sum_{i,k \neq h} t_{i,k} e^{s_{i,k} - s_{i,h}}}
+\tag{13}
+\end{equation}</p>
+<p><strong>问题</strong>: 令$\frac{\partial L_1}{\partial s_{i,j}} = 0$得到的方程组极其复杂，没有简单的解析解。</p>
+<h3 id="6">6. 第二次尝试：从解倒推<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<p><strong>策略6.1</strong>: 既然正向推导无法得到解析解，我们反向思考：
+1. 先假设理想的解的形式
+2. 反推对应的损失函数
+3. 检验该损失函数是否合理</p>
+<p><strong>假设6.1 (理想解的形式)</strong></p>
+<p>假设最优解应该是：
+\begin{equation}
+t_{i,j} = \text{softmax}(f(s_{i,j})) = \frac{e^{f(s_{i,j})}}{\sum_k e^{f(s_{i,k})}}
+\tag{14}
+\end{equation}</p>
+<p>其中$f: \mathbb{R} \to \mathbb{R}$是某个函数。</p>
+<p><strong>一般损失形式</strong>:
+\begin{equation}
+L_2 = \sum_{j=1}^m \log\left(1 + \sum_{i=1}^n t_{i,j} e^{-f(s_{i,j})}\right)
+\tag{15}
+\end{equation}</p>
+<h3 id="7">7. 梯度与最优性条件<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<p><strong>定理7.1 (一般形式的梯度)</strong></p>
+<p>对式(15)求梯度：
+\begin{equation}
+\frac{\partial L_2}{\partial s_{i,k}} = \sum_{j=1}^m \frac{-t_{i,j} e^{-f(s_{i,j})} \frac{\partial f(s_{i,j})}{\partial s_{i,k}}}{1 + \sum_i t_{i,j} e^{-f(s_{i,j})}}
+\tag{16}
+\end{equation}</p>
+<p><strong>化简</strong>: 令$Z_j = 1 + \sum_i t_{i,j} e^{-f(s_{i,j})}$，则：
+\begin{equation}
+\frac{\partial L_2}{\partial s_{i,k}} = -\sum_{j=1}^m \frac{t_{i,j} e^{-f(s_{i,j})}}{Z_j} \cdot \frac{\partial f(s_{i,j})}{\partial s_{i,k}}
+\tag{17}
+\end{equation}</p>
+<p><strong>最优性条件</strong>: 如果$t_{i,j} = \frac{e^{f(s_{i,j})}}{\sum_k e^{f(s_{i,k})}}$是解，代入式(17)：
+\begin{equation}
+\frac{\partial L_2}{\partial s_{i,k}} = -\sum_{j=1}^m \frac{e^{f(s_{i,j})}/Z_i \cdot e^{-f(s_{i,j})}}{Z_j} \cdot \frac{\partial f(s_{i,j})}{\partial s_{i,k}}
+\tag{18}
+\end{equation}</p>
+<p>其中$Z_i = \sum_k e^{f(s_{i,k})}$。</p>
+<h3 id="8-f">8. 函数f的确定<a class="toc-link" href="#8-f" title="Permanent link">&para;</a></h3>
+<p><strong>要求</strong>: 为了让式(18)对所有$k$都等于0，我们需要：
+\begin{equation}
+\sum_{j=1}^m f(s_{i,j}) = C \quad \text{（与$i,j$无关的常数）}
+\tag{19}
+\end{equation}</p>
+<p><strong>最简单的选择</strong>: 令$C=0$，即：
+\begin{equation}
+\sum_{j=1}^m f(s_{i,j}) = 0
+\tag{20}
+\end{equation}</p>
+<p><strong>解</strong>: 取平均中心化：
+\begin{equation}
+f(s_{i,j}) = s_{i,j} - \bar{s}<em j="1">i, \quad \bar{s}_i = \frac{1}{m}\sum</em>
+\tag{21}
+\end{equation}}^m s_{i,j</p>
+<p><strong>验证</strong>:
+\begin{equation}
+\sum_{j=1}^m f(s_{i,j}) = \sum_{j=1}^m (s_{i,j} - \bar{s}<em j="1">i) = \sum</em>_i = 0
+\tag{22}
+\end{equation}}^m s_{i,j} - m\bar{s</p>
+<h3 id="9">9. 倒推的损失函数<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<p><strong>定义9.1 (中心化损失函数)</strong></p>
+<p>根据式(15)和(21)，得到：
+\begin{equation}
+L_3 = \sum_{j=1}^m \log\left(1 + \sum_{i=1}^n t_{i,j} e^{-(s_{i,j} - \bar{s}<em j="1">i)}\right) = \sum</em>}^m \log\left(1 + \sum_{i=1}^n t_{i,j} e^{\bar{s<em i_j="i,j">i - s</em>\right)
+\tag{23}
+\end{equation}}</p>
+<p><strong>理论最优解</strong>:
+\begin{equation}
+t_{i,j} = \frac{e^{s_{i,j} - \bar{s}<em i_k="i,k">i}}{\sum_k e^{s</em>} - \bar{s<em i_1="i,1">i}} = \text{softmax}(s</em>
+\tag{24}
+\end{equation}}, \ldots, s_{i,m})_{j</p>
+<p>注意$\bar{s}_i$不影响softmax的结果。</p>
+<h3 id="10">10. 硬标签情况分析<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<p><strong>问题10.1</strong>: 为什么式(23)在硬标签情况下表现不佳？</p>
+<p><strong>分析</strong>: 考虑第$i$个任务，假设真实标签是第$j^<em>$类（$t_{i,j^</em>}=1$，其他为0）。</p>
+<p>损失函数简化为：
+\begin{equation}
+L_3 \supset \log\left(1 + e^{\bar{s}<em i_j_="i,j^*">i - s</em>\right)
+\tag{25}
+\end{equation}}</p>
+<p><strong>问题</strong>: 只要$s_{i,j^<em>} \gg \bar{s}<em>i$，损失就会很小。但$s</em>{i,j^</em>}$不一定是${s_{i,1}, \ldots, s_{i,m}}$中的最大值！</p>
+<p><strong>具体例子</strong>:
+- 假设$s_{i,1} = 10, s_{i,2} = 5, s_{i,3} = -5$（真实类别是第2类）
+- $\bar{s}<em i_2="i,2">i = \frac{10+5-5}{3} = 3.33$
+- $s</em>} - \bar{s<em i_2="i,2">i = 5 - 3.33 = 1.67 &gt; 0$
+- 但$s</em>$不是最大值！模型会错误地预测第1类</p>
+<h3 id="11-vs">11. 软标签vs硬标签的矛盾<a class="toc-link" href="#11-vs" title="Permanent link">&para;</a></h3>
+<p><strong>矛盾11.1</strong>:
+- <strong>软标签情况</strong>: $L_3$有美好的理论性质（解析解为softmax）
+- <strong>硬标签情况</strong>: $L_3$无法保证正确分类（最大logit不一定对应最大概率）</p>
+<p><strong>根本原因</strong>: 平均中心化$\bar{s}_i$破坏了logits的相对大小关系。</p>
+<p><strong>对比</strong>: 标准softmax交叉熵不存在这个问题：
+\begin{equation}
+L_{standard} = -\sum_i t_{i,j^<em>} \log\frac{e^{s_{i,j^</em>}}}{\sum_k e^{s_{i,k}}}
+\tag{26}
+\end{equation}</p>
+<p>这会强制$s_{i,j^*}$成为最大值。</p>
+<h3 id="12">12. 类别不平衡的自动调节机制<a class="toc-link" href="#12" title="Permanent link">&para;</a></h3>
+<p><strong>机制12.1 (对数内求和)</strong></p>
+<p>回顾多标签交叉熵（式2）和推广形式（式10、23），关键特征是：</p>
+<p><strong>标准形式</strong>:
+\begin{equation}
+L_{standard} = \sum_i L_i
+\tag{27}
+\end{equation}
+每个类的损失权重正比于样本数。</p>
+<p><strong>改进形式</strong>:
+\begin{equation}
+L_{improved} = \sum_j \log\left(1 + \sum_i (\cdots)\right)
+\tag{28}
+\end{equation}
+每个类的损失权重正比于样本数的对数。</p>
+<p><strong>数学分析</strong>: 假设第$j$类有$N_j$个样本：
+- 标准方法: 贡献$\sim N_j$
+- 改进方法: 贡献$\sim \log(1 + N_j) \approx \log N_j$</p>
+<p><strong>效果</strong>:
+\begin{equation}
+\frac{\log N_1}{\log N_2} &lt; \frac{N_1}{N_2} \quad \text{当} \quad N_1 &gt; N_2 &gt; 1
+\tag{29}
+\end{equation}</p>
+<p>缩小了类别间的权重差异。</p>
+<h3 id="13">13. 退化到二分类的验证<a class="toc-link" href="#13" title="Permanent link">&para;</a></h3>
+<p><strong>定理13.1 (m=2时的退化)</strong></p>
+<p>当$m=2$时，式(10)和式(23)都退化为多标签交叉熵。</p>
+<p><strong>证明</strong>: 对于二分类，不失一般性假设第2类是"负类"（$t_{i,2} = 1 - t_{i,1}$）。</p>
+<p>式(23)变为：
+\begin{equation}
+\begin{aligned}
+L_3 &amp;= \log\left(1 + \sum_i t_{i,1} e^{\bar{s}<em i_1="i,1">i - s</em>}}\right) + \log\left(1 + \sum_i (1-t_{i,1}) e^{\bar{s<em i_2="i,2">i - s</em>\right)
+\end{aligned}
+\tag{30}
+\end{equation}}</p>
+<p>定义$\tilde{s}<em i_1="i,1">i = s</em>$（相对logit），则：
+\begin{equation}
+\bar{s}} - s_{i,2<em i_1="i,1">i - s</em>
+\tag{31}
+\end{equation}} = \frac{s_{i,1} + s_{i,2}}{2} - s_{i,1} = \frac{s_{i,2} - s_{i,1}}{2} = -\frac{\tilde{s}_i}{2</p>
+<p>类似地：
+\begin{equation}
+\bar{s}<em i_2="i,2">i - s</em>
+\tag{32}
+\end{equation}} = \frac{\tilde{s}_i}{2</p>
+<p>代入式(30)：
+\begin{equation}
+L_3 = \log\left(1 + \sum_i t_{i,1} e^{-\tilde{s}<em i_1="i,1">i/2}\right) + \log\left(1 + \sum_i (1-t</em>\right)
+\tag{33}
+\end{equation}}) e^{\tilde{s}_i/2</p>
+<p>这与多标签交叉熵形式一致（相差一个常数因子1/2）。</p>
+<h3 id="14">14. 数值示例：硬标签失败<a class="toc-link" href="#14" title="Permanent link">&para;</a></h3>
+<p><strong>例14.1</strong>: 考虑3个任务，每个任务3分类。</p>
+<p><strong>Logits</strong>:
+\begin{equation}
+\mathbf{S} = \begin{pmatrix}
+5 &amp; 2 &amp; 1 \
+3 &amp; 6 &amp; 0 \
+1 &amp; 2 &amp; 8
+\end{pmatrix}
+\tag{34}
+\end{equation}</p>
+<p>真实标签: 任务1选类1，任务2选类2，任务3选类3。</p>
+<p><strong>平均值</strong>: $\bar{s}_1 = 8/3 \approx 2.67$, $\bar{s}_2 = 3$, $\bar{s}_3 = 11/3 \approx 3.67$</p>
+<p><strong>损失贡献</strong>:
+- 任务1: $\log(1 + e^{2.67-5}) = \log(1 + e^{-2.33}) \approx 0.091$
+- 任务2: $\log(1 + e^{3-6}) = \log(1 + e^{-3}) \approx 0.048$
+- 任务3: $\log(1 + e^{3.67-8}) = \log(1 + e^{-4.33}) \approx 0.013$</p>
+<p>看起来损失很小！但用argmax预测：
+- 任务1: argmax$(5,2,1) = 1$ ✓
+- 任务2: argmax$(3,6,0) = 2$ ✓
+- 任务3: argmax$(1,2,8) = 3$ ✓</p>
+<p>这个例子中恰好正确。但考虑轻微扰动：</p>
+<p><strong>扰动Logits</strong>:
+\begin{equation}
+\mathbf{S'} = \begin{pmatrix}
+5 &amp; 2 &amp; 4 \
+3 &amp; 6 &amp; 0 \
+1 &amp; 2 &amp; 8
+\end{pmatrix}
+\tag{35}
+\end{equation}</p>
+<p>现在$\bar{s}<em 1_1="1,1">1 = 11/3 \approx 3.67$，$s</em>_1 = 5 - 3.67 = 1.33 &gt; 0$，损失仍然小，但argmax已经错了（如果第3类也很接近）。} - \bar{s</p>
+<h3 id="15">15. 软标签的优势分析<a class="toc-link" href="#15" title="Permanent link">&para;</a></h3>
+<p><strong>观察15.1</strong>: 软标签情况下，式(23)的解析解是softmax，这意味着：</p>
+<p><strong>收敛性</strong>: 梯度下降会收敛到softmax分布
+<strong>光滑性</strong>: 损失函数关于logits是光滑的
+<strong>唯一性</strong>: 在凸优化框架下，解是唯一的</p>
+<p><strong>但</strong>: 这些优点在硬标签情况下都不重要，因为我们的评估指标是argmax正确率，而非概率分布的接近程度。</p>
+<h3 id="16">16. 组合优化视角<a class="toc-link" href="#16" title="Permanent link">&para;</a></h3>
+<p><strong>视角16.1 (硬标签作为组合优化)</strong></p>
+<p>硬标签分类本质上是组合优化问题：
+\begin{equation}
+\hat{y}<em _123_1_ldots_m_125_="{1,\ldots,m}" _in="\in" j="j">i = \arg\max</em>
+\tag{36}
+\end{equation}} s_{i,j</p>
+<p><strong>松弛</strong>: softmax是这个组合优化的凸松弛：
+\begin{equation}
+p_{i,j} = \text{softmax}(s_{i,1}, \ldots, s_{i,m})<em i_k="i,k">j \approx \mathbb{I}[j = \arg\max_k s</em>]
+\tag{37}
+\end{equation}</p>
+<p><strong>问题</strong>: 平均中心化改变了argmax，因此破坏了这个松弛关系。</p>
+<h3 id="17">17. 信息论解释<a class="toc-link" href="#17" title="Permanent link">&para;</a></h3>
+<p><strong>定义17.1 (交叉熵)</strong></p>
+<p>标准softmax交叉熵可以写为：
+\begin{equation}
+H(t, p) = -\sum_{i,j} t_{i,j} \log p_{i,j}
+\tag{38}
+\end{equation}</p>
+<p>这是真实分布$t$和预测分布$p$之间的交叉熵。</p>
+<p><strong>式(10)的解释</strong>:
+\begin{equation}
+L_1 = \sum_j \log\left(1 + \sum_i \sum_{k \neq j} t_{i,j} e^{s_{i,k} - s_{i,j}}\right)
+\tag{39}
+\end{equation}</p>
+<p>可以理解为"加权几何平均"的对数形式，但缺乏清晰的信息论解释。</p>
+<h3 id="18-sigmoid-vs-softmax">18. Sigmoid vs Softmax<a class="toc-link" href="#18-sigmoid-vs-softmax" title="Permanent link">&para;</a></h3>
+<p><strong>对比18.1</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>Sigmoid</th>
+<th>Softmax</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>输出范围</td>
+<td>$[0,1]$</td>
+<td>$[0,1]$</td>
+</tr>
+<tr>
+<td>归一化</td>
+<td>独立</td>
+<td>$\sum_j p_j = 1$</td>
+</tr>
+<tr>
+<td>决策边界</td>
+<td>$s &gt; 0$</td>
+<td>$s_j = \max_k s_k$</td>
+</tr>
+<tr>
+<td>多标签</td>
+<td>自然支持</td>
+<td>需要推广</td>
+</tr>
+<tr>
+<td>类别不平衡</td>
+<td>严重问题</td>
+<td>相对较好</td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键差异</strong>: Sigmoid允许多个类别同时为正，Softmax强制单选。</p>
+<p><strong>$n$个$m$分类的挑战</strong>: 需要在每个任务内保持softmax的归一化约束，同时在任务间处理不平衡。</p>
+<h3 id="19">19. 实践建议与权衡<a class="toc-link" href="#19" title="Permanent link">&para;</a></h3>
+<p><strong>建议19.1 (何时使用各种损失)</strong></p>
+<ol>
+<li><strong>硬标签 + 类别平衡</strong>: 使用标准softmax交叉熵（式3）</li>
+<li><strong>硬标签 + 类别不平衡</strong>: 使用式(10)，可能需要调整</li>
+<li><strong>软标签 + 需要解析解</strong>: 可以尝试式(23)，但注意硬标签测试时的问题</li>
+<li><strong>多标签（真正的）</strong>: 使用式(2)或GlobalPointer</li>
+</ol>
+<p><strong>建议19.2 (混合策略)</strong></p>
+<p>可以考虑加权组合：
+\begin{equation}
+L_{hybrid} = \alpha L_1 + (1-\alpha) L_{standard}
+\tag{40}
+\end{equation}</p>
+<p>其中$\alpha \in [0,1]$平衡类别不平衡调节和分类正确性。</p>
+<h3 id="20">20. 未来方向与开放问题<a class="toc-link" href="#20" title="Permanent link">&para;</a></h3>
+<p><strong>开放问题20.1</strong>:
+- 是否存在同时满足以下条件的损失函数：
+  1. 自动类别不平衡调节
+  2. 软标签解析解
+  3. 硬标签情况下保证argmax正确</p>
+<p><strong>可能方向</strong>:
+1. <strong>自适应权重</strong>: 动态调整每个类别的权重
+2. <strong>多目标优化</strong>: 同时优化软标签和硬标签目标
+3. <strong>结构化预测</strong>: 利用任务间的相关性</p>
+<p><strong>理论挑战</strong>: 可能需要证明不存在"完美"解，或者需要引入额外的假设。</p>
+<h3 id="21">21. 总结<a class="toc-link" href="#21" title="Permanent link">&para;</a></h3>
+<p><strong>本文贡献</strong>:
+1. 提出了两种"$n$个$m$分类"损失函数的候选形式
+2. 分析了各自的优缺点和适用场景
+3. 揭示了软标签优化和硬标签评估之间的内在矛盾</p>
+<p><strong>关键洞察</strong>:
+- 类别不平衡调节与分类正确性存在权衡
+- 平均中心化虽然理论优美，但在实践中可能失效
+- 二分类的成功经验不能直接推广到$m$分类（$m&gt;2$）</p>
+<p><strong>实践启示</strong>:
+- 硬标签情况：式(10)可以尝试，但需要实验验证
+- 软标签情况：式(23)有理论保证
+- 实际应用：可能需要针对具体问题定制损失函数</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -199,7 +597,7 @@ url={\url{https://spaces.ac.cn/archives/9158}},<br />
                             
                             <a href="生成扩散模型漫谈二ddpm-自回归式vae.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#45 生成扩散模型漫谈（二）：DDPM = 自回归式VAE</div>
+                                <div class="nav-title">#191 生成扩散模型漫谈（二）：DDPM = 自回归式VAE</div>
                             </a>
                             
                         </div>
@@ -207,7 +605,7 @@ url={\url{https://spaces.ac.cn/archives/9158}},<br />
                             
                             <a href="生成扩散模型漫谈三ddpm-贝叶斯-去噪.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#47 生成扩散模型漫谈（三）：DDPM = 贝叶斯 + 去噪</div>
+                                <div class="nav-title">#193 生成扩散模型漫谈（三）：DDPM = 贝叶斯 + 去噪</div>
                             </a>
                             
                         </div>
@@ -236,7 +634,30 @@ url={\url{https://spaces.ac.cn/archives/9158}},<br />
 <li><a href="#_2">结果倒推</a></li>
 <li><a href="#_3">思考分析</a></li>
 <li><a href="#_4">文章小结</a></li>
-<li><a href="#_5">公式推导与注释</a></li>
+<li><a href="#_5">公式推导与注释</a><ul>
+<li><a href="#1">1. 问题背景与动机</a></li>
+<li><a href="#2-m">2. 从二分类到m分类的推广</a></li>
+<li><a href="#3">3. 第一次尝试：直接类比</a></li>
+<li><a href="#4">4. 一阶截断近似</a></li>
+<li><a href="#5">5. 梯度计算与解析解分析</a></li>
+<li><a href="#6">6. 第二次尝试：从解倒推</a></li>
+<li><a href="#7">7. 梯度与最优性条件</a></li>
+<li><a href="#8-f">8. 函数f的确定</a></li>
+<li><a href="#9">9. 倒推的损失函数</a></li>
+<li><a href="#10">10. 硬标签情况分析</a></li>
+<li><a href="#11-vs">11. 软标签vs硬标签的矛盾</a></li>
+<li><a href="#12">12. 类别不平衡的自动调节机制</a></li>
+<li><a href="#13">13. 退化到二分类的验证</a></li>
+<li><a href="#14">14. 数值示例：硬标签失败</a></li>
+<li><a href="#15">15. 软标签的优势分析</a></li>
+<li><a href="#16">16. 组合优化视角</a></li>
+<li><a href="#17">17. 信息论解释</a></li>
+<li><a href="#18-sigmoid-vs-softmax">18. Sigmoid vs Softmax</a></li>
+<li><a href="#19">19. 实践建议与权衡</a></li>
+<li><a href="#20">20. 未来方向与开放问题</a></li>
+<li><a href="#21">21. 总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

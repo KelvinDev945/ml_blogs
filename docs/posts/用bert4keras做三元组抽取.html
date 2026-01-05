@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用bert4keras做三元组抽取 | ML & Math Blog Posts</title>
+    <meta name="description" content="用bert4keras做三元组抽取&para;
+原文链接: https://spaces.ac.cn/archives/7161
+发布日期: 
+
+在开发bert4keras的时候就承诺过，会逐渐将之前用keras-bert实现的例子逐渐迁移到bert4keras来，而那里其中一个例子便是三元组抽取的任务。现在bert4keras的例子已经颇为丰富了，但还没有序列标注和信息抽取相关的任务，而三元组抽...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
+
+    <!-- MathJax for math rendering with equation numbering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=语言模型">语言模型</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #88 用bert4keras做三元组抽取
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">
+                <span class="post-number">#88</span>
+                用bert4keras做三元组抽取
+            </h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/7161" target="_blank" rel="noopener">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=语言模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 语言模型</span>
+                </a>
+                
+                <a href="../index.html?tags=信息抽取" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 信息抽取</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+            </div>
+            
+        </header>
+
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="bert4keras">用bert4keras做三元组抽取<a class="toc-link" href="#bert4keras" title="Permanent link">&para;</a></h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7161">https://spaces.ac.cn/archives/7161</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在开发<a href="https://github.com/bojone/bert4keras">bert4keras</a>的时候就承诺过，会逐渐将之前<a href="/archives/6736">用keras-bert实现的例子</a>逐渐迁移到bert4keras来，而那里其中一个例子便是三元组抽取的任务。现在<a href="https://github.com/bojone/bert4keras/tree/master/examples">bert4keras的例子</a>已经颇为丰富了，但还没有序列标注和信息抽取相关的任务，而三元组抽取正好是这样的一个任务，因此就补充上去了。</p>
+<p><a href="/usr/uploads/2020/01/2014723975.png" title="点击查看原图"><img alt="基于Bert的三元组抽取模型结构示意图" src="/usr/uploads/2020/01/2014723975.png" /></a></p>
+<p>基于Bert的三元组抽取模型结构示意图</p>
+<h2 id="_1">模型简介<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
+<p>关于数据格式和模型的基本思路，在<a href="/archives/6671">《基于DGCNN和概率图的轻量级信息抽取模型》</a>一文中已经详细介绍过了，在此不再重复。数据集百度已经公开了，在<a href="http://ai.baidu.com/broad/download?dataset=sked">这里</a>就可以下载。</p>
+<p>跟之前的策略一样，模型依然是基于“半指针-半标注”的方式来做抽取，顺序是先抽取s，然后传入s来抽取o、p，不同的只是将模型的整体架构换成了bert：</p>
+<blockquote>
+<p>1、原始序列转id后，传入bert的编码器，得到编码序列；</p>
+<p>2、编码序列接两个二分类器，预测s；</p>
+<p>3、根据传入的s，从编码序列中抽取出s的首和尾对应的编码向量；</p>
+<p>4、以s的编码向量作为条件，对编码序列做一次条件Layer Norm；</p>
+<p>5、条件Layer Norm后的序列来预测该s对应的o、p。</p>
+</blockquote>
+<h2 id="_2">类别失衡<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
+<p>不难想到，用“半指针-半标注”结构做实体抽取时，会面临类别不均衡的问题，因为通常来说目标实体词比非目标词要少得多，所以标签1会比标签0少得多。常规的处理不平衡的方法都可以用，比如focal loss或者人工调节类权重，但这些方法用了之后，阈值就不大好取了。我这里用了一种自以为比较恰当的方法：将概率值做$n$次方。</p>
+<p>具体来说，原来输出一个概率值$p$，代表类别1的概率是$p$，我现在将它变为$p^n$，也就是认为类别1的概率是$p^n$，除此之外不变，loss还是用正常的二分类交叉熵loss。由于原来就有$0\leq p \leq 1$，所以$p^n$整体会更接近于0，因此初始状态就符合目标分布了，所以最终能加速收敛。</p>
+<p>从loss角度也可以比较两者的差异，假设标签为$t\in\{0, 1\}$，那么原来的loss是：<br />
+\begin{equation}- t \log p - (1 - t) \log (1 - p)\end{equation}<br />
+而$n$次方之后的loss就变成了<br />
+\begin{equation}- t \log p^n - (1 - t) \log (1 - p^n)\end{equation}<br />
+注意到$- t \log p^n = -nt \log p$，所以当标签为1时，相当于放大了loss的权重，而标签为0时，$(1 - p^n)$更接近于1，所以对应的loss $\log(1 - p^n)$更小（梯度也更小）。因此，这算是一种自适应调节loss权重（梯度权重）的思路了。</p>
+<p>相比于focal loss或人工调节类权重，这种方法的好处是不改变原来内积（$p$通常是内积加sigmoid得到的）的分布就能使得分布更加贴近目标，而不改变内积分布通常来说对优化更加友好。</p>
+<h2 id="_3">源码效果<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
+<p><strong>Github</strong> ：<a href="https://github.com/bojone/bert4keras/blob/master/examples/task_relation_extraction.py">task_relation_extraction.py</a></p>
+<p>在没有任何前处理和后处理的情况下，最终在验证集上的f1为0.822，基本上比之前的DGCNN模型都要好。注意这是没有任何前后处理的，如果加上一些前后处理，估计可以f1达到0.83。</p>
+<p>同时，我们可以发现训练集和验证集的标注有不少错漏之处，而当初我们做比赛的时候，线上测试集的标注质量比训练集和验证集都要高（更规范、更完整），所以当时提交测试的f1基本上要比线下验证集的f1高4%～5%，也就是说，加上一些规则修正后，这个结果如果提交到当时的排行榜上，单模型估计有0.87的f1。</p>
+<h2 id="_4">值得注意<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
+<p>开头已经提到了，之前用keras-bert就写过一个用bert来抽三元组的<a href="https://github.com/bojone/bert_in_keras/blob/master/relation_extract.py">例子</a>了，而这里主要谈谈本文模型跟之前的例子不同之处以及一些值得注意的地方。</p>
+<p>第一个不同之处是，当时仅仅是简单的尝试，所以仅仅是将s的向量加到编码序列中，然后做o、p的预测，而不是像本文一样用到<a href="/archives/7124">条件Layer Norm</a>；条件Layer Norm的方案有更好的表达能力，效果略微有提升。</p>
+<p>第二个不同之处，也是值得留意的地方，就是本文的模型用的是标准的bert的tokenizer，而之前的例子是直接按字切分。标准的tokenizer出来的序列，并不是简单地按字切分的，尤其是函数英文和数字的情况下，输出的分词结果跟原始序列的字并非对齐的，所以在构建训练样本和输出结果时，都要格外留意这一点。</p>
+<p>读者可能会疑问：那为什么不用回原来的按字切分的方式呢？笔者觉得，既然用了bert，应该按照bert的tokenizer，就算不对齐其实也有办法处理好的；而之前的按字切分，只是笔者当时还不够熟悉bert所导致的不规范用法，是不值得提倡的；遵循bert的tokenizer，还有可能比自己强行按字切分获得更好的finetune效果。</p>
+<p>此外，笔者还发现一个有点意外的事实，就是中文bert所带的字表（vocab.txt）是不全的，比如“符箓”的“箓”字就不在bert的vocab.txt里边，所以要输出最终结果的时候，最好别用tokenizer自带的decode方法，而是直接对应到原始序列，在原始序列中切片输出。</p>
+<p>最后，这一版模型的训练还加入了权重滑动平均，它可以稳定模型的训练，甚至能轻微提升模型的效果。关于权重滑动平均的相关介绍，可以参考<a href="/archives/6583#%E6%9D%83%E9%87%8D%E6%BB%91%E5%8A%A8%E5%B9%B3%E5%9D%87">这里</a>。</p>
+<h2 id="_5">文章小结<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
+<p>本文给出了用bert4keras来做三元组抽取的一个例子，并且指出了一些值得注意的事情，欢迎大家参考试用。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7161">https://spaces.ac.cn/archives/7161</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jan. 03, 2020). 《用bert4keras做三元组抽取 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7161">https://spaces.ac.cn/archives/7161</a></p>
+<p>@online{kexuefm-7161,<br />
+title={用bert4keras做三元组抽取},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={Jan},<br />
+url={\url{https://spaces.ac.cn/archives/7161}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+                </div>
+
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="transformer升级之路4二维位置的旋转式位置编码.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#87 Transformer升级之路：4、二维位置的旋转式位置编码</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="让人惊叹的johnson-lindenstrauss引理理论篇.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#89 让人惊叹的Johnson-Lindenstrauss引理：理论篇</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#bert4keras">用bert4keras做三元组抽取</a><ul>
+<li><a href="#_1">模型简介</a></li>
+<li><a href="#_2">类别失衡</a></li>
+<li><a href="#_3">源码效果</a></li>
+<li><a href="#_4">值得注意</a></li>
+<li><a href="#_5">文章小结</a></li>
+<li><a href="#_6">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
+</body>
+</html>

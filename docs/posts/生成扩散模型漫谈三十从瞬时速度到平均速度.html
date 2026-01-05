@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=微分方程">微分方程</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #177 生成扩散模型漫谈（三十）：从瞬时速度到平均速度
+                    #323 生成扩散模型漫谈（三十）：从瞬时速度到平均速度
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#177</span>
+                <span class="post-number">#323</span>
                 生成扩散模型漫谈（三十）：从瞬时速度到平均速度
             </h1>
             <div class="post-meta">
@@ -191,9 +191,9 @@
 <p>不过，对于部分读者来说，目标函数$\eqref{eq:loss-1}$的实现还是有点困难的，因为它涉及到普通用户比较少见的“雅可比向量积（Jacobian-Vector Product，JVP）”。具体来说，我们可以将目标函数内方括号部分写成：<br />
 \begin{equation}\underbrace{\left[\boldsymbol{u}<em _text_向量="\text{向量">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, t),0,1\right] \\[10pt]}</em>}}\cdot\underbrace{\left[\frac{\partial}{\partial \boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t), \frac{\partial}{\partial r}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t), \frac{\partial}{\partial t}\boldsymbol{u}</em>}}(\boldsymbol{x<em _text_雅可比矩阵="\text{雅可比矩阵">t, r, t)\right] \\[10pt]}</em>}}\end{equation
 即$\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t)$的雅可比矩阵与给定向量$[\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, t),0,1]$的乘法，结果是一个跟$\boldsymbol{u}</em>_t, r, t)$大小一致的向量，这种运算就叫做JVP，在Jax、Torch里边都有现成实现，比如Jax的参考代码是：}}(\boldsymbol{x</p>
-<pre class="highlight"><code>u = lambda xt, r, t: diffusion_model(weights, [xt, r, t])
-urt, durt = jax.jvp(u, (xt, r, t), (u(xt, t, t), r * 0, t * 0 + 1))
-</code></pre>
+<div class="highlight"><pre><span></span><code>u = lambda xt, r, t: diffusion_model(weights, [xt, r, t])
+urt, durt = jax.jvp(u, (xt, r, t), (u(xt, t, t), r <span class="gs">* 0, t *</span> 0 + 1))
+</code></pre></div>
 
 <p>其中<code>urt</code>就是$\boldsymbol{u}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t)$，而<code>durt</code>就是对应的JVP结果，Torch的用法也类似。了解JVP运算后，目标函数$\eqref{eq:loss-1}$的实现就基本上没有难度了。</p>
 <h2 id="_7">第二目标<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
@@ -279,7 +279,412 @@ url={\url{https://spaces.ac.cn/archives/10958}},<br />
 } </p>
 <hr />
 <h2 id="_13">公式推导与注释<a class="toc-link" href="#_13" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1">1. 核心概念与数学框架<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<h4 id="11-ode">1.1 ODE式扩散模型的基本设定<a class="toc-link" href="#11-ode" title="Permanent link">&para;</a></h4>
+<p>在扩散模型中,我们的目标是学习一个从简单分布(如标准正态分布)到复杂数据分布的变换。ODE式扩散模型通过以下常微分方程来实现这一变换:</p>
+<p>$$\frac{d\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t}{dt} = \boldsymbol{v}</em>$$}}(\boldsymbol{x}_t,t) \tag{1</p>
+<p><strong>符号说明:</strong>
+- $\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t$: 时刻$t$的状态变量,可以理解为图像在加噪过程中的中间状态
+- $t \in [0,1]$: 时间参数,通常$t=1$对应纯噪声,$t=0$对应真实数据
+- $\boldsymbol{v}</em>_t,t)$: 参数化的速度场,描述状态变化的瞬时速度
+- $\boldsymbol{\theta}$: 神经网络参数}}(\boldsymbol{x</p>
+<p><strong>物理直觉:</strong> 将$t$看作时间,$\boldsymbol{x}_t$看作位移,则$\frac{d\boldsymbol{x}_t}{dt}$就是瞬时速度。</p>
+<h4 id="12-reflow">1.2 ReFlow框架<a class="toc-link" href="#12-reflow" title="Permanent link">&para;</a></h4>
+<p>ReFlow提供了一种直观的方法来训练速度场$\boldsymbol{v}_{\boldsymbol{\theta}}$。其核心思想是:</p>
+<ol>
+<li>
+<p><strong>构建插值路径:</strong> 在数据点$\boldsymbol{x}_0$和噪声点$\boldsymbol{x}_1$之间构建插值
+   $$\boldsymbol{x}_t = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_1 \tag{2}$$</p>
+</li>
+<li>
+<p><strong>计算精确速度:</strong> 对插值路径求导得到精确的速度场
+   $$\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{x}_1 - \boldsymbol{x}_0 \tag{3}$$</p>
+</li>
+<li>
+<p><strong>监督学习:</strong> 用神经网络$\boldsymbol{v}<em _text_ReFlow="\text{ReFlow">{\boldsymbol{\theta}}$拟合这个速度场
+   $$\mathcal{L}</em>}} = \mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{t,\boldsymbol{x}_0,\boldsymbol{x}_1}\left[|\boldsymbol{v}</em>$$}}(\boldsymbol{x}_t,t) - (\boldsymbol{x}_1 - \boldsymbol{x}_0)|^2\right] \tag{4</p>
+</li>
+</ol>
+<p><strong>理论保证:</strong> 可以证明,当损失函数最小化时,学到的ODE确实能将噪声分布$p_1$变换为数据分布$p_0$。</p>
+<h3 id="2">2. 从瞬时速度到平均速度的动机<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
+<h4 id="21-ode">2.1 ODE离散化的问题<a class="toc-link" href="#21-ode" title="Permanent link">&para;</a></h4>
+<p>在实际应用中,我们需要对ODE进行离散化求解。最简单的欧拉方法为:</p>
+<p>$$\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t-\Delta t} = \boldsymbol{x}_t - \boldsymbol{v}</em>$$}}(\boldsymbol{x}_t,t) \Delta t \tag{5</p>
+<p><strong>关键矛盾:</strong>
+- <strong>理论要求:</strong> ODE的精确求解需要$\Delta t \to 0$,即步长越小越好
+- <strong>实际需求:</strong> 为了加速生成,我们希望$\Delta t$尽可能大,最好$\Delta t = 1$实现一步生成
+- <strong>性能问题:</strong> ReFlow虽然声称直线插值使轨迹更直,但实际轨迹仍有弯曲,$\Delta t$很难接近1</p>
+<h4 id="22">2.2 平均速度的定义<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p>为了解决这个矛盾,我们考虑对ODE两端积分:</p>
+<p>$$\int_r^t \frac{d\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{\tau}}{d\tau} d\tau = \int_r^t \boldsymbol{v}</em>$$}}(\boldsymbol{x}_{\tau},\tau) d\tau \tag{6</p>
+<p>左端积分为:
+$$\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t - \boldsymbol{x}_r = \int_r^t \boldsymbol{v}</em>$$}}(\boldsymbol{x}_{\tau},\tau) d\tau \tag{7</p>
+<p><strong>改写为平均速度形式:</strong>
+$$\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t - \boldsymbol{x}_r = (t-r) \cdot \frac{1}{t-r}\int_r^t \boldsymbol{v}</em>$$}}(\boldsymbol{x}_{\tau},\tau) d\tau \tag{8</p>
+<p><strong>定义平均速度:</strong>
+$$\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t) \triangleq \frac{1}{t-r}\int_r^t \boldsymbol{v}</em>$$}}(\boldsymbol{x}_{\tau},\tau) d\tau \tag{9</p>
+<p><strong>核心优势:</strong> 如果能直接建模平均速度$\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}$,则有:
+$$\boldsymbol{x}_0 = \boldsymbol{x}_1 - \boldsymbol{u}</em>$$}}(\boldsymbol{x}_1, 0, 1) \tag{10</p>
+<p>这样就可以<strong>理论上精确地</strong>实现一步生成,无需依赖离散化近似!</p>
+<h3 id="3">3. 瞬时速度与平均速度的恒等变换<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 第一个恒等关系的推导<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p>从平均速度的定义出发:
+$$\int_r^t \boldsymbol{v}<em _tau="\tau">{\boldsymbol{\theta}}(\boldsymbol{x}</em>$$},\tau) d\tau = (t-r)\boldsymbol{u}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t) \tag{11</p>
+<p><strong>两端对$t$求导</strong> (应用Leibniz积分法则):</p>
+<p>左端求导:
+$$\frac{d}{dt}\left[\int_r^t \boldsymbol{v}<em _tau="\tau">{\boldsymbol{\theta}}(\boldsymbol{x}</em>$$},\tau) d\tau\right] = \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t,t) \tag{12</p>
+<p>右端求导(应用乘积法则):
+$$\frac{d}{dt}\left[(t-r)\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t)\right] = \boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + (t-r)\frac{d}{dt}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, r, t) \tag{13</p>
+<p><strong>对$\boldsymbol{u}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t)$应用链式法则:</strong></p>
+<p>$\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}$是关于$\boldsymbol{x}_t$和$t$的函数,因此全导数为:
+$$\frac{d}{dt}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) = \frac{d\boldsymbol{x}_t}{dt}\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + \frac{\partial}{\partial t}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, r, t) \tag{14</p>
+<p><strong>第一个恒等关系:</strong>
+结合(12)-(14),得到:
+$$\boldsymbol{v}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t,t) = \boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + (t-r)\left[\frac{d\boldsymbol{x}_t}{dt}\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + \frac{\partial}{\partial t}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, r, t)\right] \tag{15</p>
+<h4 id="32">3.2 第二个恒等关系的推导<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p>从平均速度的定义,考虑极限情况$r \to t$:</p>
+<p>$$\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t) = \frac{1}{t-r}\int_r^t \boldsymbol{v}</em>$$}}(\boldsymbol{x}_{\tau},\tau) d\tau \tag{16</p>
+<p><strong>应用L'Hôpital法则或积分中值定理:</strong></p>
+<p>当$r \to t$时,分子分母都趋于0,应用L'Hôpital法则:
+$$\lim_{r \to t} \boldsymbol{u}<em _to="\to" r="r" t="t">{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t) = \lim</em>} \frac{\int_r^t \boldsymbol{v<em _tau="\tau">{\boldsymbol{\theta}}(\boldsymbol{x}</em>$$},\tau) d\tau}{t-r} \tag{17</p>
+<p>对分子求导(对$r$):
+$$\frac{\partial}{\partial r}\left[\int_r^t \boldsymbol{v}<em _tau="\tau">{\boldsymbol{\theta}}(\boldsymbol{x}</em>$$},\tau) d\tau\right] = -\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_r,r) \tag{18</p>
+<p>对分母求导:
+$$\frac{\partial}{\partial r}(t-r) = -1 \tag{19}$$</p>
+<p>因此:
+$$\lim_{r \to t} \boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t) = \boldsymbol{v}</em>$$}}(\boldsymbol{x}_t,t) \tag{20</p>
+<p><strong>第二个恒等关系:</strong>
+$$\boldsymbol{v}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t,t) = \boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, t, t) \tag{21</p>
+<p><strong>物理直觉:</strong> 无限小时间区间内的平均速度就等于瞬时速度。</p>
+<h3 id="4-meanflow">4. MeanFlow的三个训练目标<a class="toc-link" href="#4-meanflow" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 第一目标的推导(最理想)<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p><strong>策略:</strong> 用平均速度$\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}$来表达瞬时速度$\boldsymbol{v}</em>$,然后代入ReFlow目标。}</p>
+<p><strong>步骤1:</strong> 将第二恒等关系(21)代入第一恒等关系(15)中的$\frac{d\boldsymbol{x}_t}{dt}$:</p>
+<p>$$\boldsymbol{v}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t,t) = \boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + (t-r)\left[\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, t)\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + \frac{\partial}{\partial t}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, r, t)\right] \tag{22</p>
+<p><strong>步骤2:</strong> 代入ReFlow的损失函数(4):</p>
+<p>$$\mathcal{L}<em r_t_boldsymbol_x="r,t,\boldsymbol{x">1 = \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0,\boldsymbol{x}_1}\left[\left|\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + (t-r)\left[\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, t)\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + \frac{\partial}{\partial t}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, r, t)\right] - (\boldsymbol{x}_1 - \boldsymbol{x}_0)\right|^2\right] \tag{23</p>
+<p><strong>优点分析:</strong>
+1. <strong>单一目标:</strong> 只有一个最小化目标,没有对抗或多目标优化
+2. <strong>无EMA:</strong> 不需要指数移动平均,训练更稳定
+3. <strong>无stop_gradient:</strong> 不依赖梯度截断技巧
+4. <strong>理论保证:</strong> 继承ReFlow的理论保证</p>
+<p><strong>计算要求:</strong>
+- 需要两次前向传播: $\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t)$和$\boldsymbol{u}</em>_t, t, t)$
+- 需要计算JVP(雅可比向量积)
+- 反向传播时需要二阶梯度}}(\boldsymbol{x</p>
+<h4 id="42-jvp">4.2 雅可比向量积(JVP)的理解<a class="toc-link" href="#42-jvp" title="Permanent link">&para;</a></h4>
+<p><strong>定义:</strong> 给定函数$f: \mathbb{R}^n \to \mathbb{R}^m$和切向量$\boldsymbol{v} \in \mathbb{R}^n$,JVP计算:</p>
+<p>$$\text{JVP}(f, \boldsymbol{v}) = J_f \cdot \boldsymbol{v} = \frac{\partial f}{\partial \boldsymbol{x}} \boldsymbol{v} \tag{24}$$</p>
+<p>其中$J_f \in \mathbb{R}^{m \times n}$是雅可比矩阵。</p>
+<p><strong>在MeanFlow中的应用:</strong></p>
+<p>函数: $f(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) = \boldsymbol{u}</em>_t, r, t)$}}(\boldsymbol{x</p>
+<p>输入向量: $(\boldsymbol{x}_t, r, t)$</p>
+<p>切向量: $(\boldsymbol{u}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, t), 0, 1)$</p>
+<p>JVP结果:
+$$\text{JVP} = \boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, t) \cdot \frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + 0 \cdot \frac{\partial}{\partial r}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + 1 \cdot \frac{\partial}{\partial t}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, r, t) \tag{25</p>
+<p><strong>计算效率:</strong> JVP的计算复杂度与前向传播相同,远小于完整雅可比矩阵的计算。</p>
+<h4 id="43">4.3 第二目标(减少计算量)<a class="toc-link" href="#43" title="Permanent link">&para;</a></h4>
+<p><strong>问题:</strong> 第一目标需要对JVP再次求梯度,计算量较大。</p>
+<p><strong>解决方案:</strong> 对JVP部分添加stop_gradient:</p>
+<p>$$\mathcal{L}<em r_t_boldsymbol_x="r,t,\boldsymbol{x">2 = \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0,\boldsymbol{x}_1}\left[\left|\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + (t-r)\text{sg}\left[\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, t)\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + \frac{\partial}{\partial t}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, r, t)\right] - (\boldsymbol{x}_1 - \boldsymbol{x}_0)\right|^2\right] \tag{26</p>
+<p>其中$\text{sg}[\cdot]$表示stop_gradient操作。</p>
+<p><strong>梯度分析:</strong></p>
+<p>对$\boldsymbol{u}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t)$求梯度时:</p>
+<p>不含stop_gradient的项:
+$$\nabla_{\boldsymbol{\theta}} \boldsymbol{u}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t) \tag{27}$$</p>
+<p>含stop_gradient的项不产生梯度:
+$$\nabla_{\boldsymbol{\theta}} \text{sg}[...] = 0 \tag{28}$$</p>
+<p><strong>效果:</strong>
+- 训练速度提升约2倍
+- 实验表明效果无明显损失
+- 仍需两次前向传播</p>
+<p><strong>与Consistency Model的区别:</strong>
+- MeanFlow的stop_gradient是为了<strong>计算效率</strong>
+- 损失函数值越小越好(真实的优化目标)
+- CM的stop_gradient是为了<strong>算法正确性</strong>
+- CM的损失不一定越小越好(仅保证梯度等效)</p>
+<h4 id="44-meanflow">4.4 第三目标(MeanFlow论文使用)<a class="toc-link" href="#44-meanflow" title="Permanent link">&para;</a></h4>
+<p><strong>动机:</strong> 进一步减少计算量,去掉第二次前向传播$\boldsymbol{u}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, t)$。</p>
+<p><strong>策略:</strong> 用$\boldsymbol{x}_1 - \boldsymbol{x}_0$替换$\frac{d\boldsymbol{x}_t}{dt}$:</p>
+<p>从ReFlow我们知道$\frac{d\boldsymbol{x}_t}{dt}$的回归目标就是$\boldsymbol{x}_1 - \boldsymbol{x}_0$,因此在第一恒等关系(15)中:</p>
+<p>$$\boldsymbol{v}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t,t) \approx \boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + (t-r)\left[(\boldsymbol{x}_1-\boldsymbol{x}_0)\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + \frac{\partial}{\partial t}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, r, t)\right] \tag{29</p>
+<p><strong>标签泄漏问题:</strong> $\boldsymbol{x}_1 - \boldsymbol{x}_0$既是回归目标,又出现在模型定义中。</p>
+<p><strong>解决方案:</strong> 添加stop_gradient:</p>
+<p>$$\mathcal{L}<em r_t_boldsymbol_x="r,t,\boldsymbol{x">3 = \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0,\boldsymbol{x}_1}\left[\left|\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + (t-r)\text{sg}\left[(\boldsymbol{x}_1-\boldsymbol{x}_0)\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + \frac{\partial}{\partial t}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, r, t)\right] - (\boldsymbol{x}_1 - \boldsymbol{x}_0)\right|^2\right] \tag{30</p>
+<p><strong>特殊情况分析($r=t$):</strong></p>
+<p>当$r=t$时,目标退化为:
+$$\mathcal{L}<em r="t">3|</em>} = \mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{t,\boldsymbol{x}_0,\boldsymbol{x}_1}\left[|\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, t, t) - (\boldsymbol{x}_1 - \boldsymbol{x}_0)|^2\right] \tag{31</p>
+<p>这正是ReFlow的目标!因此ReFlow为MeanFlow"兜底",保证训练不会太差。</p>
+<p><strong>优缺点:</strong>
+- 优点: 只需一次前向传播,最快
+- 缺点: 与优化器耦合,有"神秘感"</p>
+<h3 id="5">5. 理论证明与收敛性分析<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
+<h4 id="51-reflow">5.1 ReFlow的理论基础<a class="toc-link" href="#51-reflow" title="Permanent link">&para;</a></h4>
+<p><strong>引理1(回归最优解):</strong></p>
+<p>$$\mathop{\text{argmin}}_{\boldsymbol{\mu}} \mathbb{E}[|\boldsymbol{\mu} - \boldsymbol{x}|^2] = \mathbb{E}[\boldsymbol{x}] \tag{32}$$</p>
+<p><strong>证明:</strong>
+对$\boldsymbol{\mu}$求导:
+$$\frac{\partial}{\partial \boldsymbol{\mu}} \mathbb{E}[|\boldsymbol{\mu} - \boldsymbol{x}|^2] = 2\mathbb{E}[\boldsymbol{\mu} - \boldsymbol{x}] = 2(\boldsymbol{\mu} - \mathbb{E}[\boldsymbol{x}]) \tag{33}$$</p>
+<p>令导数为零:
+$$\boldsymbol{\mu} = \mathbb{E}[\boldsymbol{x}] \tag{34}$$</p>
+<p><strong>引理2(ODE的概率流形式):</strong></p>
+<p>对于插值轨迹$\boldsymbol{x}_t = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_1$,将$\boldsymbol{x}_1$到$\boldsymbol{x}_0$的最优ODE为:</p>
+<p>$$\frac{d\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t}{dt} = \mathbb{E}</em>$$}_0|\boldsymbol{x}_t}[\boldsymbol{x}_1 - \boldsymbol{x}_0] \tag{35</p>
+<p><strong>直觉理解:</strong>
+- 在$\boldsymbol{x}_t$处,下一步应该朝着期望方向移动
+- 期望是对所有可能的$\boldsymbol{x}_0$(给定$\boldsymbol{x}_t$)取平均</p>
+<p><strong>ReFlow的收敛性:</strong></p>
+<p>最优解满足:
+$$\boldsymbol{v}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\theta}^*}(\boldsymbol{x}_t, t) = \mathbb{E}</em>$$}_0|\boldsymbol{x}_t}[\boldsymbol{x}_1 - \boldsymbol{x}_0] \tag{36</p>
+<p>代入引理2,得到正确的ODE。</p>
+<h4 id="52">5.2 第三目标的理论证明<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p><strong>目标:</strong> 证明$\mathcal{L}_3$的最优解是期望的平均速度模型。</p>
+<p><strong>步骤1:</strong> 对$\boldsymbol{u}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t)$求梯度并令其为零。</p>
+<p>由于有stop_gradient,梯度为:
+$$\nabla_{\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}} \mathcal{L}_3 = 2\mathbb{E}\left[\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_u="\boldsymbol{u">t, r, t) + (t-r)\text{sg}[...] - (\boldsymbol{x}_1 - \boldsymbol{x}_0)\right] \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}} \boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, r, t) \tag{37</p>
+<p>令梯度为零:
+$$\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}^<em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t, r, t) + (t-r)\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0|\boldsymbol{x}_t}\left[(\boldsymbol{x}_1-\boldsymbol{x}_0)\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>^</em>}(\boldsymbol{x}_t, r, t) + \frac{\partial}{\partial t}\boldsymbol{u}</em>}^*}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, r, t)\right] = \mathbb{E}</em>$$}_0|\boldsymbol{x}_t}[\boldsymbol{x}_1 - \boldsymbol{x}_0] \tag{38</p>
+<p><strong>步骤2:</strong> 利用引理2,将$\mathbb{E}_{\boldsymbol{x}_0|\boldsymbol{x}_t}[\boldsymbol{x}_1 - \boldsymbol{x}_0]$替换为$\frac{d\boldsymbol{x}_t}{dt}$:</p>
+<p>$$\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}^<em>}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + (t-r)\left[\frac{d\boldsymbol{x}_t}{dt}\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>^</em>}(\boldsymbol{x}_t, r, t) + \frac{\partial}{\partial t}\boldsymbol{u}</em>$$}^*}(\boldsymbol{x}_t, r, t)\right] = \frac{d\boldsymbol{x}_t}{dt} \tag{39</p>
+<p><strong>步骤3:</strong> 识别全导数结构。</p>
+<p>注意到:
+$$\frac{d}{dt}\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}^<em>}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) = \frac{d\boldsymbol{x}_t}{dt}\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>^</em>}(\boldsymbol{x}_t, r, t) + \frac{\partial}{\partial t}\boldsymbol{u}</em>$$}^*}(\boldsymbol{x}_t, r, t) \tag{40</p>
+<p>方程(39)可改写为:
+$$\boldsymbol{u}_{\boldsymbol{\theta}^<em>}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) + (t-r)\frac{d}{dt}\boldsymbol{u}</em>^</em>}(\boldsymbol{x}_t, r, t) = \frac{d\boldsymbol{x}_t}{dt} \tag{41}$$</p>
+<p><strong>步骤4:</strong> 应用乘积法则。</p>
+<p>注意到:
+$$\frac{d}{dt}\left[(t-r)\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}^<em>}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t)\right] = \boldsymbol{u}</em>^</em>}(\boldsymbol{x}_t, r, t) + (t-r)\frac{d}{dt}\boldsymbol{u}</em>$$}^*}(\boldsymbol{x}_t, r, t) \tag{42</p>
+<p>因此方程(41)等价于:
+$$\frac{d}{dt}\left[(t-r)\boldsymbol{u}_{\boldsymbol{\theta}^*}(\boldsymbol{x}_t, r, t)\right] = \frac{d\boldsymbol{x}_t}{dt} \tag{43}$$</p>
+<p><strong>步骤5:</strong> 积分得到结果。</p>
+<p>对方程(43)从$r$到$t$积分:
+$$\int_r^t \frac{d}{d\tau}\left[(\tau-r)\boldsymbol{u}<em _tau="\tau">{\boldsymbol{\theta}^*}(\boldsymbol{x}</em>$$}, r, \tau)\right] d\tau = \int_r^t \frac{d\boldsymbol{x}_{\tau}}{d\tau} d\tau \tag{44</p>
+<p>左端:
+$$(t-r)\boldsymbol{u}_{\boldsymbol{\theta}^<em>}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) - 0 = (t-r)\boldsymbol{u}</em>^</em>}(\boldsymbol{x}_t, r, t) \tag{45}$$</p>
+<p>右端:
+$$\boldsymbol{x}_t - \boldsymbol{x}_r \tag{46}$$</p>
+<p><strong>最终结果:</strong>
+$$\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t - \boldsymbol{x}_r = (t-r)\boldsymbol{u}</em>$$}^*}(\boldsymbol{x}_t, r, t) \tag{47</p>
+<p>这正是平均速度的定义!证明完毕。</p>
+<p><strong>stop_gradient的必要性分析:</strong></p>
+<p>如果去掉stop_gradient,求梯度时会多出JVP部分对$\boldsymbol{u}_{\boldsymbol{\theta}^*}$的雅可比矩阵,导致无法将方程化简为(43)的形式。</p>
+<p><strong>数学意义:</strong> stop_gradient的引入避免了对JVP求梯度,使得最优性条件能够化简为微分方程形式。</p>
+<h3 id="6">6. 与相关工作的联系<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 与中值定理方法的关系<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p><strong>中值定理方法</strong> (<a href="/archives/9881">《生成扩散模型漫谈(二十一)》</a>) 的核心思想:</p>
+<p>根据积分中值定理,存在$s \in [r,t]$使得:
+$$\frac{1}{t-r}\int_r^t \boldsymbol{v}<em _tau="\tau">{\boldsymbol{\theta}}(\boldsymbol{x}</em>$$},\tau) d\tau = \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_s, s) \tag{48</p>
+<p><strong>策略:</strong> 寻找最优的$s$来近似平均速度。</p>
+<p><strong>与MeanFlow的区别:</strong>
+- 中值定理: 寻找特殊点$s$,仍是求解器思想
+- MeanFlow: 直接建模平均速度,训练时学习</p>
+<h4 id="62-shortcut">6.2 与Shortcut模型的关系<a class="toc-link" href="#62-shortcut" title="Permanent link">&para;</a></h4>
+<p><strong>Shortcut模型</strong> (<a href="/archives/10617">《生成扩散模型漫谈(二十七)》</a>) 将步长作为条件输入。</p>
+<p><strong>平均速度的性质:</strong> 应该满足
+$$\boldsymbol{u}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, r, t) = \frac{1}{2}\left[\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, s, t) + \boldsymbol{u}</em>$$}}(\boldsymbol{x}_s, r, s)\right] \tag{49</p>
+<p>其中$s = (r+t)/2$。</p>
+<p><strong>Shortcut的正则化损失:</strong>
+$$\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">{\text{reg}} = \left|\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, r, t) - \frac{1}{2}\text{sg}\left[\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, s, t) + \boldsymbol{u}</em>$$}}(\boldsymbol{x}_s, r, s)\right]\right|^2 \tag{50</p>
+<p>混合ReFlow目标训练。</p>
+<p><strong>与MeanFlow的区别:</strong>
+- Shortcut: 直观但缺乏理论保证,像经验性探索
+- MeanFlow: 通过恒等变换有严格理论支撑</p>
+<h4 id="63-consistency-model">6.3 与Consistency Model的关系<a class="toc-link" href="#63-consistency-model" title="Permanent link">&para;</a></h4>
+<p><strong>连续一致性模型(sCM)</strong> 的目标函数:
+$$\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">{\text{sCM}} = \boldsymbol{f}</em>}}(\boldsymbol{x<em _text_sg="\text{sg">t, t) \cdot \frac{d}{dt}\boldsymbol{f}</em>$$}[\boldsymbol{\theta}]}(\boldsymbol{x}_t, t) \tag{51</p>
+<p>其中$\boldsymbol{f}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$是一致性函数。</p>
+<p><strong>变换关系:</strong> 令
+$$\boldsymbol{f}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = \boldsymbol{x}_t - t\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, 0, t) \tag{52</p>
+<p><strong>梯度等价性推导:</strong></p>
+<p>对$\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">{\text{sCM}}$求梯度:
+$$\nabla</em>}}\mathcal{L<em _boldsymbol_theta="\boldsymbol{\theta">{\text{sCM}} = \nabla</em>}}\boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) \cdot \left[\frac{d\boldsymbol{x}_t}{dt}\cdot\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{f}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) + \frac{\partial}{\partial t}\boldsymbol{f}</em>$$}}(\boldsymbol{x}_t, t)\right] \tag{53</p>
+<p>代入(52):
+$$\nabla_{\boldsymbol{\theta}}\boldsymbol{f}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = -t\nabla</em>$$}}\boldsymbol{u}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, 0, t) \tag{54</p>
+<p>$$\frac{\partial}{\partial \boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t}\boldsymbol{f}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) = \boldsymbol{I} - t\frac{\partial}{\partial \boldsymbol{x}_t}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, 0, t) \tag{55</p>
+<p>$$\frac{\partial}{\partial t}\boldsymbol{f}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = -\boldsymbol{u}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, 0, t) - t\frac{\partial}{\partial t}\boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, 0, t) \tag{56</p>
+<p>经过代数化简(详细过程略),可以证明:
+$$\nabla_{\boldsymbol{\theta}}\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">{\text{sCM}} \propto \nabla</em>}}\mathcal{L<em r="0">3|</em>$$} \tag{57</p>
+<p><strong>结论:</strong> sCM是MeanFlow在$r=0$时的特例。</p>
+<p><strong>MeanFlow的优势:</strong>
+1. 引入$r$参数,当$r=t$时退化为ReFlow,提供"兜底"保证
+2. 物理意义更清晰(平均速度 vs 一致性)
+3. 可以得到不依赖stop_gradient的第一、第二目标</p>
+<h3 id="7">7. 实现细节与技术要点<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 采样算法<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p><strong>单步生成:</strong>
+$$\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">0 = \boldsymbol{x}_1 - \boldsymbol{u}</em>$$}}(\boldsymbol{x}_1, 0, 1) \tag{58</p>
+<p><strong>多步生成</strong> (NFE=N):</p>
+<p>将$[0,1]$划分为$0=t_0 &lt; t_1 &lt; \cdots &lt; t_N = 1$</p>
+<p>从$\boldsymbol{x}<em i-1="i-1">N \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$开始:
+$$\boldsymbol{x}</em>} = \boldsymbol{x<em i-1="i-1">i - (t_i - t</em>})\boldsymbol{u<em i-1="i-1">{\boldsymbol{\theta}}(\boldsymbol{x}_i, t</em>$$}, t_i), \quad i=N,N-1,\ldots,1 \tag{59</p>
+<p><strong>理论优势:</strong> 多步时是对ODE积分的更精确近似,可以提升质量。</p>
+<h4 id="72">7.2 训练算法伪代码<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p><strong>输入:</strong> 数据集${\boldsymbol{x}<em i="1">0^{(i)}}</em>^M$</p>
+<p><strong>输出:</strong> 训练好的$\boldsymbol{u}_{\boldsymbol{\theta}}$</p>
+<div class="highlight"><pre><span></span><code><span class="k">for</span><span class="w"> </span><span class="n">epoch</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">max_epochs</span><span class="p">:</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">batch</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">data_loader</span><span class="p">:</span>
+<span class="w">        </span><span class="c1"># 采样数据点</span>
+<span class="w">        </span><span class="n">x0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">batch</span><span class="w">  </span><span class="c1"># 真实数据</span>
+
+<span class="w">        </span><span class="c1"># 采样噪声</span>
+<span class="w">        </span><span class="n">x1</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">N</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">I</span><span class="p">)</span>
+
+<span class="w">        </span><span class="c1"># 采样时间参数</span>
+<span class="w">        </span><span class="n">t</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">Uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span>
+<span class="w">        </span><span class="n">r</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">Uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w">  </span><span class="c1"># 或固定 r=0</span>
+
+<span class="w">        </span><span class="c1"># 构建插值</span>
+<span class="w">        </span><span class="n">xt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="o">-</span><span class="n">t</span><span class="p">)</span><span class="o">*</span><span class="n">x0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">t</span><span class="o">*</span><span class="n">x1</span>
+
+<span class="w">        </span><span class="c1"># 目标速度</span>
+<span class="w">        </span><span class="n">target</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">x0</span>
+
+<span class="w">        </span><span class="c1"># 计算预测(根据选择的目标)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">using_loss_1</span><span class="p">:</span>
+<span class="w">            </span><span class="n">u_rt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_theta</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">)</span>
+<span class="w">            </span><span class="n">u_tt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_theta</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">)</span>
+<span class="w">            </span><span class="n">jvp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_jvp</span><span class="p">(</span><span class="n">u_rt</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="n">xt</span><span class="p">,</span><span class="n">r</span><span class="p">,</span><span class="n">t</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="n">u_tt</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span>
+<span class="w">            </span><span class="n">pred</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_rt</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">r</span><span class="p">)</span><span class="o">*</span><span class="n">jvp</span>
+<span class="w">        </span><span class="k">elif</span><span class="w"> </span><span class="n">using_loss_2</span><span class="p">:</span>
+<span class="w">            </span><span class="n">u_rt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_theta</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">)</span>
+<span class="w">            </span><span class="n">u_tt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_theta</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">)</span>
+<span class="w">            </span><span class="n">jvp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_jvp</span><span class="p">(</span><span class="n">u_rt</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="n">xt</span><span class="p">,</span><span class="n">r</span><span class="p">,</span><span class="n">t</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="n">u_tt</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span>
+<span class="w">            </span><span class="n">pred</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_rt</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">r</span><span class="p">)</span><span class="o">*</span><span class="n">stop_gradient</span><span class="p">(</span><span class="n">jvp</span><span class="p">)</span>
+<span class="w">        </span><span class="k">elif</span><span class="w"> </span><span class="n">using_loss_3</span><span class="p">:</span>
+<span class="w">            </span><span class="n">u_rt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_theta</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span><span class="w"> </span><span class="n">r</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">)</span>
+<span class="w">            </span><span class="n">jvp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">compute_jvp</span><span class="p">(</span><span class="n">u_rt</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="n">xt</span><span class="p">,</span><span class="n">r</span><span class="p">,</span><span class="n">t</span><span class="p">),</span><span class="w"> </span><span class="p">(</span><span class="n">target</span><span class="p">,</span><span class="mi">0</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span>
+<span class="w">            </span><span class="n">pred</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u_rt</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">t</span><span class="o">-</span><span class="n">r</span><span class="p">)</span><span class="o">*</span><span class="n">stop_gradient</span><span class="p">(</span><span class="n">jvp</span><span class="p">)</span>
+
+<span class="w">        </span><span class="c1"># 计算损失</span>
+<span class="w">        </span><span class="n">loss</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">||</span><span class="n">pred</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">target</span><span class="o">||^</span><span class="mi">2</span>
+
+<span class="w">        </span><span class="c1"># 反向传播</span>
+<span class="w">        </span><span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">loss</span><span class="p">)</span>
+</code></pre></div>
+
+<h4 id="73-jvp">7.3 JVP的实现<a class="toc-link" href="#73-jvp" title="Permanent link">&para;</a></h4>
+<p><strong>PyTorch示例:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">compute_jvp</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">tangents</span><span class="p">):</span>
+    <span class="c1"># func: 要计算JVP的函数</span>
+    <span class="c1"># inputs: 输入点 (xt, r, t)</span>
+    <span class="c1"># tangents: 切向量 (v_xt, v_r, v_t)</span>
+
+    <span class="n">outputs</span><span class="p">,</span> <span class="n">jvp_out</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">functional</span><span class="o">.</span><span class="n">jvp</span><span class="p">(</span>
+        <span class="n">func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">tangents</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">outputs</span><span class="p">,</span> <span class="n">jvp_out</span>
+</code></pre></div>
+
+<p><strong>JAX示例:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">compute_jvp</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">tangents</span><span class="p">):</span>
+    <span class="n">primals_out</span><span class="p">,</span> <span class="n">tangents_out</span> <span class="o">=</span> <span class="n">jax</span><span class="o">.</span><span class="n">jvp</span><span class="p">(</span>
+        <span class="n">func</span><span class="p">,</span> <span class="n">inputs</span><span class="p">,</span> <span class="n">tangents</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">primals_out</span><span class="p">,</span> <span class="n">tangents_out</span>
+</code></pre></div>
+
+<h3 id="8">8. 理论深度分析<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 为什么平均速度更适合大步长?<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p><strong>瞬时速度的局限性:</strong></p>
+<p>ODE $\frac{d\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t}{dt} = \boldsymbol{v}</em>_t, t)$ 描述的是}}(\boldsymbol{x<strong>局部</strong>性质,只在$\Delta t \to 0$时精确。</p>
+<p>欧拉法离散化:
+$$\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t-\Delta t} \approx \boldsymbol{x}_t - \boldsymbol{v}</em>$$}}(\boldsymbol{x}_t, t)\Delta t \tag{60</p>
+<p><strong>局部截断误差:</strong> $O(\Delta t^2)$</p>
+<p><strong>全局累积误差:</strong> $O(\Delta t)$</p>
+<p>当$\Delta t$大时,误差不可接受。</p>
+<p><strong>平均速度的优势:</strong></p>
+<p>平均速度直接建模<strong>全局</strong>性质:
+$$\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t-\Delta t} = \boldsymbol{x}_t - \Delta t \cdot \boldsymbol{u}</em>$$}}(\boldsymbol{x}_t, t-\Delta t, t) \tag{61</p>
+<p>理论上,当模型完美学习时,这是<strong>精确</strong>的,无近似误差!</p>
+<p><strong>类比:</strong>
+- 瞬时速度: 用切线近似曲线
+- 平均速度: 直接学习曲线的弦</p>
+<h4 id="82">8.2 双时间参数的意义<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<p><strong>为什么需要$r$和$t$两个参数?</strong></p>
+<ol>
+<li><strong>灵活性:</strong> 可以建模任意时间区间$[r,t]$的平均速度</li>
+<li><strong>ReFlow兜底:</strong> 当$r=t$时,退化为瞬时速度,即ReFlow</li>
+<li><strong>渐进学习:</strong> 可以先学小区间,再泛化到大区间</li>
+</ol>
+<p><strong>训练策略:</strong></p>
+<p>可以设计课程学习:
+- 早期训练: $r$和$t$接近,学习局部性质
+- 后期训练: $r$和$t$相差大,学习全局性质</p>
+<h4 id="83">8.3 理论局限性分析<a class="toc-link" href="#83" title="Permanent link">&para;</a></h4>
+<p><strong>stop_gradient的理论地位:</strong></p>
+<p>第三目标中的stop_gradient:
+- 数学上: 改变了优化目标的性质
+- 优化上: 使最优点变为驻点而非极小值点
+- 实践上: 依赖优化器动力学</p>
+<p><strong>开放问题:</strong>
+1. 能否找到不依赖stop_gradient的全局性建模方法?
+2. stop_gradient的稳定性如何理论保证?
+3. 不同优化器对结果的影响?</p>
+<h3 id="9">9. 实验观察与实践建议<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 三个目标的对比<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p><strong>第一目标($\mathcal{L}_1$):</strong>
+- 优点: 理论最清晰,无stop_gradient
+- 缺点: 计算量最大(二阶梯度)
+- 适用: 理论研究,小规模实验</p>
+<p><strong>第二目标($\mathcal{L}_2$):</strong>
+- 优点: 平衡理论与效率
+- 缺点: 仍需两次前向传播
+- 适用: 高质量生成任务</p>
+<p><strong>第三目标($\mathcal{L}_3$):</strong>
+- 优点: 最快,工程实践友好
+- 缺点: 理论上有"神秘感"
+- 适用: 大规模生产应用</p>
+<h4 id="92">9.2 超参数设置建议<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p><strong>时间采样:</strong>
+- $t \sim \text{Uniform}(0, 1)$: 简单有效
+- $t \sim \text{Beta}(\alpha, \beta)$: 可以调整难度分布</p>
+<p><strong>$r$的选择:</strong>
+- $r = 0$: 类似sCM,理论保证强
+- $r \sim \text{Uniform}(0, t)$: 更灵活,学习全局</p>
+<p><strong>学习率:</strong>
+- 建议使用warmup
+- AdamW优化器效果较好</p>
+<h3 id="10">10. 总结与展望<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 核心贡献<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p>MeanFlow的核心贡献可以总结为:</p>
+<ol>
+<li><strong>概念创新:</strong> 从瞬时速度转向平均速度,突破ODE的$\Delta t \to 0$限制</li>
+<li><strong>理论严格:</strong> 通过恒等变换和ReFlow理论,提供了严格的数学基础</li>
+<li><strong>多个目标:</strong> 提供了三个训练目标,平衡理论纯粹性与计算效率</li>
+<li><strong>统一框架:</strong> 将sCM、Shortcut等方法统一到平均速度框架下</li>
+</ol>
+<h4 id="102">10.2 理论意义<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p><strong>对扩散模型的理解:</strong>
+- 生成过程不必局限于无限小步长
+- 全局性质可以直接建模
+- 理论保证与实践效率可以兼顾</p>
+<p><strong>对未来研究的启示:</strong>
+- 寻找更多的全局性质进行建模
+- 探索stop_gradient的替代方案
+- 发展更精细的理论分析工具</p>
+<h4 id="103">10.3 开放问题<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>最优时间离散化:</strong> 多步生成时,如何选择最优的时间点?</li>
+<li><strong>高阶平均速度:</strong> 能否引入加速度等高阶概念?</li>
+<li><strong>条件生成:</strong> 如何将平均速度扩展到条件生成?</li>
+<li><strong>离散数据:</strong> 能否应用到文本等离散模态?</li>
+</ol>
+<h4 id="104">10.4 实践展望<a class="toc-link" href="#104" title="Permanent link">&para;</a></h4>
+<p>MeanFlow为扩散模型的快速生成开辟了新路径:
+- <strong>一步生成:</strong> 理论上可以达到与多步生成相当的质量
+- <strong>可扩展性:</strong> 可以通过增加步数提升效果
+- <strong>训练简单:</strong> 单一目标,无对抗训练
+- <strong>理论清晰:</strong> 便于进一步改进和扩展</p>
+<p><strong>未来方向:</strong>
+1. 结合其他加速技术(蒸馏、剪枝等)
+2. 应用到视频、3D等高维数据
+3. 与其他生成模型(VAE、GAN)结合
+4. 开发更高效的网络架构</p>
+<hr />
+<p><strong>参考文献:</strong>
+- MeanFlow原论文: <a href="https://papers.cool/arxiv/2505.13447">Mean Flows for One-step Generative Modeling</a>
+- ReFlow: <a href="https://papers.cool/arxiv/2209.03003">Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow</a>
+- sCM: <a href="https://papers.cool/arxiv/2410.11081">Simplifying, Stabilizing and Scaling Continuous-Time Consistency Models</a></p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -289,7 +694,7 @@ url={\url{https://spaces.ac.cn/archives/10958}},<br />
                             
                             <a href="moe环游记5均匀分布的反思.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#176 MoE环游记：5、均匀分布的反思</div>
+                                <div class="nav-title">#322 MoE环游记：5、均匀分布的反思</div>
                             </a>
                             
                         </div>
@@ -297,7 +702,7 @@ url={\url{https://spaces.ac.cn/archives/10958}},<br />
                             
                             <a href="等值振荡定理最优多项式逼近的充要条件.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#178 等值振荡定理：最优多项式逼近的充要条件</div>
+                                <div class="nav-title">#324 等值振荡定理：最优多项式逼近的充要条件</div>
                             </a>
                             
                         </div>
@@ -334,7 +739,19 @@ url={\url{https://spaces.ac.cn/archives/10958}},<br />
 <li><a href="#_10">相关工作</a></li>
 <li><a href="#_11">一致模型</a></li>
 <li><a href="#_12">文章小结</a></li>
-<li><a href="#_13">公式推导与注释</a></li>
+<li><a href="#_13">公式推导与注释</a><ul>
+<li><a href="#1">1. 核心概念与数学框架</a></li>
+<li><a href="#2">2. 从瞬时速度到平均速度的动机</a></li>
+<li><a href="#3">3. 瞬时速度与平均速度的恒等变换</a></li>
+<li><a href="#4-meanflow">4. MeanFlow的三个训练目标</a></li>
+<li><a href="#5">5. 理论证明与收敛性分析</a></li>
+<li><a href="#6">6. 与相关工作的联系</a></li>
+<li><a href="#7">7. 实现细节与技术要点</a></li>
+<li><a href="#8">8. 理论深度分析</a></li>
+<li><a href="#9">9. 实验观察与实践建议</a></li>
+<li><a href="#10">10. 总结与展望</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

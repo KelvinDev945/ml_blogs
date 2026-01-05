@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=微分方程">微分方程</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #155 生成扩散模型漫谈（二十七）：将步长作为条件输入
+                    #301 生成扩散模型漫谈（二十七）：将步长作为条件输入
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#155</span>
+                <span class="post-number">#301</span>
                 生成扩散模型漫谈（二十七）：将步长作为条件输入
             </h1>
             <div class="post-meta">
@@ -213,7 +213,416 @@ url={\url{https://spaces.ac.cn/archives/10617}},<br />
 } </p>
 <hr />
 <h2 id="_7">公式推导与注释<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1">1. 核心概念与数学框架<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<h4 id="11-reflow">1.1 ReFlow框架的基础<a class="toc-link" href="#11-reflow" title="Permanent link">&para;</a></h4>
+<p>ReFlow框架允许我们在噪声分布 $\boldsymbol{x}_0 \sim p_0(\boldsymbol{x}_0)$ 和目标分布 $\boldsymbol{x}_1 \sim p_1(\boldsymbol{x}_1)$ 之间构建任意的运动轨迹。最简单的选择是直线轨迹：</p>
+<p>\begin{equation}
+\boldsymbol{x}_t = (1-t)\boldsymbol{x}_0 + t \boldsymbol{x}_1, \quad t \in [0,1] \tag{1}
+\end{equation}</p>
+<p><strong>数学直觉</strong>：这个线性插值公式确保了：
+- 当 $t=0$ 时，$\boldsymbol{x}_0$ 是纯噪声
+- 当 $t=1$ 时，$\boldsymbol{x}_1$ 是真实样本
+- 中间时刻 $t \in (0,1)$ 是从噪声到真实样本的平滑过渡</p>
+<p>对式 (1) 关于时间 $t$ 求导，得到速度场：</p>
+<p>\begin{equation}
+\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{x}_1 - \boldsymbol{x}_0 \tag{2}
+\end{equation}</p>
+<p><strong>证明</strong>：
+\begin{equation}
+\frac{d\boldsymbol{x}_t}{dt} = \frac{d}{dt}[(1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_1] = -\boldsymbol{x}_0 + \boldsymbol{x}_1 = \boldsymbol{x}_1 - \boldsymbol{x}_0 \tag{3}
+\end{equation}</p>
+<h4 id="12">1.2 速度场学习问题<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p>式 (2) 中的ODE显式依赖于目标 $\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">1$，这在生成阶段是不可知的。为此，我们引入参数化的速度场 $\boldsymbol{v}</em>_0$。}}(\boldsymbol{x}_t, t)$ 来近似 $\boldsymbol{x}_1 - \boldsymbol{x</p>
+<p><strong>训练目标</strong>：
+\begin{equation}
+\boldsymbol{\theta}^* = \mathop{\text{argmin}}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\theta}} \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p_0,\boldsymbol{x}_1\sim p_1, t\sim U(0,1)}\left[\Vert\boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t) - (\boldsymbol{x}_1 - \boldsymbol{x}_0)\Vert^2\right] \tag{4</p>
+<p>其中 $\boldsymbol{x}_t = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_1$。</p>
+<p><strong>损失函数的数学意义</strong>：
+- 这是一个最小二乘问题，寻找最优的速度场预测
+- 期望是对三个随机变量取的：起点 $\boldsymbol{x}_0$，终点 $\boldsymbol{x}_1$，以及时间 $t$
+- $L^2$ 范数保证了速度场在各个方向上的均衡拟合</p>
+<p>训练完成后，生成过程变为求解ODE：
+\begin{equation}
+\frac{d\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t}{dt} = \boldsymbol{v}</em>
+\end{equation}}^*}(\boldsymbol{x}_t, t) \tag{5</p>
+<h3 id="2">2. 欧拉方法与步长问题<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 欧拉离散化<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>在实际计算中，我们无法精确求解连续时间的ODE (5)，而是使用<strong>欧拉方法</strong>进行离散化：</p>
+<p>\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t+\epsilon} = \boldsymbol{x}_t + \epsilon \cdot \boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t) \tag{6</p>
+<p><strong>欧拉方法的误差分析</strong>：</p>
+<p>记精确解为 $\boldsymbol{x}^*(t)$，欧拉方法的局部截断误差为：</p>
+<p>\begin{equation}
+\boldsymbol{e}<em _boldsymbol_theta="\boldsymbol{\theta">{\text{local}} = \boldsymbol{x}^<em>(t+\epsilon) - [\boldsymbol{x}^</em>(t) + \epsilon \boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}^*(t), t)] \tag{7</p>
+<p>通过泰勒展开：
+\begin{equation}
+\boldsymbol{x}^<em>(t+\epsilon) = \boldsymbol{x}^</em>(t) + \epsilon \frac{d\boldsymbol{x}^<em>}{dt}\bigg|_t + \frac{\epsilon^2}{2}\frac{d^2\boldsymbol{x}^</em>}{dt^2}\bigg|_t + O(\epsilon^3) \tag{8}
+\end{equation}</p>
+<p>因为 $\frac{d\boldsymbol{x}^<em>}{dt} = \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}^</em>, t)$，所以：
+\begin{equation}
+\boldsymbol{e}_{\text{local}} = \frac{\epsilon^2}{2}\frac{d^2\boldsymbol{x}^*}{dt^2}\bigg|_t + O(\epsilon^3) = O(\epsilon^2) \tag{9}
+\end{equation}</p>
+<p><strong>全局误差</strong>：假设需要 $N = 1/\epsilon$ 步从 $t=0$ 到 $t=1$，全局误差为：
+\begin{equation}
+\boldsymbol{e}_{\text{global}} = N \cdot O(\epsilon^2) = \frac{1}{\epsilon} \cdot O(\epsilon^2) = O(\epsilon) \tag{10}
+\end{equation}</p>
+<p><strong>结论</strong>：步长 $\epsilon$ 越小，误差越小，但生成步数 $N = 1/\epsilon$ 越大，计算成本越高。</p>
+<h4 id="22-">2.2 步长-精度权衡<a class="toc-link" href="#22-" title="Permanent link">&para;</a></h4>
+<p>生成质量和计算成本之间存在根本矛盾：</p>
+<table>
+<thead>
+<tr>
+<th>步长 $\epsilon$</th>
+<th>生成步数 $N$</th>
+<th>误差量级</th>
+<th>生成质量</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$\epsilon = 1$</td>
+<td>$N = 1$</td>
+<td>$O(1)$</td>
+<td>很差</td>
+</tr>
+<tr>
+<td>$\epsilon = 0.1$</td>
+<td>$N = 10$</td>
+<td>$O(0.1)$</td>
+<td>较好</td>
+</tr>
+<tr>
+<td>$\epsilon = 0.01$</td>
+<td>$N = 100$</td>
+<td>$O(0.01)$</td>
+<td>很好</td>
+</tr>
+<tr>
+<td>$\epsilon = 0.001$</td>
+<td>$N = 1000$</td>
+<td>$O(0.001)$</td>
+<td>极好</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Shortcut模型的核心思想</strong>：与其被动接受欧拉方法的误差，不如主动让模型适应不同的步长。</p>
+<h3 id="3-shortcut">3. Shortcut模型：步长条件化<a class="toc-link" href="#3-shortcut" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 步长条件速度场<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p>传统速度场 $\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$ 只依赖于状态 $\boldsymbol{x}_t$ 和时间 $t$。Shortcut模型将步长 $\epsilon$ 也作为输入：</p>
+<p>\begin{equation}
+\boldsymbol{v}<em>{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, \epsilon): \mathbb{R}^d \times [0,1] \times \mathbb{R}</em>+ \to \mathbb{R}^d \tag{11}
+\end{equation}</p>
+<p><strong>更新规则</strong>：
+\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t+\epsilon} = \boldsymbol{x}_t + \epsilon \cdot \boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t, \epsilon) \tag{12</p>
+<p><strong>数学直觉</strong>：
+- 当 $\epsilon \to 0$，$\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, \epsilon)$ 应该收敛到精确的ODE速度场
+- 当 $\epsilon$ 较大时，模型可以"预见"更远的未来，输出修正后的速度场
+- 这类似于高阶ODE求解器，但通过学习而非手工设计</p>
+<h4 id="32-ode">3.2 第一个损失函数：精确ODE损失<a class="toc-link" href="#32-ode" title="Permanent link">&para;</a></h4>
+<p>为了保证 $\epsilon \to 0$ 时的精确性，我们需要训练精确的ODE模型：</p>
+<p>\begin{equation}
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">1(\boldsymbol{\theta}) = \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p_0,\boldsymbol{x}_1\sim p_1, t\sim U(0,1)}\left[\Vert\boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t, 0) - (\boldsymbol{x}_1 - \boldsymbol{x}_0)\Vert^2\right] \tag{13</p>
+<p><strong>注意事项</strong>：
+- 这里步长设为 $\epsilon = 0$，表示无限小步长
+- 这确保了模型在极限情况下的正确性
+- 单独这个损失还不够，因为它没有告诉模型如何处理 $\epsilon &gt; 0$ 的情况</p>
+<h3 id="4">4. 自洽性约束：核心创新<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 自洽性条件的推导<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p>Shortcut模型的关键洞察是：<strong>大步长应该等于多个小步长的组合</strong>。</p>
+<p>具体地，用步长 $2\epsilon$ 走1步应该等于用步长 $\epsilon$ 走2步：</p>
+<p>\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t + 2\epsilon \cdot \boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t, 2\epsilon) = \text{(用步长 } \epsilon \text{ 走2步的结果)} \tag{14</p>
+<p><strong>第一步</strong>（从 $t$ 到 $t+\epsilon$）：
+\begin{equation}
+\tilde{\boldsymbol{x}}<em _boldsymbol_theta="\boldsymbol{\theta">{t+\epsilon} = \boldsymbol{x}_t + \epsilon \cdot \boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t, \epsilon) \tag{15</p>
+<p><strong>第二步</strong>（从 $t+\epsilon$ 到 $t+2\epsilon$）：
+\begin{equation}
+\tilde{\boldsymbol{x}}<em t_epsilon="t+\epsilon">{t+2\epsilon} = \tilde{\boldsymbol{x}}</em>} + \epsilon \cdot \boldsymbol{v<em t_epsilon="t+\epsilon">{\boldsymbol{\theta}}(\tilde{\boldsymbol{x}}</em>
+\end{equation}}, t+\epsilon, \epsilon) \tag{16</p>
+<p>将式 (15) 代入式 (16)：
+\begin{equation}
+\begin{aligned}
+\tilde{\boldsymbol{x}}<em _boldsymbol_theta="\boldsymbol{\theta">{t+2\epsilon} &amp;= \boldsymbol{x}_t + \epsilon \cdot \boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, \epsilon) \
+&amp;\quad + \epsilon \cdot \boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t + \epsilon \cdot \boldsymbol{v}</em>_t, t, \epsilon), t+\epsilon, \epsilon)
+\end{aligned} \tag{17}
+\end{equation}}}(\boldsymbol{x</p>
+<p><strong>自洽性条件</strong>：要求
+\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t + 2\epsilon \cdot \boldsymbol{v}</em>}}(\boldsymbol{x<em t_2_epsilon="t+2\epsilon">t, t, 2\epsilon) = \tilde{\boldsymbol{x}}</em>
+\end{equation}} \tag{18</p>
+<p>两边减去 $\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t$ 并除以 $2\epsilon$：
+\begin{equation}
+\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, 2\epsilon) = \frac{1}{2}\left[\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, \epsilon) + \boldsymbol{v}</em>
+\end{equation}}}(\tilde{\boldsymbol{x}}_{t+\epsilon}, t+\epsilon, \epsilon)\right] \tag{19</p>
+<p><strong>数学意义</strong>：大步长的速度场应该是两个小步长速度场的平均。这是一种<strong>时间一致性约束</strong>。</p>
+<h4 id="42">4.2 第二个损失函数：自洽性损失<a class="toc-link" href="#42" title="Permanent link">&para;</a></h4>
+<p>基于式 (19)，我们构造自洽性损失：</p>
+<p>\begin{equation}
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">2(\boldsymbol{\theta}) = \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0,\boldsymbol{x}_1,t,\epsilon}\left[\left\Vert\boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t, 2\epsilon) - \frac{1}{2}\left[\boldsymbol{v}_1 + \boldsymbol{v}_2\right]\right\Vert^2\right] \tag{20</p>
+<p>其中：
+\begin{equation}
+\begin{aligned}
+\boldsymbol{v}<em _boldsymbol_theta="\boldsymbol{\theta">1 &amp;= \boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, \epsilon) \
+\boldsymbol{v}_2 &amp;= \boldsymbol{v}</em>}}(\boldsymbol{x<em t_epsilon="t+\epsilon">t + \epsilon \boldsymbol{v}_1, t+\epsilon, \epsilon) \
+\tilde{\boldsymbol{x}}</em>_1
+\end{aligned} \tag{21}
+\end{equation}} &amp;= \boldsymbol{x}_t + \epsilon \boldsymbol{v</p>
+<p><strong>展开损失函数</strong>：
+\begin{equation}
+\begin{aligned}
+\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">2 = \mathbb{E}\bigg[&amp;\Vert\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, 2\epsilon)\Vert^2 \
+&amp;- \boldsymbol{v}</em>_2] \
+&amp;+ \frac{1}{4}\Vert\boldsymbol{v}_1 + \boldsymbol{v}_2\Vert^2\bigg]
+\end{aligned} \tag{22}
+\end{equation}}}(\boldsymbol{x}_t, t, 2\epsilon) \cdot [\boldsymbol{v}_1 + \boldsymbol{v</p>
+<h3 id="5">5. 多尺度自洽性<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 离散步长集合<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>Shortcut模型不对所有 $\epsilon \in (0,1]$ 进行训练，而是选择离散的步长集合：</p>
+<p>\begin{equation}
+\mathcal{E} = {2^{-7}, 2^{-6}, 2^{-5}, 2^{-4}, 2^{-3}, 2^{-2}, 2^{-1}, 2^0} \tag{23}
+\end{equation}</p>
+<p><strong>选择理由</strong>：
+1. <strong>指数间隔</strong>：$\epsilon_k = 2^{-k}$ 覆盖了从小步长到大步长的广泛范围
+2. <strong>二进制关系</strong>：$2\epsilon_k = \epsilon_{k-1}$，自洽性条件自然成立
+3. <strong>计算效率</strong>：有限的步长集合可以用Embedding表示</p>
+<h4 id="52">5.2 递归自洽性<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p>对于任意的 $k$，我们有：
+\begin{equation}
+\epsilon_{k-1} = 2\epsilon_k \tag{24}
+\end{equation}</p>
+<p>因此自洽性条件可以递归应用：
+\begin{equation}
+\boldsymbol{v}<em k-1="k-1">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, \epsilon</em>}) = \frac{1}{2}\left[\boldsymbol{v<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, \epsilon_k) + \boldsymbol{v}</em>
+\end{equation}}}(\tilde{\boldsymbol{x}}_{t+\epsilon_k}, t+\epsilon_k, \epsilon_k)\right] \tag{25</p>
+<p><strong>训练策略</strong>：
+- 对每个 $\epsilon_k \in {2^{-7}, ..., 2^{-1}}$，随机选择时间 $t \sim U(0, 1-\epsilon_k)$
+- 计算自洽性损失 $\mathcal{L}_2$ for 步长对 $(\epsilon_k, 2\epsilon_k)$
+- 这确保了所有尺度上的一致性</p>
+<h3 id="6">6. 总损失函数与训练算法<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 组合损失<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p>最终的训练目标是：
+\begin{equation}
+\mathcal{L}(\boldsymbol{\theta}) = \lambda_1 \mathcal{L}_1(\boldsymbol{\theta}) + \lambda_2 \mathcal{L}_2(\boldsymbol{\theta}) \tag{26}
+\end{equation}</p>
+<p><strong>权重选择</strong>：
+- 理论上 $\lambda_1 = \lambda_2 = 1$ 即可
+- 但实际中 $\mathcal{L}_2$ 涉及两次前向传播，计算量是 $\mathcal{L}_1$ 的两倍
+- 论文采用策略：75% 样本用于 $\mathcal{L}_1$，25% 样本用于 $\mathcal{L}_2$
+- 这相当于隐式地设置 $\lambda_1 : \lambda_2 = 3:1$</p>
+<h4 id="62-stop-gradient">6.2 Stop Gradient技巧<a class="toc-link" href="#62-stop-gradient" title="Permanent link">&para;</a></h4>
+<p>实际实现中，$\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">2$ 被修改为：
+\begin{equation}
+\mathcal{L}_2 = \mathbb{E}\left[\left\Vert\boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t, 2\epsilon) - \text{sg}\left[\frac{\boldsymbol{v}_1 + \boldsymbol{v}_2}{2}\right]\right\Vert^2\right] \tag{27</p>
+<p>其中 $\text{sg}[\cdot]$ 是stop gradient算子。</p>
+<p><strong>原因分析</strong>：
+1. <strong>目标视角</strong>：将 $\frac{\boldsymbol{v}_1 + \boldsymbol{v}_2}{2}$ 视为固定的"目标"
+2. <strong>计算效率</strong>：避免对 $\boldsymbol{v}_2$ 的二次反向传播，节省内存和时间
+3. <strong>训练稳定性</strong>：类似BYOL等自监督学习方法，防止梯度爆炸</p>
+<p><strong>梯度流分析</strong>：</p>
+<p>不使用stop gradient时：
+\begin{equation}
+\frac{\partial \mathcal{L}_2}{\partial \boldsymbol{\theta}} = \frac{\partial}{\partial \boldsymbol{\theta}}\left[\text{模型预测}\right] - \frac{\partial}{\partial \boldsymbol{\theta}}\left[\frac{\boldsymbol{v}_1 + \boldsymbol{v}_2}{2}\right] \tag{28}
+\end{equation}</p>
+<p>使用stop gradient后：
+\begin{equation}
+\frac{\partial \mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">2}{\partial \boldsymbol{\theta}} = \frac{\partial}{\partial \boldsymbol{\theta}}\left[\boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t, 2\epsilon)\right] \tag{29</p>
+<h3 id="7-embedding">7. 步长Embedding的实现<a class="toc-link" href="#7-embedding" title="Permanent link">&para;</a></h3>
+<h4 id="71-embedding">7.1 离散Embedding方案<a class="toc-link" href="#71-embedding" title="Permanent link">&para;</a></h4>
+<p>由于步长集合 $\mathcal{E}$ 是有限的（9个值，包括0），可以用Embedding表示：</p>
+<p>\begin{equation}
+\epsilon \to \mathbf{e}<em _text_emb="\text{emb">{\epsilon} \in \mathbb{R}^{d</em>
+\end{equation}}}} \tag{30</p>
+<p><strong>实现细节</strong>：
+1. 建立映射 ${0, 2^{-7}, ..., 2^0} \to {0, 1, ..., 8}$
+2. 使用Embedding层：$\mathbf{E} \in \mathbb{R}^{9 \times d_{\text{emb}}}$
+3. 组合时间和步长的Embedding：
+   \begin{equation}
+   \mathbf{c}<em _epsilon="\epsilon">{t,\epsilon} = \mathbf{e}_t + \mathbf{e}</em>
+   \end{equation}
+4. 将 $\mathbf{c}_{t,\epsilon}$ 注入U-Net的每一层} \tag{31</p>
+<h4 id="72-embedding">7.2 与时间Embedding的融合<a class="toc-link" href="#72-embedding" title="Permanent link">&para;</a></h4>
+<p><strong>标准时间Embedding</strong>（Sinusoidal位置编码）：
+\begin{equation}
+\begin{aligned}
+[\mathbf{e}<em 2i="2i">t]</em>\right) \
+[\mathbf{e}} &amp;= \sin\left(\frac{t}{10000^{2i/d}<em 2i_1="2i+1">t]</em>\right)
+\end{aligned} \tag{32}
+\end{equation}} &amp;= \cos\left(\frac{t}{10000^{2i/d}</p>
+<p><strong>组合方案</strong>：
+\begin{equation}
+\mathbf{h} = \text{MLP}(\mathbf{e}<em _epsilon="\epsilon">t + \mathbf{e}</em>
+\end{equation}}) \tag{33</p>
+<h3 id="8">8. 推理过程分析<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 单步生成<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p>设步长 $\epsilon = 1$，从纯噪声 $\boldsymbol{x}_0 \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$ 出发：</p>
+<p>\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">1 = \boldsymbol{x}_0 + 1 \cdot \boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_0, 0, 1) \tag{34</p>
+<p><strong>为什么可行</strong>：
+- 训练时的自洽性约束确保了 $\boldsymbol{v}_{\boldsymbol{\theta}}(\cdot, \cdot, 1)$ 能够"预见"整个轨迹
+- 它隐式地整合了多个小步长的信息</p>
+<h4 id="82">8.2 多步生成<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<p>也可以使用更小的步长 $\epsilon &lt; 1$ 进行多步生成：</p>
+<p>\begin{equation}
+\boldsymbol{x}<em k_1="k+1">{t</em>}} = \boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">{t_k} + \epsilon \cdot \boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_{t_k}, t_k, \epsilon), \quad t_k = k\epsilon \tag{35</p>
+<p><strong>质量-速度权衡</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>生成步数</th>
+<th>步长 $\epsilon$</th>
+<th>FID</th>
+<th>NFE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>1</td>
+<td>~10</td>
+<td>1</td>
+</tr>
+<tr>
+<td>2</td>
+<td>0.5</td>
+<td>~8</td>
+<td>2</td>
+</tr>
+<tr>
+<td>4</td>
+<td>0.25</td>
+<td>~6</td>
+<td>4</td>
+</tr>
+<tr>
+<td>8</td>
+<td>0.125</td>
+<td>~5</td>
+<td>8</td>
+</tr>
+</tbody>
+</table>
+<h3 id="9-ode">9. 与传统ODE求解器的对比<a class="toc-link" href="#9-ode" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 欧拉方法（一阶）<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p><strong>传统欧拉</strong>：
+\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t+\epsilon} = \boldsymbol{x}_t + \epsilon \cdot \boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t) \tag{36</p>
+<p>局部误差：$O(\epsilon^2)$，全局误差：$O(\epsilon)$</p>
+<p><strong>Shortcut</strong>：
+\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t+\epsilon} = \boldsymbol{x}_t + \epsilon \cdot \boldsymbol{v}</em>
+\end{equation}}}(\boldsymbol{x}_t, t, \epsilon) \tag{37</p>
+<p>通过学习适应步长，减小了固定步长带来的系统误差。</p>
+<h4 id="92-heun">9.2 Heun方法（二阶）<a class="toc-link" href="#92-heun" title="Permanent link">&para;</a></h4>
+<p><strong>Heun方法</strong>（预测-校正）：
+\begin{equation}
+\begin{aligned}
+\tilde{\boldsymbol{x}}<em _boldsymbol_theta="\boldsymbol{\theta">{t+\epsilon} &amp;= \boldsymbol{x}_t + \epsilon \cdot \boldsymbol{v}</em>}}(\boldsymbol{x<em t_epsilon="t+\epsilon">t, t) \
+\boldsymbol{x}</em>} &amp;= \boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t + \frac{\epsilon}{2}[\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) + \boldsymbol{v}</em>, t+\epsilon)]
+\end{aligned} \tag{38}
+\end{equation}}}(\tilde{\boldsymbol{x}}_{t+\epsilon</p>
+<p>局部误差：$O(\epsilon^3)$，全局误差：$O(\epsilon^2)$</p>
+<p><strong>Shortcut的隐式Heun</strong>：
+\begin{equation}
+\boldsymbol{v}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, 2\epsilon) \approx \frac{1}{2}[\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t, \epsilon) + \boldsymbol{v}</em>
+\end{equation}}}(\tilde{\boldsymbol{x}}_{t+\epsilon}, t+\epsilon, \epsilon)] \tag{39</p>
+<p>这与Heun方法的思想类似，但是通过学习而非手工设计。</p>
+<h3 id="10">10. 理论保证与收敛性<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 极限情况<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p><strong>定理1</strong>：当 $\epsilon \to 0$ 时，Shortcut模型收敛到精确ODE。</p>
+<p><strong>证明草图</strong>：
+- 损失 $\mathcal{L}<em 0="0" _epsilon="\epsilon" _to="\to">1$ 确保了 $\lim</em>_0$
+- 这是精确ODE的速度场
+- 因此在极限下，模型是正确的}\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, \epsilon) = \boldsymbol{x}_1 - \boldsymbol{x</p>
+<h4 id="102">10.2 有限步长的逼近质量<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p>记 $\boldsymbol{x}_1^*$ 为精确解，$\boldsymbol{x}_1^{(\epsilon)}$ 为步长 $\epsilon$ 的近似解。</p>
+<p><strong>定理2</strong>（非正式）：在适当的正则性条件下，
+\begin{equation}
+\Vert\boldsymbol{x}_1^{(\epsilon)} - \boldsymbol{x}_1^*\Vert = O(\epsilon^p) \tag{40}
+\end{equation}
+其中 $p \geq 1$，且可能 $p &gt; 1$（通过自洽性约束提升阶数）。</p>
+<p><strong>直觉</strong>：自洽性约束 $\mathcal{L}_2$ 强制模型在不同尺度上保持一致，这降低了离散化误差。</p>
+<h3 id="11">11. 实践建议与超参数<a class="toc-link" href="#11" title="Permanent link">&para;</a></h3>
+<h4 id="111">11.1 训练超参数<a class="toc-link" href="#111" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>批量大小</strong>：512（其中75%用于 $\mathcal{L}_1$，25%用于 $\mathcal{L}_2$）</li>
+<li><strong>学习率</strong>：$2 \times 10^{-4}$，使用cosine衰减</li>
+<li><strong>训练步数</strong>：300K-500K</li>
+<li><strong>时间采样</strong>：$t \sim U(0, 1)$ for $\mathcal{L}_1$；$t \sim U(0, 1-\epsilon)$ for $\mathcal{L}_2$</li>
+<li><strong>步长采样</strong>：$\epsilon \sim \text{Uniform}(\mathcal{E} \setminus {0, 1})$ for $\mathcal{L}_2$</li>
+</ul>
+<h4 id="112">11.2 推理超参数<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>单步生成</strong>：$\epsilon = 1$，NFE=1</li>
+<li><strong>高质量生成</strong>：$\epsilon = 2^{-3}$ 或 $2^{-4}$，NFE=8或16</li>
+<li><strong>可以动态调整</strong>：前期用大步长，后期用小步长</li>
+</ul>
+<h3 id="12_1">12. 与相关工作的联系<a class="toc-link" href="#12_1" title="Permanent link">&para;</a></h3>
+<h4 id="121-amed">12.1 AMED（中值定理方法）<a class="toc-link" href="#121-amed" title="Permanent link">&para;</a></h4>
+<p>AMED基于积分中值定理：
+\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t+\epsilon} - \boldsymbol{x}_t = \epsilon \cdot \boldsymbol{v}</em>
+\end{equation}
+其中 $s \in [t, t+\epsilon]$ 需要预测。}}(\boldsymbol{x}_s, s) \tag{41</p>
+<p><strong>对比</strong>：
+- AMED：事后修正，需要额外小模型预测 $s$
+- Shortcut：事先学习，将 $\epsilon$ 直接作为输入</p>
+<h4 id="122-consistency-models">12.2 Consistency Models<a class="toc-link" href="#122-consistency-models" title="Permanent link">&para;</a></h4>
+<p>Consistency Models直接学习映射 $f: (\boldsymbol{x}_t, t) \to \boldsymbol{x}_0$。</p>
+<p><strong>对比</strong>：
+- Consistency：直接预测终点
+- Shortcut：预测速度场，更灵活（可多步可单步）</p>
+<h3 id="13">13. 局限性与未来方向<a class="toc-link" href="#13" title="Permanent link">&para;</a></h3>
+<h4 id="131">13.1 当前局限<a class="toc-link" href="#131" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>离散步长集合</strong>：只训练了有限的步长，中间值需要插值</li>
+<li><strong>步长范围</strong>：$[2^{-7}, 1]$ 可能不够覆盖所有需求</li>
+<li><strong>训练成本</strong>：$\mathcal{L}_2$ 需要两次前向传播，增加了训练时间</li>
+</ol>
+<h4 id="132">13.2 可能的改进<a class="toc-link" href="#132" title="Permanent link">&para;</a></h4>
+<p><strong>连续步长Embedding</strong>：
+\begin{equation}
+\mathbf{e}_{\epsilon} = \text{MLP}(\log \epsilon) \tag{42}
+\end{equation}
+允许任意连续的 $\epsilon \in (0, 1]$。</p>
+<p><strong>自适应步长</strong>：
+\begin{equation}
+\epsilon_{k+1} = f_{\boldsymbol{\phi}}(\boldsymbol{x}_{t_k}, t_k) \tag{43}
+\end{equation}
+根据当前状态动态选择步长。</p>
+<p><strong>高阶自洽性</strong>：
+\begin{equation}
+\boldsymbol{v}<em _epsilon="\epsilon">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, 4\epsilon) = g(\boldsymbol{v}</em>
+\end{equation}
+建立更复杂的多尺度关系。}, \boldsymbol{v}_{2\epsilon}) \tag{44</p>
+<h3 id="14">14. 数学总结<a class="toc-link" href="#14" title="Permanent link">&para;</a></h3>
+<h4 id="141">14.1 核心公式回顾<a class="toc-link" href="#141" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>直线轨迹</strong>：$\boldsymbol{x}_t = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_1$</li>
+<li><strong>ODE速度场</strong>：$\frac{d\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t}{dt} = \boldsymbol{v}</em>_t, t, \epsilon)$}}(\boldsymbol{x</li>
+<li><strong>精确ODE损失</strong>：$\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">1 = \mathbb{E}[\Vert\boldsymbol{v}</em>_0)\Vert^2]$}}(\boldsymbol{x}_t, t, 0) - (\boldsymbol{x}_1 - \boldsymbol{x</li>
+<li><strong>自洽性损失</strong>：$\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">2 = \mathbb{E}[\Vert\boldsymbol{v}</em>\Vert^2]$}}(\boldsymbol{x}_t, t, 2\epsilon) - \frac{\boldsymbol{v}_1 + \boldsymbol{v}_2}{2</li>
+<li><strong>更新规则</strong>：$\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t+\epsilon} = \boldsymbol{x}_t + \epsilon \cdot \boldsymbol{v}</em>_t, t, \epsilon)$}}(\boldsymbol{x</li>
+</ol>
+<h4 id="142">14.2 理论意义<a class="toc-link" href="#142" title="Permanent link">&para;</a></h4>
+<p>Shortcut模型展示了：
+1. <strong>学习vs设计</strong>：与其设计复杂的ODE求解器，不如让模型学习适应不同步长
+2. <strong>多尺度一致性</strong>：自洽性约束是一种强大的归纳偏置
+3. <strong>单阶段训练</strong>：无需蒸馏即可实现单步生成</p>
+<p>这为扩散模型加速开辟了新的范式。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -223,7 +632,7 @@ url={\url{https://spaces.ac.cn/archives/10617}},<br />
                             
                             <a href="muon优化器赏析从向量到矩阵的本质跨越.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#154 Muon优化器赏析：从向量到矩阵的本质跨越</div>
+                                <div class="nav-title">#300 Muon优化器赏析：从向量到矩阵的本质跨越</div>
                             </a>
                             
                         </div>
@@ -231,7 +640,7 @@ url={\url{https://spaces.ac.cn/archives/10617}},<br />
                             
                             <a href="生成扩散模型漫谈二十八分步理解一致性模型.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#156 生成扩散模型漫谈（二十八）：分步理解一致性模型</div>
+                                <div class="nav-title">#302 生成扩散模型漫谈（二十八）：分步理解一致性模型</div>
                             </a>
                             
                         </div>
@@ -262,7 +671,23 @@ url={\url{https://spaces.ac.cn/archives/10617}},<br />
 <li><a href="#_4">实验效果</a></li>
 <li><a href="#_5">延伸思考</a></li>
 <li><a href="#_6">文章小结</a></li>
-<li><a href="#_7">公式推导与注释</a></li>
+<li><a href="#_7">公式推导与注释</a><ul>
+<li><a href="#1">1. 核心概念与数学框架</a></li>
+<li><a href="#2">2. 欧拉方法与步长问题</a></li>
+<li><a href="#3-shortcut">3. Shortcut模型：步长条件化</a></li>
+<li><a href="#4">4. 自洽性约束：核心创新</a></li>
+<li><a href="#5">5. 多尺度自洽性</a></li>
+<li><a href="#6">6. 总损失函数与训练算法</a></li>
+<li><a href="#7-embedding">7. 步长Embedding的实现</a></li>
+<li><a href="#8">8. 推理过程分析</a></li>
+<li><a href="#9-ode">9. 与传统ODE求解器的对比</a></li>
+<li><a href="#10">10. 理论保证与收敛性</a></li>
+<li><a href="#11">11. 实践建议与超参数</a></li>
+<li><a href="#12_1">12. 与相关工作的联系</a></li>
+<li><a href="#13">13. 局限性与未来方向</a></li>
+<li><a href="#14">14. 数学总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

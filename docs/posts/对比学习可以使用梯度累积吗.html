@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>对比学习可以使用梯度累积吗？ | ML & Math Blog Posts</title>
+    <meta name="description" content="对比学习可以使用梯度累积吗？&para;
+原文链接: https://spaces.ac.cn/archives/8471
+发布日期: 
+
+在之前的文章《用时间换取效果：Keras梯度累积优化器》中，我们介绍过“梯度累积”，它是在有限显存下实现大batch_size效果的一种技巧。一般来说，梯度累积适用的是loss是独立同分布的场景，换言之每个样本单独计算loss，然后总loss是所有单个loss...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
+
+    <!-- MathJax for math rendering with equation numbering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=模型">模型</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #30 对比学习可以使用梯度累积吗？
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">
+                <span class="post-number">#30</span>
+                对比学习可以使用梯度累积吗？
+            </h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/8471" target="_blank" rel="noopener">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 模型</span>
+                </a>
+                
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+                <a href="../index.html?tags=梯度" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+            </div>
+            
+        </header>
+
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="_1">对比学习可以使用梯度累积吗？<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8471">https://spaces.ac.cn/archives/8471</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在之前的文章<a href="/archives/6794">《用时间换取效果：Keras梯度累积优化器》</a>中，我们介绍过“梯度累积”，它是在有限显存下实现大batch_size效果的一种技巧。一般来说，梯度累积适用的是loss是独立同分布的场景，换言之每个样本单独计算loss，然后总loss是所有单个loss的平均或求和。然而，并不是所有任务都满足这个条件的，比如最近比较热门的对比学习，每个样本的loss还跟其他样本有关。</p>
+<p>那么，在对比学习场景，我们还可以使用梯度累积来达到大batch_size的效果吗？本文就来分析这个问题。</p>
+<h2 id="_2">简介<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
+<p>一般情况下，对比学习的loss可以写为<br />
+\begin{equation}\mathcal{L}=-\sum_{i,j=1}^b t_{i,j}\log p_{i,j} = -\sum_{i,j=1}^b t_{i,j}\log \frac{e^{s_{i,j}}}{\sum\limits_j e^{s_{i,j}}}=-\sum_{i,j=1}^b t_{i,j}s_{i,j} + \sum_{i=1}^b \log\sum_{j=1}^b e^{s_{i,j}}\label{eq:loss}\end{equation}<br />
+这里的$b$是batch_size；$t_{i,j}$是事先给定的标签，满足$t_{i,j}=t_{j,i}$，它是一个one hot矩阵，每一列只有一个1，其余都为0；而$s_{i,j}$是样本$i$和样本$j$的相似度，满足$s_{i,j}=s_{j,i}$，一般情况下还有个温度参数，这里假设温度参数已经整合到$s_{i,j}$中，从而简化记号。模型参数存在于$s_{i,j}$中，假设为$\theta$。</p>
+<p>可以验证，一般情况下：<br />
+\begin{equation}-\sum_{i,j=1}^{2b} t_{i,j}\log p_{i,j} \neq -\sum_{i,j=1}^{b} t_{i,j}\log p_{i,j}-\sum_{i,j=b+1}^{2b} t_{i,j}\log p_{i,j}\end{equation}<br />
+所以直接将小batch_size的对比学习的梯度累积起来，是不等价于大batch_size的对比学习的。类似的问题还存在于带BN（Batch Normalization）的模型中。</p>
+<h2 id="_3">梯度<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
+<p>注意，刚才我们说的是常规的简单梯度累积不能等效，但有可能存在稍微复杂一些的累积方案的。为此，我们分析式$\eqref{eq:loss}$的梯度：<br />
+\begin{equation}\begin{aligned}
+\nabla_{\theta}\mathcal{L} =&amp;\, -\sum_{i,j=1}^b t_{i,j}\nabla_{\theta}s_{i,j} + \sum_{i=1}^b \nabla_{\theta}\log\sum_{j=1}^b e^{s_{i,j}} \\
+=&amp;\, -\sum_{i,j=1}^b t_{i,j}\nabla_{\theta}s_{i,j} + \sum_{i,j=1}^b p_{i,j}\nabla_{\theta} s_{i,j} \\
+=&amp;\,\nabla_{\theta}\sum_{i,j=1}^b \left(p_{i,j}^{(sg)} - t_{i,j}\right)s_{i,j}
+\end{aligned}\end{equation}<br />
+其中$p_{i,j}^{(sg)}$表示不需要对$p_{i,j}$求$\theta$的梯度，也就是深度学习框架的stop_gradient算子。上式表明，如果我们使用基于梯度的优化器，那么使用式$\eqref{eq:loss}$作为loss，跟使用$\sum\limits_{i,j=1}^b \left(p_{i,j}^{(sg)} - t_{i,j}\right)s_{i,j}$作为loss，是完全等价的（因为算出来的梯度一模一样）。</p>
+<h2 id="_4">内积<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
+<p>接下来考虑$\nabla_{\theta}s_{i,j}$的计算，一般来说它是向量的内积形式，即$s_{i,j}=\langle h_i, h_j\rangle$，参数$\theta$在$h_i,h_j$里边，这时候<br />
+\begin{equation}\nabla_{\theta}s_{i,j}=\langle \nabla_{\theta}h_i, h_j\rangle + \langle h_i, \nabla_{\theta}h_j\rangle = \nabla_{\theta}\left(\langle h_i, h_j^{(sg)}\rangle + \langle h_i^{(sg)}, h_j\rangle\right)\end{equation}<br />
+所以loss中的$s_{i,j}$可以替换为$\langle h_i, h_j^{(sg)}\rangle + \langle h_i^{(sg)}, h_j\rangle$而效果不变：<br />
+\begin{equation}\begin{aligned}
+\nabla_{\theta}\sum_{i,j=1}^b \left(p_{i,j}^{(sg)} - t_{i,j}\right)s_{i,j} =&amp;\, \nabla_{\theta}\sum_{i,j=1}^b \left(p_{i,j}^{(sg)} - t_{i,j}\right)\left(\langle h_i, h_j^{(sg)}\rangle + \langle h_i^{(sg)}, h_j\rangle\right)\\
+=&amp;\, 2\nabla_{\theta}\sum_{i,j=1}^b \left(\overline{p_{i,j}^{(sg)}} - t_{i,j}\right)\langle h_i, h_j^{(sg)}\rangle\\
+=&amp;\,\nabla_{\theta}\sum_{i=1}^b \left\langle h_i, 2\sum_{j=1}^b\left(\overline{p_{i,j}^{(sg)}} - t_{i,j}\right)h_j^{(sg)}\right\rangle
+\end{aligned}\label{eq:g}\end{equation}<br />
+其中$2\overline{p_{i,j}^{(sg)}}=p_{i,j}^{(sg)} + p_{j,i}^{(sg)}$，第二个等号源于将$\langle h_i^{(sg)}, h_j\rangle$那一项的求和下标$i,j$互换而不改变求和结果。</p>
+<h2 id="_5">流程<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
+<p>式$\eqref{eq:g}$事实上就已经给出了最终的方案，它可以分为两个步骤。第一步就是向量<br />
+\begin{equation}\tilde{h}<em j="1">i = 2\sum</em>}^b\left(\overline{p_{i,j}^{(sg)}} - t_{i,j}\right)h_j^{(sg)}\label{eq:h}\end{equation
+的计算，这一步不需要求梯度，纯粹是预测过程，所以batch_size可以比较大；第二步就是把$\tilde{h}_i$当作“标签”传入到模型中，以$\langle h_i, \tilde{h}_i\rangle$为单个样本的loss进行优化模型，这一步需要求梯度，但它已经转化为每个样本的梯度和的形式了，所以这时候就可以用常规的梯度累积了。</p>
+<p>假设反向传播的最大batch_size是$b$，前向传播的最大batch_size是$nb$，那么通过梯度累积让对比学习达到batch_size为$nb$的效果，其格式化的流程如下：</p>
+<blockquote>
+<p>1、采样一个batch的数据$\{x_i\}<em i_j="i,j">{i=1}^{nb}$，对应的标签矩阵为$\{t</em>$，初始累积梯度为$g=0$；}\}_{i,j=1}^{nb</p>
+<p>2、模型前向计算，得到编码向量$\{h_i\}<em i_j="i,j">{i=1}^{nb}$以及对应的概率矩阵$\{p</em>$；}\}_{i,j=1}^{nb</p>
+<p>3、根据式$\eqref{eq:h}$计算标签向量$\{\tilde{h}<em i="1">i\}</em>$；}^{nb</p>
+<p>4、对于$k=1,2,\cdots,n$，执行：</p>
+<p>$g \leftarrow g + \nabla_{\theta}\sum\limits_{i=(k-1)b+1}^{kb} \langle h_i, \tilde{h}_i\rangle$</p>
+<p>5、用$g$作为最终梯度更新模型，然后重新执行第1步。</p>
+</blockquote>
+<p>总的来说，在计算量上比常规的梯度累积多了一次前向计算。当然，如果前向计算的最大batch_size都不能满足我们的需求，那么也可以分批前向计算，因为我们只需要把各个$\{h_i\}<em i_j="i,j">{i=1}^{nb}$算出来存好，而$\{p</em>}\<em i="1">{i,j=1}^{nb}$可以基于$\{h_i\}</em>$算出来。}^{nb</p>
+<p>最后还要提醒的是，上述流程只是在优化时等效于大batch_size模型，也就是说$\langle h_i, \tilde{h}_i\rangle$的梯度等效于原loss的梯度，但是它的值并不等于原loss的值，因此不能用$\langle h_i, \tilde{h}_i\rangle$作为loss来评价模型，它未必是单调的，也未必是非负的，跟原来的loss也不具有严格的相关性。</p>
+<h2 id="_6">问题<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
+<p>上述流程有着跟<a href="/archives/7367">《节省显存的重计算技巧也有了Keras版了》</a>介绍的“重计算”一样的问题，那就是跟Dropout并不兼容，这是因为每次更新都涉及到了多次前向计算，每次前向计算都有不一样的Dropout，这意味着我们计算标签向量$\tilde{h}_i$时所用的$h_i$跟计算梯度时所用的$h_i$并不是同一个，导致计算出来的梯度并非最合理的梯度。</p>
+<p>这没有什么好的解决方案，最简单有效的方法就是在模型中去掉Dropout。这对于CV来说没啥大问题，因为CV的模型基本也不见Dropout了；对于NLP来说，第一反应能想到的结果就是<a href="/archives/8348">SimCSE</a>没法用梯度累积，因为Dropout是SimCSE的基础～</p>
+<h2 id="_7">小结<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
+<p>本文分析了对比学习的梯度累积方法，结果显示对比学习也可以用梯度累积的，只不过多了一次前向计算，并且需要在模型中去掉Dropout。本文同样的思路还可以分析BN如何使用梯度累积，有兴趣的读者不妨试试。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8471">https://spaces.ac.cn/archives/8471</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jun. 17, 2021). 《对比学习可以使用梯度累积吗？ 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8471">https://spaces.ac.cn/archives/8471</a></p>
+<p>@online{kexuefm-8471,<br />
+title={对比学习可以使用梯度累积吗？},<br />
+author={苏剑林},<br />
+year={2021},<br />
+month={Jun},<br />
+url={\url{https://spaces.ac.cn/archives/8471}},<br />
+} </p>
+<hr />
+<h2 id="_8">公式推导与注释<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+                </div>
+
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="cool-papers-站内搜索的一些新尝试.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#29 “Cool Papers + 站内搜索”的一些新尝试</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="从动力学角度看优化算法六为什么simsiam不退化.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#31 从动力学角度看优化算法（六）：为什么SimSiam不退化？</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#_1">对比学习可以使用梯度累积吗？</a><ul>
+<li><a href="#_2">简介</a></li>
+<li><a href="#_3">梯度</a></li>
+<li><a href="#_4">内积</a></li>
+<li><a href="#_5">流程</a></li>
+<li><a href="#_6">问题</a></li>
+<li><a href="#_7">小结</a></li>
+<li><a href="#_8">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
+</body>
+</html>

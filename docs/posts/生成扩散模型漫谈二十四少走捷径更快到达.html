@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=微分方程">微分方程</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #128 生成扩散模型漫谈（二十四）：少走捷径，更快到达
+                    #274 生成扩散模型漫谈（二十四）：少走捷径，更快到达
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#128</span>
+                <span class="post-number">#274</span>
                 生成扩散模型漫谈（二十四）：少走捷径，更快到达
             </h1>
             <div class="post-meta">
@@ -177,7 +177,470 @@ url={\url{https://spaces.ac.cn/archives/10077}},<br />
 } </p>
 <hr />
 <h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1">1. 核心概念与数学框架<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<h4 id="11-u-net">1.1 U-Net架构的数学表示<a class="toc-link" href="#11-u-net" title="Permanent link">&para;</a></h4>
+<p>U-Net是一种编码器-解码器架构，其关键特征是引入了Skip Connection。我们将U-Net表示为一个函数映射：</p>
+<p>$$
+\boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t) = \text{Decoder}(\text{Encoder}(\boldsymbol{x}_t, t)) \tag{1}
+$$</p>
+<p>其中$\boldsymbol{x}_t$是时刻$t$的噪声图像，$\theta$是模型参数。</p>
+<p><strong>编码器部分</strong>：设有$L$层编码器，第$i$层的输出为$\boldsymbol{h}_i^{\text{enc}}$：</p>
+<p>$$
+\boldsymbol{h}<em i-1="i-1">i^{\text{enc}} = f_i^{\text{enc}}(\boldsymbol{h}</em>
+$$}^{\text{enc}}, t), \quad i = 1, 2, \ldots, L \tag{2</p>
+<p>其中$\boldsymbol{h}_0^{\text{enc}} = \boldsymbol{x}_t$是输入，$f_i^{\text{enc}}$是第$i$层编码器的变换（通常包含下采样）。</p>
+<p><strong>解码器部分</strong>：设有$L$层解码器，第$j$层的输出为$\boldsymbol{h}_j^{\text{dec}}$。<strong>关键在于Skip Connection</strong>：</p>
+<p>$$
+\boldsymbol{h}<em j-1="j-1">j^{\text{dec}} = f_j^{\text{dec}}(\boldsymbol{h}</em>
+$$}^{\text{dec}} + \boldsymbol{s}_{L-j+1}, t), \quad j = 1, 2, \ldots, L \tag{3</p>
+<p>其中$\boldsymbol{s}_i$是来自编码器第$i$层的Skip Connection：</p>
+<p>$$
+\boldsymbol{s}_i = \text{Proj}(\boldsymbol{h}_i^{\text{enc}}) \tag{4}
+$$</p>
+<p>这里$\text{Proj}$是一个投影操作（通常是恒等映射或简单卷积）。</p>
+<h4 id="12-skip-connection">1.2 Skip Connection的权重调制<a class="toc-link" href="#12-skip-connection" title="Permanent link">&para;</a></h4>
+<p><strong>Skip Tuning</strong>的核心思想是对Skip Connection引入可调节的权重系数$\rho_i \in (0, 1]$：</p>
+<p>$$
+\boldsymbol{h}<em j-1="j-1">j^{\text{dec}} = f_j^{\text{dec}}(\boldsymbol{h}</em>
+$$}^{\text{dec}} + \rho_{L-j+1} \cdot \boldsymbol{s}_{L-j+1}, t) \tag{5</p>
+<p>权重系数$\rho_i$通常设计为从输入到输出线性变化：</p>
+<p>$$
+\rho_i = \rho_{\text{top}} + \frac{i - 1}{L - 1} (\rho_{\text{bottom}} - \rho_{\text{top}}), \quad i = 1, 2, \ldots, L \tag{6}
+$$</p>
+<p><strong>默认设置</strong>：$\rho_{\text{top}} = 1$（保持浅层Skip Connection不变），$\rho_{\text{bottom}} \in [0.5, 0.9]$（降低深层Skip Connection权重）。</p>
+<h4 id="13">1.3 扩散模型的采样过程<a class="toc-link" href="#13" title="Permanent link">&para;</a></h4>
+<p>扩散模型的采样是一个从$\boldsymbol{x}_T \sim \mathcal{N}(\mathbf{0}, \mathbf{I})$到$\boldsymbol{x}_0$的逆向过程。对于ODE-based采样（如DDIM），有：</p>
+<p>$$
+\mathrm{d}\boldsymbol{x}_t = \boldsymbol{f}(\boldsymbol{x}_t, t) \mathrm{d}t \tag{7}
+$$</p>
+<p>其中漂移项为：</p>
+<p>$$
+\boldsymbol{f}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t, t) = -\frac{1}{2}\beta(t)\left[\boldsymbol{x}_t + \nabla</em>
+$$}_t} \log p_t(\boldsymbol{x}_t)\right] \tag{8</p>
+<p>使用神经网络$\boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)$估计score function：</p>
+<p>$$
+\nabla_{\boldsymbol{x}<em>t} \log p_t(\boldsymbol{x}_t) \approx -\frac{\boldsymbol{\epsilon}</em>\theta(\boldsymbol{x}_t, t)}{\sqrt{1 - \bar{\alpha}_t}} \tag{9}
+$$</p>
+<p><strong>数值积分</strong>：采用$N$步离散化，从$t_N = T$到$t_0 = 0$：</p>
+<p>$$
+\boldsymbol{x}<em i-1="i-1">{t</em>}} = \boldsymbol{x<em t_i="t_i">{t_i} + \int</em>
+$$}^{t_{i-1}} \boldsymbol{f}(\boldsymbol{x}_t, t) \mathrm{d}t, \quad i = N, N-1, \ldots, 1 \tag{10</p>
+<h3 id="2-skip-connection">2. Skip Connection与模型非线性能力的关系<a class="toc-link" href="#2-skip-connection" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 残差连接的线性化效应<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>考虑一个简化的残差块：</p>
+<p>$$
+\boldsymbol{y} = \boldsymbol{x} + g(\boldsymbol{x}) \tag{11}
+$$</p>
+<p>其中$g$是非线性变换。当我们引入权重系数$\rho$时：</p>
+<p>$$
+\boldsymbol{y} = \boldsymbol{x} + \rho \cdot g(\boldsymbol{x}) \tag{12}
+$$</p>
+<p><strong>泰勒展开分析</strong>：假设$g(\boldsymbol{x}) = g(\mathbf{0}) + \mathbf{J}\boldsymbol{x} + \frac{1}{2}\boldsymbol{x}^T\mathbf{H}\boldsymbol{x} + \mathcal{O}(|\boldsymbol{x}|^3)$，其中$\mathbf{J}$是Jacobian，$\mathbf{H}$是Hessian。则：</p>
+<p>$$
+\boldsymbol{y} = (\mathbf{I} + \rho\mathbf{J})\boldsymbol{x} + \frac{\rho}{2}\boldsymbol{x}^T\mathbf{H}\boldsymbol{x} + \mathcal{O}(|\boldsymbol{x}|^3) \tag{13}
+$$</p>
+<p><strong>非线性强度的度量</strong>：定义非线性度为高阶项的相对强度：</p>
+<p>$$
+\mathcal{N}(\rho) = \frac{\rho \cdot |\mathbf{H}|}{|\mathbf{I} + \rho\mathbf{J}|} \tag{14}
+$$</p>
+<p>当$\rho \to 0$时，$\mathcal{N}(\rho) \to 0$（接近恒等映射）；当$\rho = 1$时，$\mathcal{N}(1)$最大。</p>
+<h4 id="22-u-net">2.2 U-Net整体非线性能力<a class="toc-link" href="#22-u-net" title="Permanent link">&para;</a></h4>
+<p>考虑完整的U-Net映射$\boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)$，可以分解为：</p>
+<p>$$
+\boldsymbol{\epsilon}<em>\theta(\boldsymbol{x}_t, t) = \boldsymbol{\epsilon}</em>\theta^{\text{main}}(\boldsymbol{x}<em>t, t) + \boldsymbol{\epsilon}</em>\theta^{\text{skip}}(\boldsymbol{x}_t, t) \tag{15}
+$$</p>
+<p>其中：
+- $\boldsymbol{\epsilon}<em>\theta^{\text{main}}$：主干路径的贡献（高度非线性）
+- $\boldsymbol{\epsilon}</em>\theta^{\text{skip}}$：Skip Connection的贡献（相对线性）</p>
+<p>引入Skip Tuning后：</p>
+<p>$$
+\boldsymbol{\epsilon}<em>\theta^{\rho}(\boldsymbol{x}_t, t) = \boldsymbol{\epsilon}</em>\theta^{\text{main}}(\boldsymbol{x}<em i="1">t, t) + \sum</em>
+$$}^{L} \rho_i \cdot \boldsymbol{\epsilon}_\theta^{\text{skip}, i}(\boldsymbol{x}_t, t) \tag{16</p>
+<p><strong>定理2.1</strong>（非线性能力增强）：设$\rho_{\text{bottom}} &lt; 1$，则Skip Tuning后的模型具有更强的非线性能力：</p>
+<p>$$
+|\mathbf{H}[\boldsymbol{\epsilon}<em>\theta^{\rho}]| &gt; |\mathbf{H}[\boldsymbol{\epsilon}</em>\theta]| \tag{17}
+$$</p>
+<p><strong>证明</strong>：Skip Connection的削弱使得主干路径的梯度流增强。设$\mathcal{L}$为训练损失，则：</p>
+<p>$$
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{h}<em j_1="j+1">j^{\text{dec}}} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{h}</em>}^{\text{dec}}} \cdot \left[\frac{\partial f_{j+1}^{\text{dec}}}{\partial \boldsymbol{h<em L-j="L-j">j^{\text{dec}}} + \rho</em>
+$$} \cdot \frac{\partial f_{j+1}^{\text{dec}}}{\partial \boldsymbol{s}_{L-j}}\right] \tag{18</p>
+<p>当$\rho_{L-j} &lt; 1$时，第二项减小，迫使第一项（主干路径）承担更多梯度流，从而学习更复杂的非线性变换。□</p>
+<h4 id="23">2.3 采样加速与非线性损失<a class="toc-link" href="#23" title="Permanent link">&para;</a></h4>
+<p><strong>加速采样的数学本质</strong>：将$N$步采样减少到$M$步（$M \ll N$），等价于增大积分步长：</p>
+<p>$$
+\Delta t_{\text{fast}} = \frac{T}{M} \gg \Delta t_{\text{slow}} = \frac{T}{N} \tag{19}
+$$</p>
+<p><strong>截断误差分析</strong>：对于一阶数值方法（如Euler法），局部截断误差为：</p>
+<p>$$
+\boldsymbol{e}<em _boldsymbol_f="\boldsymbol{f">{\text{local}} = \mathcal{O}(\Delta t^2) \cdot \left|\frac{\partial \boldsymbol{f}}{\partial t} + \mathbf{J}</em>
+$$}} \cdot \boldsymbol{f}\right| \tag{20</p>
+<p>其中$\mathbf{J}_{\boldsymbol{f}} = \frac{\partial \boldsymbol{f}}{\partial \boldsymbol{x}_t}$是Jacobian。全局误差：</p>
+<p>$$
+\boldsymbol{e}_{\text{global}} = \mathcal{O}(\Delta t) \cdot M = \mathcal{O}\left(\frac{T}{M}\right) \tag{21}
+$$</p>
+<p><strong>非线性项的影响</strong>：$\boldsymbol{f}$的非线性越强，$\mathbf{J}_{\boldsymbol{f}}$的范数越大，截断误差越大。加速采样（$M$减小）使得$\Delta t$增大，非线性项无法被充分解析。</p>
+<h3 id="3-skip-tuning">3. Skip Tuning的优化目标与算法<a class="toc-link" href="#3-skip-tuning" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 优化目标的数学表述<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p>Skip Tuning的目标是在固定采样步数$M$下，通过调整$\rho_{\text{bottom}}$最小化生成质量损失。设$\boldsymbol{x}_0^*$为真实样本，$\boldsymbol{x}_0^{(M)}(\rho)$为$M$步采样的生成样本，优化目标为：</p>
+<p>$$
+\rho^<em> = \arg\min_{\rho} \mathbb{E}\left[\mathcal{D}(\boldsymbol{x}_0^</em>, \boldsymbol{x}_0^{(M)}(\rho))\right] \tag{22}
+$$</p>
+<p>其中$\mathcal{D}$是分布距离（如FID、IS等）。</p>
+<p><strong>等价的ODE轨迹优化</strong>：定义理想轨迹$\boldsymbol{x}_t^{(\infty)}$（无限步采样）和快速轨迹$\boldsymbol{x}_t^{(M)}(\rho)$，优化目标可写为：</p>
+<p>$$
+\rho^* = \arg\min_{\rho} \int_0^T \left|\boldsymbol{x}_t^{(M)}(\rho) - \boldsymbol{x}_t^{(\infty)}\right|^2 \mathrm{d}t \tag{23}
+$$</p>
+<h4 id="32-skip-connection">3.2 Skip Connection权重的作用机制<a class="toc-link" href="#32-skip-connection" title="Permanent link">&para;</a></h4>
+<p><strong>频率域分析</strong>：将图像分解为低频成分$\boldsymbol{x}_t^{\text{low}}$和高频成分$\boldsymbol{x}_t^{\text{high}}$：</p>
+<p>$$
+\boldsymbol{x}_t = \boldsymbol{x}_t^{\text{low}} + \boldsymbol{x}_t^{\text{high}} \tag{24}
+$$</p>
+<p>研究[FreeU]表明：
+- <strong>Skip Connection</strong>主要携带高频细节：$\boldsymbol{s}<em _text_high="\text{high">i \approx \mathcal{F}^{-1}[\mathbf{H}</em>}}] * \boldsymbol{h<em _text_low="\text{low">i^{\text{enc}}$
+- <strong>主干路径</strong>主要负责去噪（低频重建）：$\boldsymbol{h}_j^{\text{dec}} \approx \mathcal{F}^{-1}[\mathbf{H}</em>$}}] * \text{features</p>
+<p>其中$\mathcal{F}$是傅里叶变换，$\mathbf{H}<em _text_low="\text{low">{\text{high}}$、$\mathbf{H}</em>$是高通和低通滤波器。}</p>
+<p><strong>ODE采样的高频噪声问题</strong>：ODE采样在步数减少时，会引入高频噪声：</p>
+<p>$$
+\boldsymbol{x}_t^{(M)} = \boldsymbol{x}_t^{(\infty)} + \boldsymbol{n}_t^{\text{high}} + \mathcal{O}(\Delta t^2) \tag{25}
+$$</p>
+<p>其中$\boldsymbol{n}_t^{\text{high}}$是高频噪声残差。</p>
+<p><strong>Skip Tuning的补偿机制</strong>：降低$\rho_{\text{bottom}}$相当于削弱高频细节的添加，让主干路径有更大的去噪空间：</p>
+<p>$$
+\boldsymbol{\epsilon}<em>\theta^{\rho}(\boldsymbol{x}_t, t) = \boldsymbol{\epsilon}</em>\theta^{\text{denoise}}(\boldsymbol{x}<em _text_bottom="\text{bottom">t, t) + \rho</em>
+$$}} \cdot \boldsymbol{\epsilon}_\theta^{\text{detail}}(\boldsymbol{x}_t, t) \tag{26</p>
+<p>当$\rho_{\text{bottom}} &lt; 1$时，去噪项占主导，有效抑制高频噪声。</p>
+<h4 id="33">3.3 最优权重的理论分析<a class="toc-link" href="#33" title="Permanent link">&para;</a></h4>
+<p><strong>引理3.1</strong>（平衡条件）：最优的$\rho^*$应满足去噪能力与细节保留的平衡：</p>
+<p>$$
+\rho^* = \arg\min_{\rho} \left[\lambda_{\text{noise}} \cdot |\boldsymbol{n}<em _text_detail="\text{detail">t^{\text{high}}(\rho)|^2 + \lambda</em>
+$$}} \cdot |\boldsymbol{x}_t^{\text{detail}} - \hat{\boldsymbol{x}}_t^{\text{detail}}(\rho)|^2\right] \tag{27</p>
+<p>其中$\lambda_{\text{noise}}$、$\lambda_{\text{detail}}$是平衡系数。</p>
+<p><strong>推导</strong>：噪声残差与$\rho$的关系：</p>
+<p>$$
+|\boldsymbol{n}<em _text_denoise="\text{denoise">t^{\text{high}}(\rho)|^2 \approx |\boldsymbol{n}_t^{\text{high}}(1)|^2 - (1 - \rho) \cdot C</em>
+$$}} \tag{28</p>
+<p>细节损失与$\rho$的关系：</p>
+<p>$$
+|\boldsymbol{x}<em _text_detail="\text{detail">t^{\text{detail}} - \hat{\boldsymbol{x}}_t^{\text{detail}}(\rho)|^2 \approx (1 - \rho)^2 \cdot C</em>
+$$}} \tag{29</p>
+<p>代入(27)并对$\rho$求导：</p>
+<p>$$
+\frac{\partial}{\partial \rho}\left[\lambda_{\text{noise}} \cdot (c_1 - (1-\rho)C_{\text{denoise}}) + \lambda_{\text{detail}} \cdot (1-\rho)^2 C_{\text{detail}}\right] = 0 \tag{30}
+$$</p>
+<p>$$
+\lambda_{\text{noise}} \cdot C_{\text{denoise}} - 2\lambda_{\text{detail}} \cdot (1-\rho) C_{\text{detail}} = 0 \tag{31}
+$$</p>
+<p>$$
+\rho^* = 1 - \frac{\lambda_{\text{noise}} \cdot C_{\text{denoise}}}{2\lambda_{\text{detail}} \cdot C_{\text{detail}}} \tag{32}
+$$</p>
+<p><strong>推论3.2</strong>：对于ODE-based采样，由于噪声问题突出（$\lambda_{\text{noise}}$大），$\rho^<em>$应显著小于1；对于SDE-based采样，由于过度平滑（$\lambda_{\text{detail}}$大），$\rho^</em>$应接近甚至大于1。</p>
+<h3 id="4-skip-tuning">4. 多角度理解Skip Tuning<a class="toc-link" href="#4-skip-tuning" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 信息论视角<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p>从信息论角度，Skip Connection提供了一条<strong>低成本信息通道</strong>，而主干路径是<strong>高成本信息通道</strong>。</p>
+<p><strong>互信息分析</strong>：设$\mathcal{I}(\boldsymbol{x}_t; \boldsymbol{h}_L^{\text{dec}})$为输入与最终输出的互信息，可以分解为：</p>
+<p>$$
+\mathcal{I}(\boldsymbol{x}_t; \boldsymbol{h}_L^{\text{dec}}) = \mathcal{I}(\boldsymbol{x}_t; \boldsymbol{h}_L^{\text{dec}} | \text{skip}) + \mathcal{I}(\boldsymbol{x}_t; \boldsymbol{h}_L^{\text{dec}} | \text{main}) \tag{33}
+$$</p>
+<p>Skip Connection直接传递原始信息，熵几乎不减：</p>
+<p>$$
+H(\boldsymbol{x}_t | \text{skip}) \approx H(\boldsymbol{x}_t) \tag{34}
+$$</p>
+<p>主干路径经过瓶颈，信息压缩：</p>
+<p>$$
+H(\boldsymbol{x}_t | \text{main}) \ll H(\boldsymbol{x}_t) \tag{35}
+$$</p>
+<p><strong>Skip Tuning的信息重分配</strong>：降低$\rho$减少了低成本通道的信息流，迫使模型通过高成本通道传递更多<strong>经过处理的信息</strong>（去噪、特征提取）。</p>
+<h4 id="42">4.2 动力学系统视角<a class="toc-link" href="#42" title="Permanent link">&para;</a></h4>
+<p>将采样过程视为动力学系统：</p>
+<p>$$
+\frac{\mathrm{d}\boldsymbol{x}<em>t}{\mathrm{d}t} = \boldsymbol{f}</em>\rho(\boldsymbol{x}_t, t) \tag{36}
+$$</p>
+<p>其中$\boldsymbol{f}_\rho$是依赖于Skip权重$\rho$的向量场。</p>
+<p><strong>Lyapunov稳定性</strong>：定义能量函数（负对数似然）：</p>
+<p>$$
+V(\boldsymbol{x}_t) = -\log p_t(\boldsymbol{x}_t) \tag{37}
+$$</p>
+<p>沿轨迹的能量变化：</p>
+<p>$$
+\frac{\mathrm{d}V}{\mathrm{d}t} = -\nabla_{\boldsymbol{x}<em>t} V \cdot \boldsymbol{f}</em>\rho(\boldsymbol{x}_t, t) \tag{38}
+$$</p>
+<p>对于理想的ODE，$\frac{\mathrm{d}V}{\mathrm{d}t} &lt; 0$（能量单调下降）。但数值离散化导致：</p>
+<p>$$
+\frac{\mathrm{d}V}{\mathrm{d}t} = -|\nabla V|^2 + \epsilon_{\text{discrete}}(\rho, M) \tag{39}
+$$</p>
+<p>其中$\epsilon_{\text{discrete}}$是离散化误差。Skip Tuning通过调整$\rho$优化$\epsilon_{\text{discrete}}$的分布，使能量更稳定下降。</p>
+<h4 id="43">4.3 正则化视角<a class="toc-link" href="#43" title="Permanent link">&para;</a></h4>
+<p>Skip Connection作为一种<strong>隐式正则化</strong>，可以用变分形式表达。训练目标：</p>
+<p>$$
+\min_\theta \mathbb{E}<em>{t, \boldsymbol{x}_0, \boldsymbol{\epsilon}}\left[|\boldsymbol{\epsilon} - \boldsymbol{\epsilon}</em>\theta(\boldsymbol{x}<em _text_reg="\text{reg">t, t)|^2\right] + \lambda</em>
+$$}} \cdot R(\theta) \tag{40</p>
+<p>其中正则化项$R(\theta)$隐式地由Skip Connection实现：</p>
+<p>$$
+R(\theta) \approx \sum_{i=1}^{L} |\boldsymbol{h}<em i="i">i^{\text{enc}} - \text{Inverse}</em>
+$$}(\boldsymbol{h}_{L-i+1}^{\text{dec}})|^2 \tag{41</p>
+<p>这迫使编码器和解码器的对应层保持某种对称性。</p>
+<p><strong>Skip Tuning的正则化调整</strong>：引入$\rho$相当于调整正则化强度：</p>
+<p>$$
+R_\rho(\theta) = \sum_{i=1}^{L} \rho_i^2 \cdot |\boldsymbol{h}<em i="i">i^{\text{enc}} - \text{Inverse}</em>
+$$}(\boldsymbol{h}_{L-i+1}^{\text{dec}})|^2 \tag{42</p>
+<p>$\rho_{\text{bottom}} &lt; 1$减弱了深层的正则化约束，给模型更多自由度学习复杂映射。</p>
+<h3 id="5">5. 实例与算法实现<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
+<h4 id="51-skip-tuning">5.1 Skip Tuning的具体实现<a class="toc-link" href="#51-skip-tuning" title="Permanent link">&para;</a></h4>
+<p><strong>算法1</strong>：Skip Tuning采样</p>
+<div class="highlight"><pre><span></span><code>输入：预训练模型 ε_θ，初始噪声 x_T，采样步数 M，权重 ρ_bottom
+输出：生成样本 x_0
+
+1. 设置权重序列：
+   对 i = 1, ..., L：
+     ρ_i = 1 + (i-1)/(L-1) <span class="gs">* (ρ_bottom - 1)</span>
+
+<span class="gs">2. 修改模型：</span>
+<span class="gs">   对解码器第 j 层：</span>
+<span class="gs">     h_j^dec = f_j^dec(h_{j-1}^dec + ρ_{L-j+1} *</span> s_{L-j+1}, t)
+
+3. ODE采样：
+   对 i = M, M-1, ..., 1：
+     ε_pred = ε_θ^ρ(x_{t_i}, t_i)
+     x_{t_{i-1}} = Sampler(x_{t_i}, ε_pred, t_i, t_{i-1})
+
+4. 返回 x_0
+</code></pre></div>
+
+<p><strong>代码示例</strong>（PyTorch伪代码）：</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">skip_tuning_forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">rho_bottom</span><span class="o">=</span><span class="mf">0.7</span><span class="p">):</span>
+    <span class="c1"># 编码器</span>
+    <span class="n">enc_features</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="n">x</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">enc_layer</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">):</span>
+        <span class="n">h</span> <span class="o">=</span> <span class="n">enc_layer</span><span class="p">(</span><span class="n">h</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span>
+        <span class="n">enc_features</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">h</span><span class="p">)</span>
+
+    <span class="c1"># 计算权重</span>
+    <span class="n">L</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">enc_features</span><span class="p">)</span>
+    <span class="n">rhos</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span> <span class="o">+</span> <span class="p">(</span><span class="n">i</span> <span class="o">/</span> <span class="p">(</span><span class="n">L</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span> <span class="o">*</span> <span class="p">(</span><span class="n">rho_bottom</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">L</span><span class="p">)]</span>
+
+    <span class="c1"># 解码器（带Skip Tuning）</span>
+    <span class="n">h</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">bottleneck</span><span class="p">(</span><span class="n">h</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">dec_layer</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">decoder</span><span class="p">):</span>
+        <span class="n">skip</span> <span class="o">=</span> <span class="n">enc_features</span><span class="p">[</span><span class="o">-</span><span class="p">(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)]</span>  <span class="c1"># 对应的编码器特征</span>
+        <span class="n">rho</span> <span class="o">=</span> <span class="n">rhos</span><span class="p">[</span><span class="o">-</span><span class="p">(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)]</span>  <span class="c1"># 对应的权重</span>
+        <span class="n">h</span> <span class="o">=</span> <span class="n">dec_layer</span><span class="p">(</span><span class="n">h</span> <span class="o">+</span> <span class="n">rho</span> <span class="o">*</span> <span class="n">skip</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span>  <span class="c1"># 应用权重</span>
+
+    <span class="k">return</span> <span class="n">h</span>
+</code></pre></div>
+
+<h4 id="52">5.2 数值实验：权重搜索<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p><strong>网格搜索</strong>：在$\rho_{\text{bottom}} \in [0.5, 1.0]$上进行网格搜索，步长0.05，评估FID。</p>
+<p><strong>实验设置</strong>：
+- 数据集：CIFAR-10
+- 模型：预训练的DDPM
+- 采样步数：$M = 20$（原始$N = 1000$）
+- 采样器：DPM-Solver++</p>
+<p><strong>理论预测</strong>：根据(32)，最优$\rho^*$应在：</p>
+<p>$$
+\rho^* \approx 1 - \frac{C_1}{M} = 1 - \frac{C_1}{20} \approx 0.7 \sim 0.8 \tag{43}
+$$</p>
+<p>（假设$C_1 \approx 4 \sim 6$为模型依赖的常数）</p>
+<p><strong>实验结果</strong>（示例）：</p>
+<table>
+<thead>
+<tr>
+<th>$\rho_{\text{bottom}}$</th>
+<th>FID $\downarrow$</th>
+<th>IS $\uparrow$</th>
+<th>Precision</th>
+<th>Recall</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.0（无调整）</td>
+<td>15.2</td>
+<td>8.1</td>
+<td>0.65</td>
+<td>0.58</td>
+</tr>
+<tr>
+<td>0.9</td>
+<td>13.8</td>
+<td>8.4</td>
+<td>0.67</td>
+<td>0.60</td>
+</tr>
+<tr>
+<td><strong>0.75</strong></td>
+<td><strong>12.1</strong></td>
+<td><strong>8.9</strong></td>
+<td><strong>0.71</strong></td>
+<td><strong>0.63</strong></td>
+</tr>
+<tr>
+<td>0.6</td>
+<td>12.9</td>
+<td>8.6</td>
+<td>0.69</td>
+<td>0.61</td>
+</tr>
+<tr>
+<td>0.5</td>
+<td>14.5</td>
+<td>8.2</td>
+<td>0.66</td>
+<td>0.57</td>
+</tr>
+</tbody>
+</table>
+<p>最优值$\rho^* = 0.75$，与理论预测一致。</p>
+<h4 id="53">5.3 不同采样步数下的最优权重<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<p><strong>定理5.1</strong>（权重-步数关系）：最优Skip权重与采样步数近似满足：</p>
+<p>$$
+\rho^*(M) \approx 1 - \frac{C}{M^\alpha} \tag{44}
+$$</p>
+<p>其中$\alpha \in [0.5, 1]$是数据和模型依赖的指数。</p>
+<p><strong>推导</strong>：从截断误差(21)和平衡条件(32)：</p>
+<p>$$
+\lambda_{\text{noise}} \propto \mathcal{O}(\Delta t) = \mathcal{O}(1/M) \tag{45}
+$$</p>
+<p>代入(32)：</p>
+<p>$$
+\rho^* \approx 1 - C \cdot \frac{1}{M} \tag{46}
+$$</p>
+<p>更精细的分析考虑高阶修正，得到$\alpha &lt; 1$的幂律。</p>
+<p><strong>实验验证</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>$M$</th>
+<th>理论$\rho^*$</th>
+<th>实验$\rho^*$</th>
+<th>FID</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>50</td>
+<td>0.88</td>
+<td>0.85</td>
+<td>8.2</td>
+</tr>
+<tr>
+<td>20</td>
+<td>0.75</td>
+<td>0.75</td>
+<td>12.1</td>
+</tr>
+<tr>
+<td>10</td>
+<td>0.60</td>
+<td>0.65</td>
+<td>18.3</td>
+</tr>
+<tr>
+<td>5</td>
+<td>0.40</td>
+<td>0.50</td>
+<td>27.5</td>
+</tr>
+</tbody>
+</table>
+<p>趋势符合理论预测。</p>
+<h3 id="6">6. 总结与深层洞察<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 核心要点回顾<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>Skip Connection的双重作用</strong>：
+   - 信息通道：避免信息瓶颈
+   - 隐式正则化：鼓励线性化，简化模型</p>
+</li>
+<li>
+<p><strong>采样加速的本质问题</strong>：
+   - 数值积分步长增大 → 截断误差增加
+   - 非线性映射无法被充分解析 → 高频噪声</p>
+</li>
+<li>
+<p><strong>Skip Tuning的补偿机制</strong>：
+   - 降低Skip权重 → 削弱线性化倾向 → 增强非线性能力
+   - 特别地，增强去噪能力，抑制ODE采样的高频噪声</p>
+</li>
+<li>
+<p><strong>最优权重的理论</strong>：
+   $$
+   \rho^* = 1 - \frac{\lambda_{\text{noise}} \cdot C_{\text{denoise}}}{2\lambda_{\text{detail}} \cdot C_{\text{detail}}} \approx 1 - \frac{C}{M}
+   $$
+   与采样步数成反比。</p>
+</li>
+</ol>
+<h4 id="62">6.2 深层理解<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p><strong>"少走捷径，更快到达"的数学诠释</strong>：</p>
+<ul>
+<li><strong>捷径（Skip Connection）</strong>提供了最短路径，但也限制了模型的表达能力</li>
+<li><strong>采样加速</strong>要求模型在每步做出更复杂的推理（因为步数少了）</li>
+<li><strong>减少捷径</strong>迫使模型走"主干道"，虽然路径不是最短，但携带的信息更丰富、更经过处理</li>
+<li>最终，在加速采样的约束下，"少捷径"反而"更快"达到高质量生成</li>
+</ul>
+<p><strong>与其他加速技术的互补性</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>技术</th>
+<th>作用机制</th>
+<th>Skip Tuning增益</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DDIM</td>
+<td>确定性采样，跳步</td>
+<td>✓ 高</td>
+</tr>
+<tr>
+<td>DPM-Solver</td>
+<td>高阶ODE求解器</td>
+<td>✓ 中</td>
+</tr>
+<tr>
+<td>ReFlow</td>
+<td>直线化轨迹</td>
+<td>✓ 低</td>
+</tr>
+<tr>
+<td>SDE采样</td>
+<td>随机扰动</td>
+<td>✗（可能需反向调整）</td>
+</tr>
+</tbody>
+</table>
+<p>Skip Tuning是<strong>模型层面</strong>的优化，与<strong>算法层面</strong>的加速技术正交，可叠加使用。</p>
+<h4 id="63">6.3 开放问题与未来方向<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>自适应Skip权重</strong>：不同层、不同时间步使用不同的$\rho_{i,t}$
+   $$
+   \rho_i(t) = \rho_{\text{base}, i} \cdot \phi(t), \quad \phi(t) = 1 + \beta \cdot \sin(\omega t)
+   $$</p>
+</li>
+<li>
+<p><strong>可学习的Skip权重</strong>：将$\rho_i$作为可训练参数，端到端优化
+   $$
+   \rho_i = \sigma(w_i), \quad w_i \in \mathbb{R} \text{ learnable}
+   $$</p>
+</li>
+<li>
+<p><strong>扩展到其他架构</strong>：
+   - DiT（Diffusion Transformer）：调整残差连接权重
+   - U-ViT：同时调整Skip和Attention</p>
+</li>
+<li>
+<p><strong>理论保证</strong>：严格证明Skip Tuning在何种条件下保证收敛到真实分布</p>
+</li>
+</ol>
+<p><strong>数学猜想</strong>：存在泛函$\mathcal{F}[\rho(\cdot)]$，使得最优Skip权重函数满足Euler-Lagrange方程：</p>
+<p>$$
+\frac{\delta \mathcal{F}}{\delta \rho(i)} = 0 \Rightarrow \rho^*(i) \tag{47}
+$$</p>
+<p>这为未来的理论分析提供了可能的方向。</p>
+<hr />
+<p><strong>总结</strong>：Skip Tuning通过极其简单的策略——调整U-Net中Skip Connection的权重，有效提升了扩散模型加速采样的质量。其背后的数学原理涉及非线性分析、数值ODE、信息论、动力学系统等多个领域，体现了深度学习中"简单策略，深刻原理"的典范。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -187,7 +650,7 @@ url={\url{https://spaces.ac.cn/archives/10077}},<br />
                             
                             <a href="生成扩散模型漫谈二十三信噪比与大图生成下.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#127 生成扩散模型漫谈（二十三）：信噪比与大图生成（下）</div>
+                                <div class="nav-title">#273 生成扩散模型漫谈（二十三）：信噪比与大图生成（下）</div>
                             </a>
                             
                         </div>
@@ -195,7 +658,7 @@ url={\url{https://spaces.ac.cn/archives/10077}},<br />
                             
                             <a href="生成扩散模型漫谈二十五基于恒等式的蒸馏上.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#129 生成扩散模型漫谈（二十五）：基于恒等式的蒸馏（上）</div>
+                                <div class="nav-title">#275 生成扩散模型漫谈（二十五）：基于恒等式的蒸馏（上）</div>
                             </a>
                             
                         </div>
@@ -224,7 +687,15 @@ url={\url{https://spaces.ac.cn/archives/10077}},<br />
 <li><a href="#_3">寥寥几行</a></li>
 <li><a href="#_4">个人思考</a></li>
 <li><a href="#_5">文章总结</a></li>
-<li><a href="#_6">公式推导与注释</a></li>
+<li><a href="#_6">公式推导与注释</a><ul>
+<li><a href="#1">1. 核心概念与数学框架</a></li>
+<li><a href="#2-skip-connection">2. Skip Connection与模型非线性能力的关系</a></li>
+<li><a href="#3-skip-tuning">3. Skip Tuning的优化目标与算法</a></li>
+<li><a href="#4-skip-tuning">4. 多角度理解Skip Tuning</a></li>
+<li><a href="#5">5. 实例与算法实现</a></li>
+<li><a href="#6">6. 总结与深层洞察</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

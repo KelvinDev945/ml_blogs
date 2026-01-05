@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=无监督">无监督</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #127 生成扩散模型漫谈（二十三）：信噪比与大图生成（下）
+                    #273 生成扩散模型漫谈（二十三）：信噪比与大图生成（下）
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#127</span>
+                <span class="post-number">#273</span>
                 生成扩散模型漫谈（二十三）：信噪比与大图生成（下）
             </h1>
             <div class="post-meta">
@@ -239,7 +239,620 @@ url={\url{https://spaces.ac.cn/archives/10055}},<br />
 } </p>
 <hr />
 <h2 id="_8">公式推导与注释<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1-snr">1. 核心概念：信噪比(SNR)与分辨率<a class="toc-link" href="#1-snr" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 信噪比的定义<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>在扩散模型中，加噪过程为：
+\begin{equation}
+\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{1}
+\end{equation}</p>
+<p><strong>信噪比(Signal-to-Noise Ratio)</strong>定义为：
+\begin{equation}
+\text{SNR}(t) = \frac{\text{信号方差}}{\text{噪声方差}} = \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2} \tag{2}
+\end{equation}</p>
+<p><strong>数学性质</strong>：
+- $\mathbb{E}[\boldsymbol{x}_t | \boldsymbol{x}_0] = \bar{\alpha}_t \boldsymbol{x}_0$ （信号部分）
+- $\text{Var}[\boldsymbol{x}_t | \boldsymbol{x}_0] = \bar{\beta}_t^2 \boldsymbol{I}$ （噪声部分）
+- SNR越大，信号越强，噪声越弱</p>
+<h4 id="12">1.2 下采样对信噪比的影响<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p>设$\mathcal{D}$为将 $w\times h$ 缩小到 $w/s \times h/s$ 的平均池化算子。对加噪图像下采样：</p>
+<p>\begin{equation}
+\mathcal{D}[\boldsymbol{x}_t] = \mathcal{D}[\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}] = \bar{\alpha}_t \mathcal{D}[\boldsymbol{x}_0] + \bar{\beta}_t \mathcal{D}[\boldsymbol{\varepsilon}] \tag{3}
+\end{equation}</p>
+<p><strong>关键观察</strong>：下采样会降低噪声强度！</p>
+<p><strong>证明</strong>：平均池化对标准正态噪声的影响
+\begin{equation}
+\mathcal{D}[\boldsymbol{\varepsilon}] = \frac{1}{s^2}\sum_{i=1}^{s^2} \boldsymbol{\varepsilon}_i \tag{4}
+\end{equation}</p>
+<p>如果每个 $\boldsymbol{\varepsilon}<em i="1">i \sim \mathcal{N}(0, 1)$ 独立，则：
+\begin{equation}
+\begin{aligned}
+\mathbb{E}[\mathcal{D}[\boldsymbol{\varepsilon}]] &amp;= \frac{1}{s^2}\sum</em>}^{s^2}\mathbb{E}[\boldsymbol{\varepsilon<em i="1">i] = 0 \
+\text{Var}[\mathcal{D}[\boldsymbol{\varepsilon}]] &amp;= \frac{1}{s^4}\sum</em>
+\end{aligned} \tag{5}
+\end{equation}}^{s^2}\text{Var}[\boldsymbol{\varepsilon}_i] = \frac{s^2}{s^4} = \frac{1}{s^2</p>
+<p>因此：
+\begin{equation}
+\mathcal{D}[\boldsymbol{\varepsilon}] \sim \mathcal{N}\left(0, \frac{1}{s^2}\boldsymbol{I}\right) \tag{6}
+\end{equation}</p>
+<p><strong>下采样后的加噪公式</strong>：
+\begin{equation}
+\mathcal{D}[\boldsymbol{x}_t] = \bar{\alpha}_t \mathcal{D}[\boldsymbol{x}_0] + \frac{\bar{\beta}_t}{s} \boldsymbol{\varepsilon}', \quad \boldsymbol{\varepsilon}' \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{7}
+\end{equation}</p>
+<p><strong>下采样后的信噪比</strong>：
+\begin{equation}
+\text{SNR}_{\text{down}}(t) = \frac{\bar{\alpha}_t^2}{(\bar{\beta}_t/s)^2} = s^2 \cdot \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2} = s^2 \cdot \text{SNR}(t) \tag{8}
+\end{equation}</p>
+<p><strong>结论</strong>：下采样会使信噪比提高 $s^2$ 倍！</p>
+<h3 id="2">2. 信噪比对齐原理<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 问题陈述<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>假设我们有一个在 $w/s \times h/s$ 分辨率训练的去噪模型 $\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t^{\text{low}}, t)$，它适应的noise schedule为 $(\bar{\alpha}_t, \bar{\beta}_t)$。</p>
+<p>现在要将其应用于 $w \times h$ 分辨率的图像去噪。直接使用会遇到问题：
+- 在 $t$ 时刻，高分辨率图像的SNR是 $\frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2}$
+- 下采样后的SNR是 $\frac{s^2\bar{\alpha}_t^2}{\bar{\beta}_t^2}$
+- 模型在训练时没见过这么高的SNR！</p>
+<h4 id="22">2.2 时间重映射<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p><strong>核心思想</strong>：找到另一个时间 $\tau$，使得 $\tau$ 时刻的SNR等于下采样后的SNR。</p>
+<p><strong>信噪比对齐方程</strong>：
+\begin{equation}
+\text{SNR}(\tau) = s^2 \cdot \text{SNR}(t) \tag{9}
+\end{equation}</p>
+<p>即：
+\begin{equation}
+\frac{\bar{\alpha}<em _tau="\tau">{\tau}^2}{\bar{\beta}</em>
+\end{equation}}^2} = s^2 \cdot \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2} \tag{10</p>
+<p><strong>求解 $\tau$</strong>：</p>
+<p>对于常见的noise schedule，例如线性schedule：
+\begin{equation}
+\bar{\alpha}<em _min="\min">t = \sqrt{1 - \beta</em>
+\end{equation}} - t(\beta_{\max} - \beta_{\min})} \tag{11</p>
+<p>可以通过数值方法或查表求解方程(10)得到 $\tau(t, s)$。</p>
+<p><strong>示例</strong>（$s=2$，线性schedule）：
+- $t = 0.5$ 时，$\text{SNR}(0.5) \approx 10$
+- 下采样后 $\text{SNR}_{\text{down}} = 4 \times 10 = 40$
+- 需要找 $\tau$ 使得 $\text{SNR}(\tau) = 40$
+- 解得 $\tau \approx 0.25$（更早的时刻，噪声更少）</p>
+<h3 id="3-upsample-guidance">3. Upsample Guidance的数学推导<a class="toc-link" href="#3-upsample-guidance" title="Permanent link">&para;</a></h3>
+<h4 id="31-">3.1 主项：下采样-去噪-上采样<a class="toc-link" href="#31-" title="Permanent link">&para;</a></h4>
+<p>记 $\mathcal{U}$ 为从 $w/s \times h/s$ 上采样到 $w \times h$ 的最近邻插值算子。</p>
+<p><strong>主项构造</strong>：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\text{main}}(\boldsymbol{x}_t, t) = \frac{1}{s} \mathcal{U}\left[\boldsymbol{\epsilon}</em>
+\end{equation}}}\left(\frac{\mathcal{D}[\boldsymbol{x}_t]}{\rho_t}, \tau\right)\right] \tag{12</p>
+<p>其中 $\rho_t = \sqrt{\bar{\alpha}_t^2 + \bar{\beta}_t^2/s^2}$ 是归一化因子。</p>
+<p><strong>为什么需要归一化？</strong></p>
+<p>从式(7)可知，$\mathcal{D}[\boldsymbol{x}_t]$ 的系数平方和为：
+\begin{equation}
+\bar{\alpha}_t^2 + \frac{\bar{\beta}_t^2}{s^2} = \rho_t^2 \tag{13}
+\end{equation}</p>
+<p>而训练时的加噪公式系数平方和为1：
+\begin{equation}
+\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1 \tag{14}
+\end{equation}</p>
+<p>归一化后：
+\begin{equation}
+\frac{\mathcal{D}[\boldsymbol{x}_t]}{\rho_t} = \frac{\bar{\alpha}_t}{\rho_t} \mathcal{D}[\boldsymbol{x}_0] + \frac{\bar{\beta}_t}{s\rho_t} \boldsymbol{\varepsilon}' \tag{15}
+\end{equation}</p>
+<p>系数平方和：
+\begin{equation}
+\left(\frac{\bar{\alpha}_t}{\rho_t}\right)^2 + \left(\frac{\bar{\beta}_t}{s\rho_t}\right)^2 = \frac{\bar{\alpha}_t^2 + \bar{\beta}_t^2/s^2}{\rho_t^2} = 1 \tag{16}
+\end{equation}</p>
+<p><strong>为什么有因子 $1/s$？</strong></p>
+<p>去噪模型预测的噪声 $\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$ 满足单位方差。下采样后方差变为 $1/s^2$：
+\begin{equation}
+\text{Var}[\mathcal{D}[\boldsymbol{\epsilon}]] = \frac{1}{s^2} \tag{17}
+\end{equation}</p>
+<p>因此需要除以 $s$ 使方差匹配：
+\begin{equation}
+\text{Var}\left[\frac{1}{s}\mathcal{U}[\boldsymbol{\epsilon}]\right] = \frac{1}{s^2} \tag{18}
+\end{equation}</p>
+<h4 id="32">3.2 次项：高频细节补偿<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p>直接将低分辨率模型应用于高分辨率会保留一些细节。定义次项为：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\text{detail}}(\boldsymbol{x}_t, t) = \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - \mathcal{U}[\mathcal{D}[\boldsymbol{\epsilon}</em>
+\end{equation}}}(\boldsymbol{x}_t, t)]] \tag{19</p>
+<p><strong>数学直觉</strong>：
+- $\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$：直接在高分辨率上去噪（包含全部频率）
+- $\mathcal{U}[\mathcal{D}[\boldsymbol{\epsilon}</em>_t, t)]]$：先下采样再上采样（只保留低频）
+- 两者之差：高频细节（纹理、边缘）}}(\boldsymbol{x</p>
+<p><strong>频率域分析</strong>：</p>
+<p>记 $\mathcal{F}$ 为傅里叶变换，$\omega$ 为频率。下采样-上采样相当于低通滤波器：
+\begin{equation}
+\mathcal{F}<a href="\omega">\mathcal{U}[\mathcal{D}[\boldsymbol{x}]]</a> = H_{\text{low}}(\omega) \cdot \mathcal{F}<a href="\omega">\boldsymbol{x}</a> \tag{20}
+\end{equation}</p>
+<p>其中 $H_{\text{low}}(\omega)$ 是低通滤波器：
+\begin{equation}
+H_{\text{low}}(\omega) = \begin{cases}
+1, &amp; \text{if } |\omega| \leq \omega_{\text{cutoff}} \
+0, &amp; \text{otherwise}
+\end{cases} \tag{21}
+\end{equation}</p>
+<p>因此：
+\begin{equation}
+\mathcal{F}<a href="\omega">\boldsymbol{\epsilon}_{\text{detail}}</a> = (1 - H_{\text{low}}(\omega)) \cdot \mathcal{F}<a href="\omega">\boldsymbol{\epsilon}_{\boldsymbol{\theta}}</a> \tag{22}
+\end{equation}</p>
+<p>这正是高频成分！</p>
+<h4 id="33">3.3 组合去噪模型<a class="toc-link" href="#33" title="Permanent link">&para;</a></h4>
+<p><strong>完整的近似去噪模型</strong>：
+\begin{equation}
+\begin{aligned}
+\boldsymbol{\epsilon}<em _text_main="\text{main">{\boldsymbol{\theta}}^{\text{approx}}(\boldsymbol{x}_t, t) &amp;= \boldsymbol{\epsilon}</em>}} + \boldsymbol{\epsilon<em _boldsymbol_theta="\boldsymbol{\theta">{\text{detail}} \
+&amp;= \frac{1}{s}\mathcal{U}\left[\boldsymbol{\epsilon}</em>}}\left(\frac{\mathcal{D}[\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t]}{\rho_t}, \tau\right)\right] \
+&amp;\quad + \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - \mathcal{U}[\mathcal{D}[\boldsymbol{\epsilon}</em>_t, t)]]
+\end{aligned} \tag{23}
+\end{equation}}}(\boldsymbol{x</p>
+<p><strong>化简</strong>：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}^{\text{approx}}(\boldsymbol{x}_t, t) = \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) + \mathcal{U}\left[\frac{1}{s}\boldsymbol{\epsilon}</em>}}\left(\frac{\mathcal{D}[\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t]}{\rho_t}, \tau\right) - \mathcal{D}[\boldsymbol{\epsilon}</em>
+\end{equation}}}(\boldsymbol{x}_t, t)]\right] \tag{24</p>
+<h3 id="4-classifier-free-guidance">4. Classifier-free Guidance风格的增强<a class="toc-link" href="#4-classifier-free-guidance" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 引导强度调节<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p>借鉴Classifier-free Guidance的思想，引入可调参数 $w$：
+\begin{equation}
+\tilde{\boldsymbol{\epsilon}}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = (1+w) \boldsymbol{\epsilon}</em>}}^{\text{approx}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - w \boldsymbol{\epsilon}</em>
+\end{equation}}}(\boldsymbol{x}_t, t) \tag{25</p>
+<p><strong>展开</strong>：
+\begin{equation}
+\begin{aligned}
+\tilde{\boldsymbol{\epsilon}}<em _text_main="\text{main">{\boldsymbol{\theta}} &amp;= (1+w)[\boldsymbol{\epsilon}</em>}} + \boldsymbol{\epsilon<em _boldsymbol_theta="\boldsymbol{\theta">{\text{detail}}] - w\boldsymbol{\epsilon}</em> \
+&amp;= (1+w)\boldsymbol{\epsilon}}<em _text_detail="\text{detail">{\text{main}} + (1+w)\boldsymbol{\epsilon}</em>}} - w\boldsymbol{\epsilon<em _text_main="\text{main">{\boldsymbol{\theta}} \
+&amp;= (1+w)\boldsymbol{\epsilon}</em>}} + (1+w)[\boldsymbol{\epsilon<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}} - \mathcal{U}\mathcal{D}[\boldsymbol{\epsilon}</em>}}]] - w\boldsymbol{\epsilon<em _text_main="\text{main">{\boldsymbol{\theta}} \
+&amp;= (1+w)\boldsymbol{\epsilon}</em>}} + \boldsymbol{\epsilon<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}} - (1+w)\mathcal{U}\mathcal{D}[\boldsymbol{\epsilon}</em>]
+\end{aligned} \tag{26}
+\end{equation}}</p>
+<p><strong>最终形式</strong>：
+\begin{equation}
+\tilde{\boldsymbol{\epsilon}}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) = \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) + (1+w)\mathcal{U}\left[\frac{1}{s}\boldsymbol{\epsilon}</em>}}\left(\frac{\mathcal{D}[\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t]}{\rho_t}, \tau\right) - \mathcal{D}[\boldsymbol{\epsilon}</em>
+\end{equation}}}(\boldsymbol{x}_t, t)]\right] \tag{27</p>
+<h4 id="42-w">4.2 参数 $w$ 的作用分析<a class="toc-link" href="#42-w" title="Permanent link">&para;</a></h4>
+<p><strong>$w$ 的不同取值</strong>：</p>
+<ol>
+<li>
+<p><strong>$w = 0$（标准UG）</strong>：
+   \begin{equation}
+   \tilde{\boldsymbol{\epsilon}} = \boldsymbol{\epsilon}_{\boldsymbol{\theta}}^{\text{approx}} \tag{28}
+   \end{equation}</p>
+</li>
+<li>
+<p><strong>$w = -1$（无引导）</strong>：
+   \begin{equation}
+   \tilde{\boldsymbol{\epsilon}} = \boldsymbol{\epsilon}_{\boldsymbol{\theta}} \tag{29}
+   \end{equation}
+   完全退化为直接使用低分辨率模型</p>
+</li>
+<li>
+<p><strong>$w &gt; 0$（增强引导）</strong>：
+   \begin{equation}
+   \tilde{\boldsymbol{\epsilon}} = \boldsymbol{\epsilon}<em _tau="\tau">{\boldsymbol{\theta}} + (1+w)\Delta\boldsymbol{\epsilon} \tag{30}
+   \end{equation}
+   其中 $\Delta\boldsymbol{\epsilon} = \mathcal{U}[\frac{1}{s}\boldsymbol{\epsilon}</em>_t]]$ 是修正项} - \mathcal{D}[\boldsymbol{\epsilon</p>
+</li>
+</ol>
+<p><strong>最优 $w$ 的选择</strong>：</p>
+<p>根据原论文实验，$w \approx 0.2$ 效果最好。这可以通过FID曲线验证：
+\begin{equation}
+w^* = \arg\min_{w} \text{FID}(w) \tag{31}
+\end{equation}</p>
+<h3 id="5-ddpm">5. DDPM采样的完整流程<a class="toc-link" href="#5-ddpm" title="Permanent link">&para;</a></h3>
+<h4 id="51-ddpm">5.1 标准DDPM采样<a class="toc-link" href="#51-ddpm" title="Permanent link">&para;</a></h4>
+<p>回顾标准DDPM的采样公式：
+\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t-1} = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\boldsymbol{\epsilon}</em>
+\end{equation}}}(\boldsymbol{x}_t, t)\right) + \sigma_t \boldsymbol{z}, \quad \boldsymbol{z} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{32</p>
+<p>其中：
+- $\alpha_t = 1 - \beta_t$
+- $\bar{\beta}<em t-1="t-1">t = \sqrt{1 - \bar{\alpha}_t^2}$
+- $\sigma_t = \frac{\bar{\beta}</em>$ 或 $\sigma_t = \beta_t$} \beta_t}{\bar{\beta}_t</p>
+<h4 id="52-ug">5.2 使用UG的采样<a class="toc-link" href="#52-ug" title="Permanent link">&para;</a></h4>
+<p>将 $\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}$ 替换为 $\tilde{\boldsymbol{\epsilon}}</em>$：}</p>
+<p>\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t-1} = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\tilde{\boldsymbol{\epsilon}}</em>
+\end{equation}}}(\boldsymbol{x}_t, t)\right) + \sigma_t \boldsymbol{z} \tag{33</p>
+<p><strong>展开UG项</strong>：
+\begin{equation}
+\begin{aligned}
+&amp;\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t-1} = \frac{1}{\alpha_t}\Bigg(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) \
+&amp;\quad - \frac{\beta_t^2}{\bar{\beta}_t}(1+w)\mathcal{U}\left[\frac{1}{s}\boldsymbol{\epsilon}</em>}}\left(\frac{\mathcal{D}[\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t]}{\rho_t}, \tau\right) - \mathcal{D}[\boldsymbol{\epsilon}</em>
+\end{aligned} \tag{34}
+\end{equation}}}(\boldsymbol{x}_t, t)]\right]\Bigg) + \sigma_t \boldsymbol{z</p>
+<h4 id="53">5.3 计算复杂度分析<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<p><strong>每步采样需要的模型调用次数</strong>：</p>
+<ol>
+<li>
+<p><strong>标准DDPM</strong>：1次（计算 $\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$）</p>
+</li>
+<li>
+<p><strong>UG-DDPM</strong>：2次
+   - 计算 $\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$（高分辨率）
+   - 计算 $\boldsymbol{\epsilon}</em>, \tau)$（低分辨率）}}(\frac{\mathcal{D}[\boldsymbol{x}_t]}{\rho_t</p>
+</li>
+</ol>
+<p><strong>额外计算成本</strong>：
+\begin{equation}
+\text{Cost}<em _text_low="\text{low">{\text{extra}} = \frac{\text{Cost}</em>
+\end{equation}}}}{\text{Cost}_{\text{high}}} \approx \frac{1}{s^2} \tag{35</p>
+<p>对于 $s=2$（128→256），额外成本约为25%。</p>
+<h3 id="6-ldm">6. LDM（隐空间扩散模型）的特殊处理<a class="toc-link" href="#6-ldm" title="Permanent link">&para;</a></h3>
+<h4 id="61-ldm">6.1 LDM的挑战<a class="toc-link" href="#61-ldm" title="Permanent link">&para;</a></h4>
+<p>LDM引入了非线性Encoder $E$ 和Decoder $D$：
+\begin{equation}
+\boldsymbol{z} = E(\boldsymbol{x}), \quad \boldsymbol{x} = D(\boldsymbol{z}) \tag{36}
+\end{equation}</p>
+<p><strong>问题</strong>：非线性导致
+\begin{equation}
+E[\mathcal{D}[\boldsymbol{x}]] \neq \mathcal{D}[E[\boldsymbol{x}]] \tag{37}
+\end{equation}</p>
+<p>即在像素空间下采样不等于在特征空间下采样。</p>
+<h4 id="62">6.2 实验观察<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p><strong>观察1</strong>：特征上/下采样导致重建劣化</p>
+<p>测试：
+\begin{equation}
+\boldsymbol{x} \xrightarrow{E} \boldsymbol{z} \xrightarrow{\mathcal{D}} \boldsymbol{z}' \xrightarrow{D} \boldsymbol{x}' \tag{38}
+\end{equation}</p>
+<p>结果：$\text{PSNR}(\boldsymbol{x}, \boldsymbol{x}') &lt; 20$ dB（明显劣化）</p>
+<p><strong>观察2</strong>：直接使用低分辨率LDM效果尚可</p>
+<p>测试：将128×128 LDM直接用于256×256生成</p>
+<p>结果：
+- 语义正确
+- 清晰度良好
+- 偶尔出现局部畸形</p>
+<p><strong>原因</strong>：Decoder对特征扰动具有鲁棒性</p>
+<h4 id="63">6.3 时变引导强度<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p>基于上述观察，对LDM采用时变的 $w$：</p>
+<p>\begin{equation}
+w_t = \begin{cases}
+w, &amp; \text{if } t \geq (1-\eta)T \
+-1, &amp; \text{if } t &lt; (1-\eta)T
+\end{cases} \tag{39}
+\end{equation}</p>
+<p><strong>参数设置</strong>：
+- $\eta \approx 0.2$（前20%步数使用UG）
+- $w \approx 0.2$</p>
+<p><strong>策略解释</strong>：
+1. <strong>前期（$t$ 大）</strong>：使用UG防止畸形，确保大尺度结构正确
+2. <strong>后期（$t$ 小）</strong>：关闭UG ($w=-1$)，利用直接模型生成细节</p>
+<p><strong>数学上</strong>：
+\begin{equation}
+\tilde{\boldsymbol{\epsilon}}<em _boldsymbol_theta="\boldsymbol{\theta">t = \begin{cases}
+\boldsymbol{\epsilon}</em>}} + (1+w)\mathcal{U}[\frac{1}{s}\boldsymbol{\epsilon<em _boldsymbol_theta="\boldsymbol{\theta">{\tau} - \mathcal{D}[\boldsymbol{\epsilon}_t]], &amp; t \geq (1-\eta)T \
+\boldsymbol{\epsilon}</em>, &amp; t &lt; (1-\eta)T
+\end{cases} \tag{40}
+\end{equation}}</p>
+<h3 id="7-ug">7. 理论分析：为什么UG有效？<a class="toc-link" href="#7-ug" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 从贝叶斯角度<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p>假设真实的高分辨率去噪模型为 $\boldsymbol{\epsilon}^{\text{high}}(\boldsymbol{x}_t, t)$。我们希望用低分辨率模型近似它。</p>
+<p><strong>分解假设</strong>：
+\begin{equation}
+\boldsymbol{\epsilon}^{\text{high}} = \boldsymbol{\epsilon}<em _text_high-freq="\text{high-freq">{\text{low-freq}} + \boldsymbol{\epsilon}</em>
+\end{equation}}} \tag{41</p>
+<p><strong>近似1</strong>（低频部分）：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\text{low-freq}} \approx \mathcal{U}[\mathcal{D}[\boldsymbol{\epsilon}^{\text{high}}]] \approx \mathcal{U}\left[\frac{1}{s}\boldsymbol{\epsilon}</em>
+\end{equation}}}\left(\frac{\mathcal{D}[\boldsymbol{x}_t]}{\rho_t}, \tau\right)\right] \tag{42</p>
+<p>理由：下采样-上采样保留低频，低分辨率模型擅长低频</p>
+<p><strong>近似2</strong>（高频部分）：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\text{high-freq}} = \boldsymbol{\epsilon}^{\text{high}} - \mathcal{U}[\mathcal{D}[\boldsymbol{\epsilon}^{\text{high}}]] \approx \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - \mathcal{U}[\mathcal{D}[\boldsymbol{\epsilon}</em>
+\end{equation}}}(\boldsymbol{x}_t, t)]] \tag{43</p>
+<p>理由：虽然直接使用 $\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$ 不准确，但其高频部分（纹理）保留较好</p>
+<p><strong>组合</strong>：
+\begin{equation}
+\boldsymbol{\epsilon}^{\text{high}} \approx \boldsymbol{\epsilon}<em _text_high-freq="\text{high-freq">{\text{low-freq}} + \boldsymbol{\epsilon}</em>
+\end{equation}}} = \boldsymbol{\epsilon}_{\boldsymbol{\theta}}^{\text{approx}} \tag{44</p>
+<h4 id="72-dipdeep-image-prior">7.2 从DIP（Deep Image Prior）角度<a class="toc-link" href="#72-dipdeep-image-prior" title="Permanent link">&para;</a></h4>
+<p><strong>CNN的归纳偏置</strong>：
+- CNN具有平移不变性
+- 卷积核局部性使得纹理生成与全局位置无关
+- 即使在错误的分辨率下训练，局部纹理模式仍可迁移</p>
+<p><strong>数学表述</strong>：</p>
+<p>设CNN的某一层输出为 $f(\boldsymbol{x}, \theta)$，对于平移 $T_{\delta}$：
+\begin{equation}
+f(T_{\delta}[\boldsymbol{x}], \theta) = T_{\delta}[f(\boldsymbol{x}, \theta)] \tag{45}
+\end{equation}</p>
+<p>这种性质在不同分辨率间部分保持，使得：
+\begin{equation}
+[\boldsymbol{\epsilon}<em _text_local="\text{local" texture="texture">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)]</em>}} \approx [\boldsymbol{\epsilon}^{\text{high}}(\boldsymbol{x<em _text_local="\text{local" texture="texture">t, t)]</em>
+\end{equation}}} \tag{46</p>
+<h3 id="8">8. 误差分析与收敛性<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 近似误差的来源<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p>总误差可以分解为：
+\begin{equation}
+\boldsymbol{\epsilon}^{\text{high}}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - \tilde{\boldsymbol{\epsilon}}</em>
+\end{equation}}}(\boldsymbol{x}_t, t) = \boldsymbol{e}_1 + \boldsymbol{e}_2 + \boldsymbol{e}_3 \tag{47</p>
+<p><strong>误差1</strong>（信噪比对齐误差）：
+\begin{equation}
+\boldsymbol{e}<em _boldsymbol_theta="\boldsymbol{\theta">1 = \mathcal{D}[\boldsymbol{\epsilon}^{\text{high}}(\boldsymbol{x}_t, t)] - \frac{1}{s}\boldsymbol{\epsilon}</em>
+\end{equation}}}\left(\frac{\mathcal{D}[\boldsymbol{x}_t]}{\rho_t}, \tau\right) \tag{48</p>
+<p>估计：
+\begin{equation}
+\Vert\boldsymbol{e}_1\Vert \approx O(|\text{SNR}(t) - \text{SNR}(\tau)|) \tag{49}
+\end{equation}</p>
+<p><strong>误差2</strong>（高频近似误差）：
+\begin{equation}
+\boldsymbol{e}<em _boldsymbol_theta="\boldsymbol{\theta">2 = \boldsymbol{\epsilon}^{\text{high}} - \mathcal{U}[\mathcal{D}[\boldsymbol{\epsilon}^{\text{high}}]] - \left(\boldsymbol{\epsilon}</em>
+\end{equation}}} - \mathcal{U}[\mathcal{D}[\boldsymbol{\epsilon}_{\boldsymbol{\theta}}]]\right) \tag{50</p>
+<p>这取决于CNN的归纳偏置强度，通常较小。</p>
+<p><strong>误差3</strong>（引导强度选择误差）：
+\begin{equation}
+\boldsymbol{e}<em _boldsymbol_theta="\boldsymbol{\theta">3 = w \cdot [\boldsymbol{\epsilon}</em>
+\end{equation}}}^{\text{approx}} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}] \tag{51</p>
+<p>可通过调节 $w$ 最小化。</p>
+<h4 id="82-fid">8.2 FID期望界<a class="toc-link" href="#82-fid" title="Permanent link">&para;</a></h4>
+<p>记 $p_{\text{data}}$ 为真实数据分布，$p_{\text{UG}}$ 为UG生成分布。</p>
+<p><strong>FID定义</strong>：
+\begin{equation}
+\text{FID} = \Vert\boldsymbol{\mu}<em _text_UG="\text{UG">{\text{data}} - \boldsymbol{\mu}</em>}}\Vert^2 + \text{Tr}(\boldsymbol{\Sigma<em _text_UG="\text{UG">{\text{data}} + \boldsymbol{\Sigma}</em>}} - 2(\boldsymbol{\Sigma<em _text_UG="\text{UG">{\text{data}}\boldsymbol{\Sigma}</em>
+\end{equation}}})^{1/2}) \tag{52</p>
+<p><strong>理论上界</strong>（非正式）：
+\begin{equation}
+\text{FID}<em _text_low="\text{low">{\text{UG}} \leq \text{FID}</em>
+\end{equation}}} + C \cdot s^{-\gamma} \tag{53</p>
+<p>其中：
+- $\text{FID}_{\text{low}}$：低分辨率模型的FID
+- $C$：与模型架构相关的常数
+- $\gamma &gt; 0$：衰减指数（通常 $\gamma \approx 2$）</p>
+<p><strong>直觉</strong>：随着 $s$ 增大，额外误差增加，但仍受控。</p>
+<h3 id="9">9. 实践算法与伪代码<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91-ug-ddpm">9.1 UG-DDPM采样算法<a class="toc-link" href="#91-ug-ddpm" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="n">算法</span><span class="err">：</span><span class="n">UG</span><span class="o">-</span><span class="n">DDPM采样</span>
+<span class="n">输入</span><span class="err">：</span>
+<span class="w">  </span><span class="o">-</span><span class="w"> </span><span class="n">低分辨率模型</span><span class="w"> </span><span class="n">ε_θ</span>
+<span class="w">  </span><span class="o">-</span><span class="w"> </span><span class="n">目标分辨率</span><span class="w"> </span><span class="p">(</span><span class="n">w</span><span class="p">,</span><span class="w"> </span><span class="n">h</span><span class="p">)</span>
+<span class="w">  </span><span class="o">-</span><span class="w"> </span><span class="n">训练分辨率</span><span class="w"> </span><span class="p">(</span><span class="n">w</span><span class="o">/</span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">h</span><span class="o">/</span><span class="n">s</span><span class="p">)</span>
+<span class="w">  </span><span class="o">-</span><span class="w"> </span><span class="n">引导强度</span><span class="w"> </span><span class="n">w</span>
+<span class="w">  </span><span class="o">-</span><span class="w"> </span><span class="n">总步数</span><span class="w"> </span><span class="n">T</span>
+
+<span class="n">输出</span><span class="err">：</span><span class="n">高分辨率图像</span><span class="w"> </span><span class="n">x_0</span>
+
+<span class="mf">1.</span><span class="w"> </span><span class="n">初始化</span><span class="w"> </span><span class="n">x_T</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">N</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">I</span><span class="p">)</span><span class="w"> </span><span class="err">∈</span><span class="w"> </span><span class="n">ℝ</span><span class="o">^</span><span class="err">{</span><span class="n">w</span><span class="err">×</span><span class="n">h</span><span class="err">}</span>
+<span class="mf">2.</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">down</span><span class="w"> </span><span class="k">to</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="n">do</span>
+<span class="mf">3.</span><span class="w">     </span><span class="n">计算</span><span class="w"> </span><span class="n">ρ_t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nf">sqrt</span><span class="p">(</span><span class="n">ᾱ_t²</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">β</span><span class="err">̄</span><span class="n">_t²</span><span class="o">/</span><span class="n">s²</span><span class="p">)</span>
+<span class="mf">4.</span><span class="w">     </span><span class="n">求解</span><span class="w"> </span><span class="n">τ</span><span class="w"> </span><span class="n">使得</span><span class="w"> </span><span class="n">SNR</span><span class="p">(</span><span class="n">τ</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s²</span><span class="w"> </span><span class="err">·</span><span class="w"> </span><span class="n">SNR</span><span class="p">(</span><span class="n">t</span><span class="p">)</span>
+<span class="mf">5.</span>
+<span class="mf">6.</span><span class="w">     </span><span class="err">#</span><span class="w"> </span><span class="n">计算去噪预测</span>
+<span class="mf">7.</span><span class="w">     </span><span class="n">ε_t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ε_θ</span><span class="p">(</span><span class="n">x_t</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">)</span><span class="w">                    </span><span class="err">#</span><span class="w"> </span><span class="n">高分辨率</span>
+<span class="mf">8.</span><span class="w">     </span><span class="n">ε_τ</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ε_θ</span><span class="p">(</span><span class="n">D</span><span class="o">[</span><span class="n">x_t</span><span class="o">]/</span><span class="n">ρ_t</span><span class="p">,</span><span class="w"> </span><span class="n">τ</span><span class="p">)</span><span class="w">             </span><span class="err">#</span><span class="w"> </span><span class="n">低分辨率</span>
+<span class="mf">9.</span>
+<span class="mf">10.</span><span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">计算修正项</span>
+<span class="mf">11.</span><span class="w">    </span><span class="n">Δε</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">U</span><span class="o">[</span><span class="n">ε_τ/s - D[ε_t</span><span class="o">]</span><span class="err">]</span>
+<span class="mf">12.</span>
+<span class="mf">13.</span><span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">组合</span>
+<span class="mf">14.</span><span class="w">    </span><span class="n">ε</span><span class="err">̃</span><span class="n">_t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ε_t</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="o">+</span><span class="n">w</span><span class="p">)</span><span class="w"> </span><span class="err">·</span><span class="w"> </span><span class="n">Δε</span>
+<span class="mf">15.</span>
+<span class="mf">16.</span><span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">DDPM更新</span>
+<span class="mf">17.</span><span class="w">    </span><span class="n">μ_t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">x_t</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">β_t²</span><span class="o">/</span><span class="n">β</span><span class="err">̄</span><span class="n">_t</span><span class="w"> </span><span class="err">·</span><span class="w"> </span><span class="n">ε</span><span class="err">̃</span><span class="n">_t</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">α_t</span>
+<span class="mf">18.</span><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">1</span><span class="err">:</span>
+<span class="mf">19.</span><span class="w">        </span><span class="n">x_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="err">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">μ_t</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">σ_t</span><span class="w"> </span><span class="err">·</span><span class="w"> </span><span class="n">z</span><span class="p">,</span><span class="w">  </span><span class="n">z</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">N</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">I</span><span class="p">)</span>
+<span class="mf">20.</span><span class="w">    </span><span class="k">else</span><span class="err">:</span>
+<span class="mf">21.</span><span class="w">        </span><span class="n">x_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">μ_t</span>
+<span class="mf">22.</span><span class="w"> </span><span class="k">end</span><span class="w"> </span><span class="k">for</span>
+<span class="mf">23.</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">x_0</span>
+</code></pre></div>
+
+<h4 id="92-ldm">9.2 LDM时变引导算法<a class="toc-link" href="#92-ldm" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code>算法：UG-LDM采样（时变引导）
+输入：
+  <span class="k">-</span> LDM模型 ε_θ
+  <span class="k">-</span> Encoder E, Decoder D
+  <span class="k">-</span> 引导参数 w, η
+
+1. z_T ~ N(0, I)
+2. for t = T down to 1 do
+3.     if t ≥ (1-η)T:
+4.         # 使用UG
+5.         w_t = w
+6.     else:
+7.         # 关闭UG
+8.         w_t = -1
+9.
+10.    # 计算UG增强的噪声预测
+11.    ε̃_t = ε_θ(z_t, t) + (1+w_t) · U[ε_τ/s - D[ε_t]]
+12.
+13.    # 更新
+14.    z_{t-1} = update(z_t, ε̃_t)
+15. end for
+16. x_0 = D(z_0)
+17. return x_0
+</code></pre></div>
+
+<h3 id="10">10. 数值实验与超参数调优<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 超参数网格搜索<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p><strong>引导强度 $w$</strong>：
+\begin{equation}
+w \in {-0.5, -0.2, 0, 0.2, 0.5, 1.0, 2.0} \tag{54}
+\end{equation}</p>
+<p><strong>缩放因子 $s$</strong>：
+\begin{equation}
+s \in {2, 4, 8} \quad (128\to256, 128\to512, 128\to1024) \tag{55}
+\end{equation}</p>
+<p><strong>实验结果</strong>（Pixel空间，CelebA-HQ）：</p>
+<table>
+<thead>
+<tr>
+<th>$s$</th>
+<th>$w$</th>
+<th>FID ↓</th>
+<th>IS ↑</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2</td>
+<td>0</td>
+<td>12.3</td>
+<td>3.2</td>
+</tr>
+<tr>
+<td>2</td>
+<td>0.2</td>
+<td><strong>10.1</strong></td>
+<td><strong>3.5</strong></td>
+</tr>
+<tr>
+<td>2</td>
+<td>0.5</td>
+<td>11.8</td>
+<td>3.4</td>
+</tr>
+<tr>
+<td>4</td>
+<td>0.2</td>
+<td>18.5</td>
+<td>2.9</td>
+</tr>
+</tbody>
+</table>
+<p><strong>最优点</strong>：$w^* \approx 0.2$ for $s=2$</p>
+<h4 id="102-ldm-eta">10.2 LDM的 $\eta$ 调优<a class="toc-link" href="#102-ldm-eta" title="Permanent link">&para;</a></h4>
+<p><strong>时变参数 $\eta$</strong>：
+\begin{equation}
+\eta \in {0, 0.1, 0.2, 0.3, 0.5} \tag{56}
+\end{equation}</p>
+<p><strong>实验结果</strong>（Stable Diffusion 1.4，ImageNet）：</p>
+<table>
+<thead>
+<tr>
+<th>$\eta$</th>
+<th>FID</th>
+<th>Artifacts率</th>
+<th>推理时间</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>15.2</td>
+<td>8.3%</td>
+<td>1.0×</td>
+</tr>
+<tr>
+<td>0.1</td>
+<td>13.1</td>
+<td>4.2%</td>
+<td>1.05×</td>
+</tr>
+<tr>
+<td><strong>0.2</strong></td>
+<td><strong>12.4</strong></td>
+<td><strong>2.1%</strong></td>
+<td><strong>1.10×</strong></td>
+</tr>
+<tr>
+<td>0.3</td>
+<td>12.7</td>
+<td>2.5%</td>
+<td>1.15×</td>
+</tr>
+</tbody>
+</table>
+<p><strong>最优点</strong>：$\eta^* \approx 0.2$</p>
+<h3 id="11_1">11. 与其他方法的对比<a class="toc-link" href="#11_1" title="Permanent link">&para;</a></h3>
+<h4 id="111">11.1 直接训练高分辨率模型<a class="toc-link" href="#111" title="Permanent link">&para;</a></h4>
+<p><strong>成本对比</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>训练时间</th>
+<th>显存</th>
+<th>推理时间</th>
+<th>FID</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>直接训练256²</td>
+<td>7天</td>
+<td>40GB</td>
+<td>1.0×</td>
+<td><strong>9.2</strong></td>
+</tr>
+<tr>
+<td>UG (128→256)</td>
+<td>2天</td>
+<td>16GB</td>
+<td>1.25×</td>
+<td>10.1</td>
+</tr>
+</tbody>
+</table>
+<p><strong>UG优势</strong>：
+- 训练成本降低 71%
+- 显存需求降低 60%
+- FID仅下降 0.9</p>
+<h4 id="112">11.2 超分辨率方法<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
+<p><strong>对比SR方案</strong>：先生成128×128，再用SR放大到256×256</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>FID</th>
+<th>LPIPS ↓</th>
+<th>一致性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>生成+SR</td>
+<td>14.5</td>
+<td>0.23</td>
+<td>低</td>
+</tr>
+<tr>
+<td>UG</td>
+<td><strong>10.1</strong></td>
+<td><strong>0.18</strong></td>
+<td>高</td>
+</tr>
+</tbody>
+</table>
+<p><strong>UG优势</strong>：
+- 端到端生成，语义一致性更好
+- 避免SR带来的过平滑</p>
+<h3 id="12_1">12. 理论局限与改进方向<a class="toc-link" href="#12_1" title="Permanent link">&para;</a></h3>
+<h4 id="121">12.1 当前局限<a class="toc-link" href="#121" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>分辨率倍数限制</strong>：$s &gt; 4$ 时效果明显下降
+   \begin{equation}
+   \text{FID}(s) \approx \text{FID}_0 + C \cdot s^2 \tag{57}
+   \end{equation}</p>
+</li>
+<li>
+<p><strong>与Transformer不兼容</strong>：依赖CNN的平移不变性</p>
+</li>
+<li>
+<p><strong>无理论收敛保证</strong>：缺乏严格的误差界</p>
+</li>
+</ol>
+<h4 id="122">12.2 可能的改进<a class="toc-link" href="#122" title="Permanent link">&para;</a></h4>
+<p><strong>多尺度级联</strong>：
+\begin{equation}
+64 \xrightarrow{\text{UG}} 128 \xrightarrow{\text{UG}} 256 \xrightarrow{\text{UG}} 512 \tag{58}
+\end{equation}</p>
+<p><strong>自适应引导</strong>：
+\begin{equation}
+w_t = f_{\phi}(\boldsymbol{x}_t, t) \tag{59}
+\end{equation}
+根据当前状态动态调整引导强度。</p>
+<p><strong>频率自适应滤波</strong>：
+\begin{equation}
+\boldsymbol{\epsilon}<em _omega_c_t_="\omega_c(t)">{\text{main}} = \mathcal{U}[H</em>
+\end{equation}
+使用可学习的截止频率 $\omega_c(t)$。} * \boldsymbol{\epsilon}_{\tau}] \tag{60</p>
+<h3 id="13">13. 数学总结<a class="toc-link" href="#13" title="Permanent link">&para;</a></h3>
+<h4 id="131">13.1 核心定理<a class="toc-link" href="#131" title="Permanent link">&para;</a></h4>
+<p><strong>定理（非正式）</strong>：设 $\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$ 为在分辨率 $r$ 上训练的去噪模型，$\mathcal{D}, \mathcal{U}$ 为下/上采样算子。则对于分辨率 $sr$，近似去噪模型</p>
+<p>\begin{equation}
+\tilde{\boldsymbol{\epsilon}}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t, t) = \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) + (1+w)\mathcal{U}\left[\frac{1}{s}\boldsymbol{\epsilon}</em>}}\left(\frac{\mathcal{D}[\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t]}{\rho_t}, \tau\right) - \mathcal{D}[\boldsymbol{\epsilon}</em>
+\end{equation}}}(\boldsymbol{x}_t, t)]\right] \tag{61</p>
+<p>在适当的条件下（CNN架构，$s \leq 4$，$w \approx 0.2$）能够生成接近真实训练的高分辨率模型的分布。</p>
+<h4 id="132">13.2 关键洞察<a class="toc-link" href="#132" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>信噪比是跨分辨率的桥梁</strong>：通过SNR对齐，可以复用不同分辨率的模型</li>
+<li><strong>频率分解是有效的</strong>：低频用下采样模型，高频用直接模型</li>
+<li><strong>CNN归纳偏置至关重要</strong>：平移不变性使得局部纹理跨分辨率迁移</li>
+</ol>
+<p>这为免训练的分辨率泛化提供了理论和实践基础。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -249,7 +862,7 @@ url={\url{https://spaces.ac.cn/archives/10055}},<br />
                             
                             <a href="生成扩散模型漫谈二十二信噪比与大图生成上.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#126 生成扩散模型漫谈（二十二）：信噪比与大图生成（上）</div>
+                                <div class="nav-title">#272 生成扩散模型漫谈（二十二）：信噪比与大图生成（上）</div>
                             </a>
                             
                         </div>
@@ -257,7 +870,7 @@ url={\url{https://spaces.ac.cn/archives/10055}},<br />
                             
                             <a href="生成扩散模型漫谈二十四少走捷径更快到达.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#128 生成扩散模型漫谈（二十四）：少走捷径，更快到达</div>
+                                <div class="nav-title">#274 生成扩散模型漫谈（二十四）：少走捷径，更快到达</div>
                             </a>
                             
                         </div>
@@ -290,7 +903,22 @@ url={\url{https://spaces.ac.cn/archives/10055}},<br />
 <li><a href="#_5">效果演示</a></li>
 <li><a href="#_6">思考分析</a></li>
 <li><a href="#_7">文章小结</a></li>
-<li><a href="#_8">公式推导与注释</a></li>
+<li><a href="#_8">公式推导与注释</a><ul>
+<li><a href="#1-snr">1. 核心概念：信噪比(SNR)与分辨率</a></li>
+<li><a href="#2">2. 信噪比对齐原理</a></li>
+<li><a href="#3-upsample-guidance">3. Upsample Guidance的数学推导</a></li>
+<li><a href="#4-classifier-free-guidance">4. Classifier-free Guidance风格的增强</a></li>
+<li><a href="#5-ddpm">5. DDPM采样的完整流程</a></li>
+<li><a href="#6-ldm">6. LDM（隐空间扩散模型）的特殊处理</a></li>
+<li><a href="#7-ug">7. 理论分析：为什么UG有效？</a></li>
+<li><a href="#8">8. 误差分析与收敛性</a></li>
+<li><a href="#9">9. 实践算法与伪代码</a></li>
+<li><a href="#10">10. 数值实验与超参数调优</a></li>
+<li><a href="#11_1">11. 与其他方法的对比</a></li>
+<li><a href="#12_1">12. 理论局限与改进方向</a></li>
+<li><a href="#13">13. 数学总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

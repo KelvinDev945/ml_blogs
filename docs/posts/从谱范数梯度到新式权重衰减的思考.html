@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=详细推导">详细推导</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #157 从谱范数梯度到新式权重衰减的思考
+                    #303 从谱范数梯度到新式权重衰减的思考
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#157</span>
+                <span class="post-number">#303</span>
                 从谱范数梯度到新式权重衰减的思考
             </h1>
             <div class="post-meta">
@@ -546,33 +546,33 @@ $$\mathcal{L}<em _text_WGAN="\text{WGAN">D = \mathcal{L}</em>}} + \lambda_{\text
 <h3 id="11_1">11. 实现细节与优化<a class="toc-link" href="#11_1" title="Permanent link">&para;</a></h3>
 <h4 id="111-boldsymbolv_1">11.1 高效计算$\boldsymbol{v}_1$的策略<a class="toc-link" href="#111-boldsymbolv_1" title="Permanent link">&para;</a></h4>
 <p><strong>策略1：幂迭代</strong>（如正文所述）</p>
-<pre class="highlight"><code>初始化: v = ones(m) / sqrt(m)
-for t in range(num_iterations):
-    u = W @ v
-    u = u / norm(u)
-    v = W.T @ u
-    v = v / norm(v)
-</code></pre>
+<div class="highlight"><pre><span></span><code><span class="err">初始化</span><span class="o">:</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ones</span><span class="o">(</span><span class="n">m</span><span class="o">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">sqrt</span><span class="o">(</span><span class="n">m</span><span class="o">)</span>
+<span class="k">for</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">range</span><span class="o">(</span><span class="n">num_iterations</span><span class="o">):</span>
+<span class="w">    </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">W</span><span class="w"> </span><span class="err">@</span><span class="w"> </span><span class="n">v</span>
+<span class="w">    </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">norm</span><span class="o">(</span><span class="n">u</span><span class="o">)</span>
+<span class="w">    </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">W</span><span class="o">.</span><span class="na">T</span><span class="w"> </span><span class="err">@</span><span class="w"> </span><span class="n">u</span>
+<span class="w">    </span><span class="n">v</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">v</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">norm</span><span class="o">(</span><span class="n">v</span><span class="o">)</span>
+</code></pre></div>
 
 <p>复杂度：$\mathcal{O}(t\cdot nm)$，通常$t=1\sim 10$。</p>
 <p><strong>策略2：缓存与渐进更新</strong></p>
 <p>利用相邻迭代中$\boldsymbol{W}_t$变化不大，$\boldsymbol{v}_1^{(t)}\approx\boldsymbol{v}_1^{(t-1)}$：</p>
-<pre class="highlight"><code>v = v_cached  # 使用上一步的v1作为初始化
+<div class="highlight"><pre><span></span><code>v = v_cached  # 使用上一步的v1作为初始化
 v = power_iteration(W, v, num_iterations=1)
 v_cached = v
-</code></pre>
+</code></pre></div>
 
 <p>这样每步只需1次幂迭代，效果仍然良好。</p>
 <p><strong>策略3：随机化方法</strong></p>
 <p>对于非常大的矩阵，可以使用随机SVD（Randomized SVD）：</p>
-<pre class="highlight"><code>Omega = random_matrix(m, k)  # k &lt;&lt; m
+<div class="highlight"><pre><span></span><code>Omega = random_matrix(m, k)  # k &lt;&lt; m
 Y = W @ Omega
 Q, _ = qr(Y)  # QR分解
 B = Q.T @ W
 U_B, Sigma, Vt = svd(B)  # 对小矩阵做SVD
 u1 = Q @ U_B[:, 0]
 v1 = Vt[0, :]
-</code></pre>
+</code></pre></div>
 
 <p>复杂度：$\mathcal{O}(nmk)$，$k\sim 10$通常足够。</p>
 <h4 id="112">11.2 数值稳定性<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
@@ -585,15 +585,15 @@ v1 = Vt[0, :]
    其中$\alpha\in[0,1]$根据$\sigma_1/\Vert\boldsymbol{W}\Vert_F$自适应调整。</p>
 <h4 id="113">11.3 分布式训练的考虑<a class="toc-link" href="#113" title="Permanent link">&para;</a></h4>
 <p>在数据并行的分布式训练中，梯度在各设备间平均。谱权重衰减需要在梯度聚合<strong>之后</strong>计算：</p>
-<pre class="highlight"><code># 错误：各设备独立计算v1，然后平均 ❌
+<div class="highlight"><pre><span></span><code><span class="gh">#</span> 错误：各设备独立计算v1，然后平均 ❌
 v1_local = compute_v1(W_local)
 v1 = all_reduce_mean(v1_local)  # 平均后的v1不正确
 
-# 正确：聚合梯度后，在主设备上计算v1 ✓
+<span class="gh">#</span> 正确：聚合梯度后，在主设备上计算v1 ✓
 grad = all_reduce_mean(grad_local)
 v1 = compute_v1(W)  # W在所有设备上一致
 decay = sigma1 * outer(u1, v1)
-</code></pre>
+</code></pre></div>
 
 <h3 id="12_1">12. 总结与展望<a class="toc-link" href="#12_1" title="Permanent link">&para;</a></h3>
 <h4 id="121">12.1 理论贡献总结<a class="toc-link" href="#121" title="Permanent link">&para;</a></h4>
@@ -652,7 +652,7 @@ decay = sigma1 * outer(u1, v1)
                             
                             <a href="生成扩散模型漫谈二十八分步理解一致性模型.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#156 生成扩散模型漫谈（二十八）：分步理解一致性模型</div>
+                                <div class="nav-title">#302 生成扩散模型漫谈（二十八）：分步理解一致性模型</div>
                             </a>
                             
                         </div>
@@ -660,7 +660,7 @@ decay = sigma1 * outer(u1, v1)
                             
                             <a href="为什么梯度裁剪的默认模长是1.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#158 为什么梯度裁剪的默认模长是1？</div>
+                                <div class="nav-title">#304 为什么梯度裁剪的默认模长是1？</div>
                             </a>
                             
                         </div>

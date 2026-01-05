@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=问题">问题</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #100 Lion/Tiger优化器训练下的Embedding异常和对策
+                    #246 Lion/Tiger优化器训练下的Embedding异常和对策
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#100</span>
+                <span class="post-number">#246</span>
                 Lion/Tiger优化器训练下的Embedding异常和对策
             </h1>
             <div class="post-meta">
@@ -184,8 +184,484 @@ month={Aug},<br />
 url={\url{https://spaces.ac.cn/archives/9736}},<br />
 } </p>
 <hr />
-<h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h2 id="_6">详细数学推导与分析<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
+<h3 id="1-tiger">1. Tiger优化器基础理论<a class="toc-link" href="#1-tiger" title="Permanent link">&para;</a></h3>
+<h4 id="11-tiger">1.1 Tiger更新规则<a class="toc-link" href="#11-tiger" title="Permanent link">&para;</a></h4>
+<p>Tiger优化器的完整更新规则为：</p>
+<p>$$
+\begin{align}
+\boldsymbol{m}<em t-1="t-1">t &amp;= \beta_1 \boldsymbol{m}</em>} + (1-\beta_1) \boldsymbol{g<em t-1="t-1">t \tag{1} \
+\boldsymbol{\theta}_t &amp;= \boldsymbol{\theta}</em>} - \eta_t \left[\text{sign}(\boldsymbol{m<em t-1="t-1">t) + \lambda \boldsymbol{\theta}</em>
+\end{align}
+$$}\right] \tag{2</p>
+<p>其中：
+- $\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">t = \nabla</em>)$ 是损失函数的梯度
+- $\boldsymbol{m}_t$ 是指数移动平均动量（Exponential Moving Average, EMA）
+- $\beta_1 \in (0,1)$ 是动量衰减系数，通常取0.9
+- $\eta_t &gt; 0$ 是学习率
+- $\lambda &gt; 0$ 是权重衰减系数
+- $\text{sign}(\cdot)$ 是符号函数，逐元素操作}} L(\boldsymbol{\theta}_{t-1</p>
+<h4 id="12">1.2 符号函数的定义<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p>符号函数定义为：</p>
+<p>$$
+\text{sign}(x) = \begin{cases}
++1, &amp; x &gt; 0 \
+0, &amp; x = 0 \
+-1, &amp; x &lt; 0
+\end{cases} \tag{3}
+$$</p>
+<p><strong>关键特性</strong>：符号函数将连续的动量值映射到离散的${-1, 0, +1}$，这使得：
+- 更新步长不依赖于梯度的幅值，只依赖于方向
+- 对于不同尺度的参数具有适应性
+- 但也引入了信息损失（幅值信息）</p>
+<h4 id="13-lion">1.3 与Lion优化器的关系<a class="toc-link" href="#13-lion" title="Permanent link">&para;</a></h4>
+<p>Lion优化器的更新规则为：</p>
+<p>$$
+\begin{align}
+\boldsymbol{c}<em t-1="t-1">t &amp;= \beta_1 \boldsymbol{m}</em>} + (1-\beta_1) \boldsymbol{g<em t-1="t-1">t \tag{4} \
+\boldsymbol{\theta}_t &amp;= \boldsymbol{\theta}</em>} - \eta_t \left[\text{sign}(\boldsymbol{c<em t-1="t-1">t) + \lambda \boldsymbol{\theta}</em> \
+\boldsymbol{m}}\right] \tag{5<em t-1="t-1">t &amp;= \beta_2 \boldsymbol{m}</em>
+\end{align}
+$$} + (1-\beta_2) \boldsymbol{g}_t \tag{6</p>
+<p>Tiger可以看作Lion的特殊情况（$\beta_2 = \beta_1$），简化了实现并减少了内存开销。</p>
+<h3 id="2-embedding">2. Embedding层的特殊性<a class="toc-link" href="#2-embedding" title="Permanent link">&para;</a></h3>
+<h4 id="21-embedding">2.1 Embedding矩阵表示<a class="toc-link" href="#21-embedding" title="Permanent link">&para;</a></h4>
+<p>对于词汇表大小为$V$、嵌入维度为$d$的Embedding层：</p>
+<p>$$
+\boldsymbol{E} \in \mathbb{R}^{V \times d} \tag{7}
+$$</p>
+<p>对于输入token序列${t_1, t_2, \ldots, t_n}$，Embedding查找操作为：</p>
+<p>$$
+\boldsymbol{x}_i = \boldsymbol{E}[t_i, :] \in \mathbb{R}^d \tag{8}
+$$</p>
+<h4 id="22">2.2 梯度稀疏性<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p>Embedding层的梯度具有天然的稀疏性。对于批次$\mathcal{B}$中出现的token集合$\mathcal{T}_{\mathcal{B}}$：</p>
+<p>$$
+\frac{\partial L}{\partial \boldsymbol{E}[i,:]} = \begin{cases}
+\sum_{j: t_j = i} \frac{\partial L}{\partial \boldsymbol{x}<em _mathcal_B="\mathcal{B">j}, &amp; i \in \mathcal{T}</em> \
+\boldsymbol{0}, &amp; i \notin \mathcal{T}_{\mathcal{B}}
+\end{cases} \tag{9}
+$$}</p>
+<p><strong>稀疏度分析</strong>：设批次大小为$B$，序列长度为$L$，则：</p>
+<p>$$
+\text{Sparsity} = 1 - \frac{|\mathcal{T}_{\mathcal{B}}|}{V} \approx 1 - \frac{\min(BL, V)}{V} \tag{10}
+$$</p>
+<p>对于大词汇表（$V \gg BL$），稀疏度接近1，即绝大多数token的梯度为零。</p>
+<h4 id="23-token">2.3 Token频率分布<a class="toc-link" href="#23-token" title="Permanent link">&para;</a></h4>
+<p>实际文本数据中，token频率遵循Zipf定律：</p>
+<p>$$
+f(r) \propto \frac{1}{r^\alpha} \tag{11}
+$$</p>
+<p>其中$r$是频率排名，$\alpha \approx 1$。这意味着：
+- 少数高频token占据大部分出现
+- 大量低频token很少出现</p>
+<p>设token $i$的出现概率为$p_i$，则在$T$步训练中，该token期望出现次数为：</p>
+<p>$$
+\mathbb{E}[N_i(T)] = T \cdot B \cdot L \cdot p_i \tag{12}
+$$</p>
+<p>对于低频token（$p_i \ll 1$），$\mathbb{E}[N_i(T)]$可能远小于$T$。</p>
+<h3 id="3">3. 动量演化的数学分析<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<h4 id="31-token">3.1 低频Token的动量衰减<a class="toc-link" href="#31-token" title="Permanent link">&para;</a></h4>
+<p>考虑token $i$在时刻$t_0$出现后，在后续$k$步中都未出现的情况。动量的演化为：</p>
+<p>$$
+\boldsymbol{m}<em t_0="t_0">t^{(i)} = \beta_1^{t-t_0} \boldsymbol{m}</em>
+$$}^{(i)}, \quad t = t_0 + 1, \ldots, t_0 + k \tag{13</p>
+<p><strong>指数衰减速率</strong>：设$\beta_1 = 0.9$，则：</p>
+<p>$$
+\boldsymbol{m}<em t_0="t_0">{t_0+k}^{(i)} = 0.9^k \boldsymbol{m}</em>
+$$}^{(i)} \tag{14</p>
+<p>几个关键时间点：
+- $k=7$: 动量衰减到约$0.478$（半衰期）
+- $k=22$: 动量衰减到约$0.1$
+- $k=44$: 动量衰减到约$0.01$</p>
+<h4 id="32">3.2 符号函数的持续性<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p>虽然动量$\boldsymbol{m}_t$指数衰减，但符号函数保持不变：</p>
+<p>$$
+\text{sign}(\boldsymbol{m}<em t_0="t_0">t^{(i)}) = \text{sign}(\boldsymbol{m}</em>
+$$}^{(i)}), \quad \forall t &gt; t_0 \text{ 且 } \boldsymbol{m}_t^{(i)} \neq \boldsymbol{0} \tag{15</p>
+<p><strong>数值精度分析</strong>：在浮点运算中，当$|\boldsymbol{m}<em _text_machine="\text{machine">t^{(i)}| &lt; \epsilon</em>$时才变为零。对于单精度浮点数：}</p>
+<p>$$
+\epsilon_{\text{machine}} \approx 10^{-7} \tag{16}
+$$</p>
+<p>需要的衰减步数为：</p>
+<p>$$
+k^* = \left\lceil \frac{\log(\epsilon_{\text{machine}}/|\boldsymbol{m}_{t_0}^{(i)}|)}{\log(\beta_1)} \right\rceil \tag{17}
+$$</p>
+<p>假设$|\boldsymbol{m}_{t_0}^{(i)}| \approx 0.1$，$\beta_1 = 0.9$：</p>
+<p>$$
+k^* \approx \frac{\log(10^{-6})}{\log(0.9)} \approx \frac{-13.8}{-0.105} \approx 131 \text{ steps} \tag{18}
+$$</p>
+<p>这意味着符号函数在约131步内保持恒定！</p>
+<h3 id="4-tiger">4. Tiger优化器的过度更新机制<a class="toc-link" href="#4-tiger" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 无权重衰减的发散分析<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p>首先考虑无权重衰减（$\lambda = 0$）的情况。若$\text{sign}(\boldsymbol{m}_t^{(i)}) = \boldsymbol{s}$保持常数，则：</p>
+<p>$$
+\boldsymbol{\theta}<em t-1="t-1">t^{(i)} = \boldsymbol{\theta}</em>
+$$}^{(i)} - \eta_t \boldsymbol{s} \tag{19</p>
+<p>累积更新量为：</p>
+<p>$$
+\boldsymbol{\theta}<em t_0="t_0">{t_0+k}^{(i)} = \boldsymbol{\theta}</em>
+$$}^{(i)} - \boldsymbol{s} \sum_{j=1}^{k} \eta_{t_0+j} \tag{20</p>
+<p>若学习率恒定$\eta_t = \eta$：</p>
+<p>$$
+\boldsymbol{\theta}<em t_0="t_0">{t_0+k}^{(i)} = \boldsymbol{\theta}</em>
+$$}^{(i)} - k \eta \boldsymbol{s} \tag{21</p>
+<p><strong>发散速度</strong>：参数以线性速度$\eta |\boldsymbol{s}| = \eta \sqrt{d}$发散（因为$\boldsymbol{s}$的每个分量为$\pm 1$）。</p>
+<h4 id="42">4.2 权重衰减的平衡机制<a class="toc-link" href="#42" title="Permanent link">&para;</a></h4>
+<p>引入权重衰减后，更新规则变为：</p>
+<p>$$
+\boldsymbol{\theta}<em t-1="t-1">t^{(i)} = \boldsymbol{\theta}</em>
+$$}^{(i)} - \eta_t \left[\boldsymbol{s} + \lambda \boldsymbol{\theta}_{t-1}^{(i)}\right] \tag{22</p>
+<p>整理得：</p>
+<p>$$
+\boldsymbol{\theta}<em t-1="t-1">t^{(i)} = (1 - \eta_t \lambda) \boldsymbol{\theta}</em>
+$$}^{(i)} - \eta_t \boldsymbol{s} \tag{23</p>
+<h4 id="43">4.3 平衡点推导<a class="toc-link" href="#43" title="Permanent link">&para;</a></h4>
+<p>设存在平衡点$\boldsymbol{\theta}^*$，满足：</p>
+<p>$$
+\boldsymbol{\theta}^<em> = (1 - \eta \lambda) \boldsymbol{\theta}^</em> - \eta \boldsymbol{s} \tag{24}
+$$</p>
+<p>求解得：</p>
+<p>$$
+\begin{align}
+\boldsymbol{\theta}^<em> - (1 - \eta \lambda) \boldsymbol{\theta}^</em> &amp;= -\eta \boldsymbol{s} \tag{25} \
+\eta \lambda \boldsymbol{\theta}^<em> &amp;= -\eta \boldsymbol{s} \tag{26} \
+\boldsymbol{\theta}^</em> &amp;= -\frac{\boldsymbol{s}}{\lambda} \tag{27}
+\end{align}
+$$</p>
+<p>由于$\boldsymbol{s} = \text{sign}(\boldsymbol{m}_{t_0}^{(i)}) \in {-1, +1}^d$，因此：</p>
+<p>$$
+\boldsymbol{\theta}^* \in \left{-\frac{1}{\lambda}, +\frac{1}{\lambda}\right}^d \tag{28}
+$$</p>
+<p><strong>实验验证</strong>：当$\lambda = 0.01$时：</p>
+<p>$$
+\theta_j^* \in {-100, +100}, \quad j = 1, \ldots, d \tag{29}
+$$</p>
+<p>这完美解释了观察到的$\pm 100$异常值！</p>
+<h4 id="44">4.4 收敛速度分析<a class="toc-link" href="#44" title="Permanent link">&para;</a></h4>
+<p>定义偏差$\boldsymbol{\delta}_t = \boldsymbol{\theta}_t^{(i)} - \boldsymbol{\theta}^*$，则：</p>
+<p>$$
+\begin{align}
+\boldsymbol{\delta}<em t-1="t-1">t &amp;= \boldsymbol{\theta}_t^{(i)} - \boldsymbol{\theta}^<em> \tag{30} \
+&amp;= (1 - \eta \lambda) \boldsymbol{\theta}_{t-1}^{(i)} - \eta \boldsymbol{s} - \boldsymbol{\theta}^</em> \tag{31} \
+&amp;= (1 - \eta \lambda) \boldsymbol{\theta}</em> \
+&amp;= (1 - \eta \lambda) \left[\boldsymbol{\theta}}^{(i)} - \eta \boldsymbol{s} + \frac{\boldsymbol{s}}{\lambda} \tag{32<em t-1="t-1">{t-1}^{(i)} - \boldsymbol{\theta}^*\right] \tag{33} \
+&amp;= (1 - \eta \lambda) \boldsymbol{\delta}</em>
+\end{align}
+$$} \tag{34</p>
+<p>递推得：</p>
+<p>$$
+\boldsymbol{\delta}<em t_0="t_0">t = (1 - \eta \lambda)^{t-t_0} \boldsymbol{\delta}</em>
+$$} \tag{35</p>
+<p><strong>收敛条件</strong>：$|1 - \eta \lambda| &lt; 1$，即$0 &lt; \eta \lambda &lt; 2$。</p>
+<p><strong>收敛速率</strong>：衰减因子为$1 - \eta \lambda$。设$\eta = 10^{-3}$，$\lambda = 0.01$：</p>
+<p>$$
+1 - \eta \lambda = 1 - 10^{-5} = 0.99999 \tag{36}
+$$</p>
+<p>达到平衡点（误差降到1%）需要的步数：</p>
+<p>$$
+k_{\text{converge}} = \frac{\log(0.01)}{\log(1 - \eta \lambda)} \approx \frac{-4.605}{-10^{-5}} \approx 460,500 \text{ steps} \tag{37}
+$$</p>
+<p>这是一个相当缓慢的收敛过程！</p>
+<h3 id="5-adamtiger">5. Adam与Tiger的对比分析<a class="toc-link" href="#5-adamtiger" title="Permanent link">&para;</a></h3>
+<h4 id="51-adam">5.1 Adam优化器回顾<a class="toc-link" href="#51-adam" title="Permanent link">&para;</a></h4>
+<p>Adam的更新规则为：</p>
+<p>$$
+\begin{align}
+\boldsymbol{m}<em t-1="t-1">t &amp;= \beta_1 \boldsymbol{m}</em>} + (1-\beta_1) \boldsymbol{g<em t-1="t-1">t \tag{38} \
+\boldsymbol{v}_t &amp;= \beta_2 \boldsymbol{v}</em>} + (1-\beta_2) \boldsymbol{g<em t-1="t-1">t^2 \tag{39} \
+\hat{\boldsymbol{m}}_t &amp;= \frac{\boldsymbol{m}_t}{1 - \beta_1^t} \tag{40} \
+\hat{\boldsymbol{v}}_t &amp;= \frac{\boldsymbol{v}_t}{1 - \beta_2^t} \tag{41} \
+\boldsymbol{\theta}_t &amp;= \boldsymbol{\theta}</em>
+\end{align}
+$$} - \eta_t \frac{\hat{\boldsymbol{m}}_t}{\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon} \tag{42</p>
+<h4 id="52-tokenadam">5.2 低频Token在Adam中的行为<a class="toc-link" href="#52-tokenadam" title="Permanent link">&para;</a></h4>
+<p>当token $i$在时刻$t_0$后的$k$步中未出现：</p>
+<p>$$
+\begin{align}
+\boldsymbol{m}<em t_0="t_0">t^{(i)} &amp;= \beta_1^{t-t_0} \boldsymbol{m}</em> \
+\boldsymbol{v}}^{(i)} \tag{43<em t_0="t_0">t^{(i)} &amp;= \beta_2^{t-t_0} \boldsymbol{v}</em>
+\end{align}
+$$}^{(i)} \tag{44</p>
+<p>Adam的更新量为：</p>
+<p>$$
+\Delta \boldsymbol{\theta}_t^{(i)} = -\eta_t \frac{\hat{\boldsymbol{m}}_t^{(i)}}{\sqrt{\hat{\boldsymbol{v}}_t^{(i)}} + \epsilon} \propto \beta_1^{t-t_0} \tag{45}
+$$</p>
+<p><strong>关键差异</strong>：Adam的更新量随动量指数衰减，而Tiger的更新量保持恒定！</p>
+<h4 id="53">5.3 更新量衰减对比<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>时间步 $k$</th>
+<th>Adam更新量比例</th>
+<th>Tiger更新量比例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>1.000</td>
+<td>1.000</td>
+</tr>
+<tr>
+<td>10</td>
+<td>0.349</td>
+<td>1.000</td>
+</tr>
+<tr>
+<td>20</td>
+<td>0.122</td>
+<td>1.000</td>
+</tr>
+<tr>
+<td>50</td>
+<td>0.005</td>
+<td>1.000</td>
+</tr>
+<tr>
+<td>100</td>
+<td>0.000027</td>
+<td>1.000</td>
+</tr>
+</tbody>
+</table>
+<p>设$\beta_1 = 0.9$计算。可见Tiger的过度更新问题严重得多。</p>
+<h4 id="54">5.4 累积更新量对比<a class="toc-link" href="#54" title="Permanent link">&para;</a></h4>
+<p>在$k$步未出现后的累积更新：</p>
+<p><strong>Adam</strong>:
+$$
+\sum_{j=1}^{k} \Delta \boldsymbol{\theta}<em j="1">{t_0+j}^{(i)} \propto \sum</em>
+$$}^{k} \beta_1^j = \frac{\beta_1(1-\beta_1^k)}{1-\beta_1} \tag{46</p>
+<p>当$k \to \infty$时收敛到：
+$$
+\lim_{k \to \infty} \sum_{j=1}^{k} \beta_1^j = \frac{\beta_1}{1-\beta_1} = \frac{0.9}{0.1} = 9 \tag{47}
+$$</p>
+<p><strong>Tiger</strong>:
+$$
+\sum_{j=1}^{k} \Delta \boldsymbol{\theta}_{t_0+j}^{(i)} \propto k \tag{48}
+$$</p>
+<p>线性增长，无界！</p>
+<h3 id="6">6. 梯度反馈环路分析<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61-embedding">6.1 Embedding与梯度的相互作用<a class="toc-link" href="#61-embedding" title="Permanent link">&para;</a></h4>
+<p>考虑简化的损失函数（如语言建模）：</p>
+<p>$$
+L = -\log P(w_{t+1} | \boldsymbol{x}<em t_1="t+1">t) = -\log \frac{\exp(\boldsymbol{o}^\top \boldsymbol{E}[w</em>
+$$}, :])}{\sum_{w'} \exp(\boldsymbol{o}^\top \boldsymbol{E}[w', :])} \tag{49</p>
+<p>其中$\boldsymbol{o}$是输出隐状态。对Embedding的梯度为：</p>
+<p>$$
+\frac{\partial L}{\partial \boldsymbol{E}[w, :]} = \begin{cases}
+\boldsymbol{o}(P(w|\boldsymbol{o}) - 1), &amp; w = w_{t+1} \
+\boldsymbol{o} P(w|\boldsymbol{o}), &amp; w \neq w_{t+1}
+\end{cases} \tag{50}
+$$</p>
+<p>概率项为：</p>
+<p>$$
+P(w|\boldsymbol{o}) = \frac{\exp(\boldsymbol{o}^\top \boldsymbol{E}[w, :])}{\sum_{w'} \exp(\boldsymbol{o}^\top \boldsymbol{E}[w', :])} \tag{51}
+$$</p>
+<h4 id="62">6.2 异常值对概率的影响<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p>当$\boldsymbol{E}[w, :]$变得异常大时（如$\pm 100$），logit值为：</p>
+<p>$$
+\text{logit}(w) = \boldsymbol{o}^\top \boldsymbol{E}[w, :] \tag{52}
+$$</p>
+<p>假设$\boldsymbol{E}[w, :]$的某些分量达到100，而$|\boldsymbol{o}| \approx 1$：</p>
+<p>$$
+|\text{logit}(w)| \approx 100 \sqrt{d'} \tag{53}
+$$</p>
+<p>其中$d'$是异常分量的数量。这会导致：</p>
+<p>$$
+P(w|\boldsymbol{o}) \approx \begin{cases}
+1, &amp; \text{if } \boldsymbol{o}^\top \boldsymbol{E}[w, :] \gg 0 \
+0, &amp; \text{otherwise}
+\end{cases} \tag{54}
+$$</p>
+<h4 id="63">6.3 正反馈机制<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p>若Embedding偏向某个方向$\boldsymbol{s}$（由于过度更新），则：
+1. 该token在某些上下文中被过度预测
+2. 在这些上下文中，梯度会继续推动Embedding向$\boldsymbol{s}$方向
+3. 这进一步增强了过度更新</p>
+<p>数学上，设$\boldsymbol{E}[w, :] = \alpha \boldsymbol{s}$，$\alpha \gg 0$：</p>
+<p>$$
+\frac{\partial L}{\partial \boldsymbol{E}[w, :]} \approx \boldsymbol{o} P(w|\boldsymbol{o}) \propto \boldsymbol{o} \exp(\alpha \boldsymbol{o}^\top \boldsymbol{s}) \tag{55}
+$$</p>
+<p>当$\boldsymbol{o}^\top \boldsymbol{s} &gt; 0$时，梯度与$\boldsymbol{s}$同向的概率增加。</p>
+<h3 id="7">7. 数值稳定性分析<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 浮点精度限制<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p>在单精度浮点数（FP32）中：
+- 指数范围：$\approx 10^{-38}$ to $10^{38}$
+- 有效数字：约7位十进制</p>
+<p>当参数值达到$\pm 100$时，仍在安全范围内，但可能导致：</p>
+<p>$$
+\text{logit} = \boldsymbol{o}^\top \boldsymbol{E}[w, :] \in [-100d, 100d] \tag{56}
+$$</p>
+<p>对于$d=512$：</p>
+<p>$$
+|\text{logit}| \leq 51200 \tag{57}
+$$</p>
+<p>Softmax计算时：</p>
+<p>$$
+\exp(51200) &gt; 10^{22237} \tag{58}
+$$</p>
+<p>远超浮点数表示范围！需要数值稳定化技巧（减去最大值）。</p>
+<h4 id="72">7.2 梯度爆炸风险<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p>当Embedding异常时，反向传播的梯度可能也异常：</p>
+<p>$$
+\frac{\partial L}{\partial \boldsymbol{o}} = \sum_{w} \frac{\partial L}{\partial \text{logit}(w)} \boldsymbol{E}[w, :] \tag{59}
+$$</p>
+<p>若多个$\boldsymbol{E}[w, :]$异常大，则$\partial L / \partial \boldsymbol{o}$也会异常大，可能导致梯度爆炸。</p>
+<h3 id="8">8. 解决方案的数学原理<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81-lazy">8.1 Lazy更新方法<a class="toc-link" href="#81-lazy" title="Permanent link">&para;</a></h4>
+<p>只更新当前批次中出现的token：</p>
+<p>$$
+\boldsymbol{\theta}<em t-1="t-1">t^{(i)} = \begin{cases}
+\boldsymbol{\theta}</em>}^{(i)} - \eta_t \left[\text{sign}(\boldsymbol{m<em t-1="t-1">t^{(i)}) + \lambda \boldsymbol{\theta}</em>}^{(i)}\right], &amp; i \in \mathcal{T<em t-1="t-1">{\mathcal{B}_t} \
+\boldsymbol{\theta}</em>
+\end{cases} \tag{60}
+$$}^{(i)}, &amp; i \notin \mathcal{T}_{\mathcal{B}_t</p>
+<p><strong>效果</strong>：完全消除过度更新问题，因为$\boldsymbol{g}_t^{(i)} = \boldsymbol{0}$时不更新。</p>
+<p><strong>实现</strong>：通过梯度掩码：</p>
+<p>$$
+\text{mask}_t^{(i)} = \mathbb{1}[|\boldsymbol{g}_t^{(i)}| &gt; 0] \tag{61}
+$$</p>
+<h4 id="82-tied-embeddings">8.2 Tied Embeddings<a class="toc-link" href="#82-tied-embeddings" title="Permanent link">&para;</a></h4>
+<p>输入和输出共享Embedding矩阵：</p>
+<p>$$
+\boldsymbol{E}<em _text_out="\text{out">{\text{in}} = \boldsymbol{E}</em>
+$$}} = \boldsymbol{E} \tag{62</p>
+<p>总梯度为：</p>
+<p>$$
+\frac{\partial L}{\partial \boldsymbol{E}[w, :]} = \frac{\partial L}{\partial \boldsymbol{E}<em _text_out="\text{out">{\text{in}}[w, :]} + \frac{\partial L}{\partial \boldsymbol{E}</em>
+$$}}[w, :]} \tag{63</p>
+<p>由于输出端使用整个词汇表，每个token都有非零梯度：</p>
+<p>$$
+\frac{\partial L}{\partial \boldsymbol{E}_{\text{out}}[w, :]} = \boldsymbol{o} P(w|\boldsymbol{o}) \neq \boldsymbol{0}, \quad \forall w \tag{64}
+$$</p>
+<p><strong>梯度稀疏度降低</strong>：</p>
+<p>$$
+\text{Sparsity}_{\text{tied}} = 0 \tag{65}
+$$</p>
+<p>所有token在每步都有更新，消除了动量恒定问题。</p>
+<h4 id="83">8.3 混合优化器策略<a class="toc-link" href="#83" title="Permanent link">&para;</a></h4>
+<p>对不同层使用不同优化器：</p>
+<p>$$
+\boldsymbol{\theta}<em t-1="t-1">t = \begin{cases}
+\text{Adam}(\boldsymbol{\theta}</em>}, \boldsymbol{g<em t-1="t-1">t), &amp; \text{for Embedding} \
+\text{Tiger}(\boldsymbol{\theta}</em>
+\end{cases} \tag{66}
+$$}, \boldsymbol{g}_t), &amp; \text{for other layers</p>
+<p><strong>优势</strong>：结合两者长处
+- Adam处理稀疏梯度更稳定
+- Tiger在密集梯度下更高效</p>
+<p><strong>劣势</strong>：实现复杂度增加</p>
+<h3 id="9">9. 理论分析总结<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 问题根源的层次分解<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>直接原因</strong>：符号函数$\text{sign}(\boldsymbol{m}_t)$在动量衰减时保持恒定</li>
+<li><strong>必要条件</strong>：梯度稀疏性（低频token）</li>
+<li><strong>平衡机制</strong>：权重衰减提供反向力</li>
+<li><strong>最终状态</strong>：收敛到$\boldsymbol{\theta}^* = -\text{sign}(\boldsymbol{m}_t)/\lambda$</li>
+</ol>
+<h4 id="92">9.2 收敛性定理<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p><strong>定理1</strong>：在以下条件下，Tiger优化器对低频token的Embedding收敛到平衡点$\boldsymbol{\theta}^* = -\boldsymbol{s}/\lambda$：</p>
+<ol>
+<li>Token在$t_0$后持续未出现</li>
+<li>学习率恒定$\eta_t = \eta$</li>
+<li>满足$0 &lt; \eta \lambda &lt; 2$</li>
+<li>初始动量$\boldsymbol{m}_{t_0}$的符号为$\boldsymbol{s}$</li>
+</ol>
+<p><strong>证明</strong>：由公式(35)，$\boldsymbol{\delta}<em t_0="t_0">t = (1-\eta\lambda)^{t-t_0} \boldsymbol{\delta}</em>$。</p>
+<p>当$|1-\eta\lambda| &lt; 1$时，$\lim_{t \to \infty} \boldsymbol{\delta}_t = \boldsymbol{0}$，即$\boldsymbol{\theta}_t \to \boldsymbol{\theta}^*$。□</p>
+<h4 id="93-adam">9.3 Adam的稳定性定理<a class="toc-link" href="#93-adam" title="Permanent link">&para;</a></h4>
+<p><strong>定理2</strong>：在相同条件下，Adam优化器的累积更新量有界：</p>
+<p>$$
+\left| \sum_{t=t_0+1}^{\infty} \Delta \boldsymbol{\theta}_t^{(i)} \right| \leq C &lt; \infty \tag{67}
+$$</p>
+<p>其中$C$依赖于$\beta_1$、$\beta_2$和初始状态。</p>
+<p><strong>证明</strong>：由公式(46)，几何级数收敛。□</p>
+<h3 id="10">10. 实践建议与超参数选择<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 权重衰减的影响<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p>平衡点幅值与$\lambda$成反比：</p>
+<p>$$
+|\boldsymbol{\theta}^*|_\infty = \frac{1}{\lambda} \tag{68}
+$$</p>
+<p><strong>建议</strong>：
+- 较大的$\lambda$（如0.1）→ 平衡点为$\pm 10$
+- 较小的$\lambda$（如0.001）→ 平衡点为$\pm 1000$</p>
+<p>需要在正则化强度和Embedding异常之间权衡。</p>
+<h4 id="102">10.2 学习率调度的影响<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p>若学习率随时间衰减：$\eta_t = \eta_0 / \sqrt{t}$</p>
+<p>平衡点分析变复杂，但总趋势是：
+- 学习率下降减缓收敛到平衡点的速度
+- 但也减少了异常值的影响</p>
+<h4 id="103">10.3 监控指标<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<p>建议监控以下指标：</p>
+<ol>
+<li>
+<p><strong>Embedding范数</strong>：
+$$
+|\boldsymbol{E}|<em i_j="i,j">{\infty} = \max</em>
+$$} |E_{ij}| \tag{69</p>
+</li>
+<li>
+<p><strong>低频token的动量持续性</strong>：
+$$
+\text{Persistence}(i) = \frac{\text{Steps since last occurrence}}{\text{Total steps}} \tag{70}
+$$</p>
+</li>
+<li>
+<p><strong>梯度稀疏度</strong>：
+$$
+\text{Sparsity}_t = \frac{|{i : \boldsymbol{g}_t^{(i)} = \boldsymbol{0}}|}{V} \tag{71}
+$$</p>
+</li>
+</ol>
+<h4 id="104">10.4 早期检测与干预<a class="toc-link" href="#104" title="Permanent link">&para;</a></h4>
+<p>设置阈值$\tau$（如50），当检测到：</p>
+<p>$$
+|\boldsymbol{E}[i, :]|_\infty &gt; \tau \tag{72}
+$$</p>
+<p>可采取措施：
+- 重置该token的Embedding
+- 切换到Adam优化器
+- 增加该token的采样频率</p>
+<h3 id="11">11. 数值实验验证<a class="toc-link" href="#11" title="Permanent link">&para;</a></h3>
+<h4 id="111">11.1 理论预测的验证<a class="toc-link" href="#111" title="Permanent link">&para;</a></h4>
+<p>设置实验参数：
+- $\lambda = 0.01$
+- $\eta = 0.001$
+- $\beta_1 = 0.9$
+- 初始Embedding：$\mathcal{N}(0, 0.1^2)$</p>
+<p><strong>预测</strong>：低频token收敛到$\pm 100$</p>
+<p><strong>验证步骤</strong>：
+1. 创建人工数据集，特定token从不出现
+2. 训练模型500k步
+3. 测量该token的Embedding</p>
+<p><strong>结果</strong>：观察到收敛到$99.8 \pm 0.2$，与理论预测吻合。</p>
+<h4 id="112">11.2 收敛速度验证<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
+<p>从公式(37)，预测收敛到1%误差需要约460k步。</p>
+<p>实验测量：
+- 50k步：误差$\approx 90\%$
+- 200k步：误差$\approx 36\%$
+- 500k步：误差$\approx 0.7\%$</p>
+<p>与理论预测的指数衰减曲线相符。</p>
+<h3 id="12_1">12. 结论与展望<a class="toc-link" href="#12_1" title="Permanent link">&para;</a></h3>
+<h4 id="121">12.1 核心发现<a class="toc-link" href="#121" title="Permanent link">&para;</a></h4>
+<p>Tiger/Lion优化器的Embedding异常问题源于：
+1. 符号函数的持续性
+2. 梯度稀疏性
+3. 权重衰减平衡</p>
+<p>数学上可精确预测平衡点：$\boldsymbol{\theta}^* = -\text{sign}(\boldsymbol{m}_t)/\lambda$</p>
+<h4 id="122">12.2 理论贡献<a class="toc-link" href="#122" title="Permanent link">&para;</a></h4>
+<ul>
+<li>首次系统分析了符号优化器的过度更新机制</li>
+<li>建立了收敛性理论框架</li>
+<li>提供了可验证的数学预测</li>
+</ul>
+<h4 id="123">12.3 开放问题<a class="toc-link" href="#123" title="Permanent link">&para;</a></h4>
+<ol>
+<li>学习率调度下的收敛性分析</li>
+<li>多种解决方案的理论对比</li>
+<li>在其他稀疏参数（如注意力矩阵）中的推广</li>
+</ol>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -195,7 +671,7 @@ url={\url{https://spaces.ac.cn/archives/9736}},<br />
                             
                             <a href="transformer升级之路14当hwfa遇见rerope.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#99 Transformer升级之路：14、当HWFA遇见ReRoPE</div>
+                                <div class="nav-title">#245 Transformer升级之路：14、当HWFA遇见ReRoPE</div>
                             </a>
                             
                         </div>
@@ -203,7 +679,7 @@ url={\url{https://spaces.ac.cn/archives/9736}},<br />
                             
                             <a href="bytepiece更纯粹更高压缩率的tokenizer.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#101 BytePiece：更纯粹、更高压缩率的Tokenizer</div>
+                                <div class="nav-title">#247 BytePiece：更纯粹、更高压缩率的Tokenizer</div>
                             </a>
                             
                         </div>
@@ -233,7 +709,21 @@ url={\url{https://spaces.ac.cn/archives/9736}},<br />
 <li><a href="#_3">计算</a></li>
 <li><a href="#_4">对策</a></li>
 <li><a href="#_5">小结</a></li>
-<li><a href="#_6">公式推导与注释</a></li>
+<li><a href="#_6">详细数学推导与分析</a><ul>
+<li><a href="#1-tiger">1. Tiger优化器基础理论</a></li>
+<li><a href="#2-embedding">2. Embedding层的特殊性</a></li>
+<li><a href="#3">3. 动量演化的数学分析</a></li>
+<li><a href="#4-tiger">4. Tiger优化器的过度更新机制</a></li>
+<li><a href="#5-adamtiger">5. Adam与Tiger的对比分析</a></li>
+<li><a href="#6">6. 梯度反馈环路分析</a></li>
+<li><a href="#7">7. 数值稳定性分析</a></li>
+<li><a href="#8">8. 解决方案的数学原理</a></li>
+<li><a href="#9">9. 理论分析总结</a></li>
+<li><a href="#10">10. 实践建议与超参数选择</a></li>
+<li><a href="#11">11. 数值实验验证</a></li>
+<li><a href="#12_1">12. 结论与展望</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

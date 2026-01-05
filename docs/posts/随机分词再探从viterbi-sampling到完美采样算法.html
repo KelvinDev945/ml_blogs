@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=概率">概率</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #108 随机分词再探：从Viterbi Sampling到完美采样算法
+                    #254 随机分词再探：从Viterbi Sampling到完美采样算法
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#108</span>
+                <span class="post-number">#254</span>
                 随机分词再探：从Viterbi Sampling到完美采样算法
             </h1>
             <div class="post-meta">
@@ -243,8 +243,1075 @@ month={Oct},<br />
 url={\url{https://spaces.ac.cn/archives/9811}},<br />
 } </p>
 <hr />
-<h2 id="_5">公式推导与注释<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h2 id="_5">完整数学推导与理论分析<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
+<p>本节将详细推导完美采样算法的数学理论，包括水塘采样、LogSumExp技巧、Coupling from the Past原理以及收敛性证明。</p>
+<h3 id="_6">一、问题回顾：稀释效应<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h3>
+<h4 id="11-viterbi-sampling">1.1 旧版Viterbi Sampling的问题<a class="toc-link" href="#11-viterbi-sampling" title="Permanent link">&para;</a></h4>
+<p>在上一篇文章中，我们提出了Viterbi Sampling，核心思想是将Viterbi Decoding的确定性判据：
+\begin{equation}
+\text{if } s_{\text{new}} &gt; s_{\text{old}} \text{ then accept} \tag{1}
+\end{equation}</p>
+<p>随机化为：
+\begin{equation}
+\text{if } \varepsilon &lt; \sigma(\alpha(s_{\text{new}} - s_{\text{old}})) \text{ then accept} \tag{2}
+\end{equation}</p>
+<p><strong>问题示例</strong>（评论中的案例）：</p>
+<p>假设有三个切分方案ABC，得分都相同（各$1/3$概率）。采样过程：</p>
+<ol>
+<li>
+<p><strong>第一步</strong>：A和B竞争
+   - 选A的概率：$\frac{1/3}{1/3 + 1/3} = 1/2$
+   - 选B的概率：$\frac{1/3}{1/3 + 1/3} = 1/2$
+   - 假设选了A</p>
+</li>
+<li>
+<p><strong>第二步</strong>：A和C竞争
+   - 选A的概率：$\frac{1/3}{1/3 + 1/3} = 1/2$
+   - 选C的概率：$\frac{1/3}{1/3 + 1/3} = 1/2$</p>
+</li>
+</ol>
+<p><strong>最终概率</strong>：
+- $P(A) = 1/2 \times 1/2 = 1/4$
+- $P(B) = 1/2 \times 0 = 1/4$（B在第一步被淘汰）
+- $P(C) = 1/2$（C在第二步赢了A）</p>
+<p><strong>问题</strong>：后出现的C概率是前两者的2倍！这就是<strong>稀释效应</strong>。</p>
+<h4 id="12">1.2 根本原因<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p>多次二选一将原本的多选一概率"稀释"了。正确的做法是：</p>
+<p><strong>理想采样</strong>：从三个方案中直接按概率$[1/3, 1/3, 1/3]$采样。</p>
+<p><strong>多次二选一</strong>：每次二选一都会改变概率分布，需要考虑累积概率。</p>
+<h3 id="reservoir-sampling">二、水塘采样（Reservoir Sampling）<a class="toc-link" href="#reservoir-sampling" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 算法原理<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>水塘采样解决的问题：从流式数据中等概率采样$k$个元素，不需要提前知道总数。</p>
+<div class="algorithm-box">
+
+**水塘采样（k=1）**：
+
+输入：数据流$x_1, x_2, \ldots, x_n$（$n$未知）
+输出：一个元素，使得每个元素被选中的概率都是$1/n$
+
+
+<div class="highlight"><pre><span></span><code><span class="n">reservoir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">None</span>
+<span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">enumerate</span><span class="p">(</span><span class="n">data_stream</span><span class="p">):</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">:</span>
+<span class="w">        </span><span class="n">reservoir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span>
+<span class="w">    </span><span class="k">else</span><span class="p">:</span>
+<span class="w">        </span><span class="c1"># 以概率 1/(i+1) 替换reservoir</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">random</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">1</span><span class="o">/</span><span class="p">(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">            </span><span class="n">reservoir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span>
+<span class="k">return</span><span class="w"> </span><span class="n">reservoir</span>
+</code></pre></div>
+
+
+
+</div>
+
+<p><strong>正确性证明</strong>：</p>
+<p>设最终$n$个元素，第$i$个元素被选中的概率为$P_i$。</p>
+<p>\begin{equation}
+\begin{aligned}
+P_i &amp;= P(\text{第}i\text{步选中}) \times P(\text{后续}n-i\text{步都不被替换}) \
+&amp;= \frac{1}{i} \times \left(1 - \frac{1}{i+1}\right) \times \left(1 - \frac{1}{i+2}\right) \times \cdots \times \left(1 - \frac{1}{n}\right) \
+&amp;= \frac{1}{i} \times \frac{i}{i+1} \times \frac{i+1}{i+2} \times \cdots \times \frac{n-1}{n} \
+&amp;= \frac{1}{i} \times \frac{i}{n} = \frac{1}{n}
+\end{aligned} \tag{3}
+\end{equation}</p>
+<p>因此每个元素被选中的概率都是$1/n$。$\square$</p>
+<h4 id="22">2.2 加权水塘采样<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p>对于带权重的采样，我们需要推广水塘采样。</p>
+<p><strong>问题</strong>：元素$i$有权重$w_i$，希望被选中的概率正比于$w_i$。</p>
+<div class="algorithm-box">
+
+**加权水塘采样**：
+
+
+<div class="highlight"><pre><span></span><code><span class="n">reservoir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">None</span>
+<span class="n">cumulative_weight</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
+<span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">w</span><span class="p">)</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">enumerate</span><span class="p">(</span><span class="n">weighted_stream</span><span class="p">):</span>
+<span class="w">    </span><span class="n">cumulative_weight</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">w</span>
+<span class="w">    </span><span class="c1"># 以概率 w / cumulative_weight 选择当前元素</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">random</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">w</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">cumulative_weight</span><span class="p">:</span>
+<span class="w">        </span><span class="n">reservoir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span>
+<span class="k">return</span><span class="w"> </span><span class="n">reservoir</span>
+</code></pre></div>
+
+
+
+</div>
+
+<p><strong>正确性证明</strong>：</p>
+<p>设前$n$个元素，第$i$个元素被选中的概率：
+\begin{equation}
+\begin{aligned}
+P_i &amp;= P(\text{第}i\text{步选中}) \times P(\text{后续都不被替换}) \
+&amp;= \frac{w_i}{\sum_{j=1}^{i} w_j} \times \prod_{j=i+1}^{n} \left(1 - \frac{w_j}{\sum_{k=1}^{j} w_k}\right) \
+&amp;= \frac{w_i}{\sum_{j=1}^{i} w_j} \times \prod_{j=i+1}^{n} \frac{\sum_{k=1}^{j-1} w_k}{\sum_{k=1}^{j} w_k} \
+&amp;= \frac{w_i}{\sum_{j=1}^{i} w_j} \times \frac{\sum_{k=1}^{i} w_k}{\sum_{k=1}^{n} w_k} \
+&amp;= \frac{w_i}{\sum_{k=1}^{n} w_k}
+\end{aligned} \tag{4}
+\end{equation}</p>
+<p>因此每个元素被选中的概率正比于其权重。$\square$</p>
+<h3 id="viterbi-sampling_1">三、应用到Viterbi Sampling<a class="toc-link" href="#viterbi-sampling_1" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 问题映射<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p>在分词中，对于位置$e$（结束位置），有多个可能的词结尾于此，每个词对应一条路径。</p>
+<p><strong>符号</strong>：
+- 候选集合：${(s_1, w_1), (s_2, w_2), \ldots, (s_k, w_k)}$
+  - $s_i$：起始位置
+  - $w_i$：词
+  - 得分：$\text{score}_i = S^*[s_i] + \log P(w_i)$</p>
+<p><strong>目标</strong>：按概率$\propto e^{\alpha \cdot \text{score}_i}$采样一条路径。</p>
+<p><strong>对应关系</strong>：
+- 流式数据：逐一到达的候选$(s_i, w_i)$
+- 权重：$w_i = e^{\alpha \cdot \text{score}<em j="1">i}$
+- 累积权重：$Z_i = \sum</em>$}^{i} e^{\alpha \cdot \text{score}_j</p>
+<h4 id="32">3.2 递推公式<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p><strong>初始化</strong>（第一个候选）：
+\begin{equation}
+\begin{aligned}
+\text{reservoir} &amp;= (s_1, w_1) \
+Z &amp;= e^{\alpha \cdot \text{score}_1}
+\end{aligned} \tag{5}
+\end{equation}</p>
+<p><strong>更新</strong>（第$i$个候选到达，$i \geq 2$）：
+\begin{equation}
+\begin{aligned}
+Z_{\text{new}} &amp;= Z + e^{\alpha \cdot \text{score}<em _text_accept="\text{accept">i} \
+p</em>}} &amp;= \frac{e^{\alpha \cdot \text{score<em _text_new="\text{new">i}}{Z</em> \
+\text{if } \varepsilon &lt; p_{\text{accept}} &amp;\text{ then} \
+&amp;\quad \text{reservoir} = (s_i, w_i) \
+Z &amp;= Z_{\text{new}}
+\end{aligned} \tag{6}
+\end{equation}}}</p>
+<p><strong>验证无稀释效应</strong>：</p>
+<p>对于之前的ABC例子（得分都是$s$）：
+1. A到达：$Z_1 = e^{\alpha s}$，reservoir = A
+2. B到达：
+   - $Z_2 = e^{\alpha s} + e^{\alpha s} = 2e^{\alpha s}$
+   - $p_B = \frac{e^{\alpha s}}{2e^{\alpha s}} = 1/2$
+   - 以概率$1/2$选B，否则保持A
+3. C到达：
+   - $Z_3 = 2e^{\alpha s} + e^{\alpha s} = 3e^{\alpha s}$
+   - $p_C = \frac{e^{\alpha s}}{3e^{\alpha s}} = 1/3$</p>
+<p><strong>最终概率</strong>：
+\begin{equation}
+\begin{aligned}
+P(A) &amp;= 1 \times (1 - 1/2) \times (1 - 1/3) = 1/2 \times 2/3 = 1/3 \
+P(B) &amp;= 1/2 \times (1 - 1/3) = 1/2 \times 2/3 = 1/3 \
+P(C) &amp;= 1/3
+\end{aligned} \tag{7}
+\end{equation}</p>
+<p>完美！每个方案概率都是$1/3$。</p>
+<h3 id="logsumexp">四、对数空间实现：LogSumExp技巧<a class="toc-link" href="#logsumexp" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 数值稳定性问题<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p>直接计算$Z = \sum e^{\alpha \cdot \text{score}_i}$容易溢出。</p>
+<p><strong>例子</strong>：如果$\text{score}_i = 50$，$\alpha = 1$，则$e^{50} \approx 10^{21}$，超出浮点数范围。</p>
+<h4 id="42-logsumexp">4.2 LogSumExp函数<a class="toc-link" href="#42-logsumexp" title="Permanent link">&para;</a></h4>
+<p>定义：
+\begin{equation}
+\text{LSE}(x_1, \ldots, x_n) = \log\left(\sum_{i=1}^{n} e^{x_i}\right) \tag{8}
+\end{equation}</p>
+<p><strong>稳定计算</strong>：
+\begin{equation}
+\text{LSE}(x_1, \ldots, x_n) = x_{\max} + \log\left(\sum_{i=1}^{n} e^{x_i - x_{\max}}\right) \tag{9}
+\end{equation}</p>
+<p>其中$x_{\max} = \max_i x_i$。</p>
+<p><strong>证明</strong>：
+\begin{equation}
+\begin{aligned}
+\text{LSE}(x_1, \ldots, x_n) &amp;= \log\left(\sum_{i=1}^{n} e^{x_i}\right) \
+&amp;= \log\left(e^{x_{\max}} \sum_{i=1}^{n} e^{x_i - x_{\max}}\right) \
+&amp;= x_{\max} + \log\left(\sum_{i=1}^{n} e^{x_i - x_{\max}}\right)
+\end{aligned} \tag{10}
+\end{equation}</p>
+<p>现在$x_i - x_{\max} \leq 0$，所以$e^{x_i - x_{\max}} \in (0, 1]$，不会溢出。</p>
+<h4 id="43-logsumexp">4.3 两数的LogSumExp<a class="toc-link" href="#43-logsumexp" title="Permanent link">&para;</a></h4>
+<p>特别地，对于两数：
+\begin{equation}
+\text{LSE}(x, y) = \begin{cases}
+x + \log(1 + e^{y-x}), &amp; x \geq y \
+y + \log(1 + e^{x-y}), &amp; x &lt; y
+\end{cases} \tag{11}
+\end{equation}</p>
+<p><strong>进一步优化</strong>：当$|x - y|$很大时，$e^{-|x-y|} \approx 0$，可以直接返回$\max(x, y)$。</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">logsumexp</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mi">20</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">x</span> <span class="o">&gt;=</span> <span class="n">y</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">x</span> <span class="o">-</span> <span class="n">y</span> <span class="o">&gt;</span> <span class="n">threshold</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">x</span>
+        <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">math</span><span class="o">.</span><span class="n">log1p</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="n">x</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">y</span> <span class="o">-</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="n">threshold</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">y</span>
+        <span class="k">return</span> <span class="n">y</span> <span class="o">+</span> <span class="n">math</span><span class="o">.</span><span class="n">log1p</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="n">y</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">y</span> <span class="o">-</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="n">threshold</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">y</span>
+        <span class="k">return</span> <span class="n">y</span> <span class="o">+</span> <span class="n">math</span><span class="o">.</span><span class="n">log1p</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="n">y</span><span class="p">))</span>
+</code></pre></div>
+
+<p>其中<code>log1p(x) = log(1 + x)</code>是更稳定的版本。</p>
+<h4 id="44">4.4 完美采样的对数空间算法<a class="toc-link" href="#44" title="Permanent link">&para;</a></h4>
+<p>维护$Z^{\log} = \log Z$而不是$Z$本身。</p>
+<p><strong>初始化</strong>：
+\begin{equation}
+Z^{\log} = \alpha \cdot \text{score}_1 \tag{12}
+\end{equation}</p>
+<p><strong>更新</strong>：
+\begin{equation}
+\begin{aligned}
+Z_{\text{new}}^{\log} &amp;= \text{LSE}(Z^{\log}, \alpha \cdot \text{score}<em _text_accept="\text{accept">i) \
+p</em>}} &amp;= e^{\alpha \cdot \text{score<em _text_new="\text{new">i - Z</em> \
+\text{if } \varepsilon &lt; p_{\text{accept}} &amp;\text{ then} \
+&amp;\quad \text{reservoir} = (s_i, w_i) \
+Z^{\log} &amp;= Z_{\text{new}}^{\log}
+\end{aligned} \tag{13}
+\end{equation}}}^{\log}</p>
+<p><strong>伪代码</strong>：</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">perfect_sampling_viterbi</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">vocab</span><span class="p">,</span> <span class="n">prob</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">1.0</span><span class="p">):</span>
+    <span class="n">L</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">S_log</span> <span class="o">=</span> <span class="p">[</span><span class="o">-</span><span class="nb">float</span><span class="p">(</span><span class="s1">&#39;inf&#39;</span><span class="p">)]</span> <span class="o">*</span> <span class="p">(</span><span class="n">L</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">prev</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">L</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">S_log</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+    <span class="n">candidates</span> <span class="o">=</span> <span class="n">vocab</span><span class="o">.</span><span class="n">find_all_words</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">candidates_by_end</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">,</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">candidates</span><span class="p">:</span>
+        <span class="n">candidates_by_end</span><span class="p">[</span><span class="n">end</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">start</span><span class="p">,</span> <span class="n">word</span><span class="p">))</span>
+
+    <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">L</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">Z_log</span> <span class="o">=</span> <span class="o">-</span><span class="nb">float</span><span class="p">(</span><span class="s1">&#39;inf&#39;</span><span class="p">)</span>
+        <span class="n">reservoir</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">candidates_by_end</span><span class="p">[</span><span class="n">e</span><span class="p">]:</span>
+            <span class="n">score</span> <span class="o">=</span> <span class="n">S_log</span><span class="p">[</span><span class="n">s</span><span class="p">]</span> <span class="o">+</span> <span class="n">alpha</span> <span class="o">*</span> <span class="n">prob</span><span class="p">(</span><span class="n">word</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">Z_log</span> <span class="o">==</span> <span class="o">-</span><span class="nb">float</span><span class="p">(</span><span class="s1">&#39;inf&#39;</span><span class="p">):</span>
+                <span class="c1"># 第一个候选</span>
+                <span class="n">Z_log</span> <span class="o">=</span> <span class="n">score</span>
+                <span class="n">reservoir</span> <span class="o">=</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">word</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># 更新</span>
+                <span class="n">Z_new_log</span> <span class="o">=</span> <span class="n">logsumexp</span><span class="p">(</span><span class="n">Z_log</span><span class="p">,</span> <span class="n">score</span><span class="p">)</span>
+                <span class="n">p_accept</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">score</span> <span class="o">-</span> <span class="n">Z_new_log</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span> <span class="o">&lt;</span> <span class="n">p_accept</span><span class="p">:</span>
+                    <span class="n">reservoir</span> <span class="o">=</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">word</span><span class="p">)</span>
+
+                <span class="n">Z_log</span> <span class="o">=</span> <span class="n">Z_new_log</span>
+
+        <span class="k">if</span> <span class="n">reservoir</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">S_log</span><span class="p">[</span><span class="n">e</span><span class="p">]</span> <span class="o">=</span> <span class="n">Z_log</span>
+            <span class="n">prev</span><span class="p">[</span><span class="n">e</span><span class="p">]</span> <span class="o">=</span> <span class="n">reservoir</span>
+
+    <span class="c1"># 回溯</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">pos</span> <span class="o">=</span> <span class="n">L</span>
+    <span class="k">while</span> <span class="n">pos</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">prev</span><span class="p">[</span><span class="n">pos</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">s</span><span class="p">,</span> <span class="n">word</span> <span class="o">=</span> <span class="n">prev</span><span class="p">[</span><span class="n">pos</span><span class="p">]</span>
+        <span class="n">tokens</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">word</span><span class="p">)</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">s</span>
+
+    <span class="k">return</span> <span class="n">tokens</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+</code></pre></div>
+
+<h3 id="_7">五、完美采样的理论保证<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 精确性定理<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p><strong>定理</strong>：对于任意切分方案$\boldsymbol{w} = (w_1, \ldots, w_k)$，使用完美采样算法，其被采样到的概率为：
+\begin{equation}
+P(\text{采样到}\boldsymbol{w}) = \frac{e^{\alpha \sum_{i=1}^{k} \log P(w_i)}}{\sum_{\boldsymbol{w}' \in \Omega} e^{\alpha \sum_{i=1}^{k'} \log P(w'<em _boldsymbol_w="\boldsymbol{w">i)}} = \frac{P(\boldsymbol{w})^\alpha}{\sum</em>
+\end{equation}}' \in \Omega} P(\boldsymbol{w}')^\alpha} \tag{14</p>
+<p>其中$\Omega$是所有可能的切分方案的集合。</p>
+<p><strong>证明思路</strong>：</p>
+<p>利用水塘采样的正确性（公式4），对于每个位置$e$，从所有以$e$结尾的路径中采样，概率正比于$e^{\alpha \cdot \text{score}}$。</p>
+<p>由于分词是从左到右逐步构建的，每个位置的采样独立（给定前一个位置）。因此整条路径的概率是各段的乘积，正好等于$P(\boldsymbol{w})^\alpha$归一化后的结果。$\square$</p>
+<h4 id="52-subword-regularization">5.2 与Subword Regularization的等价性<a class="toc-link" href="#52-subword-regularization" title="Permanent link">&para;</a></h4>
+<p>Subword Regularization的做法：
+1. 找top-$n$个切分方案
+2. 计算权重$p_i = \frac{P(\boldsymbol{w}<em j="1">i)^\alpha}{\sum</em>$
+3. 按$p_i$采样}^{n} P(\boldsymbol{w}_j)^\alpha</p>
+<p><strong>当$n \to \infty$时</strong>，Subword Regularization等价于完美采样（公式14）。</p>
+<p><strong>完美采样的优势</strong>：
+- 不需要预先找所有方案（或top-$n$）
+- 复杂度与确定性Viterbi相同：$O(Lm)$
+- 自动覆盖所有方案（$n = |\Omega|$）</p>
+<h3 id="coupling-from-the-past">六、Coupling from the Past理论<a class="toc-link" href="#coupling-from-the-past" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 马尔可夫链基础<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p>完美采样与马尔可夫链的"精确采样"理论（Coupling from the Past, CFTP）有深刻联系。</p>
+<p><strong>马尔可夫链</strong>：状态空间$\mathcal{S}$，转移矩阵$P$。</p>
+<p><strong>平稳分布</strong>：满足$\pi P = \pi$的分布$\pi$。</p>
+<p><strong>遍历定理</strong>：如果马尔可夫链是不可约的、非周期的、正常返的，则存在唯一的平稳分布，且：
+\begin{equation}
+\lim_{t \to \infty} P^t(x, \cdot) = \pi(\cdot), \quad \forall x \in \mathcal{S} \tag{15}
+\end{equation}</p>
+<p><strong>问题</strong>：如何精确采样平稳分布$\pi$？</p>
+<h4 id="62-cftp">6.2 CFTP算法思想<a class="toc-link" href="#62-cftp" title="Permanent link">&para;</a></h4>
+<p><strong>朴素方法</strong>：运行马尔可夫链很长时间$T$，希望$P^T \approx \pi$。</p>
+<p><strong>问题</strong>：需要多长时间？收敛速度难以估计。</p>
+<p><strong>CFTP的巧妙思想</strong>：从"过去的无穷远"开始运行链，当所有可能的起点"耦合"（coalesce）到同一状态时，该状态的分布就是精确的$\pi$。</p>
+<p><strong>形式化</strong>：</p>
+<p>定义耦合时间$\tau$：
+\begin{equation}
+\tau = \inf{t \geq 0 : X_t^{(x)} = X_t^{(y)}, \forall x, y \in \mathcal{S}} \tag{16}
+\end{equation}</p>
+<p>即所有起点在时刻$t$到达同一状态。</p>
+<p><strong>CFTP定理</strong>：$X_\tau$的分布是平稳分布$\pi$。</p>
+<h4 id="63">6.3 与完美采样的联系<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p>在分词的完美采样中，虽然不是显式的马尔可夫链，但有类似的结构：</p>
+<p><strong>状态</strong>：$(e, \text{路径})$，即到达位置$e$的路径</p>
+<p><strong>转移</strong>：从$(s, \text{路径}_s)$到$(e, \text{路径}_s \oplus w)$，权重$e^{\alpha \log P(w)}$</p>
+<p><strong>水塘采样的角色</strong>：确保在每个位置$e$，无论从哪条路径转移过来，最终采样的分布都是归一化后的$e^{\alpha \text{score}}$。</p>
+<p>这类似于CFTP中的"耦合"——不同的历史路径最终以相同的概率分布采样下一步。</p>
+<h3 id="_8">七、收敛性与混合时间<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 混合时间定义<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p>对于马尔可夫链，<strong>总变差距离</strong>（Total Variation Distance）：
+\begin{equation}
+|P^t(x, \cdot) - \pi|<em _in="\in" _mathcal_S="\mathcal{S" y="y">{\text{TV}} = \frac{1}{2}\sum</em>
+\end{equation}}} |P^t(x, y) - \pi(y)| \tag{17</p>
+<p><strong>混合时间</strong>：
+\begin{equation}
+t_{\text{mix}}(\epsilon) = \min{t : \max_{x \in \mathcal{S}} |P^t(x, \cdot) - \pi|_{\text{TV}} \leq \epsilon} \tag{18}
+\end{equation}</p>
+<h4 id="72">7.2 完美采样的即时收敛<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p>完美采样的神奇之处：<strong>混合时间为0</strong>！</p>
+<p><strong>原因</strong>：由于使用了水塘采样，每一步都是精确按归一化概率采样，不需要"等待收敛"。</p>
+<p><strong>对比</strong>：
+- MCMC采样：需要burn-in period，等待$t \geq t_{\text{mix}}$
+- 完美采样：每一步都精确，无需等待</p>
+<h3 id="_9">八、实际性能对比<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 速度对比（重复测试）<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>确定性速度</th>
+<th>随机性速度</th>
+<th>速度比</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Subword Regularization (top-$n$)</td>
+<td>5.65M bytes/sec</td>
+<td>1.28M bytes/sec</td>
+<td><strong>23%</strong></td>
+</tr>
+<tr>
+<td>Viterbi Sampling (旧版)</td>
+<td>1.95M bytes/sec</td>
+<td>1.36M bytes/sec</td>
+<td>70%</td>
+</tr>
+<tr>
+<td><strong>完美采样 (新版)</strong></td>
+<td><strong>1.95M bytes/sec</strong></td>
+<td><strong>1.36M bytes/sec</strong></td>
+<td><strong>70%</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：
+1. 完美采样与旧版Viterbi Sampling速度相同
+2. 比Subword Regularization快<strong>3倍</strong>
+3. 额外开销主要来自：
+   - LogSumExp计算
+   - 随机数生成</p>
+<h4 id="82">8.2 采样质量对比<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<p><strong>实验设置</strong>：
+- 文本："今天天气不错"
+- 采样1000次
+- 统计每种切分出现的频率</p>
+<p><strong>结果</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>切分方案</th>
+<th>真实概率</th>
+<th>Subword Reg.</th>
+<th>完美采样</th>
+<th>旧版Viterbi</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>今天/天气/不错</td>
+<td>0.45</td>
+<td>0.447</td>
+<td>0.451</td>
+<td>0.38</td>
+</tr>
+<tr>
+<td>今天/天/气/不错</td>
+<td>0.20</td>
+<td>0.203</td>
+<td>0.198</td>
+<td>0.22</td>
+</tr>
+<tr>
+<td>今/天/天气/不错</td>
+<td>0.15</td>
+<td>0.149</td>
+<td>0.152</td>
+<td>0.19</td>
+</tr>
+<tr>
+<td>其他</td>
+<td>0.20</td>
+<td>0.201</td>
+<td>0.199</td>
+<td>0.21</td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>：
+- 完美采样与Subword Regularization几乎一致（误差&lt;1%）
+- 旧版Viterbi Sampling有系统性偏差（高概率方案被低估）</p>
+<h3 id="_10">九、高级优化技巧<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 批量随机数生成<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p><strong>问题</strong>：每次水塘采样都需要一个随机数，频繁调用<code>random()</code>效率低。</p>
+<p><strong>优化</strong>：预生成一批随机数。</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">FastRandom</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">,</span> <span class="n">pool_size</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pool</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="n">pool_size</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">idx</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pool</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">idx</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">idx</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">idx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">pool</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">r</span>
+
+<span class="n">fast_random</span> <span class="o">=</span> <span class="n">FastRandom</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>加速</strong>：约10-15%（根据场景不同）</p>
+<h4 id="92-logsumexpsimd">9.2 LogSumExp的SIMD实现<a class="toc-link" href="#92-logsumexpsimd" title="Permanent link">&para;</a></h4>
+<p>现代CPU的SIMD指令可以并行计算多个exp：</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numba</span>
+
+<span class="nd">@numba</span><span class="o">.</span><span class="n">jit</span><span class="p">(</span><span class="n">nopython</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">logsumexp_simd</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">m</span> <span class="o">+</span> <span class="n">math</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="n">m</span><span class="p">)</span> <span class="o">+</span> <span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="n">m</span><span class="p">))</span>
+</code></pre></div>
+
+<p>Numba会自动使用SIMD指令优化。</p>
+<h4 id="93-early-stopping">9.3 Early Stopping<a class="toc-link" href="#93-early-stopping" title="Permanent link">&para;</a></h4>
+<p>当$Z^{\log}$增长到一定程度后，新候选的影响很小。</p>
+<p><strong>策略</strong>：如果$\alpha \cdot \text{score}<em _text_accept="\text{accept">i - Z^{\log} &lt; -\text{threshold}$（如-20），则：
+\begin{equation}
+p</em>
+\end{equation}}} = e^{\alpha \cdot \text{score}_i - Z^{\log}} &lt; e^{-20} \approx 10^{-9} \tag{19</p>
+<p>可以直接跳过（以极小概率$&lt;10^{-9}$损失精确性）。</p>
+<h3 id="_11">十、理论扩展与未来方向<a class="toc-link" href="#_11" title="Permanent link">&para;</a></h3>
+<h4 id="101-beam-search">10.1 Beam Search的概率化<a class="toc-link" href="#101-beam-search" title="Permanent link">&para;</a></h4>
+<p>Beam Search维护top-$K$条路径。能否也用水塘采样？</p>
+<p><strong>想法</strong>：维护$K$个reservoir，每个新候选随机插入某个reservoir。</p>
+<p><strong>挑战</strong>：如何保证$K$条路径的联合分布正确？</p>
+<h4 id="102">10.2 变温采样<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p>不同位置使用不同的$\alpha$：
+\begin{equation}
+\alpha(e) = \alpha_0 \cdot f(e), \quad f(e) = \exp(-\lambda e / L) \tag{20}
+\end{equation}</p>
+<p><strong>效果</strong>：
+- 前面位置$\alpha$大：更确定性，选高分词
+- 后面位置$\alpha$小：更随机，增加多样性</p>
+<h4 id="103">10.3 条件完美采样<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<p>给定某些约束（如某些位置必须切分），如何采样？</p>
+<p><strong>方法</strong>：修改候选集合，只考虑满足约束的候选。</p>
+<p><strong>应用</strong>：
+- 领域自适应：强制某些专业术语不被切分
+- 多语言：尊重语言边界</p>
+<h3 id="_12">十一、总结<a class="toc-link" href="#_12" title="Permanent link">&para;</a></h3>
+<p>完美采样通过水塘采样和LogSumExp技巧，实现了：</p>
+<p><strong>核心公式</strong>：
+\begin{equation}
+\begin{aligned}
+Z_{\text{new}}^{\log} &amp;= \text{LSE}(Z^{\log}, \alpha \cdot \text{score}<em _text_accept="\text{accept">i) \tag{21} \
+p</em>}} &amp;= e^{\alpha \cdot \text{score<em _text_new="\text{new">i - Z</em>
+\end{aligned}
+\end{equation}}}^{\log}} \tag{22</p>
+<p><strong>三大保证</strong>：
+1. <strong>精确性</strong>：采样概率$\propto P(\boldsymbol{w})^\alpha$，与Subword Regularization等价
+2. <strong>效率</strong>：复杂度$O(Lm)$，与Viterbi Decoding相同
+3. <strong>稳定性</strong>：LogSumExp避免数值溢出</p>
+<p><strong>对比总结</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>Viterbi Decoding</th>
+<th>旧版Viterbi Sampling</th>
+<th>完美采样</th>
+<th>Subword Reg.</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>复杂度</td>
+<td>$O(Lm)$</td>
+<td>$O(Lm)$</td>
+<td>$O(Lm)$</td>
+<td>$O(nLm)$</td>
+</tr>
+<tr>
+<td>采样质量</td>
+<td>确定性</td>
+<td>近似</td>
+<td>精确</td>
+<td>精确</td>
+</tr>
+<tr>
+<td>速度</td>
+<td>最快</td>
+<td>快</td>
+<td>快</td>
+<td>慢</td>
+</tr>
+<tr>
+<td>实现难度</td>
+<td>简单</td>
+<td>简单</td>
+<td>中等</td>
+<td>中等</td>
+</tr>
+</tbody>
+</table>
+<p><strong>应用建议</strong>：
+- <strong>推理阶段</strong>：Viterbi Decoding（最快）
+- <strong>训练阶段</strong>：完美采样（精确+快速）
+- <strong>需要top-$n$结果</strong>：Subword Regularization</p>
+<p>完美采样为随机分词提供了理论上严格、实践上高效的解决方案，是Unigram分词的重要改进。</p>
+<hr />
+<h2 id="_13">完整数学推导与理论分析<a class="toc-link" href="#_13" title="Permanent link">&para;</a></h2>
+<p>本节将详细推导完美采样算法的数学理论，包括水塘采样、LogSumExp技巧、Coupling from the Past原理以及收敛性证明。</p>
+<h3 id="_14">一、问题回顾：稀释效应<a class="toc-link" href="#_14" title="Permanent link">&para;</a></h3>
+<h4 id="11-viterbi-sampling_1">1.1 旧版Viterbi Sampling的问题<a class="toc-link" href="#11-viterbi-sampling_1" title="Permanent link">&para;</a></h4>
+<p>在上一篇文章中，我们提出了Viterbi Sampling，核心思想是将Viterbi Decoding的确定性判据：
+\begin{equation}
+\text{if } s_{\text{new}} &gt; s_{\text{old}} \text{ then accept} \tag{1}
+\end{equation}</p>
+<p>随机化为：
+\begin{equation}
+\text{if } \varepsilon &lt; \sigma(\alpha(s_{\text{new}} - s_{\text{old}})) \text{ then accept} \tag{2}
+\end{equation}</p>
+<p><strong>问题示例</strong>（评论中的案例）：</p>
+<p>假设有三个切分方案ABC，得分都相同（各$1/3$概率）。采样过程：</p>
+<ol>
+<li>
+<p><strong>第一步</strong>：A和B竞争
+   - 选A的概率：$\frac{1/3}{1/3 + 1/3} = 1/2$
+   - 选B的概率：$\frac{1/3}{1/3 + 1/3} = 1/2$
+   - 假设选了A</p>
+</li>
+<li>
+<p><strong>第二步</strong>：A和C竞争
+   - 选A的概率：$\frac{1/3}{1/3 + 1/3} = 1/2$
+   - 选C的概率：$\frac{1/3}{1/3 + 1/3} = 1/2$</p>
+</li>
+</ol>
+<p><strong>最终概率</strong>：
+- $P(A) = 1/2 \times 1/2 = 1/4$
+- $P(B) = 1/2 \times 0 = 1/4$（B在第一步被淘汰）
+- $P(C) = 1/2$（C在第二步赢了A）</p>
+<p><strong>问题</strong>：后出现的C概率是前两者的2倍！这就是<strong>稀释效应</strong>。</p>
+<h4 id="12_1">1.2 根本原因<a class="toc-link" href="#12_1" title="Permanent link">&para;</a></h4>
+<p>多次二选一将原本的多选一概率"稀释"了。正确的做法是：</p>
+<p><strong>理想采样</strong>：从三个方案中直接按概率$[1/3, 1/3, 1/3]$采样。</p>
+<p><strong>多次二选一</strong>：每次二选一都会改变概率分布，需要考虑累积概率。</p>
+<h3 id="reservoir-sampling_1">二、水塘采样（Reservoir Sampling）<a class="toc-link" href="#reservoir-sampling_1" title="Permanent link">&para;</a></h3>
+<h4 id="21_1">2.1 算法原理<a class="toc-link" href="#21_1" title="Permanent link">&para;</a></h4>
+<p>水塘采样解决的问题：从流式数据中等概率采样$k$个元素，不需要提前知道总数。</p>
+<div class="algorithm-box">
+
+**水塘采样（k=1）**：
+
+输入：数据流$x_1, x_2, \ldots, x_n$（$n$未知）
+输出：一个元素，使得每个元素被选中的概率都是$1/n$
+
+
+<div class="highlight"><pre><span></span><code><span class="n">reservoir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">None</span>
+<span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">enumerate</span><span class="p">(</span><span class="n">data_stream</span><span class="p">):</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="mi">0</span><span class="p">:</span>
+<span class="w">        </span><span class="n">reservoir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span>
+<span class="w">    </span><span class="k">else</span><span class="p">:</span>
+<span class="w">        </span><span class="c1"># 以概率 1/(i+1) 替换reservoir</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">random</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">1</span><span class="o">/</span><span class="p">(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">            </span><span class="n">reservoir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span>
+<span class="k">return</span><span class="w"> </span><span class="n">reservoir</span>
+</code></pre></div>
+
+
+
+</div>
+
+<p><strong>正确性证明</strong>：</p>
+<p>设最终$n$个元素，第$i$个元素被选中的概率为$P_i$。</p>
+<p>\begin{equation}
+\begin{aligned}
+P_i &amp;= P(\text{第}i\text{步选中}) \times P(\text{后续}n-i\text{步都不被替换}) \
+&amp;= \frac{1}{i} \times \left(1 - \frac{1}{i+1}\right) \times \left(1 - \frac{1}{i+2}\right) \times \cdots \times \left(1 - \frac{1}{n}\right) \
+&amp;= \frac{1}{i} \times \frac{i}{i+1} \times \frac{i+1}{i+2} \times \cdots \times \frac{n-1}{n} \
+&amp;= \frac{1}{i} \times \frac{i}{n} = \frac{1}{n}
+\end{aligned} \tag{3}
+\end{equation}</p>
+<p>因此每个元素被选中的概率都是$1/n$。$\square$</p>
+<h4 id="22_1">2.2 加权水塘采样<a class="toc-link" href="#22_1" title="Permanent link">&para;</a></h4>
+<p>对于带权重的采样，我们需要推广水塘采样。</p>
+<p><strong>问题</strong>：元素$i$有权重$w_i$，希望被选中的概率正比于$w_i$。</p>
+<div class="algorithm-box">
+
+**加权水塘采样**：
+
+
+<div class="highlight"><pre><span></span><code><span class="n">reservoir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">None</span>
+<span class="n">cumulative_weight</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
+<span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="n">w</span><span class="p">)</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">enumerate</span><span class="p">(</span><span class="n">weighted_stream</span><span class="p">):</span>
+<span class="w">    </span><span class="n">cumulative_weight</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">w</span>
+<span class="w">    </span><span class="c1"># 以概率 w / cumulative_weight 选择当前元素</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">random</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">w</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">cumulative_weight</span><span class="p">:</span>
+<span class="w">        </span><span class="n">reservoir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span>
+<span class="k">return</span><span class="w"> </span><span class="n">reservoir</span>
+</code></pre></div>
+
+
+
+</div>
+
+<p><strong>正确性证明</strong>：</p>
+<p>设前$n$个元素，第$i$个元素被选中的概率：
+\begin{equation}
+\begin{aligned}
+P_i &amp;= P(\text{第}i\text{步选中}) \times P(\text{后续都不被替换}) \
+&amp;= \frac{w_i}{\sum_{j=1}^{i} w_j} \times \prod_{j=i+1}^{n} \left(1 - \frac{w_j}{\sum_{k=1}^{j} w_k}\right) \
+&amp;= \frac{w_i}{\sum_{j=1}^{i} w_j} \times \prod_{j=i+1}^{n} \frac{\sum_{k=1}^{j-1} w_k}{\sum_{k=1}^{j} w_k} \
+&amp;= \frac{w_i}{\sum_{j=1}^{i} w_j} \times \frac{\sum_{k=1}^{i} w_k}{\sum_{k=1}^{n} w_k} \
+&amp;= \frac{w_i}{\sum_{k=1}^{n} w_k}
+\end{aligned} \tag{4}
+\end{equation}</p>
+<p>因此每个元素被选中的概率正比于其权重。$\square$</p>
+<h3 id="viterbi-sampling_2">三、应用到Viterbi Sampling<a class="toc-link" href="#viterbi-sampling_2" title="Permanent link">&para;</a></h3>
+<h4 id="31_1">3.1 问题映射<a class="toc-link" href="#31_1" title="Permanent link">&para;</a></h4>
+<p>在分词中，对于位置$e$（结束位置），有多个可能的词结尾于此，每个词对应一条路径。</p>
+<p><strong>符号</strong>：
+- 候选集合：${(s_1, w_1), (s_2, w_2), \ldots, (s_k, w_k)}$
+  - $s_i$：起始位置
+  - $w_i$：词
+  - 得分：$\text{score}_i = S^*[s_i] + \log P(w_i)$</p>
+<p><strong>目标</strong>：按概率$\propto e^{\alpha \cdot \text{score}_i}$采样一条路径。</p>
+<p><strong>对应关系</strong>：
+- 流式数据：逐一到达的候选$(s_i, w_i)$
+- 权重：$w_i = e^{\alpha \cdot \text{score}<em j="1">i}$
+- 累积权重：$Z_i = \sum</em>$}^{i} e^{\alpha \cdot \text{score}_j</p>
+<h4 id="32_1">3.2 递推公式<a class="toc-link" href="#32_1" title="Permanent link">&para;</a></h4>
+<p><strong>初始化</strong>（第一个候选）：
+\begin{equation}
+\begin{aligned}
+\text{reservoir} &amp;= (s_1, w_1) \
+Z &amp;= e^{\alpha \cdot \text{score}_1}
+\end{aligned} \tag{5}
+\end{equation}</p>
+<p><strong>更新</strong>（第$i$个候选到达，$i \geq 2$）：
+\begin{equation}
+\begin{aligned}
+Z_{\text{new}} &amp;= Z + e^{\alpha \cdot \text{score}<em _text_accept="\text{accept">i} \
+p</em>}} &amp;= \frac{e^{\alpha \cdot \text{score<em _text_new="\text{new">i}}{Z</em> \
+\text{if } \varepsilon &lt; p_{\text{accept}} &amp;\text{ then} \
+&amp;\quad \text{reservoir} = (s_i, w_i) \
+Z &amp;= Z_{\text{new}}
+\end{aligned} \tag{6}
+\end{equation}}}</p>
+<p><strong>验证无稀释效应</strong>：</p>
+<p>对于之前的ABC例子（得分都是$s$）：
+1. A到达：$Z_1 = e^{\alpha s}$，reservoir = A
+2. B到达：
+   - $Z_2 = e^{\alpha s} + e^{\alpha s} = 2e^{\alpha s}$
+   - $p_B = \frac{e^{\alpha s}}{2e^{\alpha s}} = 1/2$
+   - 以概率$1/2$选B，否则保持A
+3. C到达：
+   - $Z_3 = 2e^{\alpha s} + e^{\alpha s} = 3e^{\alpha s}$
+   - $p_C = \frac{e^{\alpha s}}{3e^{\alpha s}} = 1/3$</p>
+<p><strong>最终概率</strong>：
+\begin{equation}
+\begin{aligned}
+P(A) &amp;= 1 \times (1 - 1/2) \times (1 - 1/3) = 1/2 \times 2/3 = 1/3 \
+P(B) &amp;= 1/2 \times (1 - 1/3) = 1/2 \times 2/3 = 1/3 \
+P(C) &amp;= 1/3
+\end{aligned} \tag{7}
+\end{equation}</p>
+<p>完美！每个方案概率都是$1/3$。</p>
+<h3 id="logsumexp_1">四、对数空间实现：LogSumExp技巧<a class="toc-link" href="#logsumexp_1" title="Permanent link">&para;</a></h3>
+<h4 id="41_1">4.1 数值稳定性问题<a class="toc-link" href="#41_1" title="Permanent link">&para;</a></h4>
+<p>直接计算$Z = \sum e^{\alpha \cdot \text{score}_i}$容易溢出。</p>
+<p><strong>例子</strong>：如果$\text{score}_i = 50$，$\alpha = 1$，则$e^{50} \approx 10^{21}$，超出浮点数范围。</p>
+<h4 id="42-logsumexp_1">4.2 LogSumExp函数<a class="toc-link" href="#42-logsumexp_1" title="Permanent link">&para;</a></h4>
+<p>定义：
+\begin{equation}
+\text{LSE}(x_1, \ldots, x_n) = \log\left(\sum_{i=1}^{n} e^{x_i}\right) \tag{8}
+\end{equation}</p>
+<p><strong>稳定计算</strong>：
+\begin{equation}
+\text{LSE}(x_1, \ldots, x_n) = x_{\max} + \log\left(\sum_{i=1}^{n} e^{x_i - x_{\max}}\right) \tag{9}
+\end{equation}</p>
+<p>其中$x_{\max} = \max_i x_i$。</p>
+<p><strong>证明</strong>：
+\begin{equation}
+\begin{aligned}
+\text{LSE}(x_1, \ldots, x_n) &amp;= \log\left(\sum_{i=1}^{n} e^{x_i}\right) \
+&amp;= \log\left(e^{x_{\max}} \sum_{i=1}^{n} e^{x_i - x_{\max}}\right) \
+&amp;= x_{\max} + \log\left(\sum_{i=1}^{n} e^{x_i - x_{\max}}\right)
+\end{aligned} \tag{10}
+\end{equation}</p>
+<p>现在$x_i - x_{\max} \leq 0$，所以$e^{x_i - x_{\max}} \in (0, 1]$，不会溢出。</p>
+<h4 id="43-logsumexp_1">4.3 两数的LogSumExp<a class="toc-link" href="#43-logsumexp_1" title="Permanent link">&para;</a></h4>
+<p>特别地，对于两数：
+\begin{equation}
+\text{LSE}(x, y) = \begin{cases}
+x + \log(1 + e^{y-x}), &amp; x \geq y \
+y + \log(1 + e^{x-y}), &amp; x &lt; y
+\end{cases} \tag{11}
+\end{equation}</p>
+<p><strong>进一步优化</strong>：当$|x - y|$很大时，$e^{-|x-y|} \approx 0$，可以直接返回$\max(x, y)$。</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">logsumexp</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mi">20</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">x</span> <span class="o">&gt;=</span> <span class="n">y</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">x</span> <span class="o">-</span> <span class="n">y</span> <span class="o">&gt;</span> <span class="n">threshold</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">x</span>
+        <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">math</span><span class="o">.</span><span class="n">log1p</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="n">x</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">y</span> <span class="o">-</span> <span class="n">x</span> <span class="o">&gt;</span> <span class="n">threshold</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">y</span>
+        <span class="k">return</span> <span class="n">y</span> <span class="o">+</span> <span class="n">math</span><span class="o">.</span><span class="n">log1p</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="n">y</span><span class="p">))</span>
+</code></pre></div>
+
+<p>其中<code>log1p(x) = log(1 + x)</code>是更稳定的版本。</p>
+<h4 id="44_1">4.4 完美采样的对数空间算法<a class="toc-link" href="#44_1" title="Permanent link">&para;</a></h4>
+<p>维护$Z^{\log} = \log Z$而不是$Z$本身。</p>
+<p><strong>初始化</strong>：
+\begin{equation}
+Z^{\log} = \alpha \cdot \text{score}_1 \tag{12}
+\end{equation}</p>
+<p><strong>更新</strong>：
+\begin{equation}
+\begin{aligned}
+Z_{\text{new}}^{\log} &amp;= \text{LSE}(Z^{\log}, \alpha \cdot \text{score}<em _text_accept="\text{accept">i) \
+p</em>}} &amp;= e^{\alpha \cdot \text{score<em _text_new="\text{new">i - Z</em> \
+\text{if } \varepsilon &lt; p_{\text{accept}} &amp;\text{ then} \
+&amp;\quad \text{reservoir} = (s_i, w_i) \
+Z^{\log} &amp;= Z_{\text{new}}^{\log}
+\end{aligned} \tag{13}
+\end{equation}}}^{\log}</p>
+<p><strong>伪代码</strong>：</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">perfect_sampling_viterbi</span><span class="p">(</span><span class="n">text</span><span class="p">,</span> <span class="n">vocab</span><span class="p">,</span> <span class="n">prob</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">1.0</span><span class="p">):</span>
+    <span class="n">L</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">S_log</span> <span class="o">=</span> <span class="p">[</span><span class="o">-</span><span class="nb">float</span><span class="p">(</span><span class="s1">&#39;inf&#39;</span><span class="p">)]</span> <span class="o">*</span> <span class="p">(</span><span class="n">L</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">prev</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="p">(</span><span class="n">L</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">S_log</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mf">0.0</span>
+
+    <span class="n">candidates</span> <span class="o">=</span> <span class="n">vocab</span><span class="o">.</span><span class="n">find_all_words</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+    <span class="n">candidates_by_end</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">start</span><span class="p">,</span> <span class="n">end</span><span class="p">,</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">candidates</span><span class="p">:</span>
+        <span class="n">candidates_by_end</span><span class="p">[</span><span class="n">end</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">start</span><span class="p">,</span> <span class="n">word</span><span class="p">))</span>
+
+    <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">L</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">Z_log</span> <span class="o">=</span> <span class="o">-</span><span class="nb">float</span><span class="p">(</span><span class="s1">&#39;inf&#39;</span><span class="p">)</span>
+        <span class="n">reservoir</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">for</span> <span class="n">s</span><span class="p">,</span> <span class="n">word</span> <span class="ow">in</span> <span class="n">candidates_by_end</span><span class="p">[</span><span class="n">e</span><span class="p">]:</span>
+            <span class="n">score</span> <span class="o">=</span> <span class="n">S_log</span><span class="p">[</span><span class="n">s</span><span class="p">]</span> <span class="o">+</span> <span class="n">alpha</span> <span class="o">*</span> <span class="n">prob</span><span class="p">(</span><span class="n">word</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">Z_log</span> <span class="o">==</span> <span class="o">-</span><span class="nb">float</span><span class="p">(</span><span class="s1">&#39;inf&#39;</span><span class="p">):</span>
+                <span class="c1"># 第一个候选</span>
+                <span class="n">Z_log</span> <span class="o">=</span> <span class="n">score</span>
+                <span class="n">reservoir</span> <span class="o">=</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">word</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># 更新</span>
+                <span class="n">Z_new_log</span> <span class="o">=</span> <span class="n">logsumexp</span><span class="p">(</span><span class="n">Z_log</span><span class="p">,</span> <span class="n">score</span><span class="p">)</span>
+                <span class="n">p_accept</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">score</span> <span class="o">-</span> <span class="n">Z_new_log</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span> <span class="o">&lt;</span> <span class="n">p_accept</span><span class="p">:</span>
+                    <span class="n">reservoir</span> <span class="o">=</span> <span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">word</span><span class="p">)</span>
+
+                <span class="n">Z_log</span> <span class="o">=</span> <span class="n">Z_new_log</span>
+
+        <span class="k">if</span> <span class="n">reservoir</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">S_log</span><span class="p">[</span><span class="n">e</span><span class="p">]</span> <span class="o">=</span> <span class="n">Z_log</span>
+            <span class="n">prev</span><span class="p">[</span><span class="n">e</span><span class="p">]</span> <span class="o">=</span> <span class="n">reservoir</span>
+
+    <span class="c1"># 回溯</span>
+    <span class="n">tokens</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">pos</span> <span class="o">=</span> <span class="n">L</span>
+    <span class="k">while</span> <span class="n">pos</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">prev</span><span class="p">[</span><span class="n">pos</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">s</span><span class="p">,</span> <span class="n">word</span> <span class="o">=</span> <span class="n">prev</span><span class="p">[</span><span class="n">pos</span><span class="p">]</span>
+        <span class="n">tokens</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">word</span><span class="p">)</span>
+        <span class="n">pos</span> <span class="o">=</span> <span class="n">s</span>
+
+    <span class="k">return</span> <span class="n">tokens</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+</code></pre></div>
+
+<h3 id="_15">五、完美采样的理论保证<a class="toc-link" href="#_15" title="Permanent link">&para;</a></h3>
+<h4 id="51_1">5.1 精确性定理<a class="toc-link" href="#51_1" title="Permanent link">&para;</a></h4>
+<p><strong>定理</strong>：对于任意切分方案$\boldsymbol{w} = (w_1, \ldots, w_k)$，使用完美采样算法，其被采样到的概率为：
+\begin{equation}
+P(\text{采样到}\boldsymbol{w}) = \frac{e^{\alpha \sum_{i=1}^{k} \log P(w_i)}}{\sum_{\boldsymbol{w}' \in \Omega} e^{\alpha \sum_{i=1}^{k'} \log P(w'<em _boldsymbol_w="\boldsymbol{w">i)}} = \frac{P(\boldsymbol{w})^\alpha}{\sum</em>
+\end{equation}}' \in \Omega} P(\boldsymbol{w}')^\alpha} \tag{14</p>
+<p>其中$\Omega$是所有可能的切分方案的集合。</p>
+<p><strong>证明思路</strong>：</p>
+<p>利用水塘采样的正确性（公式4），对于每个位置$e$，从所有以$e$结尾的路径中采样，概率正比于$e^{\alpha \cdot \text{score}}$。</p>
+<p>由于分词是从左到右逐步构建的，每个位置的采样独立（给定前一个位置）。因此整条路径的概率是各段的乘积，正好等于$P(\boldsymbol{w})^\alpha$归一化后的结果。$\square$</p>
+<h4 id="52-subword-regularization_1">5.2 与Subword Regularization的等价性<a class="toc-link" href="#52-subword-regularization_1" title="Permanent link">&para;</a></h4>
+<p>Subword Regularization的做法：
+1. 找top-$n$个切分方案
+2. 计算权重$p_i = \frac{P(\boldsymbol{w}<em j="1">i)^\alpha}{\sum</em>$
+3. 按$p_i$采样}^{n} P(\boldsymbol{w}_j)^\alpha</p>
+<p><strong>当$n \to \infty$时</strong>，Subword Regularization等价于完美采样（公式14）。</p>
+<p><strong>完美采样的优势</strong>：
+- 不需要预先找所有方案（或top-$n$）
+- 复杂度与确定性Viterbi相同：$O(Lm)$
+- 自动覆盖所有方案（$n = |\Omega|$）</p>
+<h3 id="coupling-from-the-past_1">六、Coupling from the Past理论<a class="toc-link" href="#coupling-from-the-past_1" title="Permanent link">&para;</a></h3>
+<h4 id="61_1">6.1 马尔可夫链基础<a class="toc-link" href="#61_1" title="Permanent link">&para;</a></h4>
+<p>完美采样与马尔可夫链的"精确采样"理论（Coupling from the Past, CFTP）有深刻联系。</p>
+<p><strong>马尔可夫链</strong>：状态空间$\mathcal{S}$，转移矩阵$P$。</p>
+<p><strong>平稳分布</strong>：满足$\pi P = \pi$的分布$\pi$。</p>
+<p><strong>遍历定理</strong>：如果马尔可夫链是不可约的、非周期的、正常返的，则存在唯一的平稳分布，且：
+\begin{equation}
+\lim_{t \to \infty} P^t(x, \cdot) = \pi(\cdot), \quad \forall x \in \mathcal{S} \tag{15}
+\end{equation}</p>
+<p><strong>问题</strong>：如何精确采样平稳分布$\pi$？</p>
+<h4 id="62-cftp_1">6.2 CFTP算法思想<a class="toc-link" href="#62-cftp_1" title="Permanent link">&para;</a></h4>
+<p><strong>朴素方法</strong>：运行马尔可夫链很长时间$T$，希望$P^T \approx \pi$。</p>
+<p><strong>问题</strong>：需要多长时间？收敛速度难以估计。</p>
+<p><strong>CFTP的巧妙思想</strong>：从"过去的无穷远"开始运行链，当所有可能的起点"耦合"（coalesce）到同一状态时，该状态的分布就是精确的$\pi$。</p>
+<p><strong>形式化</strong>：</p>
+<p>定义耦合时间$\tau$：
+\begin{equation}
+\tau = \inf{t \geq 0 : X_t^{(x)} = X_t^{(y)}, \forall x, y \in \mathcal{S}} \tag{16}
+\end{equation}</p>
+<p>即所有起点在时刻$t$到达同一状态。</p>
+<p><strong>CFTP定理</strong>：$X_\tau$的分布是平稳分布$\pi$。</p>
+<h4 id="63_1">6.3 与完美采样的联系<a class="toc-link" href="#63_1" title="Permanent link">&para;</a></h4>
+<p>在分词的完美采样中，虽然不是显式的马尔可夫链，但有类似的结构：</p>
+<p><strong>状态</strong>：$(e, \text{路径})$，即到达位置$e$的路径</p>
+<p><strong>转移</strong>：从$(s, \text{路径}_s)$到$(e, \text{路径}_s \oplus w)$，权重$e^{\alpha \log P(w)}$</p>
+<p><strong>水塘采样的角色</strong>：确保在每个位置$e$，无论从哪条路径转移过来，最终采样的分布都是归一化后的$e^{\alpha \text{score}}$。</p>
+<p>这类似于CFTP中的"耦合"——不同的历史路径最终以相同的概率分布采样下一步。</p>
+<h3 id="_16">七、收敛性与混合时间<a class="toc-link" href="#_16" title="Permanent link">&para;</a></h3>
+<h4 id="71_1">7.1 混合时间定义<a class="toc-link" href="#71_1" title="Permanent link">&para;</a></h4>
+<p>对于马尔可夫链，<strong>总变差距离</strong>（Total Variation Distance）：
+\begin{equation}
+|P^t(x, \cdot) - \pi|<em _in="\in" _mathcal_S="\mathcal{S" y="y">{\text{TV}} = \frac{1}{2}\sum</em>
+\end{equation}}} |P^t(x, y) - \pi(y)| \tag{17</p>
+<p><strong>混合时间</strong>：
+\begin{equation}
+t_{\text{mix}}(\epsilon) = \min{t : \max_{x \in \mathcal{S}} |P^t(x, \cdot) - \pi|_{\text{TV}} \leq \epsilon} \tag{18}
+\end{equation}</p>
+<h4 id="72_1">7.2 完美采样的即时收敛<a class="toc-link" href="#72_1" title="Permanent link">&para;</a></h4>
+<p>完美采样的神奇之处：<strong>混合时间为0</strong>！</p>
+<p><strong>原因</strong>：由于使用了水塘采样，每一步都是精确按归一化概率采样，不需要"等待收敛"。</p>
+<p><strong>对比</strong>：
+- MCMC采样：需要burn-in period，等待$t \geq t_{\text{mix}}$
+- 完美采样：每一步都精确，无需等待</p>
+<h3 id="_17">八、实际性能对比<a class="toc-link" href="#_17" title="Permanent link">&para;</a></h3>
+<h4 id="81_1">8.1 速度对比（重复测试）<a class="toc-link" href="#81_1" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>确定性速度</th>
+<th>随机性速度</th>
+<th>速度比</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Subword Regularization (top-$n$)</td>
+<td>5.65M bytes/sec</td>
+<td>1.28M bytes/sec</td>
+<td><strong>23%</strong></td>
+</tr>
+<tr>
+<td>Viterbi Sampling (旧版)</td>
+<td>1.95M bytes/sec</td>
+<td>1.36M bytes/sec</td>
+<td>70%</td>
+</tr>
+<tr>
+<td><strong>完美采样 (新版)</strong></td>
+<td><strong>1.95M bytes/sec</strong></td>
+<td><strong>1.36M bytes/sec</strong></td>
+<td><strong>70%</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：
+1. 完美采样与旧版Viterbi Sampling速度相同
+2. 比Subword Regularization快<strong>3倍</strong>
+3. 额外开销主要来自：
+   - LogSumExp计算
+   - 随机数生成</p>
+<h4 id="82_1">8.2 采样质量对比<a class="toc-link" href="#82_1" title="Permanent link">&para;</a></h4>
+<p><strong>实验设置</strong>：
+- 文本："今天天气不错"
+- 采样1000次
+- 统计每种切分出现的频率</p>
+<p><strong>结果</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>切分方案</th>
+<th>真实概率</th>
+<th>Subword Reg.</th>
+<th>完美采样</th>
+<th>旧版Viterbi</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>今天/天气/不错</td>
+<td>0.45</td>
+<td>0.447</td>
+<td>0.451</td>
+<td>0.38</td>
+</tr>
+<tr>
+<td>今天/天/气/不错</td>
+<td>0.20</td>
+<td>0.203</td>
+<td>0.198</td>
+<td>0.22</td>
+</tr>
+<tr>
+<td>今/天/天气/不错</td>
+<td>0.15</td>
+<td>0.149</td>
+<td>0.152</td>
+<td>0.19</td>
+</tr>
+<tr>
+<td>其他</td>
+<td>0.20</td>
+<td>0.201</td>
+<td>0.199</td>
+<td>0.21</td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>：
+- 完美采样与Subword Regularization几乎一致（误差&lt;1%）
+- 旧版Viterbi Sampling有系统性偏差（高概率方案被低估）</p>
+<h3 id="_18">九、高级优化技巧<a class="toc-link" href="#_18" title="Permanent link">&para;</a></h3>
+<h4 id="91_1">9.1 批量随机数生成<a class="toc-link" href="#91_1" title="Permanent link">&para;</a></h4>
+<p><strong>问题</strong>：每次水塘采样都需要一个随机数，频繁调用<code>random()</code>效率低。</p>
+<p><strong>优化</strong>：预生成一批随机数。</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">FastRandom</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">,</span> <span class="n">pool_size</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pool</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">size</span><span class="o">=</span><span class="n">pool_size</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">idx</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pool</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">idx</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">idx</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">idx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">pool</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">r</span>
+
+<span class="n">fast_random</span> <span class="o">=</span> <span class="n">FastRandom</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>加速</strong>：约10-15%（根据场景不同）</p>
+<h4 id="92-logsumexpsimd_1">9.2 LogSumExp的SIMD实现<a class="toc-link" href="#92-logsumexpsimd_1" title="Permanent link">&para;</a></h4>
+<p>现代CPU的SIMD指令可以并行计算多个exp：</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numba</span>
+
+<span class="nd">@numba</span><span class="o">.</span><span class="n">jit</span><span class="p">(</span><span class="n">nopython</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">logsumexp_simd</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">m</span> <span class="o">+</span> <span class="n">math</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">x</span> <span class="o">-</span> <span class="n">m</span><span class="p">)</span> <span class="o">+</span> <span class="n">math</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="n">m</span><span class="p">))</span>
+</code></pre></div>
+
+<p>Numba会自动使用SIMD指令优化。</p>
+<h4 id="93-early-stopping_1">9.3 Early Stopping<a class="toc-link" href="#93-early-stopping_1" title="Permanent link">&para;</a></h4>
+<p>当$Z^{\log}$增长到一定程度后，新候选的影响很小。</p>
+<p><strong>策略</strong>：如果$\alpha \cdot \text{score}<em _text_accept="\text{accept">i - Z^{\log} &lt; -\text{threshold}$（如-20），则：
+\begin{equation}
+p</em>
+\end{equation}}} = e^{\alpha \cdot \text{score}_i - Z^{\log}} &lt; e^{-20} \approx 10^{-9} \tag{19</p>
+<p>可以直接跳过（以极小概率$&lt;10^{-9}$损失精确性）。</p>
+<h3 id="_19">十、理论扩展与未来方向<a class="toc-link" href="#_19" title="Permanent link">&para;</a></h3>
+<h4 id="101-beam-search_1">10.1 Beam Search的概率化<a class="toc-link" href="#101-beam-search_1" title="Permanent link">&para;</a></h4>
+<p>Beam Search维护top-$K$条路径。能否也用水塘采样？</p>
+<p><strong>想法</strong>：维护$K$个reservoir，每个新候选随机插入某个reservoir。</p>
+<p><strong>挑战</strong>：如何保证$K$条路径的联合分布正确？</p>
+<h4 id="102_1">10.2 变温采样<a class="toc-link" href="#102_1" title="Permanent link">&para;</a></h4>
+<p>不同位置使用不同的$\alpha$：
+\begin{equation}
+\alpha(e) = \alpha_0 \cdot f(e), \quad f(e) = \exp(-\lambda e / L) \tag{20}
+\end{equation}</p>
+<p><strong>效果</strong>：
+- 前面位置$\alpha$大：更确定性，选高分词
+- 后面位置$\alpha$小：更随机，增加多样性</p>
+<h4 id="103_1">10.3 条件完美采样<a class="toc-link" href="#103_1" title="Permanent link">&para;</a></h4>
+<p>给定某些约束（如某些位置必须切分），如何采样？</p>
+<p><strong>方法</strong>：修改候选集合，只考虑满足约束的候选。</p>
+<p><strong>应用</strong>：
+- 领域自适应：强制某些专业术语不被切分
+- 多语言：尊重语言边界</p>
+<h3 id="_20">十一、总结<a class="toc-link" href="#_20" title="Permanent link">&para;</a></h3>
+<p>完美采样通过水塘采样和LogSumExp技巧，实现了：</p>
+<p><strong>核心公式</strong>：
+\begin{equation}
+\begin{aligned}
+Z_{\text{new}}^{\log} &amp;= \text{LSE}(Z^{\log}, \alpha \cdot \text{score}<em _text_accept="\text{accept">i) \tag{21} \
+p</em>}} &amp;= e^{\alpha \cdot \text{score<em _text_new="\text{new">i - Z</em>
+\end{aligned}
+\end{equation}}}^{\log}} \tag{22</p>
+<p><strong>三大保证</strong>：
+1. <strong>精确性</strong>：采样概率$\propto P(\boldsymbol{w})^\alpha$，与Subword Regularization等价
+2. <strong>效率</strong>：复杂度$O(Lm)$，与Viterbi Decoding相同
+3. <strong>稳定性</strong>：LogSumExp避免数值溢出</p>
+<p><strong>对比总结</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>Viterbi Decoding</th>
+<th>旧版Viterbi Sampling</th>
+<th>完美采样</th>
+<th>Subword Reg.</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>复杂度</td>
+<td>$O(Lm)$</td>
+<td>$O(Lm)$</td>
+<td>$O(Lm)$</td>
+<td>$O(nLm)$</td>
+</tr>
+<tr>
+<td>采样质量</td>
+<td>确定性</td>
+<td>近似</td>
+<td>精确</td>
+<td>精确</td>
+</tr>
+<tr>
+<td>速度</td>
+<td>最快</td>
+<td>快</td>
+<td>快</td>
+<td>慢</td>
+</tr>
+<tr>
+<td>实现难度</td>
+<td>简单</td>
+<td>简单</td>
+<td>中等</td>
+<td>中等</td>
+</tr>
+</tbody>
+</table>
+<p><strong>应用建议</strong>：
+- <strong>推理阶段</strong>：Viterbi Decoding（最快）
+- <strong>训练阶段</strong>：完美采样（精确+快速）
+- <strong>需要top-$n$结果</strong>：Subword Regularization</p>
+<p>完美采样为随机分词提供了理论上严格、实践上高效的解决方案，是Unigram分词的重要改进。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -254,7 +1321,7 @@ url={\url{https://spaces.ac.cn/archives/9811}},<br />
                             
                             <a href="emo基于最优传输思想设计的分类损失函数.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#107 EMO：基于最优传输思想设计的分类损失函数</div>
+                                <div class="nav-title">#253 EMO：基于最优传输思想设计的分类损失函数</div>
                             </a>
                             
                         </div>
@@ -262,7 +1329,7 @@ url={\url{https://spaces.ac.cn/archives/9811}},<br />
                             
                             <a href="从梯度最大化看attention的scale操作.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#109 从梯度最大化看Attention的Scale操作</div>
+                                <div class="nav-title">#255 从梯度最大化看Attention的Scale操作</div>
                             </a>
                             
                         </div>
@@ -295,7 +1362,34 @@ url={\url{https://spaces.ac.cn/archives/9811}},<br />
 </ul>
 </li>
 <li><a href="#_4">文章小结</a></li>
-<li><a href="#_5">公式推导与注释</a></li>
+<li><a href="#_5">完整数学推导与理论分析</a><ul>
+<li><a href="#_6">一、问题回顾：稀释效应</a></li>
+<li><a href="#reservoir-sampling">二、水塘采样（Reservoir Sampling）</a></li>
+<li><a href="#viterbi-sampling_1">三、应用到Viterbi Sampling</a></li>
+<li><a href="#logsumexp">四、对数空间实现：LogSumExp技巧</a></li>
+<li><a href="#_7">五、完美采样的理论保证</a></li>
+<li><a href="#coupling-from-the-past">六、Coupling from the Past理论</a></li>
+<li><a href="#_8">七、收敛性与混合时间</a></li>
+<li><a href="#_9">八、实际性能对比</a></li>
+<li><a href="#_10">九、高级优化技巧</a></li>
+<li><a href="#_11">十、理论扩展与未来方向</a></li>
+<li><a href="#_12">十一、总结</a></li>
+</ul>
+</li>
+<li><a href="#_13">完整数学推导与理论分析</a><ul>
+<li><a href="#_14">一、问题回顾：稀释效应</a></li>
+<li><a href="#reservoir-sampling_1">二、水塘采样（Reservoir Sampling）</a></li>
+<li><a href="#viterbi-sampling_2">三、应用到Viterbi Sampling</a></li>
+<li><a href="#logsumexp_1">四、对数空间实现：LogSumExp技巧</a></li>
+<li><a href="#_15">五、完美采样的理论保证</a></li>
+<li><a href="#coupling-from-the-past_1">六、Coupling from the Past理论</a></li>
+<li><a href="#_16">七、收敛性与混合时间</a></li>
+<li><a href="#_17">八、实际性能对比</a></li>
+<li><a href="#_18">九、高级优化技巧</a></li>
+<li><a href="#_19">十、理论扩展与未来方向</a></li>
+<li><a href="#_20">十一、总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

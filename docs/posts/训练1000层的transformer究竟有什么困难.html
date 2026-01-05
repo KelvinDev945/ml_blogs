@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=优化">优化</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #25 训练1000层的Transformer究竟有什么困难？
+                    #171 训练1000层的Transformer究竟有什么困难？
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#25</span>
+                <span class="post-number">#171</span>
                 训练1000层的Transformer究竟有什么困难？
             </h1>
             <div class="post-meta">
@@ -229,7 +229,552 @@ url={\url{https://spaces.ac.cn/archives/8978}},<br />
 } </p>
 <hr />
 <h2 id="_9">公式推导与注释<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="_10">一、深层网络的梯度问题数学分析<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 梯度消失与梯度爆炸的基础理论<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>考虑一个 $N$ 层的深度神经网络，损失函数为 $\mathcal{L}$。第 $l$ 层的参数 $\boldsymbol{\theta}_l$ 的梯度可以通过链式法则表示：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{\theta}<em i="l+1">l} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_N} \prod</em>}^{N} \frac{\partial \boldsymbol{x<em i-1="i-1">i}{\partial \boldsymbol{x}</em>
+\tag{1}
+\end{equation}}} \frac{\partial \boldsymbol{x}_l}{\partial \boldsymbol{\theta}_l</p>
+<p>其中 $\boldsymbol{x}_i$ 是第 $i$ 层的输出。</p>
+<p><strong>关键观察</strong>: 梯度包含一个连乘项 $\prod_{i=l+1}^{N} \frac{\partial \boldsymbol{x}<em i-1="i-1">i}{\partial \boldsymbol{x}</em>$，这是梯度传播的雅可比矩阵链。}</p>
+<h4 id="12">1.2 雅可比矩阵的范数分析<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p>设每层的雅可比矩阵 $\boldsymbol{J}<em i-1="i-1">i = \frac{\partial \boldsymbol{x}_i}{\partial \boldsymbol{x}</em>_i|$。则：}}$，其范数为 $|\boldsymbol{J</p>
+<p>\begin{equation}
+\left|\prod_{i=l+1}^{N} \boldsymbol{J}<em i="l+1">i\right| \leq \prod</em>_i|
+\tag{2}
+\end{equation}}^{N} |\boldsymbol{J</p>
+<p><strong>情况1: 梯度消失</strong> - 如果 $|\boldsymbol{J}_i| &lt; 1$，设 $|\boldsymbol{J}_i| = \gamma &lt; 1$:</p>
+<p>\begin{equation}
+\left|\prod_{i=l+1}^{N} \boldsymbol{J}_i\right| \leq \gamma^{N-l}
+\tag{3}
+\end{equation}</p>
+<p>当 $N-l$ 很大时，$\gamma^{N-l} \to 0$，导致梯度消失。</p>
+<p><strong>情况2: 梯度爆炸</strong> - 如果 $|\boldsymbol{J}_i| &gt; 1$，设 $|\boldsymbol{J}_i| = \beta &gt; 1$:</p>
+<p>\begin{equation}
+\left|\prod_{i=l+1}^{N} \boldsymbol{J}_i\right| \geq \beta^{N-l}
+\tag{4}
+\end{equation}</p>
+<p>当 $N-l$ 很大时，$\beta^{N-l} \to \infty$，导致梯度爆炸。</p>
+<p><strong>数值示例</strong>: 假设 $\gamma = 0.9$，$N = 100$，$l = 1$:</p>
+<p>\begin{equation}
+0.9^{99} \approx 2.65 \times 10^{-5}
+\tag{5}
+\end{equation}</p>
+<p>梯度衰减了约 $10^5$ 倍！</p>
+<h4 id="13-transformer">1.3 Transformer中的梯度传播<a class="toc-link" href="#13-transformer" title="Permanent link">&para;</a></h4>
+<p>标准Transformer的一层包含两个子层：
+1. 自注意力层: $\boldsymbol{y}<em l_1="l+1">l = \boldsymbol{x}_l + \text{Attention}(\boldsymbol{x}_l)$
+2. FFN层: $\boldsymbol{x}</em>_l)$} = \boldsymbol{y}_l + \text{FFN}(\boldsymbol{y</p>
+<p>不含残差时，雅可比矩阵为：</p>
+<p>\begin{equation}
+\boldsymbol{J}_l = \frac{\partial \text{FFN}(\text{Attention}(\boldsymbol{x}_l))}{\partial \boldsymbol{x}_l}
+\tag{6}
+\end{equation}</p>
+<p>含残差时（Post-LN）：</p>
+<p>\begin{equation}
+\boldsymbol{J}_l = \boldsymbol{I} + \frac{\partial \text{FFN}(\boldsymbol{y}_l)}{\partial \boldsymbol{y}_l} \left(\boldsymbol{I} + \frac{\partial \text{Attention}(\boldsymbol{x}_l)}{\partial \boldsymbol{x}_l}\right)
+\tag{7}
+\end{equation}</p>
+<p><strong>关键洞察</strong>: 残差连接引入的 $\boldsymbol{I}$ 项确保 $\boldsymbol{J}_l$ 的特征值至少有1，防止梯度消失。</p>
+<h3 id="_11">二、增量爆炸问题的深入分析<a class="toc-link" href="#_11" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 增量爆炸的数学定义<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>对于参数更新 $\Delta \boldsymbol{\theta} = -\eta \nabla_{\boldsymbol{\theta}} \mathcal{L}$，损失函数的一阶近似变化为：</p>
+<p>\begin{equation}
+\Delta \mathcal{L} = \mathcal{L}(\boldsymbol{\theta} + \Delta\boldsymbol{\theta}) - \mathcal{L}(\boldsymbol{\theta}) \approx \langle \nabla_{\boldsymbol{\theta}} \mathcal{L}, \Delta\boldsymbol{\theta} \rangle
+\tag{8}
+\end{equation}</p>
+<p>对于SGD:</p>
+<p>\begin{equation}
+\Delta \mathcal{L} \approx -\eta |\nabla_{\boldsymbol{\theta}} \mathcal{L}|^2
+\tag{9}
+\end{equation}</p>
+<p><strong>问题</strong>: 对于 $N$ 层Transformer，每层有 $K$ 个参数矩阵（Self-Attention有QKV和输出，FFN有两层，通常 $K \approx 6$）。</p>
+<h4 id="22">2.2 深度模型的梯度范数<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p>假设每个参数矩阵 $\boldsymbol{W}<em _boldsymbol_W="\boldsymbol{W">i$ 的梯度范数为 $|\nabla</em>| = g$ (通过归一化和初始化控制)。}_i} \mathcal{L</p>
+<p>总梯度范数的平方：</p>
+<p>\begin{equation}
+|\nabla_{\boldsymbol{\theta}} \mathcal{L}|^2 = \sum_{i=1}^{NK} |\nabla_{\boldsymbol{W}_i} \mathcal{L}|^2 = NKg^2
+\tag{10}
+\end{equation}</p>
+<p>因此：</p>
+<p>\begin{equation}
+\Delta \mathcal{L} \approx -\eta NK g^2 = \mathcal{O}(\eta N)
+\tag{11}
+\end{equation}</p>
+<p><strong>关键结论</strong>: 更新量正比于层数 $N$！</p>
+<h4 id="23">2.3 增量爆炸的后果<a class="toc-link" href="#23" title="Permanent link">&para;</a></h4>
+<p>对于深层网络（$N$ 很大）：
+1. 初始阶段梯度步长过大
+2. 容易跳过局部最优，进入次优区域
+3. 训练不稳定，甚至发散</p>
+<p><strong>数值示例</strong>: $N=100$ 层 vs $N=10$ 层，相同学习率下更新量差 10 倍！</p>
+<p>\begin{equation}
+\frac{\Delta \mathcal{L}<em N="10">{N=100}}{\Delta \mathcal{L}</em> = 10
+\tag{12}
+\end{equation}}} = \frac{100}{10</p>
+<h3 id="layernorm">三、LayerNorm的数学推导<a class="toc-link" href="#layernorm" title="Permanent link">&para;</a></h3>
+<h4 id="31-layernorm">3.1 LayerNorm的定义<a class="toc-link" href="#31-layernorm" title="Permanent link">&para;</a></h4>
+<p>对于输入 $\boldsymbol{x} \in \mathbb{R}^d$，LayerNorm计算：</p>
+<p>\begin{equation}
+\text{LN}(\boldsymbol{x}) = \boldsymbol{\gamma} \odot \frac{\boldsymbol{x} - \boldsymbol{\mu}}{\sqrt{\boldsymbol{\sigma}^2 + \epsilon}} + \boldsymbol{\beta}
+\tag{13}
+\end{equation}</p>
+<p>其中：
+- $\boldsymbol{\mu} = \frac{1}{d} \sum_{i=1}^{d} x_i$ (均值)
+- $\boldsymbol{\sigma}^2 = \frac{1}{d} \sum_{i=1}^{d} (x_i - \mu)^2$ (方差)
+- $\boldsymbol{\gamma}, \boldsymbol{\beta} \in \mathbb{R}^d$ 是可学习参数
+- $\epsilon$ 是数值稳定性常数（通常 $10^{-5}$）</p>
+<h4 id="32-layernorm">3.2 LayerNorm的梯度推导<a class="toc-link" href="#32-layernorm" title="Permanent link">&para;</a></h4>
+<p>设 $\boldsymbol{y} = \text{LN}(\boldsymbol{x})$，计算 $\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}}$：</p>
+<p>首先计算归一化部分 $\hat{\boldsymbol{x}} = \frac{\boldsymbol{x} - \boldsymbol{\mu}}{\sqrt{\boldsymbol{\sigma}^2 + \epsilon}}$：</p>
+<p>\begin{equation}
+\frac{\partial \hat{x}<em ij="ij">i}{\partial x_j} = \frac{1}{\sqrt{\boldsymbol{\sigma}^2 + \epsilon}} \left(\delta</em>
+\tag{14}
+\end{equation}} - \frac{1}{d}\right) - \frac{\hat{x}_i \cdot (x_j - \mu)}{d(\boldsymbol{\sigma}^2 + \epsilon)</p>
+<p>其中 $\delta_{ij}$ 是Kronecker delta。</p>
+<p>完整的梯度为：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial x_i} = \frac{\gamma_i}{\sqrt{\boldsymbol{\sigma}^2 + \epsilon}} \left[\frac{\partial \mathcal{L}}{\partial y_i} - \frac{1}{d} \sum_{j=1}^{d} \frac{\partial \mathcal{L}}{\partial y_j} - \hat{x}<em j="1">i \frac{1}{d} \sum</em>\right]
+\tag{15}
+\end{equation}}^{d} \hat{x}_j \frac{\partial \mathcal{L}}{\partial y_j</p>
+<p><strong>重要性质</strong>: LayerNorm的梯度自动归一化，$|\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}}| = \mathcal{O}(1)$，有助于稳定训练。</p>
+<h4 id="33-rmsnorm">3.3 RMSNorm的简化推导<a class="toc-link" href="#33-rmsnorm" title="Permanent link">&para;</a></h4>
+<p>RMSNorm简化了LayerNorm，去掉了均值计算和偏置项：</p>
+<p>\begin{equation}
+\text{RMSNorm}(\boldsymbol{x}) = \boldsymbol{\gamma} \odot \frac{\boldsymbol{x}}{\text{RMS}(\boldsymbol{x})}
+\tag{16}
+\end{equation}</p>
+<p>其中 RMS (Root Mean Square):</p>
+<p>\begin{equation}
+\text{RMS}(\boldsymbol{x}) = \sqrt{\frac{1}{d} \sum_{i=1}^{d} x_i^2 + \epsilon}
+\tag{17}
+\end{equation}</p>
+<p><strong>优势</strong>:
+1. 计算更快（少一次均值计算）
+2. 梯度更简单
+3. 实验效果与LayerNorm相当</p>
+<p>RMSNorm的梯度：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial x_i} = \frac{\gamma_i}{\text{RMS}(\boldsymbol{x})} \left[\frac{\partial \mathcal{L}}{\partial y_i} - \frac{x_i}{d \cdot \text{RMS}(\boldsymbol{x})^2} \sum_{j=1}^{d} x_j \frac{\partial \mathcal{L}}{\partial y_j}\right]
+\tag{18}
+\end{equation}</p>
+<h3 id="post-ln-vs-pre-ln">四、Post-LN vs Pre-LN的理论分析<a class="toc-link" href="#post-ln-vs-pre-ln" title="Permanent link">&para;</a></h3>
+<h4 id="41-post-ln">4.1 Post-LN的结构<a class="toc-link" href="#41-post-ln" title="Permanent link">&para;</a></h4>
+<p>\begin{equation}
+\boldsymbol{x}_{l+1} = \text{LN}(\boldsymbol{x}_l + F(\boldsymbol{x}_l))
+\tag{19}
+\end{equation}</p>
+<p>其中 $F$ 是Self-Attention或FFN。</p>
+<p><strong>梯度流</strong>:</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em l_1="l+1">l} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}</em>\right)
+\tag{20}
+\end{equation}}} \frac{\partial \text{LN}(\boldsymbol{x}_l + F(\boldsymbol{x}_l))}{\partial (\boldsymbol{x}_l + F(\boldsymbol{x}_l))} \left(\boldsymbol{I} + \frac{\partial F(\boldsymbol{x}_l)}{\partial \boldsymbol{x}_l</p>
+<p><strong>问题</strong>: LayerNorm的雅可比矩阵会重新缩放梯度，可能破坏残差连接的恒等映射。</p>
+<h4 id="42-pre-ln">4.2 Pre-LN的结构<a class="toc-link" href="#42-pre-ln" title="Permanent link">&para;</a></h4>
+<p>\begin{equation}
+\boldsymbol{x}_{l+1} = \boldsymbol{x}_l + F(\text{LN}(\boldsymbol{x}_l))
+\tag{21}
+\end{equation}</p>
+<p><strong>梯度流</strong>:</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em l_1="l+1">l} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}</em>\right)
+\tag{22}
+\end{equation}}} \left(\boldsymbol{I} + \frac{\partial F(\text{LN}(\boldsymbol{x}_l))}{\partial \text{LN}(\boldsymbol{x}_l)} \frac{\partial \text{LN}(\boldsymbol{x}_l)}{\partial \boldsymbol{x}_l</p>
+<p><strong>优势</strong>: 恒等路径 $\boldsymbol{I}$ 不受LayerNorm影响，梯度传播更稳定。</p>
+<h4 id="43-deepnorm">4.3 DeepNorm的改进<a class="toc-link" href="#43-deepnorm" title="Permanent link">&para;</a></h4>
+<p>DeepNorm引入缩放因子 $\alpha$:</p>
+<p>\begin{equation}
+\boldsymbol{x}_{l+1} = \text{LN}(\alpha \boldsymbol{x}_l + F(\boldsymbol{x}_l))
+\tag{23}
+\end{equation}</p>
+<p>等价形式：</p>
+<p>\begin{equation}
+\boldsymbol{x}_{l+1} = \text{LN}\left(\boldsymbol{x}_l + \frac{F(\boldsymbol{x}_l)}{\alpha}\right)
+\tag{24}
+\end{equation}</p>
+<p><strong>设计原理</strong>: 通过调整 $\alpha$ 控制残差分支的贡献，使初始阶段模型接近恒等函数。</p>
+<h3 id="_12">五、量级分解与初始化策略<a class="toc-link" href="#_12" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 矩阵的量级分解<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>将参数矩阵 $\boldsymbol{W}$ 分解为:</p>
+<p>\begin{equation}
+\boldsymbol{W} = \lambda \boldsymbol{U}
+\tag{25}
+\end{equation}</p>
+<p>其中：
+- $\lambda &gt; 0$ 是标量增益
+- $\boldsymbol{U}$ 接近正交矩阵 ($\boldsymbol{U}\boldsymbol{U}^\top \approx \boldsymbol{I}$)</p>
+<p><strong>最优化问题</strong>:</p>
+<p>\begin{equation}
+\lambda = \arg\min_{\kappa &gt; 0} |\boldsymbol{W}\boldsymbol{W}^\top / \kappa^2 - \boldsymbol{I}|_F
+\tag{26}
+\end{equation}</p>
+<p>解为：</p>
+<p>\begin{equation}
+\lambda = \sqrt{\frac{\text{tr}(\boldsymbol{W}\boldsymbol{W}^\top)}{d}} = |\boldsymbol{W}|_F / \sqrt{d}
+\tag{27}
+\end{equation}</p>
+<h4 id="52">5.2 梯度的量级探针<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p>对于损失函数 $\mathcal{L}(\lambda \boldsymbol{U})$，标量梯度为：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \lambda} = \left\langle \frac{\partial \mathcal{L}}{\partial (\lambda \boldsymbol{U})}, \boldsymbol{U} \right\rangle = \left\langle \frac{\partial \mathcal{L}}{\partial \boldsymbol{W}}, \boldsymbol{U} \right\rangle
+\tag{28}
+\end{equation}</p>
+<p><strong>关键性质</strong>: $\frac{\partial \mathcal{L}}{\partial \lambda}$ 与 $|\frac{\partial \mathcal{L}}{\partial \boldsymbol{W}}|$ 在量级上成正比。</p>
+<h4 id="53-xavier">5.3 Xavier初始化的数学原理<a class="toc-link" href="#53-xavier" title="Permanent link">&para;</a></h4>
+<p>Xavier初始化要求前向传播时方差保持不变。对于线性层 $\boldsymbol{y} = \boldsymbol{W}\boldsymbol{x}$:</p>
+<p>\begin{equation}
+\text{Var}(y_i) = \sum_{j=1}^{d_{\text{in}}} \text{Var}(W_{ij} x_j) = d_{\text{in}} \cdot \text{Var}(W_{ij}) \cdot \text{Var}(x_j)
+\tag{29}
+\end{equation}</p>
+<p>要使 $\text{Var}(y_i) = \text{Var}(x_j)$，需要：</p>
+<p>\begin{equation}
+\text{Var}(W_{ij}) = \frac{1}{d_{\text{in}}}
+\tag{30}
+\end{equation}</p>
+<p>考虑反向传播的对称性，最终：</p>
+<p>\begin{equation}
+W_{ij} \sim \mathcal{N}\left(0, \frac{2}{d_{\text{in}} + d_{\text{out}}}\right)
+\tag{31}
+\end{equation}</p>
+<p><strong>矩阵视角</strong>: Xavier初始化使 $\boldsymbol{W}$ 接近正交矩阵，即 $\lambda \approx 1$。</p>
+<h3 id="ffn">六、FFN层的梯度量级分析<a class="toc-link" href="#ffn" title="Permanent link">&para;</a></h3>
+<h4 id="61-ffn">6.1 FFN的数学形式<a class="toc-link" href="#61-ffn" title="Permanent link">&para;</a></h4>
+<p>\begin{equation}
+\boldsymbol{x}_{l+1} = \text{LN}(\boldsymbol{x}_l + \phi(\boldsymbol{x}_l \boldsymbol{W}_1) \boldsymbol{W}_2 / \alpha)
+\tag{32}
+\end{equation}</p>
+<p>其中 $\phi$ 是激活函数（ReLU, GELU等）。</p>
+<p><strong>齐次性</strong>: 对于ReLU及其变体，满足 $\phi(\lambda \boldsymbol{x}) \approx \lambda \phi(\boldsymbol{x})$ (当 $\lambda &gt; 0$)。</p>
+<h4 id="62">6.2 量级分解后的形式<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p>使用 $\boldsymbol{W}_i = \lambda_i \boldsymbol{U}_i$:</p>
+<p>\begin{equation}
+\boldsymbol{z}_{l+1} = \boldsymbol{x}_l + \lambda_1 \lambda_2 \phi(\boldsymbol{x}_l \boldsymbol{U}_1) \boldsymbol{U}_2 / \alpha
+\tag{33}
+\end{equation}</p>
+<h4 id="63">6.3 梯度计算<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p>对 $\lambda_1$ 的梯度：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \lambda_1} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em l_1="l+1">{l+1}} \frac{\partial \boldsymbol{x}</em>
+\tag{34}
+\end{equation}}}{\partial \boldsymbol{z}_{l+1}} \frac{\lambda_2 \phi(\boldsymbol{x}_l \boldsymbol{U}_1) \boldsymbol{U}_2}{\alpha</p>
+<p><strong>量级估计</strong>:
+- $\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em l_1="l+1">{l+1}} = \mathcal{O}(1)$ (归一化作用)
+- $\frac{\partial \boldsymbol{x}</em>(1)$ (LayerNorm雅可比)
+- $\phi(\boldsymbol{x}_l \boldsymbol{U}_1) \boldsymbol{U}_2 = \mathcal{O}(1)$ (正交性)}}{\partial \boldsymbol{z}_{l+1}} = \mathcal{O</p>
+<p>因此：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \lambda_1} = \mathcal{O}\left(\frac{\lambda_2}{\alpha}\right)
+\tag{35}
+\end{equation}</p>
+<p>同理：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \lambda_2} = \mathcal{O}\left(\frac{\lambda_1}{\alpha}\right)
+\tag{36}
+\end{equation}</p>
+<h3 id="self-attention">七、Self-Attention的梯度量级分析<a class="toc-link" href="#self-attention" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 单头注意力的量级分解<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p>\begin{equation}
+\boldsymbol{x}_{l+1} = \text{LN}(\boldsymbol{x}_l + \sigma(\boldsymbol{x}_l \boldsymbol{W}_q \boldsymbol{W}_k^\top \boldsymbol{x}_l^\top) \boldsymbol{x}_l \boldsymbol{W}_v \boldsymbol{W}_o / \alpha)
+\tag{37}
+\end{equation}</p>
+<p>其中 $\sigma$ 表示softmax操作。</p>
+<p>分解后：</p>
+<p>\begin{equation}
+\boldsymbol{z}_{l+1} = \boldsymbol{x}_l + \lambda_v \lambda_o \sigma(\lambda_q \lambda_k \boldsymbol{x}_l \boldsymbol{U}_q \boldsymbol{U}_k^\top \boldsymbol{x}_l^\top) \boldsymbol{x}_l \boldsymbol{U}_v \boldsymbol{U}_o / \alpha
+\tag{38}
+\end{equation}</p>
+<h4 id="72-softmax">7.2 Softmax的量级不变性<a class="toc-link" href="#72-softmax" title="Permanent link">&para;</a></h4>
+<p><strong>关键性质</strong>: Softmax对输入的缩放不敏感（到某种程度）。</p>
+<p>\begin{equation}
+\sigma(c\boldsymbol{x}) = \sigma(\boldsymbol{x}), \quad \text{当缩放被温度吸收}
+\tag{39}
+\end{equation}</p>
+<p>在Attention中，$\lambda_q \lambda_k$ 的缩放效果类似于调整温度，但softmax后的加权平均仍保持 $\mathcal{O}(1)$ 量级。</p>
+<p><strong>数学直觉</strong>:</p>
+<p>\begin{equation}
+\sum_{i} \text{softmax}(\boldsymbol{a})_i \boldsymbol{v}_i \approx \mathcal{O}(|\boldsymbol{v}|)
+\tag{40}
+\end{equation}</p>
+<p>由于 $\boldsymbol{v}_i = \boldsymbol{x}_i \boldsymbol{U}_v$ 且 $\boldsymbol{U}_v$ 正交，有 $|\boldsymbol{v}| = \mathcal{O}(|\boldsymbol{x}|) = \mathcal{O}(1)$ (经过LayerNorm)。</p>
+<h4 id="73-vo">7.3 V和O的梯度<a class="toc-link" href="#73-vo" title="Permanent link">&para;</a></h4>
+<p>对 $\lambda_v$ 的梯度：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \lambda_v} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em l_1="l+1">{l+1}} \frac{\partial \boldsymbol{x}</em>\right)
+\tag{41}
+\end{equation}}}{\partial \boldsymbol{z}_{l+1}} \frac{\lambda_o \sigma(\cdots) \boldsymbol{x}_l \boldsymbol{U}_v \boldsymbol{U}_o}{\alpha} = \mathcal{O}\left(\frac{\lambda_o}{\alpha</p>
+<p>对 $\lambda_o$ 的梯度：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \lambda_o} = \mathcal{O}\left(\frac{\lambda_v}{\alpha}\right)
+\tag{42}
+\end{equation}</p>
+<p><strong>统一结论</strong>: 无论FFN还是Self-Attention：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \lambda} = \mathcal{O}\left(\frac{\lambda}{\alpha}\right)
+\tag{43}
+\end{equation}</p>
+<h3 id="_13">八、深度归一化方案的推导<a class="toc-link" href="#_13" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 抑制增量爆炸的目标<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p>回顾增量爆炸：每个参数的梯度为 $\mathcal{O}(\lambda/\alpha)$，$N$ 层网络共 $2NK$ 个参数（每层K个Self-Attention参数，K个FFN参数）。</p>
+<p>总梯度范数平方：</p>
+<p>\begin{equation}
+|\nabla_{\boldsymbol{\theta}} \mathcal{L}|^2 = 2NK \cdot \mathcal{O}\left(\frac{\lambda^2}{\alpha^2}\right)
+\tag{44}
+\end{equation}</p>
+<p>SGD的更新量：</p>
+<p>\begin{equation}
+\Delta \mathcal{L} = -\eta |\nabla_{\boldsymbol{\theta}} \mathcal{L}|^2 = \mathcal{O}\left(\eta \cdot 2NK \cdot \frac{\lambda^2}{\alpha^2}\right)
+\tag{45}
+\end{equation}</p>
+<p><strong>目标</strong>: 使更新量与 $N$ 无关，即：</p>
+<p>\begin{equation}
+\frac{\lambda^2}{\alpha^2} = \mathcal{O}\left(\frac{1}{N}\right)
+\tag{46}
+\end{equation}</p>
+<h4 id="82">8.2 三种优化器的分析<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<p><strong>SGD</strong>: $\Delta \boldsymbol{\theta} = -\eta \nabla_{\boldsymbol{\theta}} \mathcal{L}$</p>
+<p>\begin{equation}
+\Delta \mathcal{L} \propto -\eta |\nabla_{\boldsymbol{\theta}} \mathcal{L}|^2 = \mathcal{O}\left(\eta NK \frac{\lambda^2}{\alpha^2}\right)
+\tag{47}
+\end{equation}</p>
+<p>要求 $\frac{\lambda^2}{\alpha^2} = \frac{1}{2NK}$，即：</p>
+<p>\begin{equation}
+\frac{\lambda}{\alpha} = \frac{1}{\sqrt{2NK}} = \frac{1}{\sqrt{2N}} \quad (\text{假设} K \approx 1)
+\tag{48}
+\end{equation}</p>
+<p><strong>Adam</strong>: $\Delta \boldsymbol{\theta} \approx -\eta \cdot \text{sign}(\nabla_{\boldsymbol{\theta}} \mathcal{L})$</p>
+<p>\begin{equation}
+\Delta \mathcal{L} \propto -\eta |\nabla_{\boldsymbol{\theta}} \mathcal{L}|_1 = \mathcal{O}\left(\eta \sqrt{NK} \cdot \frac{\lambda}{\alpha}\right)
+\tag{49}
+\end{equation}</p>
+<p>要求 $\frac{\lambda}{\alpha} = \frac{1}{\sqrt{NK}} = \frac{1}{\sqrt{N}}$。</p>
+<p><strong>LAMB</strong>: $\Delta \boldsymbol{\theta} \approx -\eta |\boldsymbol{\theta}| \cdot \text{sign}(\nabla_{\boldsymbol{\theta}} \mathcal{L})$</p>
+<p>\begin{equation}
+\Delta \mathcal{L} \propto -\eta \lambda \sqrt{NK} \cdot \frac{\lambda}{\alpha} = \mathcal{O}\left(\eta \sqrt{NK} \cdot \frac{\lambda^2}{\alpha}\right)
+\tag{50}
+\end{equation}</p>
+<p>要求 $\frac{\lambda^2}{\alpha} = \frac{1}{\sqrt{NK}}$，即 $\lambda = 1, \alpha = \sqrt{N}$ (选择一种简单解)。</p>
+<h4 id="83-alpha-lambda">8.3 $\alpha$ 和 $\lambda$ 的最优选择<a class="toc-link" href="#83-alpha-lambda" title="Permanent link">&para;</a></h4>
+<p><strong>对称性原则</strong>: 让 $\lambda = 1/\alpha$，使得残差分支和主路径在初始阶段平衡。</p>
+<p>对于SGD:</p>
+<p>\begin{equation}
+\frac{\lambda}{\alpha} = \frac{1}{\sqrt{2N}} \quad \text{且} \quad \lambda = \frac{1}{\alpha}
+\tag{51}
+\end{equation}</p>
+<p>解得：</p>
+<p>\begin{equation}
+\alpha = (2N)^{1/4}, \quad \lambda = (2N)^{-1/4}
+\tag{52}
+\end{equation}</p>
+<p>对于Adam:</p>
+<p>\begin{equation}
+\alpha = N^{1/2}, \quad \lambda = N^{-1/2}
+\tag{53}
+\end{equation}</p>
+<p>对于LAMB:</p>
+<p>\begin{equation}
+\alpha = 1, \quad \lambda = N^{-1/2}
+\tag{54}
+\end{equation}</p>
+<h3 id="_14">九、初始化对训练的影响<a class="toc-link" href="#_14" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 残差分支的初始权重<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p>DeepNorm设置 $\lambda = (2N)^{-1/4}$ 意味着每个残差分支的初始贡献为：</p>
+<p>\begin{equation}
+\frac{\lambda^2}{\alpha} = \frac{(2N)^{-1/2}}{(2N)^{1/4}} = (2N)^{-3/4}
+\tag{55}
+\end{equation}</p>
+<p><strong>数值示例</strong>: $N=1000$ 时：</p>
+<p>\begin{equation}
+\frac{\lambda^2}{\alpha} = (2000)^{-3/4} \approx 0.0042
+\tag{56}
+\end{equation}</p>
+<p>初始阶段每个残差分支仅贡献 $0.4\%$ 的变化，模型接近恒等函数！</p>
+<h4 id="92">9.2 恒等初始化的重要性<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p><strong>定理</strong>: 如果初始阶段 $\boldsymbol{x}_{l+1} \approx \boldsymbol{x}_l$（恒等函数），则：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_{l+1}} \approx \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_l}
+\tag{57}
+\end{equation}</p>
+<p>梯度几乎无衰减地传播到底层。</p>
+<p><strong>证明</strong>: 由链式法则：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em l_1="l+1">l} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}</em>
+\tag{58}
+\end{equation}}} \frac{\partial \boldsymbol{x}_{l+1}}{\partial \boldsymbol{x}_l</p>
+<p>当 $\boldsymbol{x}_{l+1} = \boldsymbol{x}_l + \epsilon F(\boldsymbol{x}_l)$ 且 $\epsilon \to 0$:</p>
+<p>\begin{equation}
+\frac{\partial \boldsymbol{x}_{l+1}}{\partial \boldsymbol{x}_l} \approx \boldsymbol{I}
+\tag{59}
+\end{equation}</p>
+<p>因此 $\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em l_1="l+1">l} \approx \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}</em>$。□}</p>
+<h3 id="warmup">十、Warmup的数学必要性<a class="toc-link" href="#warmup" title="Permanent link">&para;</a></h3>
+<h4 id="101-warmup">10.1 学习率warmup的目的<a class="toc-link" href="#101-warmup" title="Permanent link">&para;</a></h4>
+<p>在训练初期，即使有DeepNorm，参数的量级仍需要时间来稳定。Warmup通过逐渐增大学习率来适应这个过程。</p>
+<p><strong>线性warmup</strong>:</p>
+<p>\begin{equation}
+\eta(t) = \begin{cases}
+\frac{t}{T_{\text{warmup}}} \eta_{\text{max}}, &amp; t \leq T_{\text{warmup}} \
+\eta_{\text{max}}, &amp; t &gt; T_{\text{warmup}}
+\end{cases}
+\tag{60}
+\end{equation}</p>
+<h4 id="102-warmup">10.2 Warmup与增量爆炸的关系<a class="toc-link" href="#102-warmup" title="Permanent link">&para;</a></h4>
+<p>即使梯度被归一化到 $\mathcal{O}(1/\sqrt{N})$，初始的大步长仍可能导致参数偏离最优初始化。</p>
+<p><strong>自适应策略</strong>: Warmup相当于动态调整 $\eta$ 使得：</p>
+<p>\begin{equation}
+\eta(t) \cdot |\nabla_{\boldsymbol{\theta}} \mathcal{L}| \approx \text{constant}
+\tag{61}
+\end{equation}</p>
+<p>在初期梯度较大时用较小的 $\eta$，避免过度更新。</p>
+<h4 id="103">10.3 数值示例<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<p>假设 $N=100$，使用Adam：
+- 无warmup: 直接用 $\eta = 10^{-4}$ 可能导致初期震荡
+- 有warmup: 前1000步从 $\eta = 10^{-7}$ 线性增加到 $10^{-4}$</p>
+<p>初期更新量：</p>
+<p>\begin{equation}
+\Delta \boldsymbol{\theta}_{\text{warmup}} = \frac{t}{1000} \cdot 10^{-4} \cdot \text{sign}(\nabla) \approx 10^{-7} \text{sign}(\nabla) \quad (t \ll 1000)
+\tag{62}
+\end{equation}</p>
+<p>相比无warmup减少了1000倍，让参数有时间"适应"。</p>
+<h3 id="pre-ln-vs-post-ln">十一、Pre-LN vs Post-LN的收敛性分析<a class="toc-link" href="#pre-ln-vs-post-ln" title="Permanent link">&para;</a></h3>
+<h4 id="111-pre-ln">11.1 Pre-LN的梯度传播<a class="toc-link" href="#111-pre-ln" title="Permanent link">&para;</a></h4>
+<p>Pre-LN: $\boldsymbol{x}_{l+1} = \boldsymbol{x}_l + F(\text{LN}(\boldsymbol{x}_l))$</p>
+<p>梯度：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em l_1="l+1">l} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}</em>(\lambda)\right]
+\tag{63}
+\end{equation}}} \left[\boldsymbol{I} + \mathcal{O</p>
+<p>跨 $N$ 层：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em l="1">1} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_N} \prod</em>(\lambda)]
+\tag{64}
+\end{equation}}^{N-1} [\boldsymbol{I} + \mathcal{O</p>
+<p><strong>范数估计</strong>:</p>
+<p>\begin{equation}
+\left|\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_1}\right| \approx \left|\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_N}\right| (1 + \mathcal{O}(\lambda))^N
+\tag{65}
+\end{equation}</p>
+<p>当 $\lambda$ 很小时，$(1 + \mathcal{O}(\lambda))^N \approx 1$，梯度传播稳定。</p>
+<h4 id="112-post-ln">11.2 Post-LN的梯度传播<a class="toc-link" href="#112-post-ln" title="Permanent link">&para;</a></h4>
+<p>Post-LN: $\boldsymbol{x}_{l+1} = \text{LN}(\boldsymbol{x}_l + F(\boldsymbol{x}_l))$</p>
+<p>梯度包含LayerNorm的雅可比：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em l_1="l+1">l} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}</em>(\lambda)]
+\tag{66}
+\end{equation}}} \cdot \boldsymbol{J}_{\text{LN}} \cdot [\boldsymbol{I} + \mathcal{O</p>
+<p><strong>问题</strong>: $\boldsymbol{J}_{\text{LN}}$ 会重新归一化，可能破坏梯度的恒等传播。</p>
+<h4 id="113-deepnorm">11.3 DeepNorm的优化<a class="toc-link" href="#113-deepnorm" title="Permanent link">&para;</a></h4>
+<p>DeepNorm在Post-LN基础上添加 $\alpha$ 缩放：</p>
+<p>\begin{equation}
+\boldsymbol{x}_{l+1} = \text{LN}(\alpha \boldsymbol{x}_l + F(\boldsymbol{x}_l))
+\tag{67}
+\end{equation}</p>
+<p>当 $\alpha &gt; 1$ 时，主路径被放大，减轻LayerNorm的破坏作用。</p>
+<p><strong>最优 $\alpha$</strong>: 使得主路径在LayerNorm后仍占主导：</p>
+<p>\begin{equation}
+\alpha = (2N)^{1/4}
+\tag{68}
+\end{equation}</p>
+<h3 id="_15">十二、实践建议与数值验证<a class="toc-link" href="#_15" title="Permanent link">&para;</a></h3>
+<h4 id="121">12.1 不同深度的配置建议<a class="toc-link" href="#121" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>层数 $N$</th>
+<th>优化器</th>
+<th>$\alpha$</th>
+<th>$\lambda$</th>
+<th>Warmup步数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>12</td>
+<td>Adam</td>
+<td>2.5</td>
+<td>0.4</td>
+<td>1000</td>
+</tr>
+<tr>
+<td>24</td>
+<td>Adam</td>
+<td>3.5</td>
+<td>0.29</td>
+<td>2000</td>
+</tr>
+<tr>
+<td>100</td>
+<td>Adam</td>
+<td>7.1</td>
+<td>0.14</td>
+<td>4000</td>
+</tr>
+<tr>
+<td>200</td>
+<td>Adam</td>
+<td>10</td>
+<td>0.1</td>
+<td>8000</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>Adam</td>
+<td>22.4</td>
+<td>0.045</td>
+<td>16000</td>
+</tr>
+</tbody>
+</table>
+<h4 id="122">12.2 训练稳定性指标<a class="toc-link" href="#122" title="Permanent link">&para;</a></h4>
+<p><strong>梯度范数监控</strong>:</p>
+<p>\begin{equation}
+G(l) = \left|\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_l}\right|, \quad l = 1, 2, \ldots, N
+\tag{69}
+\end{equation}</p>
+<p>健康训练应满足：</p>
+<p>\begin{equation}
+0.1 \leq \frac{G(l)}{G(N)} \leq 10, \quad \forall l
+\tag{70}
+\end{equation}</p>
+<p><strong>参数更新比例</strong>:</p>
+<p>\begin{equation}
+R = \frac{|\Delta \boldsymbol{\theta}|}{|\boldsymbol{\theta}|} \approx 10^{-3} \sim 10^{-2}
+\tag{71}
+\end{equation}</p>
+<h4 id="123-1000transformer">12.3 数值示例：1000层Transformer<a class="toc-link" href="#123-1000transformer" title="Permanent link">&para;</a></h4>
+<p>配置：
+- $d = 1024$, $h = 8$
+- Adam优化器
+- $\alpha = 22.4$, $\lambda = 0.045$
+- 学习率 $10^{-4}$ (峰值)
+- Warmup 16000步</p>
+<p>初始梯度范数（第1层 vs 第1000层）：</p>
+<p>\begin{equation}
+\frac{G(1)}{G(1000)} = (1.045)^{1000} \approx 2.1
+\tag{72}
+\end{equation}</p>
+<p>在可接受范围内！</p>
+<h3 id="_16">十三、总结<a class="toc-link" href="#_16" title="Permanent link">&para;</a></h3>
+<p>本节详细推导了深层Transformer训练的数学原理：</p>
+<p><strong>核心问题</strong>:
+1. 梯度消失/爆炸: $|\nabla| \propto \gamma^N$ 或 $\beta^N$
+2. 增量爆炸: $\Delta \mathcal{L} \propto \eta N$</p>
+<p><strong>解决方案</strong>:
+1. 残差连接: 确保 $\boldsymbol{J}_l \succeq \boldsymbol{I}$
+2. LayerNorm: 归一化梯度到 $\mathcal{O}(1)$
+3. DeepNorm: 通过 $\alpha, \lambda$ 缩放抑制增量爆炸
+4. Warmup: 初期小学习率适应参数</p>
+<p><strong>关键公式</strong>:
+\begin{equation}
+\begin{cases}
+\alpha = (2N)^{1/4}, \lambda = (2N)^{-1/4} &amp; \text{(SGD)} \
+\alpha = N^{1/2}, \lambda = N^{-1/2} &amp; \text{(Adam)} \
+\alpha = 1, \lambda = N^{-1/2} &amp; \text{(LAMB)}
+\end{cases}
+\tag{73}
+\end{equation}</p>
+<p>这些理论保证了1000层甚至更深的Transformer能够稳定训练，打破了"浅而宽"的局限。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -239,7 +784,7 @@ url={\url{https://spaces.ac.cn/archives/8978}},<br />
                             
                             <a href="指数梯度下降-元学习-自适应学习率.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#24 指数梯度下降 + 元学习 = 自适应学习率</div>
+                                <div class="nav-title">#170 指数梯度下降 + 元学习 = 自适应学习率</div>
                             </a>
                             
                         </div>
@@ -247,7 +792,7 @@ url={\url{https://spaces.ac.cn/archives/8978}},<br />
                             
                             <a href="门控注意力单元gau还需要warmup吗.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#26 门控注意力单元（GAU）还需要Warmup吗？</div>
+                                <div class="nav-title">#172 门控注意力单元（GAU）还需要Warmup吗？</div>
                             </a>
                             
                         </div>
@@ -280,7 +825,22 @@ url={\url{https://spaces.ac.cn/archives/8978}},<br />
 <li><a href="#_6">多种优化</a></li>
 <li><a href="#_7">事后分析</a></li>
 <li><a href="#_8">文章小结</a></li>
-<li><a href="#_9">公式推导与注释</a></li>
+<li><a href="#_9">公式推导与注释</a><ul>
+<li><a href="#_10">一、深层网络的梯度问题数学分析</a></li>
+<li><a href="#_11">二、增量爆炸问题的深入分析</a></li>
+<li><a href="#layernorm">三、LayerNorm的数学推导</a></li>
+<li><a href="#post-ln-vs-pre-ln">四、Post-LN vs Pre-LN的理论分析</a></li>
+<li><a href="#_12">五、量级分解与初始化策略</a></li>
+<li><a href="#ffn">六、FFN层的梯度量级分析</a></li>
+<li><a href="#self-attention">七、Self-Attention的梯度量级分析</a></li>
+<li><a href="#_13">八、深度归一化方案的推导</a></li>
+<li><a href="#_14">九、初始化对训练的影响</a></li>
+<li><a href="#warmup">十、Warmup的数学必要性</a></li>
+<li><a href="#pre-ln-vs-post-ln">十一、Pre-LN vs Post-LN的收敛性分析</a></li>
+<li><a href="#_15">十二、实践建议与数值验证</a></li>
+<li><a href="#_16">十三、总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

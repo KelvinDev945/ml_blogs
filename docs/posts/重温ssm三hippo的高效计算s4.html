@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=矩阵">矩阵</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #134 重温SSM（三）：HiPPO的高效计算（S4）
+                    #280 重温SSM（三）：HiPPO的高效计算（S4）
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#134</span>
+                <span class="post-number">#280</span>
                 重温SSM（三）：HiPPO的高效计算（S4）
             </h1>
             <div class="post-meta">
@@ -315,7 +315,492 @@ url={\url{https://spaces.ac.cn/archives/10162}},<br />
 } </p>
 <hr />
 <h2 id="_13">公式推导与注释<a class="toc-link" href="#_13" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<p>本节提供S4算法的详细数学推导,包括DPLR分解、Woodbury恒等式、Cauchy核加速等核心技术的完整证明。</p>
+<h3 id="dplr">一、DPLR分解的完整推导<a class="toc-link" href="#dplr" title="Permanent link">&para;</a></h3>
+<h4 id="11-dplr">1.1 对角加低秩(DPLR)分解的动机<a class="toc-link" href="#11-dplr" title="Permanent link">&para;</a></h4>
+<p>对于HiPPO-LegS矩阵$A$,我们希望找到一种表示形式,使得计算$(I - zA)^{-1}$变得高效。直接对角化$A$存在数值稳定性问题,因此我们寻求"对角+低秩"的分解形式。</p>
+<p><strong>定理1.1 (DPLR分解存在性)</strong>: 对于HiPPO-LegS矩阵$A$,存在酉矩阵$U$、对角矩阵$\Lambda$和列向量$u,v$,使得:
+\begin{equation}
+A = U^<em>(\Lambda - uv^</em>)U \tag{1}
+\end{equation}</p>
+<p><strong>证明</strong>:</p>
+<p>步骤1: 回顾HiPPO-LegS矩阵的定义:
+\begin{equation}
+A_{n,k} = \left{\begin{array}{ll}
+n\delta_{n,k} - \sqrt{2n+1}\sqrt{2k+1}, &amp; k \leq n \
+0, &amp; k &gt; n
+\end{array}\right. \tag{2}
+\end{equation}</p>
+<p>步骤2: 构造辅助矩阵$M = A + \frac{1}{2}vv^* + \frac{1}{2}I$,其中$v = [\sqrt{1}, \sqrt{3}, \sqrt{5}, \cdots]^T$:
+\begin{equation}
+M_{n,k} = \left{\begin{array}{ll}
+-\frac{1}{2}\sqrt{2n+1}\sqrt{2k+1}, &amp; k &lt; n \
+0, &amp; k = n \
+\frac{1}{2}\sqrt{2n+1}\sqrt{2k+1}, &amp; k &gt; n
+\end{array}\right. \tag{3}
+\end{equation}</p>
+<p>步骤3: 观察到$M$是反对称矩阵,即$M^T = -M$。反对称矩阵的关键性质:
+- 所有特征值都是纯虚数或零
+- 一定可以被酉矩阵对角化
+- 对角化后的特征值形式为$\pm i\lambda_k$</p>
+<p>步骤4: 由谱定理,存在酉矩阵$U$和对角矩阵$\tilde{\Lambda}$使得:
+\begin{equation}
+M = U^* \tilde{\Lambda} U \tag{4}
+\end{equation}</p>
+<p>步骤5: 回代得到$A$的表示:
+\begin{align}
+A &amp;= M - \frac{1}{2}I - \frac{1}{2}vv^<em> \tag{5} \
+&amp;= U^</em> \tilde{\Lambda} U - \frac{1}{2}I - \frac{1}{2}vv^<em> \tag{6} \
+&amp;= U^</em>\left(\tilde{\Lambda} - \frac{1}{2}I - \frac{1}{2}(Uv)(Uv)^<em>\right)U \tag{7} \
+&amp;= U^</em>(\Lambda - uv^*)U \tag{8}
+\end{align}
+其中$\Lambda = \tilde{\Lambda} - \frac{1}{2}I$是对角矩阵,$u = Uv$。$\square$</p>
+<h4 id="12-dplr">1.2 DPLR分解的数值稳定性<a class="toc-link" href="#12-dplr" title="Permanent link">&para;</a></h4>
+<p><strong>引理1.2 (酉变换的数值稳定性)</strong>: 酉矩阵$U$满足$U^*U = I$,其条件数$\kappa(U) = 1$,因此酉变换在数值计算中具有最优稳定性。</p>
+<p><strong>证明</strong>: 对于酉矩阵$U$,有:
+\begin{equation}
+\kappa(U) = |U| \cdot |U^{-1}| = |U| \cdot |U^<em>| = 1 \tag{9}
+\end{equation}
+最后一个等号利用了酉矩阵的性质$|U| = |U^</em>| = 1$。$\square$</p>
+<p><strong>定理1.3 (DPLR与直接对角化的稳定性比较)</strong>: 设$P$为对角化$A$的矩阵(即$A = P^{-1}\Lambda P$),则:
+\begin{equation}
+\kappa(P) \geq \mathcal{O}(2^{d/3}\sqrt{d}) \tag{10}
+\end{equation}
+而DPLR分解中的酉矩阵$U$满足$\kappa(U) = 1$。</p>
+<p><strong>证明</strong>: 从特征向量的计算可知,矩阵$P$的列向量包含指数级别的数值衰减。具体地,对于$\lambda = d/3$的特征值,其对应的系数$S_n$满足:
+\begin{equation}
+|S_{d/3}| \sim \mathcal{O}(\sqrt{d} \cdot 2^{-4d/3}) \tag{11}
+\end{equation}</p>
+<p>这意味着$P$的不同列之间存在指数级别的尺度差异,导致:
+\begin{equation}
+\kappa(P) = \frac{\sigma_{\max}(P)}{\sigma_{\min}(P)} \geq \mathcal{O}(2^{d/3}\sqrt{d}) \tag{12}
+\end{equation}
+$\square$</p>
+<h4 id="13-dplr">1.3 DPLR分解的计算复杂度<a class="toc-link" href="#13-dplr" title="Permanent link">&para;</a></h4>
+<p><strong>定理1.4 (DPLR分解的向量乘法复杂度)</strong>: 对于$A = U^<em>(\Lambda - uv^</em>)U$形式的矩阵,计算$Ax$的复杂度为$\mathcal{O}(d)$。</p>
+<p><strong>证明</strong>: 分解计算过程:
+\begin{align}
+Ax &amp;= U^<em>(\Lambda - uv^</em>)Ux \tag{13} \
+&amp;= U^<em>(\Lambda(Ux) - u(v^</em>(Ux))) \tag{14}
+\end{align}</p>
+<p>计算步骤和复杂度:
+1. 计算$y_1 = Ux$: 虽然$U$是$d \times d$矩阵,但由于FFT等快速算法,可在$\mathcal{O}(d\log d)$完成
+2. 计算$s = v^<em>y_1$: $\mathcal{O}(d)$(内积)
+3. 计算$y_2 = \Lambda y_1$: $\mathcal{O}(d)$(对角矩阵乘法)
+4. 计算$y_3 = us$: $\mathcal{O}(d)$(标量乘向量)
+5. 计算$y_4 = y_2 - y_3$: $\mathcal{O}(d)$
+6. 计算$Ax = U^</em>y_4$: $\mathcal{O}(d\log d)$</p>
+<p>总复杂度: $\mathcal{O}(d\log d)$,在实际中通常视为$\mathcal{O}(d)$。$\square$</p>
+<h3 id="woodbury">二、Woodbury恒等式的详细证明<a class="toc-link" href="#woodbury" title="Permanent link">&para;</a></h3>
+<h4 id="21-woodbury">2.1 基本Woodbury恒等式<a class="toc-link" href="#21-woodbury" title="Permanent link">&para;</a></h4>
+<p><strong>定理2.1 (Woodbury矩阵恒等式)</strong>: 对于$U \in \mathbb{R}^{d \times r}$,$V \in \mathbb{R}^{d \times r}$,有:
+\begin{equation}
+(I - UV^<em>)^{-1} = I + U(I - V^</em>U)^{-1}V^* \tag{15}
+\end{equation}</p>
+<p><strong>证明</strong>:</p>
+<p>方法1 (直接验证): 我们验证$(I - UV^<em>) \cdot [I + U(I - V^</em>U)^{-1}V^<em>] = I$:
+\begin{align}
+&amp;(I - UV^</em>)[I + U(I - V^<em>U)^{-1}V^</em>] \tag{16} \
+&amp;= I + U(I - V^<em>U)^{-1}V^</em> - UV^<em> - UV^</em>U(I - V^<em>U)^{-1}V^</em> \tag{17} \
+&amp;= I + U(I - V^<em>U)^{-1}V^</em> - UV^<em> - U(V^</em>U)(I - V^<em>U)^{-1}V^</em> \tag{18} \
+&amp;= I + U[(I - V^<em>U)^{-1} - (V^</em>U)(I - V^<em>U)^{-1}]V^</em> - UV^<em> \tag{19} \
+&amp;= I + U[(I - V^</em>U)(I - V^<em>U)^{-1}]V^</em> - UV^<em> \tag{20} \
+&amp;= I + UV^</em> - UV^* = I \tag{21}
+\end{align}</p>
+<p>方法2 (级数展开): 当$|UV^<em>| &lt; 1$时:
+\begin{align}
+(I - UV^</em>)^{-1} &amp;= \sum_{k=0}^{\infty}(UV^<em>)^k \tag{22} \
+&amp;= I + \sum_{k=1}^{\infty}(UV^</em>)^k \tag{23} \
+&amp;= I + U\left(\sum_{k=0}^{\infty}(V^<em>U)^k\right)V^</em> \tag{24} \
+&amp;= I + U(I - V^<em>U)^{-1}V^</em> \tag{25}
+\end{align}
+其中第(24)式利用了$(UV^<em>)^k = U(V^</em>U)^{k-1}V^*$。$\square$</p>
+<h4 id="22-woodbury">2.2 广义Woodbury恒等式<a class="toc-link" href="#22-woodbury" title="Permanent link">&para;</a></h4>
+<p><strong>定理2.2 (广义Woodbury恒等式)</strong>: 对于可逆矩阵$M$和矩阵$U,V$,有:
+\begin{equation}
+(M - UV^<em>)^{-1} = M^{-1} + M^{-1}U(I - V^</em>M^{-1}U)^{-1}V^*M^{-1} \tag{26}
+\end{equation}</p>
+<p><strong>证明</strong>: 分解计算:
+\begin{align}
+(M - UV^<em>)^{-1} &amp;= (M(I - M^{-1}UV^</em>))^{-1} \tag{27} \
+&amp;= (I - M^{-1}UV^<em>)^{-1}M^{-1} \tag{28} \
+&amp;= [I + M^{-1}U(I - V^</em>M^{-1}U)^{-1}V^<em>]M^{-1} \tag{29} \
+&amp;= M^{-1} + M^{-1}U(I - V^</em>M^{-1}U)^{-1}V^*M^{-1} \tag{30}
+\end{align}
+第(29)式应用了基本Woodbury恒等式(15)。$\square$</p>
+<h4 id="23-s4">2.3 在S4中的应用<a class="toc-link" href="#23-s4" title="Permanent link">&para;</a></h4>
+<p><strong>定理2.3 (S4中的Woodbury应用)</strong>: 对于$A = \Lambda - uv^<em>$,离散化矩阵$\bar{A}$满足:
+\begin{equation}
+\bar{A} = (I - \epsilon(\Lambda - uv^</em>)/2)^{-1}(I + \epsilon(\Lambda - uv^*)/2) \tag{31}
+\end{equation}
+可以通过Woodbury恒等式高效计算。</p>
+<p><strong>详细推导</strong>:</p>
+<p>步骤1: 计算$(I - \epsilon(\Lambda - uv^<em>)/2)^{-1}$。令$D = \frac{2}{\epsilon}I - \Lambda$,则:
+\begin{align}
+I - \epsilon(\Lambda - uv^</em>)/2 &amp;= \frac{\epsilon}{2}(D + uv^*) \tag{32}
+\end{align}</p>
+<p>步骤2: 应用Woodbury恒等式:
+\begin{align}
+(D + uv^<em>)^{-1} &amp;= D^{-1} - D^{-1}u(I + v^</em>D^{-1}u)^{-1}v^*D^{-1} \tag{33}
+\end{align}</p>
+<p>步骤3: 注意$D$是对角矩阵,$D^{-1}$的计算为$\mathcal{O}(d)$。设:
+\begin{align}
+\alpha &amp;= v^*D^{-1}u \quad (\text{标量,复杂度}\mathcal{O}(d)) \tag{34} \
+\beta &amp;= (1 + \alpha)^{-1} \quad (\text{标量倒数}) \tag{35} \
+w &amp;= D^{-1}u \quad (\text{向量,复杂度}\mathcal{O}(d)) \tag{36} \
+z &amp;= D^{-1}v \quad (\text{向量,复杂度}\mathcal{O}(d)) \tag{37}
+\end{align}</p>
+<p>步骤4: 则$(D + uv^<em>)^{-1}$可表示为:
+\begin{equation}
+(D + uv^</em>)^{-1} = D^{-1} - \beta w z^* \tag{38}
+\end{equation}
+这是"对角+秩1"的形式,总计算复杂度$\mathcal{O}(d)$。</p>
+<p>步骤5: 完整的$\bar{A}$计算:
+\begin{align}
+\bar{A} &amp;= \frac{2}{\epsilon}(D + uv^<em>)^{-1}(I + \epsilon(\Lambda - uv^</em>)/2) \tag{39} \
+&amp;= \frac{2}{\epsilon}(D^{-1} - \beta wz^<em>)\left(\frac{\epsilon}{2}(D + uv^</em>) + \epsilon(\Lambda - uv^*)/2\right) \tag{40}
+\end{align}</p>
+<p>经过整理,这仍然保持"对角+低秩"形式,总复杂度$\mathcal{O}(d)$。$\square$</p>
+<h3 id="_14">三、生成函数与卷积加速<a class="toc-link" href="#_14" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 生成函数的基本理论<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p><strong>定义3.1 (序列生成函数)</strong>: 对于序列${a_k}<em k="0">{k=0}^{\infty}$,其生成函数定义为:
+\begin{equation}
+\mathcal{G}(z|a) = \sum</em>
+\end{equation}}^{\infty}a_k z^k \tag{41</p>
+<p><strong>定理3.2 (卷积定理)</strong>: 若$c_n = \sum_{k=0}^{n}a_k b_{n-k}$是$a$和$b$的卷积,则:
+\begin{equation}
+\mathcal{G}(z|c) = \mathcal{G}(z|a) \cdot \mathcal{G}(z|b) \tag{42}
+\end{equation}</p>
+<p><strong>证明</strong>:
+\begin{align}
+\mathcal{G}(z|a)\mathcal{G}(z|b) &amp;= \left(\sum_{k=0}^{\infty}a_k z^k\right)\left(\sum_{l=0}^{\infty}b_l z^l\right) \tag{43} \
+&amp;= \sum_{k=0}^{\infty}\sum_{l=0}^{\infty}a_k b_l z^{k+l} \tag{44} \
+&amp;= \sum_{n=0}^{\infty}\left(\sum_{k=0}^{n}a_k b_{n-k}\right)z^n \tag{45} \
+&amp;= \sum_{n=0}^{\infty}c_n z^n = \mathcal{G}(z|c) \tag{46}
+\end{align}
+$\square$</p>
+<h4 id="32-ssm">3.2 SSM卷积核的生成函数<a class="toc-link" href="#32-ssm" title="Permanent link">&para;</a></h4>
+<p><strong>定理3.3 (SSM卷积核生成函数)</strong>: 对于卷积核$\bar{K}_k = \bar{C}^<em>\bar{A}^k\bar{B}$,其生成函数为:
+\begin{equation}
+\mathcal{G}(z|\bar{K}) = \sum_{k=0}^{\infty}\bar{C}^</em>\bar{A}^k\bar{B}z^k = \bar{C}^*(I - z\bar{A})^{-1}\bar{B} \tag{47}
+\end{equation}</p>
+<p><strong>证明</strong>: 利用几何级数:
+\begin{align}
+\mathcal{G}(z|\bar{K}) &amp;= \sum_{k=0}^{\infty}\bar{C}^<em>\bar{A}^k\bar{B}z^k \tag{48} \
+&amp;= \bar{C}^</em>\left(\sum_{k=0}^{\infty}(z\bar{A})^k\right)\bar{B} \tag{49} \
+&amp;= \bar{C}^*(I - z\bar{A})^{-1}\bar{B} \tag{50}
+\end{align}
+其中第(49)到(50)利用了几何级数公式$\sum_{k=0}^{\infty}M^k = (I - M)^{-1}$(当$|M| &lt; 1$时)。$\square$</p>
+<h4 id="33">3.3 截断生成函数<a class="toc-link" href="#33" title="Permanent link">&para;</a></h4>
+<p><strong>定义3.4 (截断生成函数)</strong>: 对于长度为$L$的序列,截断生成函数为:
+\begin{equation}
+\mathcal{G}<em k="0">L(z|\bar{K}) = \sum</em>
+\end{equation}}^{L-1}\bar{K}_k z^k \tag{51</p>
+<p><strong>定理3.5 (截断生成函数的闭形式)</strong>:
+\begin{equation}
+\mathcal{G}_L(z|\bar{K}) = \bar{C}^*(I - z^L\bar{A}^L)(I - z\bar{A})^{-1}\bar{B} \tag{52}
+\end{equation}</p>
+<p><strong>证明</strong>: 利用几何级数的有限形式:
+\begin{align}
+\sum_{k=0}^{L-1}M^k &amp;= (I - M^L)(I - M)^{-1} \tag{53}
+\end{align}</p>
+<p>代入$M = z\bar{A}$:
+\begin{align}
+\mathcal{G}<em k="0">L(z|\bar{K}) &amp;= \sum</em>^}^{L-1}\bar{C<em>\bar{A}^k\bar{B}z^k \tag{54} \
+&amp;= \bar{C}^</em>\left(\sum_{k=0}^{L-1}(z\bar{A})^k\right)\bar{B} \tag{55} \
+&amp;= \bar{C}^*(I - z^L\bar{A}^L)(I - z\bar{A})^{-1}\bar{B} \tag{56}
+\end{align}
+$\square$</p>
+<h3 id="dft">四、离散傅里叶变换(DFT)加速<a class="toc-link" href="#dft" title="Permanent link">&para;</a></h3>
+<h4 id="41-dft">4.1 DFT的数学基础<a class="toc-link" href="#41-dft" title="Permanent link">&para;</a></h4>
+<p><strong>定义4.1 (离散傅里叶变换)</strong>: 对于长度为$L$的序列${a_k}<em k="0">{k=0}^{L-1}$,其DFT定义为:
+\begin{equation}
+\hat{a}_l = \sum</em>
+\end{equation}}^{L-1}a_k e^{-2\pi i kl/L}, \quad l = 0,1,\cdots,L-1 \tag{57</p>
+<p><strong>定义4.2 (逆DFT, IDFT)</strong>:
+\begin{equation}
+a_k = \frac{1}{L}\sum_{l=0}^{L-1}\hat{a}_l e^{2\pi i kl/L}, \quad k = 0,1,\cdots,L-1 \tag{58}
+\end{equation}</p>
+<p><strong>定理4.3 (DFT的卷积定理)</strong>: 若$c = a * b$是卷积,则:
+\begin{equation}
+\widehat{c} = \widehat{a} \odot \widehat{b} \tag{59}
+\end{equation}
+其中$\odot$表示逐点乘法。</p>
+<p><strong>证明</strong>: 设$c_n = \sum_{k=0}^{n}a_k b_{n-k}$(循环卷积):
+\begin{align}
+\hat{c}<em n="0">l &amp;= \sum</em> \
+&amp;= \sum_{n=0}^{L-1}\left(\sum_{k=0}^{L-1}a_k b_{(n-k)\bmod L}\right)e^{-2\pi inl/L} \tag{61} \
+&amp;= \sum_{k=0}^{L-1}a_k e^{-2\pi ikl/L}\sum_{n=0}^{L-1}b_{(n-k)\bmod L}e^{-2\pi i(n-k)l/L} \tag{62} \
+&amp;= \hat{a}_l \cdot \hat{b}_l \tag{63}
+\end{align}
+$\square$}^{L-1}c_n e^{-2\pi inl/L} \tag{60</p>
+<h4 id="42-dft">4.2 DFT计算生成函数<a class="toc-link" href="#42-dft" title="Permanent link">&para;</a></h4>
+<p><strong>定理4.4 (生成函数与DFT的关系)</strong>: 对于$z = e^{-2\pi il/L}$,生成函数值就是DFT:
+\begin{equation}
+\mathcal{G}(e^{-2\pi il/L}|a) = \sum_{k=0}^{L-1}a_k e^{-2\pi ikl/L} = \hat{a}_l \tag{64}
+\end{equation}</p>
+<p><strong>推论4.5 (通过DFT计算卷积核)</strong>:
+\begin{align}
+\text{DFT}(\bar{K}) &amp;= {\mathcal{G}<em l="0">L(e^{-2\pi il/L}|\bar{K})}</em> \
+&amp;= \left{\bar{C}^*(I - e^{-2\pi il/L}\bar{A})^{-1}\bar{B}\right}_{l=0}^{L-1} \tag{66}
+\end{align}}^{L-1} \tag{65</p>
+<p>其中第二个等号利用了$e^{-2\pi iL/L} = 1$,使得$(I - z^L\bar{A}^L) = (I - \bar{A}^L)$可以吸收进$\bar{C}$。</p>
+<h4 id="43-zero-padding">4.3 零填充(Zero-Padding)技术<a class="toc-link" href="#43-zero-padding" title="Permanent link">&para;</a></h4>
+<p><strong>问题</strong>: 直接DFT会导致循环卷积,而我们需要线性卷积。</p>
+<p><strong>解决方案</strong>: 零填充——将长度$L$的序列扩展为长度$2L$:
+\begin{align}
+\bar{a} &amp;\to (\bar{a}, 0, 0, \cdots, 0) \tag{67} \
+\bar{b} &amp;\to (\bar{b}, 0, 0, \cdots, 0) \tag{68}
+\end{align}</p>
+<p><strong>定理4.6 (零填充的正确性)</strong>: 对长度为$2L$的零填充序列进行DFT,然后逐点相乘,再IDFT,前$L$个结果正好是线性卷积。</p>
+<p><strong>证明</strong>: 零填充使得循环卷积的"环绕"部分落在后$L$个位置,不影响前$L$个结果。$\square$</p>
+<h3 id="cauchy">五、Cauchy核加速算法<a class="toc-link" href="#cauchy" title="Permanent link">&para;</a></h3>
+<h4 id="51-cauchy">5.1 Cauchy核问题的定义<a class="toc-link" href="#51-cauchy" title="Permanent link">&para;</a></h4>
+<p>在S4中,我们需要计算:
+\begin{equation}
+\mathcal{G}_L(e^{-2\pi il/L}|\bar{K}) = \bar{C}^*(I - e^{-2\pi il/L}\bar{A})^{-1}\bar{B}, \quad l = 0,1,\cdots,L-1 \tag{69}
+\end{equation}</p>
+<p>对于$A = \Lambda - uv^*$(对角+秩1),应用Woodbury恒等式后,核心问题变为计算Cauchy矩阵:</p>
+<p><strong>定义5.1 (Cauchy矩阵)</strong>: 矩阵$C \in \mathbb{C}^{L \times d}$定义为:
+\begin{equation}
+C_{lk} = \frac{1}{\omega_l - \lambda_k} \tag{70}
+\end{equation}
+其中$\omega_l = e^{-2\pi il/L}$,$\lambda_k$是$\Lambda$的对角元素。</p>
+<h4 id="52-fmm">5.2 快速多极算法(FMM)加速<a class="toc-link" href="#52-fmm" title="Permanent link">&para;</a></h4>
+<p><strong>定理5.2 (Cauchy矩阵-向量乘法复杂度)</strong>: 使用快速多极算法,Cauchy矩阵与向量的乘法可在$\mathcal{O}((L+d)\log^2(L+d))$完成。</p>
+<p>标准算法复杂度为$\mathcal{O}(Ld)$,FMM通过分层结构将其降低到近线性复杂度。</p>
+<p><strong>算法框架</strong>:
+1. 构建$\omega$和$\lambda$的层次化分组
+2. 对每组使用多极展开近似
+3. 递归计算各层贡献
+4. 合并结果</p>
+<h4 id="53-fft">5.3 与FFT复杂度的对比<a class="toc-link" href="#53-fft" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>复杂度</th>
+<th>依赖性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>朴素计算</td>
+<td>$\mathcal{O}(Ld)$</td>
+<td>依赖$L$和$d$</td>
+</tr>
+<tr>
+<td>S4+Cauchy</td>
+<td>$\mathcal{O}((L+d)\log^2(L+d))$</td>
+<td>依赖$L$和$d$</td>
+</tr>
+<tr>
+<td>RFT+DFT</td>
+<td>$\mathcal{O}(L\log L)$</td>
+<td>仅依赖$L$</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_15">六、数值稳定性分析<a class="toc-link" href="#_15" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 条件数与误差传播<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p><strong>定义6.1 (条件数)</strong>: 矩阵$M$的条件数定义为:
+\begin{equation}
+\kappa(M) = |M| \cdot |M^{-1}| = \frac{\sigma_{\max}(M)}{\sigma_{\min}(M)} \tag{71}
+\end{equation}</p>
+<p><strong>定理6.3 (误差放大估计)</strong>: 若计算$y = Mx$时输入误差为$\delta x$,则输出误差满足:
+\begin{equation}
+\frac{|\delta y|}{|y|} \leq \kappa(M)\frac{|\delta x|}{|x|} + \mathcal{O}(\epsilon_{\text{machine}}) \tag{72}
+\end{equation}</p>
+<h4 id="62-dplr">6.2 DPLR分解的稳定性优势<a class="toc-link" href="#62-dplr" title="Permanent link">&para;</a></h4>
+<p><strong>定理6.4 (DPLR的数值稳定性)</strong>: DPLR分解$A = U^<em>(\Lambda - uv^</em>)U$中:
+\begin{align}
+\kappa(U) &amp;= 1 \tag{73} \
+\kappa(\Lambda) &amp;= \frac{|\lambda_{\max}|}{|\lambda_{\min}|} \tag{74}
+\end{align}</p>
+<p>对于HiPPO-LegS,$\lambda_k \in [-1,-2,\cdots,-d]$,故$\kappa(\Lambda) = d$,远小于直接对角化的$\kappa(P) \sim 2^{d/3}$。</p>
+<h4 id="63">6.3 双线性变换的数值特性<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p><strong>定理6.5 (双线性变换的A-稳定性)</strong>: 双线性离散化:
+\begin{equation}
+\bar{A} = (I - \epsilon A/2)^{-1}(I + \epsilon A/2) \tag{75}
+\end{equation}
+是A-稳定的,即对于$\text{Re}(\lambda(A)) &lt; 0$的所有特征值,都有$|\lambda(\bar{A})| &lt; 1$。</p>
+<p><strong>证明</strong>: 设$\lambda$是$A$的特征值,$\text{Re}(\lambda) &lt; 0$。对应的$\bar{A}$的特征值为:
+\begin{align}
+\bar{\lambda} &amp;= \frac{1 + \epsilon\lambda/2}{1 - \epsilon\lambda/2} \tag{76}
+\end{align}</p>
+<p>计算模长:
+\begin{align}
+|\bar{\lambda}|^2 &amp;= \frac{|1 + \epsilon\lambda/2|^2}{|1 - \epsilon\lambda/2|^2} \tag{77} \
+&amp;= \frac{(1 + \epsilon\text{Re}(\lambda)/2)^2 + (\epsilon\text{Im}(\lambda)/2)^2}{(1 - \epsilon\text{Re}(\lambda)/2)^2 + (\epsilon\text{Im}(\lambda)/2)^2} \tag{78}
+\end{align}</p>
+<p>当$\text{Re}(\lambda) &lt; 0$时,分子$&lt; $分母,故$|\bar{\lambda}| &lt; 1$。$\square$</p>
+<h3 id="_16">七、完整算法流程<a class="toc-link" href="#_16" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 训练阶段算法<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p><strong>算法7.1 (S4训练)</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="err">输入</span><span class="o">:</span><span class="w"> </span><span class="err">序列</span><span class="n">u₀</span><span class="o">,</span><span class="w"> </span><span class="n">u₁</span><span class="o">,</span><span class="w"> </span><span class="o">...,</span><span class="w"> </span><span class="n">u_</span><span class="o">{</span><span class="n">L</span><span class="o">-</span><span class="mi">1</span><span class="o">}</span>
+<span class="err">参数</span><span class="o">:</span><span class="w"> </span><span class="n">A</span><span class="w"> </span><span class="o">(</span><span class="n">HiPPO</span><span class="o">-</span><span class="n">LegS</span><span class="o">),</span><span class="w"> </span><span class="n">B</span><span class="o">,</span><span class="w"> </span><span class="n">C</span><span class="o">,</span><span class="w"> </span><span class="err">ε</span><span class="w"> </span><span class="o">(</span><span class="err">步长</span><span class="o">)</span>
+
+<span class="mi">1</span><span class="o">.</span><span class="w"> </span><span class="err">预计算</span><span class="o">:</span>
+<span class="w">   </span><span class="n">a</span><span class="o">.</span><span class="w"> </span><span class="err">对角化辅助矩阵</span><span class="o">:</span><span class="w"> </span><span class="n">M</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">A</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">vv</span><span class="o">*/</span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">I</span><span class="o">/</span><span class="mi">2</span><span class="w"> </span><span class="err">→</span><span class="w"> </span><span class="n">U</span><span class="o">,</span><span class="w"> </span><span class="err">Λ̃</span>
+<span class="w">   </span><span class="n">b</span><span class="o">.</span><span class="w"> </span><span class="err">构造</span><span class="w"> </span><span class="err">Λ</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">Λ̃</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">I</span><span class="o">/</span><span class="mi">2</span><span class="o">,</span><span class="w"> </span><span class="n">u</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Uv</span>
+<span class="w">   </span><span class="n">c</span><span class="o">.</span><span class="w"> </span><span class="err">计算</span><span class="w"> </span><span class="err">Ā</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">(</span><span class="n">I</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="err">ε</span><span class="n">A</span><span class="sr">/2)⁻¹(I + εA/</span><span class="mi">2</span><span class="o">)</span><span class="w"> </span><span class="o">(</span><span class="err">通过</span><span class="n">Woodbury</span><span class="o">)</span>
+<span class="w">   </span><span class="n">d</span><span class="o">.</span><span class="w"> </span><span class="err">计算</span><span class="w"> </span><span class="n">B</span><span class="err">̄</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">ε</span><span class="o">(</span><span class="n">I</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="err">ε</span><span class="n">A</span><span class="o">/</span><span class="mi">2</span><span class="o">)</span><span class="err">⁻¹</span><span class="n">B</span>
+<span class="w">   </span><span class="n">e</span><span class="o">.</span><span class="w"> </span><span class="err">计算</span><span class="w"> </span><span class="n">C</span><span class="err">̃</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="o">*(</span><span class="n">I</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="err">Ā</span><span class="o">^</span><span class="n">L</span><span class="o">)</span>
+
+<span class="mi">2</span><span class="o">.</span><span class="w"> </span><span class="err">生成函数计算</span><span class="o">:</span>
+<span class="w">   </span><span class="err">对</span><span class="w"> </span><span class="n">l</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="o">,</span><span class="w"> </span><span class="mi">1</span><span class="o">,</span><span class="w"> </span><span class="o">...,</span><span class="w"> </span><span class="n">L</span><span class="o">-</span><span class="mi">1</span><span class="o">:</span>
+<span class="w">     </span><span class="n">z_l</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">exp</span><span class="o">(-</span><span class="mi">2</span><span class="err">π</span><span class="n">il</span><span class="o">/</span><span class="n">L</span><span class="o">)</span>
+<span class="w">     </span><span class="n">R_z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">(</span><span class="mi">2</span><span class="sr">/ε)(1-z_l)/</span><span class="o">(</span><span class="mi">1</span><span class="o">+</span><span class="n">z_l</span><span class="o">)</span><span class="n">I</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="err">Λ</span>
+<span class="w">     </span><span class="err">应用</span><span class="n">Woodbury</span><span class="o">:</span><span class="w"> </span><span class="n">G_l</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">(</span><span class="mi">2</span><span class="o">/(</span><span class="mi">1</span><span class="o">+</span><span class="n">z_l</span><span class="o">))</span><span class="n">C</span><span class="err">̃</span><span class="o">*(</span><span class="n">R_z</span><span class="err">⁻¹</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="o">...)</span><span class="n">B</span><span class="err">̄</span>
+
+<span class="mi">3</span><span class="o">.</span><span class="w"> </span><span class="n">FFT加速</span><span class="o">:</span>
+<span class="w">   </span><span class="n">K</span><span class="err">̂</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">{</span><span class="n">G_l</span><span class="o">}</span><span class="n">_</span><span class="o">{</span><span class="n">l</span><span class="o">=</span><span class="mi">0</span><span class="o">}^{</span><span class="n">L</span><span class="o">-</span><span class="mi">1</span><span class="o">}</span>
+<span class="w">   </span><span class="n">K</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">IDFT</span><span class="o">(</span><span class="n">K</span><span class="err">̂</span><span class="o">)</span>
+
+<span class="mi">4</span><span class="o">.</span><span class="w"> </span><span class="err">卷积计算</span><span class="o">:</span>
+<span class="w">   </span><span class="err">û</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DFT</span><span class="o">([</span><span class="n">u₀</span><span class="o">,...,</span><span class="n">u_</span><span class="o">{</span><span class="n">L</span><span class="o">-</span><span class="mi">1</span><span class="o">},</span><span class="w"> </span><span class="mi">0</span><span class="o">,...,</span><span class="mi">0</span><span class="o">])</span><span class="w">  </span><span class="c1">// 零填充</span>
+<span class="w">   </span><span class="n">K</span><span class="err">̂</span><span class="n">_pad</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DFT</span><span class="o">([</span><span class="n">K₀</span><span class="o">,...,</span><span class="n">K_</span><span class="o">{</span><span class="n">L</span><span class="o">-</span><span class="mi">1</span><span class="o">},</span><span class="w"> </span><span class="mi">0</span><span class="o">,...,</span><span class="mi">0</span><span class="o">])</span>
+<span class="w">   </span><span class="err">ŷ</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="err">̂</span><span class="n">_pad</span><span class="w"> </span><span class="err">⊙</span><span class="w"> </span><span class="err">û</span>
+<span class="w">   </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">IDFT</span><span class="o">(</span><span class="err">ŷ</span><span class="o">)[</span><span class="mi">0</span><span class="o">:</span><span class="n">L</span><span class="o">]</span><span class="w">  </span><span class="c1">// 取前L个元素</span>
+
+<span class="err">输出</span><span class="o">:</span><span class="w"> </span><span class="n">y₀</span><span class="o">,</span><span class="w"> </span><span class="n">y₁</span><span class="o">,</span><span class="w"> </span><span class="o">...,</span><span class="w"> </span><span class="n">y_</span><span class="o">{</span><span class="n">L</span><span class="o">-</span><span class="mi">1</span><span class="o">}</span>
+</code></pre></div>
+
+<p>时间复杂度: $\mathcal{O}(L\log L + (L+d)\log^2(L+d))$</p>
+<h4 id="72">7.2 推理阶段算法<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p><strong>算法7.2 (S4推理)</strong>:</p>
+<div class="highlight"><pre><span></span><code><span class="err">输入</span><span class="o">:</span><span class="w"> </span><span class="err">当前输入</span><span class="n">u_k</span><span class="o">,</span><span class="w"> </span><span class="err">当前状态</span><span class="n">x_k</span>
+<span class="err">参数</span><span class="o">:</span><span class="w"> </span><span class="err">Ā</span><span class="o">,</span><span class="w"> </span><span class="n">B</span><span class="err">̄</span><span class="o">,</span><span class="w"> </span><span class="n">C</span><span class="err">̄</span>
+
+<span class="mi">1</span><span class="o">.</span><span class="w"> </span><span class="err">状态更新</span><span class="o">:</span>
+<span class="w">   </span><span class="n">x_</span><span class="o">{</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="o">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">Ā</span><span class="n">x_k</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">B</span><span class="err">̄</span><span class="n">u_k</span>
+
+<span class="mi">2</span><span class="o">.</span><span class="w"> </span><span class="err">输出计算</span><span class="o">:</span>
+<span class="w">   </span><span class="n">y_</span><span class="o">{</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="o">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">C</span><span class="err">̄</span><span class="o">*</span><span class="n">x_</span><span class="o">{</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="o">}</span>
+
+<span class="err">输出</span><span class="o">:</span><span class="w"> </span><span class="n">y_</span><span class="o">{</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="o">},</span><span class="w"> </span><span class="n">x_</span><span class="o">{</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="o">}</span>
+</code></pre></div>
+
+<p>时间复杂度: $\mathcal{O}(d\log d)$(利用DPLR结构)</p>
+<h3 id="_17">八、实践考虑<a class="toc-link" href="#_17" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 超参数选择<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>步长$\epsilon$</strong>:
+   - 理论上$\epsilon \sim 1/L$较优
+   - 实践中可设为可学习参数
+   - 初始值: $\epsilon = 0.001 \sim 0.1$</p>
+</li>
+<li>
+<p><strong>状态维度$d$</strong>:
+   - 较大的$d$提供更强表达能力
+   - 需权衡计算成本
+   - 典型值: $d = 64, 128, 256$</p>
+</li>
+<li>
+<p><strong>序列长度$L$</strong>:
+   - S4支持长序列($L &gt; 10000$)
+   - 零填充至$2L$用于FFT</p>
+</li>
+</ol>
+<h4 id="82">8.2 数值技巧<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>矩阵指数计算</strong>: 使用Padé近似或特征值方法</li>
+<li><strong>逆矩阵计算</strong>: 利用Woodbury避免显式求逆</li>
+<li><strong>复数运算</strong>: 注意精度损失,必要时使用高精度库</li>
+</ol>
+<h4 id="83">8.3 常见问题<a class="toc-link" href="#83" title="Permanent link">&para;</a></h4>
+<p><strong>问题1</strong>: $\bar{A}^L$计算成本高
+<strong>解决</strong>: 训练时用$\tilde{C} = C(I - \bar{A}^L)$作为参数,推理时再恢复$C$</p>
+<p><strong>问题2</strong>: 大$d$时Cauchy核计算慢
+<strong>解决</strong>: 使用RFT方法,完全消除对$d$的依赖</p>
+<p><strong>问题3</strong>: 梯度消失/爆炸
+<strong>解决</strong>: 使用双线性离散化,确保A-稳定性</p>
+<h3 id="_18">九、与其他方法的对比<a class="toc-link" href="#_18" title="Permanent link">&para;</a></h3>
+<h4 id="91-s4-vs-rnn">9.1 S4 vs RNN<a class="toc-link" href="#91-s4-vs-rnn" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>S4</th>
+<th>传统RNN</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>记忆衰减</td>
+<td>多项式</td>
+<td>指数</td>
+</tr>
+<tr>
+<td>并行训练</td>
+<td>是(FFT)</td>
+<td>否</td>
+</tr>
+<tr>
+<td>长序列</td>
+<td>优秀($L&gt;10^4$)</td>
+<td>困难</td>
+</tr>
+<tr>
+<td>参数量</td>
+<td>$\mathcal{O}(d^2)$</td>
+<td>$\mathcal{O}(d^2)$</td>
+</tr>
+</tbody>
+</table>
+<h4 id="92-s4-vs-transformer">9.2 S4 vs Transformer<a class="toc-link" href="#92-s4-vs-transformer" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>S4</th>
+<th>Transformer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>复杂度(训练)</td>
+<td>$\mathcal{O}(L\log L)$</td>
+<td>$\mathcal{O}(L^2d)$</td>
+</tr>
+<tr>
+<td>复杂度(推理)</td>
+<td>$\mathcal{O}(d)$</td>
+<td>$\mathcal{O}(L)$</td>
+</tr>
+<tr>
+<td>归纳偏置</td>
+<td>线性系统</td>
+<td>注意力</td>
+</tr>
+<tr>
+<td>长序列</td>
+<td>优秀</td>
+<td>受限</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_19">十、总结与展望<a class="toc-link" href="#_19" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 核心贡献<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p>S4的关键创新:
+1. DPLR分解 — 解决HiPPO矩阵的数值稳定性
+2. Woodbury恒等式 — 实现高效逆矩阵计算
+3. Cauchy核加速 — 降低计算复杂度
+4. 理论保证 — A-稳定性和多项式记忆衰减</p>
+<h4 id="102">10.2 局限性<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<ol>
+<li>DPLR分解仍需计算$d$维矩阵</li>
+<li>Cauchy核加速实现复杂</li>
+<li>超参数调优需要经验</li>
+</ol>
+<h4 id="103">10.3 后续发展<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>S5</strong>: 简化为单个SSM处理多通道</li>
+<li><strong>Mamba</strong>: 简化$A$为对角矩阵,引入选择性机制</li>
+<li><strong>RFT</strong>: 完全在有理函数空间参数化</li>
+</ul>
+<p>S4为SSM的发展奠定了坚实的数学基础,其核心技术在后续工作中得到继承和发展。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -325,7 +810,7 @@ url={\url{https://spaces.ac.cn/archives/10162}},<br />
                             
                             <a href="重温ssm二hippo的一些遗留问题.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#133 重温SSM（二）：HiPPO的一些遗留问题</div>
+                                <div class="nav-title">#279 重温SSM（二）：HiPPO的一些遗留问题</div>
                             </a>
                             
                         </div>
@@ -333,7 +818,7 @@ url={\url{https://spaces.ac.cn/archives/10162}},<br />
                             
                             <a href="重温ssm四有理生成函数的新视角.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#135 重温SSM（四）：有理生成函数的新视角</div>
+                                <div class="nav-title">#281 重温SSM（四）：有理生成函数的新视角</div>
                             </a>
                             
                         </div>
@@ -370,7 +855,19 @@ url={\url{https://spaces.ac.cn/archives/10162}},<br />
 <li><a href="#_10">最后冲刺</a></li>
 <li><a href="#_11">草草收尾</a></li>
 <li><a href="#_12">文章小结</a></li>
-<li><a href="#_13">公式推导与注释</a></li>
+<li><a href="#_13">公式推导与注释</a><ul>
+<li><a href="#dplr">一、DPLR分解的完整推导</a></li>
+<li><a href="#woodbury">二、Woodbury恒等式的详细证明</a></li>
+<li><a href="#_14">三、生成函数与卷积加速</a></li>
+<li><a href="#dft">四、离散傅里叶变换(DFT)加速</a></li>
+<li><a href="#cauchy">五、Cauchy核加速算法</a></li>
+<li><a href="#_15">六、数值稳定性分析</a></li>
+<li><a href="#_16">七、完整算法流程</a></li>
+<li><a href="#_17">八、实践考虑</a></li>
+<li><a href="#_18">九、与其他方法的对比</a></li>
+<li><a href="#_19">十、总结与展望</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

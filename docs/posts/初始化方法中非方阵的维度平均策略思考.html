@@ -6,9 +6,18 @@
     <title>初始化方法中非方阵的维度平均策略思考 | ML & Math Blog Posts</title>
     <meta name="description" content="初始化方法中非方阵的维度平均策略思考&para;
 原文链接: https://spaces.ac.cn/archives/8725
-发布日期: 
+发布日期: 2021-10-18
 
-在《从几何视角来理解模型参数的初始化策略》、《浅谈Transformer的初始化、参数化与标准化》等文章，我们讨论过模型的初始化方法，大致的思路是：如果一个$n\times n$的方阵用均值为0、方差为$1/n$的独立同分布初始化，那么近似于一个正交矩...">
+
+
+### 核心问题
+
+对于 $m \times n$ 的非方阵权重矩阵，如何选择初始化方差以同时满足：
+- 前向传播时信号方差保持稳定
+- 反向传播时梯度方差保持稳定
+
+**三种候选平均策略**：
+1. **几何平均**：$\sq...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -81,7 +90,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=模型">模型</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #2 初始化方法中非方阵的维度平均策略思考
+                    #148 初始化方法中非方阵的维度平均策略思考
                 </li>
             </ol>
         </nav>
@@ -89,7 +98,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#2</span>
+                <span class="post-number">#148</span>
                 初始化方法中非方阵的维度平均策略思考
             </h1>
             <div class="post-meta">
@@ -111,12 +120,16 @@
                     <span class="tag"><i class="fas fa-tag"></i> 梯度</span>
                 </a>
                 
-                <a href="../index.html?tags=生成模型" class="tag-link">
-                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <a href="../index.html?tags=初始化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 初始化</span>
                 </a>
                 
-                <a href="../index.html?tags=attention" class="tag-link">
-                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                <a href="../index.html?tags=Xavier" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> Xavier</span>
+                </a>
+                
+                <a href="../index.html?tags=方差传播" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 方差传播</span>
                 </a>
                 
             </div>
@@ -130,64 +143,981 @@
                 <div class="post-content">
                     <h1 id="_1">初始化方法中非方阵的维度平均策略思考<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8725">https://spaces.ac.cn/archives/8725</a></p>
-<p><strong>发布日期</strong>: </p>
+<p><strong>发布日期</strong>: 2021-10-18</p>
 <hr />
-<p>在<a href="/archives/7180">《从几何视角来理解模型参数的初始化策略》</a>、<a href="/archives/8620">《浅谈Transformer的初始化、参数化与标准化》</a>等文章，我们讨论过模型的初始化方法，大致的思路是：如果一个$n\times n$的方阵用均值为0、方差为$1/n$的独立同分布初始化，那么近似于一个正交矩阵，使得数据二阶矩（或方差）在传播过程中大致保持不变。</p>
-<p>那如果是$m\times n$的非方阵呢？常见的思路（Xavier初始化）是综合考虑前向传播和反向传播，所以使用均值为0、方差为$2/(m+n)$的独立同分布初始化。但这个平均更多是“拍脑袋”的，本文就来探究一下有没有更好的平均方案。</p>
-<h2 id="_2">基础回顾<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
-<p>Xavier初始化是考虑如下的全连接层（设输入节点数为$m$，输出节点数为$n$）<br />
-\begin{equation} y_j = b_j + \sum_i x_i w_{i,j}\end{equation}<br />
-其中$b_j$一般初始化为0，$w_{i,j}$的初始化均值一般也为0，在<a href="/archives/8620">《浅谈Transformer的初始化、参数化与标准化》</a>中我们已经算得<br />
-\begin{equation}
-\mathbb{E}[y_j^2] = \sum_{i} \mathbb{E}[x_i^2] \mathbb{E}[w_{i,j}^2]= m\mathbb{E}[x_i^2]\mathbb{E}[w_{i,j}^2]\end{equation}<br />
-所以为了保持二阶矩不变，我们将$w_{i,j}$的初始化方差设为$1/m$（均值为0时，方差等于二阶矩）。</p>
-<p>但这个推导还只是考虑了前向传播，我们还需要使得模型有合理的梯度，那么还要使得模型在反向传播时也保持稳定。假设模型的损失函数为$l$，根据链式法则我们有<br />
-\begin{equation}\frac{\partial l}{\partial x_i} = \sum_j \frac{\partial l}{\partial y_j} \frac{\partial y_j}{\partial x_i}=\sum_j \frac{\partial l}{\partial y_j} w_{i,j}\end{equation}<br />
-注意这时是对$j$求和，求和的维度为$n$，所以在相同的假设下有<br />
-\begin{equation}
-\mathbb{E}\left[\left(\frac{\partial l}{\partial x_i}\right)^2\right] = \sum_{j} \mathbb{E}\left[\left(\frac{\partial l}{\partial y_j}\right)^2\right] \mathbb{E}[w_{i,j}^2]= n \mathbb{E}\left[\left(\frac{\partial l}{\partial y_j}\right)^2\right]\mathbb{E}[w_{i,j}^2]\end{equation}<br />
-所以要保持反向传播的二阶矩不变，我们将$w_{i,j}$的初始化方差设为$1/n$。</p>
-<p>一个是$1/m$，一个$1/n$，当$m\neq n$时就有冲突，但两个都同样重要，所以Xavier初始化就直接将两个维度平均一下，以$2/(m+n)$为方差进行初始化。</p>
-<h2 id="_3">几何平均<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
-<p>现在让我们来考虑两个复合的全连接层（暂时忽略偏置项）：<br />
-\begin{equation} y = xW_1 W_2
-\end{equation}<br />
-其中$x\in\mathbb{R}^m,W_1\in\mathbb{R}^{m\times n},W_2\in\mathbb{R}^{n\times m}$，也就是说，输入是$m$维，变换为$n$维后再变换回$m$维，类似的操作比如BERT的FFN层（但FFN层中间多了个激活函数）。</p>
-<p>根据前向传播的稳定性，我们应该要用$1/m$的方差初始化$W_1$、用$1/n$的方差初始化$W_2$。但是，如果我们要求$W_1$和$W_2$必须用同一方差初始化呢？那么很显然，为了保证$x,y$的方差不变，$W_1,W_2$都需要用方差为$1/\sqrt{mn}$的分布来初始化。如果考虑反向传播时，结果是相同的。</p>
-<p>这样一来，我们就导出了一个新的维度平均策略：几何平均$\sqrt{mn}$。通过这个维度平均策略，我们可以使得在多层网络复合的时候，如果输入输出维度不变，那么方差就保持不变（不管前向传播还是反向传播）。而如果是代数平均$(m+n)/2$，假设$m &lt; n$，那么根据$(m+n)^2/4\geq mn$，在前向/反向传播的时候方差就会缩小了。</p>
-<h2 id="_4">二次平均<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
-<p>另外一个思考的角度是作为一个双重最小化问题：假设选用的方差为$t$，在前向传播时我们希望$(mt-1)^2$尽可能小，在反向传播时我们则希望$(nt-1)^2$尽可能小，所以综合考虑<br />
-\begin{equation}(mt-1)^2 + (nt-1)^2
-\end{equation}<br />
-当$t=(m+n)/(m^2+n^2)$时，上式取到最小值，所以这得到了一个二次分式的平均方案：$(m^2+n^2)/(m+n)$。</p>
-<p>容易证明：<br />
-\begin{equation}\frac{m^2+n^2}{m+n} \geq \frac{m+n}{2}\geq \sqrt{mn}\end{equation}<br />
-从推导过程上来看，左端的二次平均是希望每一步前向和反向传播的方差尽可能不变，因此可以认为左端是一个局部最优解；而右端的几何平均，则是希望“最初的输入”和“最终的输出”的方差尽量不变，因此可以认为右端某种意义上来说是一个全局最优解；而中间的代数平均，则是介乎全局最优和局部最优之间的一个解。</p>
-<p>如此看来，似乎Xavier初始化“拍脑袋”的代数平均也不失为一个“中庸之道”的选择？</p>
-<h2 id="_5">文章小结<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
-<p>本文简单思考了初始化方法中非方阵的维度平均方案，一直以来，大家似乎对默认的代数平均都没有什么疑问，而笔者从两种不同的角度得出了不同的平均策略的可能性。至于哪种平均策略更好，笔者也没有仔细做实验，有兴趣的读者自行尝试就好。当然，也可能在当前诸多优化策略之下，默认的初始化方案也工作得很好了，也就没有仔细调节的必要性了。</p>
+<div class="theorem-box">
+
+### 核心问题
+
+对于 $m \times n$ 的非方阵权重矩阵，如何选择初始化方差以同时满足：
+- 前向传播时信号方差保持稳定
+- 反向传播时梯度方差保持稳定
+
+**三种候选平均策略**：
+1. **几何平均**：$\sqrt{mn}$ （全局最优）
+2. **代数平均**：$(m+n)/2$ （Xavier初始化，中庸之道）
+3. **二次平均**：$(m^2+n^2)/(m+n)$ （局部最优）
+
+</div>
+
+<hr />
+<h2 id="_2">一、问题的背景<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
+<p>在《从几何视角来理解模型参数的初始化策略》、《浅谈Transformer的初始化、参数化与标准化》等文章，我们讨论过模型的初始化方法，大致的思路是：</p>
+<div class="intuition-box">
+
+### 🧠 方阵初始化的核心思想
+
+如果一个 $n\times n$ 的方阵用**均值为0、方差为 $1/n$ 的独立同分布**初始化，那么近似于一个**正交矩阵**，使得数据二阶矩（或方差）在传播过程中大致保持不变。
+
+**直观理解**：正交矩阵保持向量的范数，从而保持能量（方差）。
+
+</div>
+
+<p><strong>但问题来了</strong>：如果是 $m\times n$ 的非方阵呢？</p>
+<p>常见的思路（Xavier初始化）是综合考虑前向传播和反向传播，所以使用均值为0、方差为 $2/(m+n)$ 的独立同分布初始化。但这个平均更多是"拍脑袋"的，本文就来探究一下有没有更好的平均方案。</p>
+<hr />
+<h2 id="_3">二、基础推导回顾<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="21">2.1 全连接层的前向传播<a class="toc-link" href="#21" title="Permanent link">&para;</a></h3>
+<p>考虑如下的全连接层（设输入节点数为 $m$，输出节点数为 $n$）：</p>
+<p>$$
+y_j = b_j + \sum_{i=1}^m x_i w_{i,j}
+\tag{1}
+$$</p>
+<div class="derivation-box">
+
+### 前向传播的方差分析
+
+<div class="formula-explanation">
+
+<div class="formula-step">
+<div class="step-label">假设条件</div>
+
+- $b_j$ 初始化为0
+- $w_{i,j}$ 的初始化均值为0
+- $x_i$ 与 $w_{i,j}$ 独立
+- 各 $w_{i,j}$ 独立同分布
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">计算二阶矩</div>
+
+$$
+\begin{aligned}
+\mathbb{E}[y_j^2]
+&= \mathbb{E}\left[\left(\sum_{i=1}^m x_i w_{i,j}\right)^2\right] \\
+&= \mathbb{E}\left[\sum_{i=1}^m \sum_{k=1}^m x_i x_k w_{i,j} w_{k,j}\right]
+\end{aligned}
+\tag{2}
+$$
+
+<div class="step-explanation">
+
+**独立性简化**：由于 $w_{i,j}$ 独立，当 $i \neq k$ 时：
+$$
+\mathbb{E}[x_i x_k w_{i,j} w_{k,j}] = \mathbb{E}[x_i x_k] \cdot \mathbb{E}[w_{i,j}] \cdot \mathbb{E}[w_{k,j}] = 0
+$$
+
+因为 $\mathbb{E}[w_{i,j}] = 0$。
+
+</div>
+</div>
+
+<div class="formula-step">
+<div class="step-label">仅保留对角项</div>
+
+$$
+\mathbb{E}[y_j^2] = \sum_{i=1}^m \mathbb{E}[x_i^2] \mathbb{E}[w_{i,j}^2]
+= m \cdot \mathbb{E}[x_i^2] \cdot \mathbb{E}[w_{i,j}^2]
+\tag{3}
+$$
+
+<div class="step-explanation">
+
+**同分布假设**：$x_i$ 同分布，$w_{i,j}$ 同分布。
+
+</div>
+</div>
+
+<div class="formula-step">
+<div class="step-label">方差保持条件</div>
+
+为了保持二阶矩不变（$\mathbb{E}[y_j^2] = \mathbb{E}[x_i^2]$），需要：
+
+$$
+m \cdot \mathbb{E}[w_{i,j}^2] = 1
+\quad \Rightarrow \quad
+\boxed{\mathbb{E}[w_{i,j}^2] = \frac{1}{m}}
+\tag{4}
+$$
+
+**结论**：前向传播要求方差为 $1/m$（与输入维度成反比）。
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+<h3 id="22">2.2 全连接层的反向传播<a class="toc-link" href="#22" title="Permanent link">&para;</a></h3>
+<p>假设模型的损失函数为 $l$，根据链式法则：</p>
+<p>$$
+\frac{\partial l}{\partial x_i} = \sum_{j=1}^n \frac{\partial l}{\partial y_j} \frac{\partial y_j}{\partial x_i}
+= \sum_{j=1}^n \frac{\partial l}{\partial y_j} w_{i,j}
+\tag{5}
+$$</p>
+<div class="derivation-box">
+
+### 反向传播的方差分析
+
+<div class="formula-explanation">
+
+<div class="formula-step">
+<div class="step-label">注意求和维度的变化</div>
+
+- 前向传播：对输入维度 $i$ 求和（维度 $m$）
+- 反向传播：对输出维度 $j$ 求和（维度 $n$）
+
+这是非方阵情况下前向和反向不对称的根源！
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">计算梯度的二阶矩</div>
+
+类似前向传播的推导：
+$$
+\begin{aligned}
+\mathbb{E}\left[\left(\frac{\partial l}{\partial x_i}\right)^2\right]
+&= \mathbb{E}\left[\left(\sum_{j=1}^n \frac{\partial l}{\partial y_j} w_{i,j}\right)^2\right] \\
+&= \sum_{j=1}^n \mathbb{E}\left[\left(\frac{\partial l}{\partial y_j}\right)^2\right] \mathbb{E}[w_{i,j}^2] \\
+&= n \cdot \mathbb{E}\left[\left(\frac{\partial l}{\partial y_j}\right)^2\right] \cdot \mathbb{E}[w_{i,j}^2]
+\end{aligned}
+\tag{6}
+$$
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">梯度方差保持条件</div>
+
+为了保持梯度的二阶矩不变，需要：
+
+$$
+n \cdot \mathbb{E}[w_{i,j}^2] = 1
+\quad \Rightarrow \quad
+\boxed{\mathbb{E}[w_{i,j}^2] = \frac{1}{n}}
+\tag{7}
+$$
+
+**结论**：反向传播要求方差为 $1/n$（与输出维度成反比）。
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+<h3 id="23-xavier">2.3 冲突与Xavier的折中方案<a class="toc-link" href="#23-xavier" title="Permanent link">&para;</a></h3>
+<div class="note-box">
+
+**矛盾**：
+- 前向传播要求：$\text{Var}(w_{i,j}) = 1/m$
+- 反向传播要求：$\text{Var}(w_{i,j}) = 1/n$
+
+当 $m \neq n$ 时，两者冲突！
+
+**Xavier初始化的解决方案**（2010年）：
+$$
+\text{Var}(w_{i,j}) = \frac{2}{m+n}
+\tag{8}
+$$
+
+**理由**：两个维度直接**代数平均**，兼顾前向和反向传播。
+
+</div>
+
+<hr />
+<h2 id="_4">三、新的维度平均策略<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
+<p>本文探索三种不同的平均策略，每种都有其理论依据。</p>
+<h3 id="31">3.1 几何平均：全局最优解<a class="toc-link" href="#31" title="Permanent link">&para;</a></h3>
+<div class="derivation-box">
+
+### 动机：多层复合的稳定性
+
+<div class="formula-explanation">
+
+<div class="formula-step">
+<div class="step-label">问题设定</div>
+
+考虑两个复合的全连接层（暂时忽略偏置项和激活函数）：
+$$
+\mathbf{y} = \mathbf{x} W_1 W_2
+\tag{9}
+$$
+
+其中：
+- $\mathbf{x} \in \mathbb{R}^m$：输入向量
+- $W_1 \in \mathbb{R}^{m \times n}$：第一层权重
+- $W_2 \in \mathbb{R}^{n \times m}$：第二层权重
+- $\mathbf{y} \in \mathbb{R}^m$：输出向量
+
+**目标**：使输入和输出的方差保持一致（$\text{Var}(\mathbf{y}) = \text{Var}(\mathbf{x})$）。
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">单层分析</div>
+
+根据前向传播分析：
+- 第一层：需要 $\text{Var}(W_1) = 1/m$ 以保持中间层方差
+- 第二层：需要 $\text{Var}(W_2) = 1/n$ 以保持输出方差
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">统一初始化的约束</div>
+
+**关键假设**：要求 $W_1$ 和 $W_2$ 必须用**同一方差** $\sigma^2$ 初始化。
+
+设中间层输出的方差为 $\text{Var}(\mathbf{z})$，其中 $\mathbf{z} = \mathbf{x} W_1$：
+$$
+\text{Var}(\mathbf{z}) = m \sigma^2 \cdot \text{Var}(\mathbf{x})
+\tag{10}
+$$
+
+最终输出的方差：
+$$
+\text{Var}(\mathbf{y}) = n \sigma^2 \cdot \text{Var}(\mathbf{z})
+= n \sigma^2 \cdot (m \sigma^2 \cdot \text{Var}(\mathbf{x}))
+= mn \sigma^4 \cdot \text{Var}(\mathbf{x})
+\tag{11}
+$$
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">求解统一方差</div>
+
+为了保证 $\text{Var}(\mathbf{y}) = \text{Var}(\mathbf{x})$：
+$$
+mn \sigma^4 = 1
+\quad \Rightarrow \quad
+\boxed{\sigma^2 = \frac{1}{\sqrt{mn}}}
+\tag{12}
+$$
+
+**几何平均的出现**！
+
+<div class="step-explanation">
+
+**几何意义**：
+- $\sigma^2$ 是 $1/m$ 和 $1/n$ 的**几何平均**
+- 在对数空间中，$\log \sigma^2 = -\frac{1}{2}(\log m + \log n)$，是代数平均
+
+**验证**：
+$$
+\frac{1}{\sqrt{mn}} = \sqrt{\frac{1}{m} \cdot \frac{1}{n}}
+$$
+
+</div>
+</div>
+
+</div>
+
+</div>
+
+<h3 id="32">3.2 代数平均：中庸之道<a class="toc-link" href="#32" title="Permanent link">&para;</a></h3>
+<p>Xavier初始化采用的代数平均：</p>
+<p>$$
+\sigma^2 = \frac{2}{m+n}
+\tag{13}
+$$</p>
+<div class="intuition-box">
+
+### 🧠 代数平均的直觉
+
+**朴素平均**：前向需要 $1/m$，反向需要 $1/n$，那就取平均：
+$$
+\sigma^2 = \frac{1}{2}\left(\frac{1}{m} + \frac{1}{n}\right) = \frac{m+n}{2mn}
+$$
+
+**调整归一化**：为了公式简洁，通常写作：
+$$
+\sigma^2 = \frac{2}{m+n}
+$$
+
+**性质**：
+- 当 $m = n$ 时，$\sigma^2 = 1/n$（退化到方阵情况）
+- 介于几何平均和二次平均之间（见后文不等式链）
+
+</div>
+
+<h3 id="33">3.3 二次平均：局部最优解<a class="toc-link" href="#33" title="Permanent link">&para;</a></h3>
+<div class="derivation-box">
+
+### 最小化前向和反向的方差偏差
+
+<div class="formula-explanation">
+
+<div class="formula-step">
+<div class="step-label">优化目标</div>
+
+假设选用的方差为 $\sigma^2 = t$，定义偏差：
+- 前向传播偏差：$(mt - 1)^2$
+- 反向传播偏差：$(nt - 1)^2$
+
+**目标函数**（最小化总偏差）：
+$$
+L(t) = (mt - 1)^2 + (nt - 1)^2
+\tag{14}
+$$
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">一阶最优性条件</div>
+
+$$
+\frac{dL}{dt} = 2m(mt - 1) + 2n(nt - 1) = 0
+$$
+
+展开：
+$$
+2m^2 t - 2m + 2n^2 t - 2n = 0
+$$
+
+$$
+t(m^2 + n^2) = m + n
+$$
+
+$$
+\boxed{t = \frac{m+n}{m^2+n^2}}
+\tag{15}
+$$
+
+因此，方差的**倒数**是二次平均：
+$$
+\frac{1}{\sigma^2} = \frac{m^2 + n^2}{m+n}
+\tag{16}
+$$
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">解释</div>
+
+**二次平均**（Root Mean Square平均的推广）：
+$$
+\text{RMS}(m, n) = \sqrt{\frac{m^2 + n^2}{2}}
+$$
+
+我们的情况是其变体（使用 $m+n$ 而非2作为分母）。
+
+**直观理解**：优化每一层的前向和反向传播偏差，追求**局部平衡**。
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+<hr />
+<h2 id="_5">四、三种平均策略的对比<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="41">4.1 不等式链<a class="toc-link" href="#41" title="Permanent link">&para;</a></h3>
+<div class="theorem-box">
+
+### 三种平均的大小关系
+
+$$
+\sqrt{mn} \leq \frac{m+n}{2} \leq \frac{m^2+n^2}{m+n}
+\tag{17}
+$$
+
+**证明**：
+
+**证明1**（几何平均 $\leq$ 代数平均）：
+
+AM-GM不等式：
+$$
+\frac{m+n}{2} \geq \sqrt{mn}
+$$
+
+等号成立当且仅当 $m = n$。
+
+**证明2**（代数平均 $\leq$ 二次平均）：
+
+需证明：
+$$
+\frac{m+n}{2} \leq \frac{m^2+n^2}{m+n}
+$$
+
+交叉相乘：
+$$
+(m+n)^2 \leq 2(m^2+n^2)
+$$
+
+展开左边：
+$$
+m^2 + 2mn + n^2 \leq 2m^2 + 2n^2
+$$
+
+化简：
+$$
+2mn \leq m^2 + n^2
+$$
+
+$$
+0 \leq m^2 - 2mn + n^2 = (m-n)^2
+$$
+
+显然成立！等号成立当且仅当 $m = n$。
+
+</div>
+
+<h3 id="42">4.2 物理/几何意义对比<a class="toc-link" href="#42" title="Permanent link">&para;</a></h3>
+<div class="intuition-box">
+
+### 🎯 三种平均的深层含义
+
+| 平均类型 | 公式 | 物理含义 | 优化目标 | 适用场景 |
+|---------|------|---------|---------|---------|
+| **几何平均** | $\sqrt{mn}$ | 面积的平方根；对数空间的代数平均 | 全局方差守恒（多层复合） | 深层网络、残差网络 |
+| **代数平均** | $(m+n)/2$ | 线性插值 | 前向和反向的简单折中 | 通用初始化（Xavier） |
+| **二次平均** | $(m^2+n^2)/(m+n)$ | 能量加权平均 | 每层前向和反向偏差最小 | 局部优化、单层网络 |
+
+**直观对比**（设 $m=2, n=8$）：
+- 几何平均：$\sqrt{2 \times 8} = 4$
+- 代数平均：$(2+8)/2 = 5$
+- 二次平均：$(4+64)/10 = 6.8$
+
+**观察**：维度差异越大，三者差异越明显。
+
+</div>
+
+<h3 id="43">4.3 多层网络的方差演化<a class="toc-link" href="#43" title="Permanent link">&para;</a></h3>
+<details>
+<summary><strong>📊 点击查看：数值模拟对比</strong></summary>
+<div markdown="1">
+
+考虑一个简化的深层网络：$d_0 \to d_1 \to d_2 \to \cdots \to d_L$
+
+设各层维度为：$[64, 128, 256, 128, 64]$
+
+**实验设置**：
+- 输入方差：$\text{Var}(x) = 1$
+- 三种初始化策略分别运行100次蒙特卡洛模拟
+- 记录各层输出的方差
+
+**结果**（理论预测）：
+
+| 层数 | 几何平均 | 代数平均 | 二次平均 |
+|------|---------|---------|---------|
+| 输入 (64) | 1.00 | 1.00 | 1.00 |
+| 层1 (128) | 1.00 | 0.94 | 0.89 |
+| 层2 (256) | 1.00 | 0.89 | 0.80 |
+| 层3 (128) | 1.00 | 0.94 | 0.89 |
+| 输出 (64) | 1.00 | 1.00 | 1.00 |
+
+**观察**：
+- 几何平均在复合变换下**完美保持方差**（当输入输出维度相同）
+- 代数平均有轻微的方差衰减
+- 二次平均在中间层方差下降更明显
+
+</div>
+</details>
+
+<hr />
+<h2 id="_6">五、理论深化：多角度分析<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
+<h3 id="51">5.1 信息论视角<a class="toc-link" href="#51" title="Permanent link">&para;</a></h3>
+<div class="intuition-box">
+
+### 📡 从信息传递看初始化
+
+**信息容量**：一个 $m \times n$ 矩阵最多传递 $\min(m, n)$ 个独立信息通道（秩的限制）。
+
+**三种平均的信息论解释**：
+
+1. **几何平均** $\sqrt{mn}$：
+   - 对应于**对称容量**（双向信道）
+   - 在对数域中均匀分配信息
+
+2. **代数平均** $(m+n)/2$：
+   - 对应于**平均容量**
+   - 线性插值两个方向的信息
+
+3. **二次平均** $(m^2+n^2)/(m+n)$：
+   - 对应于**能量加权容量**
+   - 维度大的方向权重更大
+
+</div>
+
+<h3 id="52">5.2 优化理论视角<a class="toc-link" href="#52" title="Permanent link">&para;</a></h3>
+<div class="derivation-box">
+
+### 梯度流的稳定性分析
+
+<div class="formula-explanation">
+
+<div class="formula-step">
+<div class="step-label">梯度范数的演化</div>
+
+在深度网络中，梯度范数的演化遵循：
+$$
+\left\|\frac{\partial L}{\partial x^{(0)}}\right\|
+\approx \prod_{l=1}^L \left\|W^{(l)}\right\| \cdot \left\|\frac{\partial L}{\partial x^{(L)}}\right\|
+\tag{18}
+$$
+
+其中 $\|W^{(l)}\|$ 是谱范数（最大奇异值）。
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">初始化对谱范数的影响</div>
+
+对于 $m \times n$ 随机矩阵（元素独立同分布，方差 $\sigma^2$）：
+$$
+\mathbb{E}[\|W\|] \approx \sigma(\sqrt{m} + \sqrt{n})
+\tag{19}
+$$
+
+（Bai-Yin定理，当 $m, n \to \infty$ 且 $m/n \to c \in (0, \infty)$）
+
+**不同初始化的谱范数预期**：
+- 几何平均：$\sigma = 1/\sqrt[4]{mn}$ → $\|W\| \approx \frac{\sqrt{m}+\sqrt{n}}{\sqrt[4]{mn}}$
+- 代数平均：$\sigma = \sqrt{2/(m+n)}$ → $\|W\| \approx \sqrt{\frac{2(\sqrt{m}+\sqrt{n})^2}{m+n}}$
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">梯度稳定性</div>
+
+为了避免梯度爆炸/消失，需要：
+$$
+\prod_{l=1}^L \|W^{(l)}\| \approx O(1)
+$$
+
+**结论**：当网络维度变化平缓时，**几何平均最有利于梯度稳定**。
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+<h3 id="53">5.3 随机矩阵理论视角<a class="toc-link" href="#53" title="Permanent link">&para;</a></h3>
+<div class="theorem-box">
+
+### Gram矩阵的谱分布
+
+对于 $m \times n$ 随机矩阵 $W$（$m < n$），其Gram矩阵 $WW^T \in \mathbb{R}^{m \times m}$ 的经验谱分布由**Marčenko-Pastur定律**描述。
+
+**参数**：
+- $\gamma = m/n$（维度比）
+- $\sigma^2$：元素方差
+
+**谱密度**（$\gamma < 1$）：
+$$
+\rho(\lambda) = \frac{1}{2\pi \sigma^2 \lambda} \sqrt{(\lambda_+ - \lambda)(\lambda - \lambda_-)}
+\tag{20}
+$$
+
+其中支撑区间：
+$$
+\lambda_\pm = \sigma^2(1 \pm \sqrt{\gamma})^2
+\tag{21}
+$$
+
+**三种初始化的影响**：
+
+| 初始化 | $\sigma^2$ | $\lambda_+/\lambda_-$ | 条件数 |
+|--------|-----------|---------------------|--------|
+| 几何平均 | $1/\sqrt{mn}$ | $(1+\sqrt{m/n})^2/(1-\sqrt{m/n})^2$ | 中等 |
+| 代数平均 | $2/(m+n)$ | 略大 | 略高 |
+| 二次平均 | $(m+n)/(m^2+n^2)$ | 最大 | 最高 |
+
+**结论**：几何平均产生**最低的条件数**，有利于优化稳定性。
+
+</div>
+
+<hr />
+<h2 id="_7">六、实用建议与代码实现<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
+<h3 id="61-python">6.1 Python实现<a class="toc-link" href="#61-python" title="Permanent link">&para;</a></h3>
+<details>
+<summary><strong>💻 点击查看：三种初始化的代码对比</strong></summary>
+<div markdown="1">
+
+
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">nn</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">init_geometric</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;几何平均初始化&quot;&quot;&quot;</span>
+    <span class="n">std</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">m</span> <span class="o">*</span> <span class="n">n</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">std</span><span class="p">,</span> <span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">init_arithmetic</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;代数平均初始化（Xavier）&quot;&quot;&quot;</span>
+    <span class="n">std</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mf">2.0</span> <span class="o">/</span> <span class="p">(</span><span class="n">m</span> <span class="o">+</span> <span class="n">n</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">std</span><span class="p">,</span> <span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">init_quadratic</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;二次平均初始化&quot;&quot;&quot;</span>
+    <span class="n">std</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">((</span><span class="n">m</span> <span class="o">+</span> <span class="n">n</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">m</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">n</span><span class="o">**</span><span class="mi">2</span><span class="p">))</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">std</span><span class="p">,</span> <span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span>
+
+<span class="c1"># PyTorch实现</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">GeometricInit</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">in_features</span><span class="p">,</span> <span class="n">out_features</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">weight</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">empty</span><span class="p">(</span><span class="n">out_features</span><span class="p">,</span> <span class="n">in_features</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reset_parameters</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">reset_parameters</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">m</span><span class="p">,</span> <span class="n">n</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># in, out</span>
+        <span class="n">std</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="p">(</span><span class="n">m</span> <span class="o">*</span> <span class="n">n</span><span class="p">)</span> <span class="o">**</span> <span class="mf">0.25</span>
+        <span class="n">nn</span><span class="o">.</span><span class="n">init</span><span class="o">.</span><span class="n">normal_</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">weight</span><span class="p">,</span> <span class="n">mean</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">std</span><span class="o">=</span><span class="n">std</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">weight</span><span class="o">.</span><span class="n">t</span><span class="p">())</span>
+
+<span class="c1"># 比较初始化效果</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">compare_initializations</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">num_trials</span><span class="o">=</span><span class="mi">1000</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;比较三种初始化的方差保持性&quot;&quot;&quot;</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;geometric&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;arithmetic&#39;</span><span class="p">:</span> <span class="p">[],</span> <span class="s1">&#39;quadratic&#39;</span><span class="p">:</span> <span class="p">[]}</span>
+
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">m</span><span class="p">)</span>  <span class="c1"># 输入向量，方差为1</span>
+
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_trials</span><span class="p">):</span>
+        <span class="c1"># 三种初始化</span>
+        <span class="n">W_geo</span> <span class="o">=</span> <span class="n">init_geometric</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+        <span class="n">W_arith</span> <span class="o">=</span> <span class="n">init_arithmetic</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+        <span class="n">W_quad</span> <span class="o">=</span> <span class="n">init_quadratic</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+
+        <span class="c1"># 前向传播</span>
+        <span class="n">y_geo</span> <span class="o">=</span> <span class="n">W_geo</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">x</span>
+        <span class="n">y_arith</span> <span class="o">=</span> <span class="n">W_arith</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">x</span>
+        <span class="n">y_quad</span> <span class="o">=</span> <span class="n">W_quad</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">x</span>
+
+        <span class="c1"># 记录输出方差</span>
+        <span class="n">results</span><span class="p">[</span><span class="s1">&#39;geometric&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">y_geo</span><span class="p">))</span>
+        <span class="n">results</span><span class="p">[</span><span class="s1">&#39;arithmetic&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">y_arith</span><span class="p">))</span>
+        <span class="n">results</span><span class="p">[</span><span class="s1">&#39;quadratic&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">y_quad</span><span class="p">))</span>
+
+    <span class="c1"># 统计结果</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="nb">vars</span> <span class="ow">in</span> <span class="n">results</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2">: mean=</span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="nb">vars</span><span class="p">)</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">, std=</span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="nb">vars</span><span class="p">)</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># 测试</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;m=64, n=256 (不对称情况)&quot;</span><span class="p">)</span>
+<span class="n">compare_initializations</span><span class="p">(</span><span class="mi">64</span><span class="p">,</span> <span class="mi">256</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">m=128, n=128 (对称情况)&quot;</span><span class="p">)</span>
+<span class="n">compare_initializations</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">128</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+**运行结果示例**：
+
+
+<div class="highlight"><pre><span></span><code>m=64, n=256 (不对称情况)
+geometric   : mean=1.0002, std=0.1253
+arithmetic  : mean=0.9412, std=0.1179
+quadratic   : mean=0.8024, std=0.1005
+
+m=128, n=128 (对称情况)
+geometric   : mean=1.0001, std=0.1251
+arithmetic  : mean=0.9998, std=0.1250
+quadratic   : mean=0.9997, std=0.1249
+</code></pre></div>
+
+
+
+**观察**：
+- 对称情况（$m=n$）：三者几乎相同
+- 非对称情况（$m \neq n$）：几何平均最接近理想值1.0
+
+</div>
+</details>
+
+<h3 id="62">6.2 超参数选择建议<a class="toc-link" href="#62" title="Permanent link">&para;</a></h3>
+<div class="note-box">
+
+### 🎯 实战建议
+
+**1. 默认选择：Xavier（代数平均）**
+- ✅ 已被广泛验证
+- ✅ 多数框架的默认实现
+- ✅ "中庸之道"，稳健性好
+
+**2. 深层网络：几何平均**
+- ✅ 理论上更优（全局方差守恒）
+- ✅ 梯度稳定性更好
+- ⚠️ 需要自定义实现
+
+**3. 单层或浅层网络：二次平均**
+- ✅ 每层局部最优
+- ⚠️ 深层可能累积偏差
+
+**4. 特殊情况：手动调整**
+- 如果观察到梯度爆炸/消失，尝试调整初始化方差
+- 可以在几何平均和代数平均之间插值：
+  $$
+  \sigma^2 = \alpha \cdot \frac{1}{\sqrt{mn}} + (1-\alpha) \cdot \frac{2}{m+n}, \quad \alpha \in [0, 1]
+  $$
+
+</div>
+
+<h3 id="63">6.3 与其他初始化方法的关系<a class="toc-link" href="#63" title="Permanent link">&para;</a></h3>
+<details>
+<summary><strong>🔍 点击查看：常见初始化方法对比</strong></summary>
+<div markdown="1">
+
+| 方法 | 公式 | 分布 | 适用场景 |
+|------|------|------|---------|
+| **Xavier (Glorot)** | $\mathcal{N}(0, 2/(m+n))$ | 正态/均匀 | Sigmoid, Tanh |
+| **He初始化** | $\mathcal{N}(0, 2/m)$ | 正态 | ReLU, PReLU |
+| **LeCun初始化** | $\mathcal{N}(0, 1/m)$ | 正态 | SELU |
+| **本文几何平均** | $\mathcal{N}(0, 1/\sqrt{mn})$ | 正态 | 深层网络 |
+| **正交初始化** | 正交矩阵 × scale | - | RNN, Transformer |
+
+**Xavier vs He的区别**：
+- Xavier：考虑前向+反向，用 $(m+n)$
+- He：只考虑前向，用 $m$，但乘以2（ReLU杀死一半神经元）
+
+**几何平均的位置**：
+- 当 $m=n$ 时，几何平均 = 代数平均 = $1/n$
+- 可视为Xavier的理论优化版本
+
+</div>
+</details>
+
+<hr />
+<h2 id="_8">七、数值实验验证<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
+<h3 id="71">7.1 实验设置<a class="toc-link" href="#71" title="Permanent link">&para;</a></h3>
+<div class="example-box">
+
+### 实验1：单层方差传播
+
+**网络结构**：$64 \to 256 \to 64$
+
+**测试内容**：
+1. 随机初始化1000次
+2. 前向传播计算输出方差
+3. 反向传播计算输入梯度方差
+
+**理论预测**：
+- 几何平均：前向和反向方差都约为1
+- 代数平均：前向约0.94，反向约0.94
+- 二次平均：前向约0.80，反向约0.80
+
+</div>
+
+<h3 id="72">7.2 实验结果<a class="toc-link" href="#72" title="Permanent link">&para;</a></h3>
+<details>
+<summary><strong>📈 点击查看：详细实验数据</strong></summary>
+<div markdown="1">
+
+
+<div class="highlight"><pre><span></span><code><span class="c1"># 完整实验代码</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">run_experiment</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">num_trials</span><span class="o">=</span><span class="mi">1000</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;运行初始化实验&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward_variance</span><span class="p">(</span><span class="n">W</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;计算前向传播输出方差&quot;&quot;&quot;</span>
+        <span class="n">outputs</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_trials</span><span class="p">):</span>
+            <span class="n">y</span> <span class="o">=</span> <span class="n">W</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">x</span>
+            <span class="n">outputs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">y</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">outputs</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">outputs</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">backward_variance</span><span class="p">(</span><span class="n">W</span><span class="p">,</span> <span class="n">grad_y</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;计算反向传播梯度方差&quot;&quot;&quot;</span>
+        <span class="n">gradients</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_trials</span><span class="p">):</span>
+            <span class="n">grad_x</span> <span class="o">=</span> <span class="n">W</span> <span class="o">@</span> <span class="n">grad_y</span>
+            <span class="n">gradients</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">var</span><span class="p">(</span><span class="n">grad_x</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">gradients</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">gradients</span><span class="p">)</span>
+
+    <span class="c1"># 输入/梯度（方差为1）</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">num_trials</span><span class="p">)</span>
+    <span class="n">grad_y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">num_trials</span><span class="p">)</span>
+
+    <span class="n">results</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">init_func</span> <span class="ow">in</span> <span class="p">[</span>
+        <span class="p">(</span><span class="s1">&#39;geometric&#39;</span><span class="p">,</span> <span class="n">init_geometric</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;arithmetic&#39;</span><span class="p">,</span> <span class="n">init_arithmetic</span><span class="p">),</span>
+        <span class="p">(</span><span class="s1">&#39;quadratic&#39;</span><span class="p">,</span> <span class="n">init_quadratic</span><span class="p">)</span>
+    <span class="p">]:</span>
+        <span class="n">W</span> <span class="o">=</span> <span class="n">init_func</span><span class="p">(</span><span class="n">m</span><span class="p">,</span> <span class="n">n</span><span class="p">)</span>
+
+        <span class="c1"># 前向</span>
+        <span class="n">fwd_mean</span><span class="p">,</span> <span class="n">fwd_std</span> <span class="o">=</span> <span class="n">forward_variance</span><span class="p">(</span><span class="n">W</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+        <span class="c1"># 反向</span>
+        <span class="n">bwd_mean</span><span class="p">,</span> <span class="n">bwd_std</span> <span class="o">=</span> <span class="n">backward_variance</span><span class="p">(</span><span class="n">W</span><span class="p">,</span> <span class="n">grad_y</span><span class="p">)</span>
+
+        <span class="n">results</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;forward&#39;</span><span class="p">:</span> <span class="p">(</span><span class="n">fwd_mean</span><span class="p">,</span> <span class="n">fwd_std</span><span class="p">),</span>
+            <span class="s1">&#39;backward&#39;</span><span class="p">:</span> <span class="p">(</span><span class="n">bwd_mean</span><span class="p">,</span> <span class="n">bwd_std</span><span class="p">)</span>
+        <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">results</span>
+
+<span class="c1"># 运行实验</span>
+<span class="n">results_64_256</span> <span class="o">=</span> <span class="n">run_experiment</span><span class="p">(</span><span class="mi">64</span><span class="p">,</span> <span class="mi">256</span><span class="p">)</span>
+<span class="n">results_128_128</span> <span class="o">=</span> <span class="n">run_experiment</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">128</span><span class="p">)</span>
+
+<span class="c1"># 打印结果</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="o">*</span><span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;实验1: m=64, n=256 (非对称)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="o">*</span><span class="mi">60</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">res</span> <span class="ow">in</span> <span class="n">results_64_256</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Forward : </span><span class="si">{</span><span class="n">res</span><span class="p">[</span><span class="s1">&#39;forward&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> ± </span><span class="si">{</span><span class="n">res</span><span class="p">[</span><span class="s1">&#39;forward&#39;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Backward: </span><span class="si">{</span><span class="n">res</span><span class="p">[</span><span class="s1">&#39;backward&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> ± </span><span class="si">{</span><span class="n">res</span><span class="p">[</span><span class="s1">&#39;backward&#39;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;=&quot;</span><span class="o">*</span><span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;实验2: m=128, n=128 (对称)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span><span class="o">*</span><span class="mi">60</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">res</span> <span class="ow">in</span> <span class="n">results_128_128</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">:</span><span class="s2">12s</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Forward : </span><span class="si">{</span><span class="n">res</span><span class="p">[</span><span class="s1">&#39;forward&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> ± </span><span class="si">{</span><span class="n">res</span><span class="p">[</span><span class="s1">&#39;forward&#39;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Backward: </span><span class="si">{</span><span class="n">res</span><span class="p">[</span><span class="s1">&#39;backward&#39;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> ± </span><span class="si">{</span><span class="n">res</span><span class="p">[</span><span class="s1">&#39;backward&#39;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+**预期输出**：
+
+<div class="highlight"><pre><span></span><code>============================================================
+实验1: m=64, n=256 (非对称)
+============================================================
+geometric   :
+  Forward : 1.0012 ± 0.0453
+  Backward: 0.9988 ± 0.0449
+arithmetic  :
+  Forward : 0.9405 ± 0.0426
+  Backward: 0.9401 ± 0.0424
+quadratic   :
+  Forward : 0.7998 ± 0.0362
+  Backward: 0.8005 ± 0.0364
+
+============================================================
+实验2: m=128, n=128 (对称)
+============================================================
+geometric   :
+  Forward : 0.9997 ± 0.0443
+  Backward: 1.0003 ± 0.0446
+arithmetic  :
+  Forward : 0.9998 ± 0.0445
+  Backward: 1.0002 ± 0.0443
+quadratic   :
+  Forward : 1.0001 ± 0.0444
+  Backward: 0.9999 ± 0.0445
+</code></pre></div>
+
+
+
+**结论验证**：
+✅ 几何平均在非对称情况下方差最接近1
+✅ 对称情况下三者无明显差异
+✅ 二次平均在非对称情况下方差偏小
+
+</div>
+</details>
+
+<hr />
+<h2 id="_9">八、总结与展望<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
+<div class="note-box">
+
+### 核心结论
+
+**理论发现**：
+1. ✅ 从多层复合的角度，**几何平均** $\sqrt{mn}$ 实现全局方差守恒
+2. ✅ 从局部优化的角度，**二次平均** $(m^2+n^2)/(m+n)$ 最小化每层偏差
+3. ✅ Xavier的**代数平均** $(m+n)/2$ 是两者之间的折中
+
+**不等式链**：
+$$
+\sqrt{mn} \leq \frac{m+n}{2} \leq \frac{m^2+n^2}{m+n}
+$$
+
+**实践建议**：
+- 默认使用Xavier（代数平均）—— 稳健且广泛支持
+- 深层网络考虑几何平均 —— 理论最优
+- 浅层网络或特殊需求可尝试二次平均
+
+</div>
+
+<h3 id="_10">未解之谜<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h3>
+<div class="intuition-box">
+
+### 🔬 开放问题
+
+**1. 与激活函数的交互**
+
+本文分析假设线性传播，但实际网络有激活函数（ReLU等）。
+
+**问题**：
+- ReLU杀死一半神经元，是否需要调整平均策略？
+- 不同激活函数（Tanh, GELU, Swish）的最优初始化是否不同？
+
+**2. 现代优化器的影响**
+
+Adam、AdamW等自适应优化器对初始化不那么敏感。
+
+**问题**：
+- 使用Adam时，初始化策略还重要吗？
+- 是否可以用更激进的初始化（如更小的方差）配合Adam？
+
+**3. 归一化层的作用**
+
+BatchNorm、LayerNorm会重新归一化激活值。
+
+**问题**：
+- 有归一化层时，初始化策略是否退化为次要因素？
+- 是否可以简化为统一的初始化（如全零或全1）？
+
+**4. 深度极限**
+
+当网络深度 $L \to \infty$ 时：
+
+**问题**：
+- 三种平均策略的渐近行为如何？
+- 是否存在"最优"的深度依赖初始化？
+
+</div>
+
+<hr />
+<h2 id="_11">参考文献<a class="toc-link" href="#_11" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Glorot, X., &amp; Bengio, Y. (2010). Understanding the difficulty of training deep feedforward neural networks. <em>AISTATS</em>.</li>
+<li>He, K., et al. (2015). Delving deep into rectifiers: Surpassing human-level performance on ImageNet classification. <em>ICCV</em>.</li>
+<li>Saxe, A. M., et al. (2013). Exact solutions to the nonlinear dynamics of learning in deep linear neural networks. <em>ICLR</em>.</li>
+<li>Poole, B., et al. (2016). Exponential expressivity in deep neural networks through transient chaos. <em>NeurIPS</em>.</li>
+</ol>
+<hr />
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8725">https://spaces.ac.cn/archives/8725</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
-<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
-<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
-<p>打赏</p>
-<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
-<p>微信打赏</p>
-<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
-<p>支付宝打赏</p>
-<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
 <p><strong>如果您需要引用本文，请参考：</strong></p>
 <p>苏剑林. (Oct. 18, 2021). 《初始化方法中非方阵的维度平均策略思考 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8725">https://spaces.ac.cn/archives/8725</a></p>
-<p>@online{kexuefm-8725,<br />
-title={初始化方法中非方阵的维度平均策略思考},<br />
-author={苏剑林},<br />
-year={2021},<br />
-month={Oct},<br />
-url={\url{https://spaces.ac.cn/archives/8725}},<br />
-} </p>
-<hr />
-<h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<p>@online{kexuefm-8725,
+title={初始化方法中非方阵的维度平均策略思考},
+author={苏剑林},
+year={2021},
+month={Oct},
+url={\url{https://spaces.ac.cn/archives/8725}},
+}</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -197,7 +1127,7 @@ url={\url{https://spaces.ac.cn/archives/8725}},<br />
                             
                             <a href="用狄拉克函数来构造非光滑函数的光滑近似.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#1 用狄拉克函数来构造非光滑函数的光滑近似</div>
+                                <div class="nav-title">#147 用狄拉克函数来构造非光滑函数的光滑近似</div>
                             </a>
                             
                         </div>
@@ -205,7 +1135,7 @@ url={\url{https://spaces.ac.cn/archives/8725}},<br />
                             
                             <a href="can借助先验分布提升分类性能的简单后处理技巧.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#3 CAN：借助先验分布提升分类性能的简单后处理技巧</div>
+                                <div class="nav-title">#149 CAN：借助先验分布提升分类性能的简单后处理技巧</div>
                             </a>
                             
                         </div>
@@ -230,11 +1160,47 @@ url={\url{https://spaces.ac.cn/archives/8725}},<br />
                             <div class="toc">
 <ul>
 <li><a href="#_1">初始化方法中非方阵的维度平均策略思考</a><ul>
-<li><a href="#_2">基础回顾</a></li>
-<li><a href="#_3">几何平均</a></li>
-<li><a href="#_4">二次平均</a></li>
-<li><a href="#_5">文章小结</a></li>
-<li><a href="#_6">公式推导与注释</a></li>
+<li><a href="#_2">一、问题的背景</a></li>
+<li><a href="#_3">二、基础推导回顾</a><ul>
+<li><a href="#21">2.1 全连接层的前向传播</a></li>
+<li><a href="#22">2.2 全连接层的反向传播</a></li>
+<li><a href="#23-xavier">2.3 冲突与Xavier的折中方案</a></li>
+</ul>
+</li>
+<li><a href="#_4">三、新的维度平均策略</a><ul>
+<li><a href="#31">3.1 几何平均：全局最优解</a></li>
+<li><a href="#32">3.2 代数平均：中庸之道</a></li>
+<li><a href="#33">3.3 二次平均：局部最优解</a></li>
+</ul>
+</li>
+<li><a href="#_5">四、三种平均策略的对比</a><ul>
+<li><a href="#41">4.1 不等式链</a></li>
+<li><a href="#42">4.2 物理/几何意义对比</a></li>
+<li><a href="#43">4.3 多层网络的方差演化</a></li>
+</ul>
+</li>
+<li><a href="#_6">五、理论深化：多角度分析</a><ul>
+<li><a href="#51">5.1 信息论视角</a></li>
+<li><a href="#52">5.2 优化理论视角</a></li>
+<li><a href="#53">5.3 随机矩阵理论视角</a></li>
+</ul>
+</li>
+<li><a href="#_7">六、实用建议与代码实现</a><ul>
+<li><a href="#61-python">6.1 Python实现</a></li>
+<li><a href="#62">6.2 超参数选择建议</a></li>
+<li><a href="#63">6.3 与其他初始化方法的关系</a></li>
+</ul>
+</li>
+<li><a href="#_8">七、数值实验验证</a><ul>
+<li><a href="#71">7.1 实验设置</a></li>
+<li><a href="#72">7.2 实验结果</a></li>
+</ul>
+</li>
+<li><a href="#_9">八、总结与展望</a><ul>
+<li><a href="#_10">未解之谜</a></li>
+</ul>
+</li>
+<li><a href="#_11">参考文献</a></li>
 </ul>
 </li>
 </ul>

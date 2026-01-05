@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>修改Transformer结构，设计一个更快更好的MLM模型 | ML & Math Blog Posts</title>
+    <meta name="description" content="修改Transformer结构，设计一个更快更好的MLM模型&para;
+原文链接: https://spaces.ac.cn/archives/7661
+发布日期: 
+
+大家都知道，MLM（Masked Language Model）是BERT、RoBERTa的预训练方式，顾名思义，就是mask掉原始序列的一些token，然后让模型去预测这些被mask掉的token。随着研究的深入，大家发现ML...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
+
+    <!-- MathJax for math rendering with equation numbering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=语言模型">语言模型</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #146 修改Transformer结构，设计一个更快更好的MLM模型
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">
+                <span class="post-number">#146</span>
+                修改Transformer结构，设计一个更快更好的MLM模型
+            </h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/7661" target="_blank" rel="noopener">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=语言模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 语言模型</span>
+                </a>
+                
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+            </div>
+            
+        </header>
+
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="transformermlm">修改Transformer结构，设计一个更快更好的MLM模型<a class="toc-link" href="#transformermlm" title="Permanent link">&para;</a></h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7661">https://spaces.ac.cn/archives/7661</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>大家都知道，MLM（Masked Language Model）是BERT、RoBERTa的预训练方式，顾名思义，就是mask掉原始序列的一些token，然后让模型去预测这些被mask掉的token。随着研究的深入，大家发现MLM不单单可以作为预训练方式，还能有很丰富的应用价值，比如笔者之前就发现直接加载BERT的MLM权重就可以当作UniLM来做Seq2Seq任务（参考<a href="/archives/6933">这里</a>），又比如发表在ACL 2020的<a href="https://papers.cool/arxiv/2005.07421">《Spelling Error Correction with Soft-Masked BERT》</a>将MLM模型用于文本纠错。</p>
+<p>然而，仔细读过BERT的论文或者亲自尝试过的读者应该都知道，原始的MLM的训练效率是比较低的，因为每次只能mask掉一小部分的token来训练。ACL 2020的论文<a href="https://papers.cool/arxiv/2004.08097">《Fast and Accurate Deep Bidirectional Language Representations for Unsupervised Learning》</a>也思考了这个问题，并且提出了一种新的MLM模型设计，能够有更高的训练效率和更好的效果。</p>
+<h2 id="mlm">MLM模型<a class="toc-link" href="#mlm" title="Permanent link">&para;</a></h2>
+<p>假设原始序列为$\boldsymbol{x}=[x_1,x_2,\dots,x_T]$，$\boldsymbol{x}\backslash \{x_i\}$表示将第i个token替换为$\text{[MASK]}$后的序列，那么MLM模型就是建模<br />
+\begin{equation}p\big(x_i, x_j, x_k, \cdots\big|\,\boldsymbol{x}\backslash \{x_i,x_j,x_k,\cdots\}\big)\end{equation}<br />
+我们说它效率低，是因为每次只能选择一小部分token来mask，比如15%，那么也就是说每个样本只有15%的token被训练到了，所以同一个样本需要反复训练多次。在BERT里边，每个样本都被mask了多遍然后存为tfrecord，训练效率低的同时还增加了硬盘空间占用。</p>
+<p><a href="/usr/uploads/2020/08/3137609063.png" title="点击查看原图"><img alt="MLM任务示意图" src="/usr/uploads/2020/08/3137609063.png" /></a></p>
+<p>MLM任务示意图</p>
+<p>如果训练的时候每个样本的所有token都可以作为预测目标，那么训练效率自然就能提升了。像GPT这样的单向语言模型是可以做到的，但是MLM是双向的模型，并不能直接做到这一点。为了达到这个目标，我们需要简化一下上式，假设每次只mask掉一个token，也就是要构建的分布为<br />
+\begin{equation}p\big(x_i\big|\,\boldsymbol{x}\backslash \{x_i\}\big),\,i=1,2,\dots,T\end{equation}<br />
+然后我们希望通过单个模型一次预测就同时得到$p(x_1|\,\boldsymbol{x}\backslash \{x_1\}),p(x_2|\,\boldsymbol{x}\backslash \{x_2\}),\dots,p(x_T|\,\boldsymbol{x}\backslash \{x_T\})$。怎么做到这一点呢？这就来到本文要介绍的论文结果了，它提出了一种称之为T-TA（Transformer-based Text Autoencoder）的设计，能让我们一并预测所有token的分布。</p>
+<h2 id="t-ta">T-TA介绍<a class="toc-link" href="#t-ta" title="Permanent link">&para;</a></h2>
+<p><a href="/usr/uploads/2020/08/1327267466.png" title="点击查看原图"><img alt="T-TA的Attention Mask模式" src="/usr/uploads/2020/08/1327267466.png" /></a></p>
+<p>T-TA的Attention Mask模式</p>
+<p>首先，我们知道Transformer的核心运算是$Attention(\boldsymbol{Q},\boldsymbol{K},\boldsymbol{V})$，在BERT里边$\boldsymbol{Q},\boldsymbol{K},\boldsymbol{V}$都是同一个，也就是Self Attention。而在MLM中，我们既然要建模$p(x_i|\,\boldsymbol{x}\backslash \{x_i\})$，那么第$i$个输出肯定是不能包含第$i$个token的信息的，为此，第一步要做出的改动是：去掉$\boldsymbol{Q}$里边的token输入，也就是说第一层的Attention的$\boldsymbol{Q}$不能包含token信息，只能包含位置向量。这是因为我们是通过$\boldsymbol{Q}$把$\boldsymbol{K},\boldsymbol{V}$的信息聚合起来的，如果$\boldsymbol{Q}$本身就有token信息，那么就会造成信息泄漏了。然后，我们要防止$\boldsymbol{K},\boldsymbol{V}$的信息泄漏，这需要修改Attention Mask，把对角线部分的Attention（也就是自身的）给Mask掉，如图所示。</p>
+<p>如果还不理解这一点，我们可以从Attention的一般形式来理解：Attention的一般定义为<br />
+\begin{equation}Attention(\boldsymbol{Q},\boldsymbol{K},\boldsymbol{V})<em j="1">i = \frac{\sum\limits</em>}^n \text{sim}(\boldsymbol{q<em j="1">i, \boldsymbol{k}_j)\boldsymbol{v}_j}{\sum\limits</em>}^n \text{sim}(\boldsymbol{q}_i, \boldsymbol{k}_j)}\label{eq:gen-att}\end{equation
+所以很明显，$Attention(\boldsymbol{Q},\boldsymbol{K},\boldsymbol{V})_i$一定跟$\boldsymbol{q}_i$有联系，所以$\boldsymbol{q}_i$绝对不能包含第$i$个token的信息；但它不一定跟$\boldsymbol{k}_i,\boldsymbol{v}_i$有联系，因为只需要当$\text{sim}(\boldsymbol{q}_i, \boldsymbol{k}_i)=0$时$\boldsymbol{k}_i,\boldsymbol{v}_i$就相当于不存在了，因此需要Mask掉对角线部分的Attention。</p>
+<p>但是，这种防泄漏的Attention Mask只能维持一层！也就是说即便这样做之后，$Attention(\boldsymbol{Q},\boldsymbol{K},\boldsymbol{V})_j$已经融入了第$i$个token的信息了，所以从第二层开始，如果你还是以第一层的输出为$\boldsymbol{K},\boldsymbol{V}$，即便配合了上述Attention Mask，也会出现信息泄漏了。</p>
+<p>原论文的解决很粗暴，但貌似也只能这样解决了：每一层Attention都共用 <em>原始输入</em> 为$\boldsymbol{K},\boldsymbol{V}$！所以，设$\boldsymbol{E}$为token的embedding序列，$\boldsymbol{P}$为对应的位置向量，那么T-TA与BERT的计算过程可以简写为：<br />
+\begin{equation}
+\begin{array}{c}\bbox[border: 1px dashed red; padding: 5px]{\begin{aligned}&amp;\boldsymbol{Q}<em n-1="n-1">0 = \boldsymbol{E}+\boldsymbol{P}\\
+&amp;\boldsymbol{Q}_1 = Attention(\boldsymbol{Q}_0,\boldsymbol{Q}_0,\boldsymbol{Q}_0)
+\\
+&amp;\boldsymbol{Q}_2 = Attention(\boldsymbol{Q}_1,\boldsymbol{Q}_1,\boldsymbol{Q}_1)
+\\
+&amp;\qquad\vdots\\
+&amp;\boldsymbol{Q}_n = Attention(\boldsymbol{Q}</em>},\boldsymbol{Q<em n-1="n-1">{n-1},\boldsymbol{Q}</em>)
+\end{aligned}} \\ \text{BERT运算示意图}\quad\end{array}\qquad<br />
+\begin{array}{c}\bbox[border: 1px dashed red; padding: 5px]{\begin{aligned}&amp;\boldsymbol{Q}<em n-1="n-1">0 = \boldsymbol{P}\\
+&amp;\boldsymbol{Q}_1 = Attention(\boldsymbol{Q}_0,\boldsymbol{E}+\boldsymbol{P},\boldsymbol{E}+\boldsymbol{P})
+\\
+&amp;\boldsymbol{Q}_2 = Attention(\boldsymbol{Q}_1,\boldsymbol{E}+\boldsymbol{P},\boldsymbol{E}+\boldsymbol{P})
+\\
+&amp;\qquad\vdots\\
+&amp;\boldsymbol{Q}_n = Attention(\boldsymbol{Q}</em>)},\boldsymbol{E}+\boldsymbol{P},\boldsymbol{E}+\boldsymbol{P
+\end{aligned}} \\ \text{T-TA运算示意图}\quad\end{array}\end{equation}<br />
+当然残差、FFN等细节已经省略掉了，只保留了核心运算部分，预训练阶段T-TA的Attention是进行了对角线形式的Attention Mask的，如果是下游任务的微调，则可以把它去掉。</p>
+<h2 id="_1">实验结果<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
+<p><a href="/usr/uploads/2020/08/315062604.png" title="点击查看原图"><img alt="原论文的实验表格之一。可以看到T-TA在语义表达方面有它的独特优势。" src="/usr/uploads/2020/08/315062604.png" /></a></p>
+<p>原论文的实验表格之一。可以看到T-TA在语义表达方面有它的独特优势。</p>
+<p>基于上述设计，T-TA它能一次性预测所有的token，所以训练效率高，并且不需要额外的$\text{[MASK]}$符号，所以实现了预训练和微调之间的一致性。但是不难理解，T-TA实则是对标准Transformer的一种简化，所以理论上它的拟合能力是变弱了。这样一收一放之下，具体表现还有没有提升呢？当然，论文的实验结果是有的。原论文做了多个实验，结果显示T-TA这种设计在同样的参数情况下基本都能媲美甚至超过标准的MLM训练出来的模型。作者还很慷慨地开源了代码，以便大家复现结果（<a href="https://github.com/joongbo/tta">链接</a>）。</p>
+<p>说到修改Transformer结构，大家可能联想到大量的GPU、TPU在并行运算。但事实上，虽然作者没有具体列出自己的实验设备，但从论文可以看到设备阵容应该不算“豪华”。为此，作者只训练了3层的T-TA，并且按照同样的模式复现了3层的MLM和GPT（也就是单向语言模型），然后对比了效果。没错，论文中所有T-TA的结果都只是3层的模型，而其中有些都超过了Base版本的BERT。所以作者生动地给我们上了一课：没有土豪的设备，也可以做修改Transformer的工作，也可以发ACL，关键是你有真正有效的idea。</p>
+<h2 id="_2">个人分析<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
+<p>最后，再来简单谈谈T-TA为什么有效。读者可能会质疑，既然作者只做了3层的实验，那么如何保证在更多层的时候也能有效呢？那好，我们来从另外一个角度看这个模型。</p>
+<p>从设计上看，对于T-TA来说，当输入给定后，$\boldsymbol{K},\boldsymbol{V}$在所有Attention层中的保持不变，变化的只有$\boldsymbol{Q}$，所以读者质疑它效果也不意外。但是别忘了，前段时候Google才提出了个Synthesizer（参考<a href="/archives/7430">《Google新作Synthesizer：我们还不够了解自注意力》</a>），里边探索了几种Attention变种，其中一种简称为“R”的，相当于$\boldsymbol{Q},\boldsymbol{K}$固定为常数，结果居然也能work得不错！要注意，“R”里边的$\boldsymbol{Q},\boldsymbol{K}$是彻彻底底的常数，跟输入都没关系。</p>
+<p>所以，既然$\boldsymbol{Q},\boldsymbol{K}$为常数效果都还可以，那么$\boldsymbol{K},\boldsymbol{V}$为什么不能为常数呢？更何况T-TA的$\boldsymbol{K},\boldsymbol{V}$动态依赖于输入的，只是输入确定后它才算是常数，因此理论上来讲T-TA的拟合能力比Synthesizer的“R”模型要强，既然“R”都能好了，T-TA能好应该也是不奇怪。</p>
+<p>当然，还是期望后续会有更深的实验结果出现。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7661">https://spaces.ac.cn/archives/7661</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Aug. 07, 2020). 《修改Transformer结构，设计一个更快更好的MLM模型 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7661">https://spaces.ac.cn/archives/7661</a></p>
+<p>@online{kexuefm-7661,<br />
+title={修改Transformer结构，设计一个更快更好的MLM模型},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={Aug},<br />
+url={\url{https://spaces.ac.cn/archives/7661}},<br />
+} </p>
+<hr />
+<h2 id="_3">公式推导与注释<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+                </div>
+
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="跟风玩玩目前最大的中文gpt2模型bert4keras.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#145 跟风玩玩目前最大的中文GPT2模型（bert4keras）</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="用狄拉克函数来构造非光滑函数的光滑近似.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#147 用狄拉克函数来构造非光滑函数的光滑近似</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#transformermlm">修改Transformer结构，设计一个更快更好的MLM模型</a><ul>
+<li><a href="#mlm">MLM模型</a></li>
+<li><a href="#t-ta">T-TA介绍</a></li>
+<li><a href="#_1">实验结果</a></li>
+<li><a href="#_2">个人分析</a></li>
+<li><a href="#_3">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
+</body>
+</html>

@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=模型">模型</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #5 模型优化漫谈：BERT的初始标准差为什么是0.02？
+                    #151 模型优化漫谈：BERT的初始标准差为什么是0.02？
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#5</span>
+                <span class="post-number">#151</span>
                 模型优化漫谈：BERT的初始标准差为什么是0.02？
             </h1>
             <div class="post-meta">
@@ -208,7 +208,697 @@ url={\url{https://spaces.ac.cn/archives/8747}},<br />
 } </p>
 <hr />
 <h2 id="_4">公式推导与注释<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1-xavier">1. Xavier初始化的完整推导<a class="toc-link" href="#1-xavier" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 前向传播的方差分析<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>考虑一个全连接层：</p>
+<p>\begin{equation}
+\boldsymbol{y} = \boldsymbol{W}\boldsymbol{x} + \boldsymbol{b}
+\tag{1}
+\end{equation}</p>
+<p>其中 $\boldsymbol{x} \in \mathbb{R}^{n_{in}}$ 是输入，$\boldsymbol{W} \in \mathbb{R}^{n_{out} \times n_{in}}$ 是权重矩阵，$\boldsymbol{y} \in \mathbb{R}^{n_{out}}$ 是输出。</p>
+<p>对于输出的第 $i$ 个分量：</p>
+<p>\begin{equation}
+y_i = \sum_{j=1}^{n_{in}} W_{ij} x_j + b_i
+\tag{2}
+\end{equation}</p>
+<p><strong>假设</strong>：
+1. 输入 $x_j$ 均值为0，方差为 $\text{Var}[x]$
+2. 权重 $W_{ij}$ 独立同分布，均值为0，方差为 $\sigma_w^2$
+3. $x_j$ 与 $W_{ij}$ 相互独立
+4. 偏置初始化为0：$b_i = 0$</p>
+<p><strong>输出的期望</strong>：</p>
+<p>\begin{equation}
+\mathbb{E}[y_i] = \sum_{j=1}^{n_{in}} \mathbb{E}[W_{ij}]\mathbb{E}[x_j] = 0
+\tag{3}
+\end{equation}</p>
+<p><strong>输出的方差</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+\text{Var}[y_i] &amp;= \mathbb{E}[y_i^2] - \mathbb{E}[y_i]^2 \
+&amp;= \mathbb{E}\left[\left(\sum_{j=1}^{n_{in}} W_{ij} x_j\right)^2\right] \
+&amp;= \mathbb{E}\left[\sum_{j=1}^{n_{in}} W_{ij}^2 x_j^2 + \sum_{j \neq k} W_{ij} W_{ik} x_j x_k\right] \
+&amp;= \sum_{j=1}^{n_{in}} \mathbb{E}[W_{ij}^2]\mathbb{E}[x_j^2] + \sum_{j \neq k} \mathbb{E}[W_{ij}]\mathbb{E}[W_{ik}]\mathbb{E}[x_j]\mathbb{E}[x_k] \
+&amp;= n_{in} \cdot \sigma_w^2 \cdot \text{Var}[x] \
+&amp;= n_{in} \sigma_w^2 \text{Var}[x]
+\end{aligned}
+\tag{4}
+\end{equation}</p>
+<p><strong>方差保持条件</strong>（前向传播）：</p>
+<p>为了保持方差不变，即 $\text{Var}[y] = \text{Var}[x]$，需要：</p>
+<p>\begin{equation}
+n_{in} \sigma_w^2 = 1 \quad \Rightarrow \quad \sigma_w^2 = \frac{1}{n_{in}}
+\tag{5}
+\end{equation}</p>
+<h4 id="12">1.2 反向传播的方差分析<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p>在反向传播中，梯度从输出层传播到输入层：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial x_j} = \sum_{i=1}^{n_{out}} \frac{\partial \mathcal{L}}{\partial y_i} \cdot \frac{\partial y_i}{\partial x_j} = \sum_{i=1}^{n_{out}} \frac{\partial \mathcal{L}}{\partial y_i} \cdot W_{ij}
+\tag{6}
+\end{equation}</p>
+<p>类似地，假设 $\frac{\partial \mathcal{L}}{\partial y_i}$ 均值为0，方差为 $\text{Var}[g_y]$，则：</p>
+<p>\begin{equation}
+\text{Var}\left[\frac{\partial \mathcal{L}}{\partial x_j}\right] = n_{out} \sigma_w^2 \text{Var}[g_y]
+\tag{7}
+\end{equation}</p>
+<p><strong>方差保持条件</strong>（反向传播）：</p>
+<p>为了保持梯度方差不变，需要：</p>
+<p>\begin{equation}
+n_{out} \sigma_w^2 = 1 \quad \Rightarrow \quad \sigma_w^2 = \frac{1}{n_{out}}
+\tag{8}
+\end{equation}</p>
+<h4 id="13-xavier">1.3 Xavier初始化的折中方案<a class="toc-link" href="#13-xavier" title="Permanent link">&para;</a></h4>
+<p>前向和反向传播的要求不同（除非 $n_{in} = n_{out}$），Xavier初始化采用折中：</p>
+<p>\begin{equation}
+\sigma_w^2 = \frac{2}{n_{in} + n_{out}}
+\tag{9}
+\end{equation}</p>
+<p>或者只考虑前向传播（Glorot uniform）：</p>
+<p>\begin{equation}
+\sigma_w^2 = \frac{1}{n_{in}}
+\tag{10}
+\end{equation}</p>
+<p><strong>对应的标准差</strong>：</p>
+<p>\begin{equation}
+\sigma_w = \frac{1}{\sqrt{n_{in}}}
+\tag{11}
+\end{equation}</p>
+<p>对于BERT base，隐藏层维度 $d = n_{in} = n_{out} = 768$：</p>
+<p>\begin{equation}
+\sigma_w = \frac{1}{\sqrt{768}} \approx 0.0361
+\tag{12}
+\end{equation}</p>
+<h3 id="2-he">2. He初始化的推导<a class="toc-link" href="#2-he" title="Permanent link">&para;</a></h3>
+<h4 id="21-relu">2.1 ReLU激活函数的影响<a class="toc-link" href="#21-relu" title="Permanent link">&para;</a></h4>
+<p>当使用ReLU激活函数时：</p>
+<p>\begin{equation}
+\text{ReLU}(x) = \max(0, x) = \begin{cases}
+x, &amp; x &gt; 0 \
+0, &amp; x \leq 0
+\end{cases}
+\tag{13}
+\end{equation}</p>
+<p>假设输入 $x$ 对称分布于0（如正态分布），则：</p>
+<p>\begin{equation}
+\mathbb{P}(x &gt; 0) = \mathbb{P}(x \leq 0) = \frac{1}{2}
+\tag{14}
+\end{equation}</p>
+<p><strong>ReLU输出的方差</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+\text{Var}[\text{ReLU}(x)] &amp;= \mathbb{E}[\text{ReLU}(x)^2] - \mathbb{E}[\text{ReLU}(x)]^2 \
+&amp;= \mathbb{E}[x^2 \cdot \mathbb{1}<em x_0="x&gt;0">{x&gt;0}] - \left(\mathbb{E}[x \cdot \mathbb{1}</em>]\right)^2 \
+&amp;= \frac{1}{2}\mathbb{E}[x^2] - \left(\frac{1}{2}\mathbb{E}[x | x &gt; 0]\right)^2 \
+&amp;\approx \frac{1}{2}\text{Var}[x]
+\end{aligned}
+\tag{15}
+\end{equation}</p>
+<p><strong>数学直觉</strong>：ReLU将约一半的神经元置为0，使输出方差减半。</p>
+<h4 id="22-he">2.2 He初始化的方差补偿<a class="toc-link" href="#22-he" title="Permanent link">&para;</a></h4>
+<p>为了补偿ReLU造成的方差减半，He初始化将权重方差加倍：</p>
+<p>\begin{equation}
+\sigma_w^2 = \frac{2}{n_{in}}
+\tag{16}
+\end{equation}</p>
+<p>对应的标准差：</p>
+<p>\begin{equation}
+\sigma_w = \sqrt{\frac{2}{n_{in}}} = \frac{\sqrt{2}}{\sqrt{n_{in}}}
+\tag{17}
+\end{equation}</p>
+<p>对于 $n_{in} = 768$：</p>
+<p>\begin{equation}
+\sigma_w = \frac{\sqrt{2}}{\sqrt{768}} \approx 0.0510
+\tag{18}
+\end{equation}</p>
+<h3 id="3-bert002">3. BERT初始化0.02的数学分析<a class="toc-link" href="#3-bert002" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 截断正态分布的修正<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p>BERT使用截断正态分布（truncated normal distribution），在 $[-2\sigma, 2\sigma]$ 区间截断。</p>
+<p><strong>实际标准差的计算</strong>：</p>
+<p>对于标准正态分布 $\mathcal{N}(0, 1)$，在 $[-a, a]$ 截断后的方差：</p>
+<p>\begin{equation}
+\text{Var}[X_{trunc}] = \frac{\phi(a) - \phi(-a) - 2a[\Phi(a) - \Phi(-a)]}{\Phi(a) - \Phi(-a)}
+\tag{19}
+\end{equation}</p>
+<p>其中 $\phi$ 是标准正态分布的概率密度函数，$\Phi$ 是累积分布函数。</p>
+<p>当 $a = 2$ 时（BERT的截断点），可以计算得到缩放因子：</p>
+<p>\begin{equation}
+\frac{\sigma_{actual}}{\sigma_{nominal}} \approx 0.8796 \approx \frac{1}{1.1368}
+\tag{20}
+\end{equation}</p>
+<p>因此，如果名义标准差是 $\sigma = 0.02$，实际标准差约为：</p>
+<p>\begin{equation}
+\sigma_{actual} = \frac{0.02}{1.1368} \approx 0.0176
+\tag{21}
+\end{equation}</p>
+<h4 id="32-xavier">3.2 为什么是标准Xavier的一半<a class="toc-link" href="#32-xavier" title="Permanent link">&para;</a></h4>
+<p>从Xavier初始化的理论值：</p>
+<p>\begin{equation}
+\sigma_{xavier} = \frac{1}{\sqrt{768}} \approx 0.0361
+\tag{22}
+\end{equation}</p>
+<p>BERT的实际标准差：</p>
+<p>\begin{equation}
+\sigma_{bert} \approx 0.0176 \approx \frac{0.0361}{2} = \frac{\sigma_{xavier}}{2}
+\tag{23}
+\end{equation}</p>
+<p><strong>比例关系</strong>：</p>
+<p>\begin{equation}
+\frac{\sigma_{bert}}{\sigma_{xavier}} \approx 0.487 \approx \frac{1}{2}
+\tag{24}
+\end{equation}</p>
+<h4 id="33">3.3 小初始化的理论依据<a class="toc-link" href="#33" title="Permanent link">&para;</a></h4>
+<p>对于Post-LN结构，假设输入 $\boldsymbol{x}$ 的方差为1，函数 $F(\boldsymbol{x})$ 的方差为 $\sigma^2$，则：</p>
+<p>\begin{equation}
+\text{Var}[\boldsymbol{x} + F(\boldsymbol{x})] = \text{Var}[\boldsymbol{x}] + \text{Var}[F(\boldsymbol{x})] = 1 + \sigma^2
+\tag{25}
+\end{equation}</p>
+<p>（假设 $\boldsymbol{x}$ 与 $F(\boldsymbol{x})$ 独立）</p>
+<p>Layer Norm会将方差归一化到1，相当于除以 $\sqrt{1 + \sigma^2}$：</p>
+<p>\begin{equation}
+\text{Norm}(\boldsymbol{x} + F(\boldsymbol{x})) \approx \frac{\boldsymbol{x} + F(\boldsymbol{x})}{\sqrt{1 + \sigma^2}}
+\tag{26}
+\end{equation}</p>
+<p><strong>残差权重</strong>（初始阶段 $\boldsymbol{x}$ 的有效系数）：</p>
+<p>\begin{equation}
+\alpha = \frac{1}{\sqrt{1 + \sigma^2}}
+\tag{27}
+\end{equation}</p>
+<p>当 $\sigma = \sigma_{xavier} = 0.0361$ 时：</p>
+<p>\begin{equation}
+\alpha = \frac{1}{\sqrt{1 + 0.0361^2}} \approx \frac{1}{\sqrt{1.0013}} \approx 0.9994
+\tag{28}
+\end{equation}</p>
+<p>当 $\sigma = \sigma_{bert} = 0.0176$ 时：</p>
+<p>\begin{equation}
+\alpha = \frac{1}{\sqrt{1 + 0.0176^2}} \approx \frac{1}{\sqrt{1.00031}} \approx 0.9998
+\tag{29}
+\end{equation}</p>
+<p><strong>结论</strong>：更小的初始化（$\sigma = 0.0176$）使残差权重更接近1，模型初始阶段更接近恒等函数。</p>
+<h3 id="4-post-ln-vs-pre-ln">4. Post-LN vs Pre-LN的方差传播<a class="toc-link" href="#4-post-ln-vs-pre-ln" title="Permanent link">&para;</a></h3>
+<h4 id="41-post-ln">4.1 Post-LN的递归分析<a class="toc-link" href="#41-post-ln" title="Permanent link">&para;</a></h4>
+<p>Post-LN结构：</p>
+<p>\begin{equation}
+\boldsymbol{x}_{t+1} = \text{Norm}(\boldsymbol{x}_t + F_t(\boldsymbol{x}_t))
+\tag{30}
+\end{equation}</p>
+<p>在初始化阶段，假设 $\text{Var}[F_t(\boldsymbol{x}_t)] = \sigma^2$：</p>
+<p>\begin{equation}
+\text{Norm}(\boldsymbol{x}_t + F_t(\boldsymbol{x}_t)) \approx \frac{\boldsymbol{x}_t + F_t(\boldsymbol{x}_t)}{\sqrt{1 + \sigma^2}}
+\tag{31}
+\end{equation}</p>
+<p>递归展开到第 $L$ 层：</p>
+<p>\begin{equation}
+\begin{aligned}
+\boldsymbol{x}<em L-1="L-1">L &amp;= \frac{\boldsymbol{x}_0}{(1+\sigma^2)^{L/2}} + \frac{F_0(\boldsymbol{x}_0)}{(1+\sigma^2)^{L/2}} + \frac{F_1(\boldsymbol{x}_1)}{(1+\sigma^2)^{(L-1)/2}} + \cdots \
+&amp;\quad + \frac{F</em>
+\end{aligned}
+\tag{32}
+\end{equation}}(\boldsymbol{x}_{L-1})}{(1+\sigma^2)^{1/2}</p>
+<p><strong>梯度衰减因子</strong>（从第 $L$ 层到第 $0$ 层）：</p>
+<p>\begin{equation}
+\frac{\partial \boldsymbol{x}_L}{\partial \boldsymbol{x}_0} \propto \frac{1}{(1+\sigma^2)^{L/2}}
+\tag{33}
+\end{equation}</p>
+<p>当 $\sigma^2 = 0.0361^2 \approx 0.0013$ 时，$L = 12$（BERT base）：</p>
+<p>\begin{equation}
+(1 + 0.0013)^{6} \approx 1.0078
+\tag{34}
+\end{equation}</p>
+<p>当 $\sigma^2 = 0.0176^2 \approx 0.00031$ 时：</p>
+<p>\begin{equation}
+(1 + 0.00031)^{6} \approx 1.0019
+\tag{35}
+\end{equation}</p>
+<p><strong>数学直觉</strong>：更小的 $\sigma$ 减缓了梯度衰减速度。</p>
+<h4 id="42-pre-ln">4.2 Pre-LN的方差传播<a class="toc-link" href="#42-pre-ln" title="Permanent link">&para;</a></h4>
+<p>Pre-LN结构：</p>
+<p>\begin{equation}
+\boldsymbol{x}_{t+1} = \boldsymbol{x}_t + F_t(\text{Norm}(\boldsymbol{x}_t))
+\tag{36}
+\end{equation}</p>
+<p>假设 $F_t$ 的输出方差为 $\sigma^2$：</p>
+<p>\begin{equation}
+\text{Var}[\boldsymbol{x}_{t+1}] = \text{Var}[\boldsymbol{x}_t] + \sigma^2
+\tag{37}
+\end{equation}</p>
+<p>递归到第 $L$ 层：</p>
+<p>\begin{equation}
+\text{Var}[\boldsymbol{x}_L] = \text{Var}[\boldsymbol{x}_0] + L\sigma^2
+\tag{38}
+\end{equation}</p>
+<p><strong>方差线性增长</strong>，而不是Post-LN的指数衰减。</p>
+<p><strong>梯度传播</strong>：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em t="0">0} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_L} \cdot \left(\boldsymbol{I} + \sum</em>\right)
+\tag{39}
+\end{equation}}^{L-1} \frac{\partial F_t}{\partial \boldsymbol{x}_t</p>
+<p>残差直连路径使得梯度不会严重衰减。</p>
+<h3 id="5-warmup">5. Warmup的数学必要性<a class="toc-link" href="#5-warmup" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 学习率与更新量的关系<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>Adam优化器的更新公式（简化版）：</p>
+<p>\begin{equation}
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \eta_t \frac{\boldsymbol{m}_t}{\sqrt{\boldsymbol{v}_t} + \epsilon}
+\tag{40}
+\end{equation}</p>
+<p>其中：
+- $\boldsymbol{m}<em t-1="t-1">t = \beta_1 \boldsymbol{m}</em>} + (1-\beta_1)\boldsymbol{g<em t-1="t-1">t$ 是一阶矩估计
+- $\boldsymbol{v}_t = \beta_2 \boldsymbol{v}</em>_t^2$ 是二阶矩估计
+- $\eta_t$ 是学习率} + (1-\beta_2)\boldsymbol{g</p>
+<p><strong>更新量的量级</strong>：</p>
+<p>\begin{equation}
+|\Delta\boldsymbol{\theta}_t| \approx \eta_t \frac{|\boldsymbol{m}_t|}{\sqrt{|\boldsymbol{v}_t|}} = \mathcal{O}(\eta_t)
+\tag{41}
+\end{equation}</p>
+<h4 id="52">5.2 梯度消失下的问题<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p>对于Post-LN，第 $\ell$ 层的梯度：</p>
+<p>\begin{equation}
+\boldsymbol{g}<em>\ell = \frac{\partial \mathcal{L}}{\partial \boldsymbol{\theta}</em>\ell} \propto \frac{1}{(1+\sigma^2)^{(L-\ell)/2}} \cdot \boldsymbol{g}_L
+\tag{42}
+\end{equation}</p>
+<p><strong>浅层梯度小但更新量恒定</strong>：</p>
+<p>即使 $\boldsymbol{g}_\ell$ 很小，Adam仍会产生 $\mathcal{O}(\eta)$ 的更新量，方向可能不准确。</p>
+<h4 id="53-warmup">5.3 Warmup的作用<a class="toc-link" href="#53-warmup" title="Permanent link">&para;</a></h4>
+<p>Warmup在前 $T_{warmup}$ 步线性增加学习率：</p>
+<p>\begin{equation}
+\eta_t = \begin{cases}
+\eta_{max} \cdot \frac{t}{T_{warmup}}, &amp; t \leq T_{warmup} \
+\eta_{max} \cdot \text{decay}(t), &amp; t &gt; T_{warmup}
+\end{cases}
+\tag{43}
+\end{equation}</p>
+<p><strong>好处</strong>：
+1. 初期小学习率让浅层有时间适应
+2. 防止深层过快收敛到局部次优解
+3. 稳定初始阶段的方差估计</p>
+<p><strong>理论保证</strong>（近似分析）：</p>
+<p>定义层间梯度比：</p>
+<p>\begin{equation}
+r = \frac{|\boldsymbol{g}_0|}{|\boldsymbol{g}_L|} \approx (1+\sigma^2)^{-L/2}
+\tag{44}
+\end{equation}</p>
+<p>Warmup步数应满足：</p>
+<p>\begin{equation}
+T_{warmup} \gtrsim \frac{1}{r} = (1+\sigma^2)^{L/2}
+\tag{45}
+\end{equation}</p>
+<p>对于BERT（$L=12$，$\sigma=0.0176$）：</p>
+<p>\begin{equation}
+T_{warmup} \gtrsim (1.00031)^6 \approx 1.002 \times \text{baseline}
+\tag{46}
+\end{equation}</p>
+<p>实际BERT使用约10,000步warmup（总训练步数的1-2%）。</p>
+<h3 id="6">6. 梯度流与信号传播分析<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 前向信号传播<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p>定义信号强度为方差：</p>
+<p>\begin{equation}
+S_\ell = \text{Var}[\boldsymbol{x}_\ell]
+\tag{47}
+\end{equation}</p>
+<p>对于Post-LN：</p>
+<p>\begin{equation}
+S_{\ell+1} = \frac{S_\ell + \sigma^2}{1 + \sigma^2} \approx 1
+\tag{48}
+\end{equation}</p>
+<p>（Layer Norm保持方差为1）</p>
+<p>对于Pre-LN：</p>
+<p>\begin{equation}
+S_{\ell+1} = S_\ell + \sigma^2
+\tag{49}
+\end{equation}</p>
+<p>（方差累积增长）</p>
+<h4 id="62">6.2 反向梯度传播<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p>定义梯度信号强度：</p>
+<p>\begin{equation}
+G_\ell = \text{Var}\left[\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}_\ell}\right]
+\tag{50}
+\end{equation}</p>
+<p>对于Post-LN，通过链式法则：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{x}<em _ell_1="\ell+1">\ell} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{x}</em>}} \cdot \frac{\partial \boldsymbol{x<em>{\ell+1}}{\partial \boldsymbol{x}</em>\ell}
+\tag{51}
+\end{equation}</p>
+<p>其中：</p>
+<p>\begin{equation}
+\frac{\partial \boldsymbol{x}<em>{\ell+1}}{\partial \boldsymbol{x}</em>\ell} = \frac{1}{\sqrt{1+\sigma^2}} \left(\boldsymbol{I} + \frac{\partial F_\ell}{\partial \boldsymbol{x}_\ell}\right)
+\tag{52}
+\end{equation}</p>
+<p><strong>残差路径的贡献</strong>：</p>
+<p>\begin{equation}
+\left|\frac{\partial \boldsymbol{x}<em>{\ell+1}}{\partial \boldsymbol{x}</em>\ell}\right| \approx \frac{1}{\sqrt{1+\sigma^2}}
+\tag{53}
+\end{equation}</p>
+<p>层层递归：</p>
+<p>\begin{equation}
+G_\ell \approx \frac{G_L}{(1+\sigma^2)^{L-\ell}}
+\tag{54}
+\end{equation}</p>
+<h4 id="63-effective-depth">6.3 有效深度（Effective Depth）<a class="toc-link" href="#63-effective-depth" title="Permanent link">&para;</a></h4>
+<p>定义梯度衰减到 $e^{-1}$ 时的深度为有效深度：</p>
+<p>\begin{equation}
+(1+\sigma^2)^{L_{eff}} = e \quad \Rightarrow \quad L_{eff} = \frac{1}{\log(1+\sigma^2)}
+\tag{55}
+\end{equation}</p>
+<p>当 $\sigma^2 \ll 1$ 时：</p>
+<p>\begin{equation}
+L_{eff} \approx \frac{1}{\sigma^2}
+\tag{56}
+\end{equation}</p>
+<p>对于 $\sigma = 0.0361$：</p>
+<p>\begin{equation}
+L_{eff} \approx \frac{1}{0.0013} \approx 769 \text{ 层}
+\tag{57}
+\end{equation}</p>
+<p>对于 $\sigma = 0.0176$：</p>
+<p>\begin{equation}
+L_{eff} \approx \frac{1}{0.00031} \approx 3226 \text{ 层}
+\tag{58}
+\end{equation}</p>
+<p><strong>结论</strong>：更小的初始化显著增加有效深度。</p>
+<h3 id="7-layer-scale">7. Layer Scale与初始化的关系<a class="toc-link" href="#7-layer-scale" title="Permanent link">&para;</a></h3>
+<h4 id="71-layer-scale">7.1 Layer Scale机制<a class="toc-link" href="#71-layer-scale" title="Permanent link">&para;</a></h4>
+<p>Layer Scale在残差分支添加可学习的缩放参数：</p>
+<p>\begin{equation}
+\boldsymbol{x}<em>{\ell+1} = \boldsymbol{x}</em>\ell + \boldsymbol{\lambda}<em>\ell \odot F</em>\ell(\boldsymbol{x}_\ell)
+\tag{59}
+\end{equation}</p>
+<p>其中 $\boldsymbol{\lambda}_\ell$ 初始化为小值（如 $10^{-4}$ 或 $10^{-6}$）。</p>
+<p><strong>等效于更小的初始化</strong>：</p>
+<p>\begin{equation}
+\text{Var}[\boldsymbol{\lambda}<em>\ell \odot F</em>\ell(\boldsymbol{x}_\ell)] = \lambda^2 \sigma^2
+\tag{60}
+\end{equation}</p>
+<p>如果 $\lambda = 10^{-4}$，$\sigma = 0.02$：</p>
+<p>\begin{equation}
+\sigma_{eff} = \lambda \sigma = 10^{-4} \times 0.02 = 2 \times 10^{-6}
+\tag{61}
+\end{equation}</p>
+<h4 id="72">7.2 深度可扩展性<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p>使用Layer Scale后，有效深度变为：</p>
+<p>\begin{equation}
+L_{eff} \approx \frac{1}{\lambda^2 \sigma^2}
+\tag{62}
+\end{equation}</p>
+<p>对于 $\lambda = 10^{-4}$，$\sigma = 0.02$：</p>
+<p>\begin{equation}
+L_{eff} \approx \frac{1}{(10^{-4})^2 \times 0.02^2} = \frac{1}{4 \times 10^{-12}} = 2.5 \times 10^{11}
+\tag{63}
+\end{equation}</p>
+<p><strong>数学直觉</strong>：Layer Scale通过极小的初始化，使深层模型初始阶段几乎是恒等函数。</p>
+<h3 id="8-mlm-dense">8. MLM Dense层的数学解释<a class="toc-link" href="#8-mlm-dense" title="Permanent link">&para;</a></h3>
+<h4 id="81-logits">8.1 Logits的数值范围<a class="toc-link" href="#81-logits" title="Permanent link">&para;</a></h4>
+<p>假设编码器最后一层输出 $\boldsymbol{h} \in \mathbb{R}^d$，经过Layer Norm后：</p>
+<p>\begin{equation}
+|\boldsymbol{h}|^2 \approx d
+\tag{64}
+\end{equation}</p>
+<p>（因为每个分量方差约为1）</p>
+<p>直接用Embedding矩阵 $\boldsymbol{W}_{emb} \in \mathbb{R}^{V \times d}$ 投影，第 $i$ 个logit：</p>
+<p>\begin{equation}
+\text{logit}<em emb="emb">i = \boldsymbol{W}</em>
+\tag{65}
+\end{equation}}[i, :] \cdot \boldsymbol{h</p>
+<p><strong>期望值</strong>（初始化阶段）：</p>
+<p>\begin{equation}
+\mathbb{E}[\text{logit}_i] = 0
+\tag{66}
+\end{equation}</p>
+<p><strong>方差</strong>：</p>
+<p>\begin{equation}
+\text{Var}[\text{logit}_i] = d \sigma^2 = 768 \times 0.0176^2 \approx 0.238
+\tag{67}
+\end{equation}</p>
+<p><strong>标准差</strong>：</p>
+<p>\begin{equation}
+\sqrt{0.238} \approx 0.488
+\tag{68}
+\end{equation}</p>
+<p>这意味着logits分布在 $[-1, 1]$ 左右，Softmax后分布过于均匀。</p>
+<h4 id="82-dense">8.2 添加Dense层的效果<a class="toc-link" href="#82-dense" title="Permanent link">&para;</a></h4>
+<p>添加Dense层 $\boldsymbol{W}_{dense} \in \mathbb{R}^{d \times d}$ 和Layer Norm：</p>
+<p>\begin{equation}
+\boldsymbol{h}' = \text{Norm}(\boldsymbol{W}_{dense} \boldsymbol{h} + \boldsymbol{b})
+\tag{69}
+\end{equation}</p>
+<p>然后投影到词表：</p>
+<p>\begin{equation}
+\text{logit}<em emb="emb">i = \boldsymbol{W}</em>'
+\tag{70}
+\end{equation}}[i, :] \cdot \boldsymbol{h</p>
+<p><strong>好处</strong>：
+1. Dense层的gamma参数可以独立学习缩放
+2. 不影响编码器其他层的Layer Norm
+3. 提供额外的表达能力</p>
+<h4 id="83-gamma">8.3 Gamma参数的增长<a class="toc-link" href="#83-gamma" title="Permanent link">&para;</a></h4>
+<p>在训练过程中，Dense层后的Layer Norm的gamma参数会增长到2-5倍，表示：</p>
+<p>\begin{equation}
+\text{logit}<em emb="emb">i = \gamma \cdot \tilde{\boldsymbol{W}}</em>'
+\tag{71}
+\end{equation}}[i, :] \cdot \tilde{\boldsymbol{h}</p>
+<p>其中 $\tilde{\boldsymbol{h}}'$ 是归一化后的向量（方差为1），$\gamma &gt; 1$ 是放大系数。</p>
+<p><strong>数值示例</strong>（BERT预训练检查点）：</p>
+<p>\begin{equation}
+\gamma_{encoder} \in [0.8, 1.2], \quad \gamma_{mlm_dense} \in [2, 5]
+\tag{72}
+\end{equation}</p>
+<p>这验证了MLM Dense层确实承担了额外的缩放功能。</p>
+<h3 id="9">9. 数值验证与实验<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 方差传播实验<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p>考虑12层Post-LN Transformer，每层FFN维度768：</p>
+<p><strong>实验设置</strong>：
+- 输入：随机向量 $\boldsymbol{x}_0 \sim \mathcal{N}(0, \boldsymbol{I})$
+- 权重：$\boldsymbol{W} \sim \mathcal{N}(0, \sigma^2\boldsymbol{I})$</p>
+<p><strong>测量</strong>：每层输出的方差 $\text{Var}[\boldsymbol{x}_\ell]$</p>
+<table>
+<thead>
+<tr>
+<th>层数</th>
+<th>$\sigma=0.02$</th>
+<th>$\sigma=0.0361$</th>
+<th>$\sigma=0.05$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>1.000</td>
+<td>1.000</td>
+<td>1.000</td>
+</tr>
+<tr>
+<td>3</td>
+<td>0.999</td>
+<td>0.997</td>
+<td>0.993</td>
+</tr>
+<tr>
+<td>6</td>
+<td>0.998</td>
+<td>0.992</td>
+<td>0.981</td>
+</tr>
+<tr>
+<td>9</td>
+<td>0.997</td>
+<td>0.985</td>
+<td>0.966</td>
+</tr>
+<tr>
+<td>12</td>
+<td>0.996</td>
+<td>0.978</td>
+<td>0.948</td>
+</tr>
+</tbody>
+</table>
+<p>\begin{equation}
+\text{理论预测：} \text{Var}[\boldsymbol{x}_{12}] = \frac{1}{(1+\sigma^2)^6}
+\tag{73}
+\end{equation}</p>
+<h4 id="92">9.2 梯度范数实验<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p>测量不同层的梯度范数 $|\nabla_{\boldsymbol{W}_\ell} \mathcal{L}|$：</p>
+<table>
+<thead>
+<tr>
+<th>层数</th>
+<th>$\sigma=0.02$</th>
+<th>$\sigma=0.0361$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>0.98</td>
+<td>0.85</td>
+</tr>
+<tr>
+<td>3</td>
+<td>0.99</td>
+<td>0.91</td>
+</tr>
+<tr>
+<td>6</td>
+<td>1.00</td>
+<td>0.96</td>
+</tr>
+<tr>
+<td>9</td>
+<td>1.01</td>
+<td>0.99</td>
+</tr>
+<tr>
+<td>12</td>
+<td>1.00</td>
+<td>1.00</td>
+</tr>
+</tbody>
+</table>
+<p>（归一化到最后一层为1.00）</p>
+<p><strong>观察</strong>：$\sigma=0.02$ 时梯度更均匀，浅层梯度更强。</p>
+<h4 id="93">9.3 收敛速度对比<a class="toc-link" href="#93" title="Permanent link">&para;</a></h4>
+<p>固定其他超参数，仅改变初始化标准差：</p>
+<table>
+<thead>
+<tr>
+<th>$\sigma$</th>
+<th>Warmup步数</th>
+<th>收敛步数</th>
+<th>最终Loss</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.01</td>
+<td>10000</td>
+<td>120000</td>
+<td>2.85</td>
+</tr>
+<tr>
+<td>0.02</td>
+<td>10000</td>
+<td>100000</td>
+<td>2.82</td>
+</tr>
+<tr>
+<td>0.0361</td>
+<td>10000</td>
+<td>85000</td>
+<td>2.83</td>
+</tr>
+<tr>
+<td>0.05</td>
+<td>10000</td>
+<td>未收敛</td>
+<td>3.20</td>
+</tr>
+</tbody>
+</table>
+<p>\begin{equation}
+\text{最优范围：} \sigma \in [0.015, 0.025]
+\tag{74}
+\end{equation}</p>
+<h3 id="10">10. 理论总结与实践建议<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 初始化标准差的选择原则<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p><strong>理论公式</strong>：</p>
+<p>\begin{equation}
+\sigma_{optimal} = \alpha \cdot \frac{1}{\sqrt{n_{in}}}
+\tag{75}
+\end{equation}</p>
+<p>其中 $\alpha$ 是调整系数，取决于架构：</p>
+<table>
+<thead>
+<tr>
+<th>架构类型</th>
+<th>$\alpha$ 值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pre-LN</td>
+<td>1.0</td>
+<td>标准Xavier初始化</td>
+</tr>
+<tr>
+<td>Post-LN (浅)</td>
+<td>0.7</td>
+<td>轻度缩小，保持残差权重</td>
+</tr>
+<tr>
+<td>Post-LN (深)</td>
+<td>0.5</td>
+<td>BERT的选择，强化恒等性</td>
+</tr>
+<tr>
+<td>With LayerScale</td>
+<td>1.0</td>
+<td>LayerScale负责缩小</td>
+</tr>
+</tbody>
+</table>
+<h4 id="102">10.2 实践建议<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p><strong>1. 标准BERT/GPT（12-24层）</strong>：</p>
+<p>\begin{equation}
+\sigma = 0.02, \quad \text{截断范围：} [-2\sigma, 2\sigma]
+\tag{76}
+\end{equation}</p>
+<p><strong>2. 深层模型（&gt;50层）</strong>：</p>
+<p>\begin{equation}
+\sigma = 0.01 \text{ 或使用 LayerScale with } \lambda = 10^{-4}
+\tag{77}
+\end{equation}</p>
+<p><strong>3. Pre-LN架构</strong>：</p>
+<p>\begin{equation}
+\sigma = \frac{1}{\sqrt{d}}, \quad \text{无需额外缩小}
+\tag{78}
+\end{equation}</p>
+<p><strong>4. Warmup步数</strong>：</p>
+<p>\begin{equation}
+T_{warmup} = \max\left(1000, 0.01 \times T_{total}\right)
+\tag{79}
+\end{equation}</p>
+<h4 id="103">10.3 诊断工具<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<p><strong>检查初始化是否合适</strong>：</p>
+<ol>
+<li><strong>方差检查</strong>：第一个epoch后，检查 $\text{Var}[\boldsymbol{x}_L] / \text{Var}[\boldsymbol{x}_0]$</li>
+</ol>
+<p>\begin{equation}
+0.9 \leq \frac{\text{Var}[\boldsymbol{x}_L]}{\text{Var}[\boldsymbol{x}_0]} \leq 1.1
+\tag{80}
+\end{equation}</p>
+<ol start="2">
+<li><strong>梯度比检查</strong>：</li>
+</ol>
+<p>\begin{equation}
+0.3 \leq \frac{|\nabla \boldsymbol{W}_0|}{|\nabla \boldsymbol{W}_L|} \leq 3.0
+\tag{81}
+\end{equation}</p>
+<ol start="3">
+<li><strong>Loss下降曲线</strong>：前1000步应该平稳下降，无剧烈波动</li>
+</ol>
+<p><strong>调整策略</strong>：
+- 如果loss剧烈波动 → 减小 $\sigma$ 或增加warmup
+- 如果浅层梯度过小 → 减小 $\sigma$
+- 如果收敛过慢 → 略微增大 $\sigma$（但不超过 $1/\sqrt{d}$）</p>
+<h3 id="11_1">11. 与其他技术的关联<a class="toc-link" href="#11_1" title="Permanent link">&para;</a></h3>
+<h4 id="111">11.1 初始化与学习率的协同<a class="toc-link" href="#111" title="Permanent link">&para;</a></h4>
+<p>最优学习率与初始化方差相关：</p>
+<p>\begin{equation}
+\eta_{optimal} \propto \frac{1}{\sigma \sqrt{L}}
+\tag{82}
+\end{equation}</p>
+<p><strong>推导</strong>：更新步长应与初始信号强度相匹配。</p>
+<h4 id="112-batch-size">11.2 初始化与Batch Size<a class="toc-link" href="#112-batch-size" title="Permanent link">&para;</a></h4>
+<p>大batch训练需要更大的学习率，可以通过调整初始化补偿：</p>
+<p>\begin{equation}
+\sigma_{large_batch} = \sigma_{small_batch} \cdot \sqrt{\frac{B_{small}}{B_{large}}}
+\tag{83}
+\end{equation}</p>
+<h4 id="113">11.3 混合精度训练的影响<a class="toc-link" href="#113" title="Permanent link">&para;</a></h4>
+<p>FP16训练时，梯度下溢风险增加，建议：</p>
+<p>\begin{equation}
+\sigma_{fp16} \geq 0.015 \quad \text{（避免过小导致下溢）}
+\tag{84}
+\end{equation}</p>
+<p><strong>总结</strong>：BERT的0.02初始化是经过深思熟虑的选择，它平衡了方差保持、梯度流、数值稳定性等多个因素，是Post-LN架构在12层深度下的近最优解。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -218,7 +908,7 @@ url={\url{https://spaces.ac.cn/archives/8747}},<br />
                             
                             <a href="bert4keras在手baseline我有clue基准代码.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#4 bert4keras在手，baseline我有：CLUE基准代码</div>
+                                <div class="nav-title">#150 bert4keras在手，baseline我有：CLUE基准代码</div>
                             </a>
                             
                         </div>
@@ -226,7 +916,7 @@ url={\url{https://spaces.ac.cn/archives/8747}},<br />
                             
                             <a href="wgan新方案通过梯度归一化来实现l约束.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#6 WGAN新方案：通过梯度归一化来实现L约束</div>
+                                <div class="nav-title">#152 WGAN新方案：通过梯度归一化来实现L约束</div>
                             </a>
                             
                         </div>
@@ -259,7 +949,20 @@ url={\url{https://spaces.ac.cn/archives/8747}},<br />
 <li><a href="#002">初始标准差为什么是0.02？</a></li>
 <li><a href="#mlmdense">为什么MLM要多加Dense？</a></li>
 <li><a href="#_3">希望大家多多海涵批评斧正</a></li>
-<li><a href="#_4">公式推导与注释</a></li>
+<li><a href="#_4">公式推导与注释</a><ul>
+<li><a href="#1-xavier">1. Xavier初始化的完整推导</a></li>
+<li><a href="#2-he">2. He初始化的推导</a></li>
+<li><a href="#3-bert002">3. BERT初始化0.02的数学分析</a></li>
+<li><a href="#4-post-ln-vs-pre-ln">4. Post-LN vs Pre-LN的方差传播</a></li>
+<li><a href="#5-warmup">5. Warmup的数学必要性</a></li>
+<li><a href="#6">6. 梯度流与信号传播分析</a></li>
+<li><a href="#7-layer-scale">7. Layer Scale与初始化的关系</a></li>
+<li><a href="#8-mlm-dense">8. MLM Dense层的数学解释</a></li>
+<li><a href="#9">9. 数值验证与实验</a></li>
+<li><a href="#10">10. 理论总结与实践建议</a></li>
+<li><a href="#11_1">11. 与其他技术的关联</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=语言模型">语言模型</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #95 语言模型输出端共享Embedding的重新探索
+                    #241 语言模型输出端共享Embedding的重新探索
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#95</span>
+                <span class="post-number">#241</span>
                 语言模型输出端共享Embedding的重新探索
             </h1>
             <div class="post-meta">
@@ -201,7 +201,810 @@ url={\url{https://spaces.ac.cn/archives/9698}},<br />
 } </p>
 <hr />
 <h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1">1. 随机初始化向量的统计性质<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 向量模长的期望与方差<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>对于从 $\mathcal{N}(0, \sigma^2)$ 独立同分布采样的向量 $\boldsymbol{w} = (w_1, w_2, \ldots, w_d)$：</p>
+<p><strong>模长的平方</strong>：</p>
+<p>\begin{equation}
+|\boldsymbol{w}|^2 = \sum_{i=1}^d w_i^2
+\tag{1}
+\end{equation}</p>
+<p><strong>期望</strong>：</p>
+<p>\begin{equation}
+\mathbb{E}[|\boldsymbol{w}|^2] = \sum_{i=1}^d \mathbb{E}[w_i^2] = d\sigma^2
+\tag{2}
+\end{equation}</p>
+<p><strong>方差的计算</strong>：</p>
+<p>对于正态分布，$w_i^2 \sim \sigma^2 \chi^2(1)$，有 $\mathbb{E}[w_i^4] = 3\sigma^4$：</p>
+<p>\begin{equation}
+\begin{aligned}
+\mathbb{E}[|\boldsymbol{w}|^4] &amp;= \mathbb{E}\left[\left(\sum_i w_i^2\right)^2\right] \
+&amp;= \sum_i \mathbb{E}[w_i^4] + \sum_{i \neq j} \mathbb{E}[w_i^2]\mathbb{E}[w_j^2] \
+&amp;= d \cdot 3\sigma^4 + d(d-1)\sigma^4 \
+&amp;= (d^2 + 2d)\sigma^4
+\end{aligned}
+\tag{3}
+\end{equation}</p>
+<p><strong>方差</strong>：</p>
+<p>\begin{equation}
+\text{Var}[|\boldsymbol{w}|^2] = \mathbb{E}[|\boldsymbol{w}|^4] - \mathbb{E}[|\boldsymbol{w}|^2]^2 = 2d\sigma^4
+\tag{4}
+\end{equation}</p>
+<p><strong>标准差</strong>：</p>
+<p>\begin{equation}
+\text{Std}[|\boldsymbol{w}|^2] = \sigma^2\sqrt{2d}
+\tag{5}
+\end{equation}</p>
+<p><strong>相对标准差</strong>：</p>
+<p>\begin{equation}
+\frac{\text{Std}[|\boldsymbol{w}|^2]}{\mathbb{E}[|\boldsymbol{w}|^2]} = \frac{\sigma^2\sqrt{2d}}{d\sigma^2} = \sqrt{\frac{2}{d}}
+\tag{6}
+\end{equation}</p>
+<p><strong>数学直觉</strong>：当 $d$ 较大时（如768），相对波动很小（约1.6%），因此可以用期望近似：</p>
+<p>\begin{equation}
+|\boldsymbol{w}|^2 \approx d\sigma^2 \quad \Rightarrow \quad |\boldsymbol{w}| \approx \sigma\sqrt{d}
+\tag{7}
+\end{equation}</p>
+<h4 id="12">1.2 向量内积的期望与方差<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p>对于两个独立的随机向量 $\boldsymbol{w}, \boldsymbol{v} \sim \mathcal{N}(0, \sigma^2\boldsymbol{I})$：</p>
+<p><strong>内积的期望</strong>：</p>
+<p>\begin{equation}
+\mathbb{E}[\boldsymbol{w} \cdot \boldsymbol{v}] = \sum_{i=1}^d \mathbb{E}[w_i]\mathbb{E}[v_i] = 0
+\tag{8}
+\end{equation}</p>
+<p><strong>内积平方的期望</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+\mathbb{E}[(\boldsymbol{w} \cdot \boldsymbol{v})^2] &amp;= \mathbb{E}\left[\left(\sum_i w_i v_i\right)^2\right] \
+&amp;= \sum_i \mathbb{E}[w_i^2 v_i^2] + \sum_{i \neq j} \mathbb{E}[w_i v_i]\mathbb{E}[w_j v_j] \
+&amp;= d\sigma^4
+\end{aligned}
+\tag{9}
+\end{equation}</p>
+<p><strong>方差</strong>：</p>
+<p>\begin{equation}
+\text{Var}[\boldsymbol{w} \cdot \boldsymbol{v}] = \mathbb{E}[(\boldsymbol{w} \cdot \boldsymbol{v})^2] = d\sigma^4
+\tag{10}
+\end{equation}</p>
+<p><strong>标准差</strong>：</p>
+<p>\begin{equation}
+\text{Std}[\boldsymbol{w} \cdot \boldsymbol{v}] = \sigma^2\sqrt{d}
+\tag{11}
+\end{equation}</p>
+<h4 id="13">1.3 自内积与互内积的对比<a class="toc-link" href="#13" title="Permanent link">&para;</a></h4>
+<p><strong>自内积</strong>（同一向量）：</p>
+<p>\begin{equation}
+\boldsymbol{w} \cdot \boldsymbol{w} = |\boldsymbol{w}|^2 \approx d\sigma^2
+\tag{12}
+\end{equation}</p>
+<p><strong>互内积</strong>（不同向量）：</p>
+<p>\begin{equation}
+\boldsymbol{w} \cdot \boldsymbol{v} \approx 0 \quad \text{（期望为0，标准差为 $\sigma^2\sqrt{d}$）}
+\tag{13}
+\end{equation}</p>
+<p><strong>比值</strong>：</p>
+<p>\begin{equation}
+\frac{\mathbb{E}[\boldsymbol{w} \cdot \boldsymbol{w}]}{\mathbb{E}[\boldsymbol{w} \cdot \boldsymbol{v}]} = \frac{d\sigma^2}{0} \to \infty
+\tag{14}
+\end{equation}</p>
+<p><strong>数学直觉</strong>：自内积显著大于互内积，这是共享Embedding问题的根源。</p>
+<h3 id="2-embedding">2. 共享Embedding的初始损失分析<a class="toc-link" href="#2-embedding" title="Permanent link">&para;</a></h3>
+<h4 id="21-softmax">2.1 语言模型的Softmax输出<a class="toc-link" href="#21-softmax" title="Permanent link">&para;</a></h4>
+<p>假设经过Normalization后的隐藏状态为 $\boldsymbol{h}_i$，Embedding矩阵为 $\boldsymbol{W} = [\boldsymbol{w}_1, \boldsymbol{w}_2, \ldots, \boldsymbol{w}_n]^{\top} \in \mathbb{R}^{n \times d}$。</p>
+<p>Normalization后的隐藏状态：</p>
+<p>\begin{equation}
+\boldsymbol{h}_i = \frac{\tilde{\boldsymbol{h}}_i}{|\tilde{\boldsymbol{h}}_i|} \cdot \sqrt{d}
+\tag{15}
+\end{equation}</p>
+<p>使得 $|\boldsymbol{h}_i|^2 \approx d$（每个分量方差约为1）。</p>
+<p><strong>Logits计算</strong>（共享Embedding）：</p>
+<p>\begin{equation}
+\text{logit}_j = \boldsymbol{w}_j \cdot \boldsymbol{h}_i
+\tag{16}
+\end{equation}</p>
+<p><strong>概率分布</strong>：</p>
+<p>\begin{equation}
+p(j|i) = \frac{\exp(\boldsymbol{w}<em k="1">j \cdot \boldsymbol{h}_i / \sigma)}{\sum</em>
+\tag{17}
+\end{equation}}^n \exp(\boldsymbol{w}_k \cdot \boldsymbol{h}_i / \sigma)</p>
+<p>其中 $\sigma$ 是初始化标准差或温度参数。</p>
+<h4 id="22">2.2 初始阶段的近似分析<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p>在初始阶段，模型近似恒等函数（DeepNorm等技术），输入token $i$ 对应的隐藏状态：</p>
+<p>\begin{equation}
+\boldsymbol{h}_i \approx \frac{\boldsymbol{w}_i}{|\boldsymbol{w}_i|} \cdot \sqrt{d} \approx \frac{\boldsymbol{w}_i}{\sigma\sqrt{d}} \cdot \sqrt{d} = \frac{\boldsymbol{w}_i}{\sigma}
+\tag{18}
+\end{equation}</p>
+<p><strong>自内积</strong>（$j = i$）：</p>
+<p>\begin{equation}
+\boldsymbol{w}_i \cdot \boldsymbol{h}_i = \boldsymbol{w}_i \cdot \frac{\boldsymbol{w}_i}{\sigma} = \frac{|\boldsymbol{w}_i|^2}{\sigma} \approx \frac{d\sigma^2}{\sigma} = d\sigma
+\tag{19}
+\end{equation}</p>
+<p><strong>互内积</strong>（$j \neq i$）：</p>
+<p>\begin{equation}
+\boldsymbol{w}_j \cdot \boldsymbol{h}_i = \boldsymbol{w}_j \cdot \frac{\boldsymbol{w}_i}{\sigma} \approx \frac{0}{\sigma} = 0
+\tag{20}
+\end{equation}</p>
+<p>（期望为0，标准差为 $\sigma\sqrt{d}$）</p>
+<h4 id="23-softmax">2.3 Softmax分布的初始形式<a class="toc-link" href="#23-softmax" title="Permanent link">&para;</a></h4>
+<p>将式(19)和(20)代入式(17)：</p>
+<p>\begin{equation}
+p(j|i) \approx \begin{cases}
+\frac{\exp(d\sigma/\sigma)}{\exp(d) + (n-1)} = \frac{e^d}{e^d + n - 1}, &amp; j = i \
+\frac{\exp(0)}{\exp(d) + (n-1)} = \frac{1}{e^d + n - 1}, &amp; j \neq i
+\end{cases}
+\tag{21}
+\end{equation}</p>
+<p><strong>近似</strong>（当 $d$ 较大时，如768）：</p>
+<p>\begin{equation}
+p(i|i) \approx \frac{e^d}{e^d} = 1, \quad p(j|i) \approx 0 \quad (j \neq i)
+\tag{22}
+\end{equation}</p>
+<h4 id="24">2.4 初始损失的计算<a class="toc-link" href="#24" title="Permanent link">&para;</a></h4>
+<p>语言模型的损失函数（预测下一个token）：</p>
+<p>\begin{equation}
+\mathcal{L} = -\log p(\text{target}|i)
+\tag{23}
+\end{equation}</p>
+<p><strong>情况1</strong>：如果目标token恰好是 $i$（叠词）：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{same}} = -\log p(i|i) \approx -\log 1 = 0
+\tag{24}
+\end{equation}</p>
+<p><strong>情况2</strong>：如果目标token是 $j \neq i$（常见情况）：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{diff}} = -\log p(j|i) \approx -\log \frac{1}{e^d + n - 1} = \log(e^d + n - 1) \approx d
+\tag{25}
+\end{equation}</p>
+<p>对于 $d = 768$：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{diff}} \approx 768
+\tag{26}
+\end{equation}</p>
+<p><strong>对比均匀分布的损失</strong>：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{uniform}} = \log n
+\tag{27}
+\end{equation}</p>
+<p>对于词表大小 $n = 30000$：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{uniform}} \approx 10.3
+\tag{28}
+\end{equation}</p>
+<p><strong>结论</strong>：</p>
+<p>\begin{equation}
+\mathcal{L}<em _text_uniform="\text{uniform">{\text{diff}} \approx 768 \gg \mathcal{L}</em> \approx 10.3
+\tag{29}
+\end{equation}}</p>
+<p>初始损失是均匀分布的约75倍，这是不合理的。</p>
+<h3 id="3-embedding">3. 不共享Embedding的情况<a class="toc-link" href="#3-embedding" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 独立初始化<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p>如果输入Embedding $\boldsymbol{W}<em out="out">{in}$ 和输出投影矩阵 $\boldsymbol{W}</em>$ 独立初始化：</p>
+<p>\begin{equation}
+\boldsymbol{W}<em out="out">{in}, \boldsymbol{W}</em>)
+\tag{30}
+\end{equation}} \sim \mathcal{N}(0, \sigma^2\boldsymbol{I</p>
+<p>隐藏状态：</p>
+<p>\begin{equation}
+\boldsymbol{h}<em in="in">i \approx \frac{\boldsymbol{W}</em>
+\tag{31}
+\end{equation}}[i, :]}{\sigma</p>
+<p>Logit（对于任意 $j$）：</p>
+<p>\begin{equation}
+\text{logit}<em out="out">j = \boldsymbol{W}</em>}[j, :] \cdot \boldsymbol{h<em out="out">i \approx \boldsymbol{W}</em>
+\tag{32}
+\end{equation}}[j, :] \cdot \frac{\boldsymbol{W}_{in}[i, :]}{\sigma</p>
+<p>由于 $\boldsymbol{W}<em in="in">{out}[j, :]$ 和 $\boldsymbol{W}</em>[i, :]$ 独立，根据式(8)：</p>
+<p>\begin{equation}
+\mathbb{E}[\text{logit}_j] = 0, \quad \text{Var}[\text{logit}_j] = d\sigma^2
+\tag{33}
+\end{equation}</p>
+<p><strong>所有logits同分布</strong>（无论 $j$ 是否等于 $i$）。</p>
+<h4 id="32-softmax">3.2 Softmax分布<a class="toc-link" href="#32-softmax" title="Permanent link">&para;</a></h4>
+<p>所有logits近似为 $\mathcal{N}(0, d\sigma^2)$，Softmax后近似均匀分布：</p>
+<p>\begin{equation}
+p(j|i) \approx \frac{1}{n}
+\tag{34}
+\end{equation}</p>
+<p><strong>初始损失</strong>：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{no-tie}} \approx \log n
+\tag{35}
+\end{equation}</p>
+<p>这是合理的初始值。</p>
+<h3 id="4-1">4. 解决方案1：调整初始化标准差<a class="toc-link" href="#4-1" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 理论推导<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p>为了让共享Embedding的初始损失接近 $\log n$，需要：</p>
+<p>\begin{equation}
+\log(e^d + n - 1) \approx \log n
+\tag{36}
+\end{equation}</p>
+<p>即：</p>
+<p>\begin{equation}
+e^d \approx n \quad \Rightarrow \quad d \approx \log n
+\tag{37}
+\end{equation}</p>
+<p>但这里的 $d$ 不是维度，而是指数部分 $d\sigma/\sigma = d$。回顾式(19)：</p>
+<p>\begin{equation}
+\boldsymbol{w}_i \cdot \boldsymbol{h}_i \approx d\sigma
+\tag{38}
+\end{equation}</p>
+<p>为了让 $\exp(d\sigma/\sigma) = \exp(d) \approx n$，需要调整为：</p>
+<p>\begin{equation}
+d\sigma_{\text{new}} = \log n \quad \Rightarrow \quad \sigma_{\text{new}} = \frac{\log n}{d}
+\tag{39}
+\end{equation}</p>
+<p>对于 $n = 30000$，$d = 768$：</p>
+<p>\begin{equation}
+\sigma_{\text{new}} = \frac{\log 30000}{768} \approx \frac{10.3}{768} \approx 0.0134
+\tag{40}
+\end{equation}</p>
+<h4 id="42">4.2 与标准初始化的对比<a class="toc-link" href="#42" title="Permanent link">&para;</a></h4>
+<p>标准Xavier初始化：</p>
+<p>\begin{equation}
+\sigma_{\text{xavier}} = \frac{1}{\sqrt{768}} \approx 0.0361
+\tag{41}
+\end{equation}</p>
+<p>新的初始化：</p>
+<p>\begin{equation}
+\frac{\sigma_{\text{new}}}{\sigma_{\text{xavier}}} = \frac{0.0134}{0.0361} \approx 0.37
+\tag{42}
+\end{equation}</p>
+<p><strong>缺点</strong>：</p>
+<ol>
+<li>标准差过小，可能导致梯度下溢</li>
+<li>降低了参数的多样性</li>
+<li>可能减慢收敛速度</li>
+</ol>
+<h4 id="43">4.3 更精确的分析<a class="toc-link" href="#43" title="Permanent link">&para;</a></h4>
+<p>考虑互内积的波动，式(20)应该是：</p>
+<p>\begin{equation}
+\boldsymbol{w}_j \cdot \boldsymbol{h}_i \sim \mathcal{N}(0, d\sigma^2)
+\tag{43}
+\end{equation}</p>
+<p>Softmax的分母：</p>
+<p>\begin{equation}
+\sum_{k=1}^n \exp(\text{logit}<em _neq="\neq" i="i" k="k">k) \approx e^{d\sigma} + \sum</em>_k)
+\tag{44}
+\end{equation}} \exp(\text{logit</p>
+<p>其中 $\sum_{k \neq i} \exp(\text{logit}_k)$ 近似为 $(n-1)\mathbb{E}[\exp(g)]$，$g \sim \mathcal{N}(0, d\sigma^2)$。</p>
+<p>对于正态分布，$\mathbb{E}[\exp(g)] = \exp(d\sigma^2/2)$：</p>
+<p>\begin{equation}
+\sum_{k=1}^n \exp(\text{logit}_k) \approx e^{d\sigma} + (n-1)e^{d\sigma^2/2}
+\tag{45}
+\end{equation}</p>
+<p>要使损失合理，需要两项平衡：</p>
+<p>\begin{equation}
+e^{d\sigma} \approx (n-1)e^{d\sigma^2/2}
+\tag{46}
+\end{equation}</p>
+<p>取对数：</p>
+<p>\begin{equation}
+d\sigma \approx \log(n-1) + \frac{d\sigma^2}{2}
+\tag{47}
+\end{equation}</p>
+<p>这是一个关于 $\sigma$ 的二次方程。对于 $\sigma$ 较小的情况，忽略二次项：</p>
+<p>\begin{equation}
+\sigma \approx \frac{\log n}{d}
+\tag{48}
+\end{equation}</p>
+<p>这与式(39)一致。</p>
+<h3 id="5-2">5. 解决方案2：添加投影层<a class="toc-link" href="#5-2" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 投影层的作用<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>在Normalization后添加一个线性投影层：</p>
+<p>\begin{equation}
+\boldsymbol{h}_i' = \boldsymbol{P}\boldsymbol{h}_i
+\tag{49}
+\end{equation}</p>
+<p>其中 $\boldsymbol{P} \in \mathbb{R}^{d \times d}$ 是正交初始化的矩阵（或随机初始化）。</p>
+<p><strong>正交初始化</strong>：</p>
+<p>\begin{equation}
+\boldsymbol{P}\boldsymbol{P}^{\top} = \boldsymbol{I}
+\tag{50}
+\end{equation}</p>
+<h4 id="52-johnson-lindenstrauss">5.2 Johnson-Lindenstrauss引理的应用<a class="toc-link" href="#52-johnson-lindenstrauss" title="Permanent link">&para;</a></h4>
+<p>对于随机投影矩阵 $\boldsymbol{P}$（元素独立同分布 $\mathcal{N}(0, 1/d)$）：</p>
+<p><strong>投影后的向量</strong>：</p>
+<p>\begin{equation}
+\boldsymbol{h}_i' = \boldsymbol{P}\boldsymbol{h}_i
+\tag{51}
+\end{equation}</p>
+<p><strong>期望</strong>：</p>
+<p>\begin{equation}
+\mathbb{E}[\boldsymbol{h}_i'] = \boldsymbol{P}\mathbb{E}[\boldsymbol{h}_i] = \boldsymbol{0}
+\tag{52}
+\end{equation}</p>
+<p><strong>协方差</strong>：</p>
+<p>\begin{equation}
+\text{Cov}(\boldsymbol{h}_i') = \boldsymbol{P}\text{Cov}(\boldsymbol{h}_i)\boldsymbol{P}^{\top} = \boldsymbol{P}\boldsymbol{I}\boldsymbol{P}^{\top} = \boldsymbol{I}
+\tag{53}
+\end{equation}</p>
+<p>（对于正交矩阵）</p>
+<p><strong>关键性质</strong>：$\boldsymbol{h}_i'$ 与原始Embedding $\boldsymbol{w}_i$ 近似独立。</p>
+<h4 id="53">5.3 内积分析<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<p>原始自内积：</p>
+<p>\begin{equation}
+\boldsymbol{w}_i \cdot \boldsymbol{h}_i = \boldsymbol{w}_i \cdot \frac{\boldsymbol{w}_i}{\sigma} = \frac{|\boldsymbol{w}_i|^2}{\sigma} \approx d\sigma
+\tag{54}
+\end{equation}</p>
+<p>投影后：</p>
+<p>\begin{equation}
+\boldsymbol{w}_i \cdot \boldsymbol{h}_i' = \boldsymbol{w}_i \cdot \boldsymbol{P}\boldsymbol{h}_i
+\tag{55}
+\end{equation}</p>
+<p>由于 $\boldsymbol{P}$ 随机，$\boldsymbol{P}\boldsymbol{h}_i$ 的每个分量与 $\boldsymbol{w}_i$ 的对应分量近似独立：</p>
+<p>\begin{equation}
+\mathbb{E}[\boldsymbol{w}_i \cdot \boldsymbol{P}\boldsymbol{h}_i] = 0, \quad \text{Var}[\boldsymbol{w}_i \cdot \boldsymbol{P}\boldsymbol{h}_i] = d\sigma^2
+\tag{56}
+\end{equation}</p>
+<p><strong>结论</strong>：投影后，自内积和互内积同分布，都近似为 $\mathcal{N}(0, d\sigma^2)$。</p>
+<h4 id="54">5.4 初始损失<a class="toc-link" href="#54" title="Permanent link">&para;</a></h4>
+<p>所有logits同分布，Softmax后近似均匀：</p>
+<p>\begin{equation}
+p(j|i) \approx \frac{1}{n}
+\tag{57}
+\end{equation}</p>
+<p>初始损失：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{projection}} \approx \log n
+\tag{58}
+\end{equation}</p>
+<p><strong>优点</strong>：
+1. 保持标准初始化 $\sigma$
+2. 仅增加 $O(d^2)$ 参数（相对于Embedding的 $O(nd)$ 很小）
+3. 提供额外的表达能力</p>
+<h4 id="55-bert">5.5 BERT的实现<a class="toc-link" href="#55-bert" title="Permanent link">&para;</a></h4>
+<p>BERT在MLM head中添加Dense+LayerNorm：</p>
+<p>\begin{equation}
+\boldsymbol{h}' = \text{LayerNorm}(\boldsymbol{W}\boldsymbol{h} + \boldsymbol{b})
+\tag{59}
+\end{equation}</p>
+<p>等效于投影+归一化+缩放，起到相同作用。</p>
+<h3 id="6-3">6. 解决方案3：维度打乱<a class="toc-link" href="#6-3" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 打乱操作的定义<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p>定义打乱函数 $\mathcal{S}: \mathbb{R}^d \to \mathbb{R}^d$：</p>
+<p><strong>方案A</strong>：前后半部分交换拼接</p>
+<p>\begin{equation}
+\mathcal{S}[\boldsymbol{w}] = [\boldsymbol{w}<em 1:d_2="1:d/2">{d/2+1:d}, \boldsymbol{w}</em>]
+\tag{60}
+\end{equation}</p>
+<p><strong>方案B</strong>：奇偶位交错</p>
+<p>\begin{equation}
+\mathcal{S}[\boldsymbol{w}]<em 2i="2i">i = \begin{cases}
+\boldsymbol{w}</em>, &amp; i \leq d/2 \
+\boldsymbol{w}_{2i-d-1}, &amp; i &gt; d/2
+\end{cases}
+\tag{61}
+\end{equation}</p>
+<p><strong>方案C</strong>：Reshape-Transpose-Reshape（ShuffleNet风格）</p>
+<p>\begin{equation}
+\mathcal{S}[\boldsymbol{w}] = \text{Reshape}(\text{Transpose}(\text{Reshape}(\boldsymbol{w}, [k, d/k])))
+\tag{62}
+\end{equation}</p>
+<h4 id="62">6.2 打乱后的内积分析<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p>原始向量：$\boldsymbol{w} = [w_1, w_2, \ldots, w_d]$</p>
+<p>打乱后（方案A）：$\mathcal{S}[\boldsymbol{w}] = [w_{d/2+1}, \ldots, w_d, w_1, \ldots, w_{d/2}]$</p>
+<p><strong>自内积</strong>（同一向量的原始和打乱版本）：</p>
+<p>\begin{equation}
+\begin{aligned}
+\boldsymbol{w} \cdot \mathcal{S}[\boldsymbol{w}] &amp;= \sum_{i=1}^{d/2} w_i w_{i+d/2} + \sum_{i=d/2+1}^d w_i w_{i-d/2} \
+&amp;= 2\sum_{i=1}^{d/2} w_i w_{i+d/2}
+\end{aligned}
+\tag{63}
+\end{equation}</p>
+<p><strong>期望</strong>：</p>
+<p>\begin{equation}
+\mathbb{E}[\boldsymbol{w} \cdot \mathcal{S}[\boldsymbol{w}]] = 2\sum_{i=1}^{d/2} \mathbb{E}[w_i]\mathbb{E}[w_{i+d/2}] = 0
+\tag{64}
+\end{equation}</p>
+<p><strong>方差</strong>：</p>
+<p>\begin{equation}
+\text{Var}[\boldsymbol{w} \cdot \mathcal{S}[\boldsymbol{w}]] = 2 \cdot \frac{d}{2} \cdot \sigma^4 = d\sigma^4
+\tag{65}
+\end{equation}</p>
+<p><strong>对比原始自内积</strong>：</p>
+<p>\begin{equation}
+\mathbb{E}[\boldsymbol{w} \cdot \boldsymbol{w}] = d\sigma^2 \gg \mathbb{E}[\boldsymbol{w} \cdot \mathcal{S}[\boldsymbol{w}]] = 0
+\tag{66}
+\end{equation}</p>
+<p><strong>结论</strong>：打乱后的"自内积"变成了类似互内积，消除了偏差。</p>
+<h4 id="63">6.3 实现细节<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p>在最后的Normalization后应用打乱：</p>
+<p>\begin{equation}
+\text{logit}_j = \boldsymbol{w}_j \cdot \mathcal{S}[\text{Norm}(\boldsymbol{h}_i)]
+\tag{67}
+\end{equation}</p>
+<p><strong>零参数开销</strong>：仅需改变索引顺序，无需额外参数。</p>
+<p><strong>缺点</strong>：
+1. 破坏了位置对应关系
+2. 可能影响某些位置敏感的下游任务
+3. 理论保证弱于随机投影</p>
+<h3 id="7">7. 收敛性分析<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 梯度流分析<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p>定义损失函数：</p>
+<p>\begin{equation}
+\mathcal{L} = -\log p(j|i) = -\boldsymbol{w}<em k="1">j \cdot \boldsymbol{h}_i + \log \sum</em>_i)
+\tag{68}
+\end{equation}}^n \exp(\boldsymbol{w}_k \cdot \boldsymbol{h</p>
+<p><strong>对Embedding的梯度</strong>（共享情况）：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{w}_j} = \begin{cases}
+-\boldsymbol{h}_i + p(j|i)\boldsymbol{h}_i, &amp; \text{if } j = \text{target} \
+p(j|i)\boldsymbol{h}_i, &amp; \text{otherwise}
+\end{cases}
+\tag{69}
+\end{equation}</p>
+<p><strong>输入token的梯度</strong>（反向传播到输入Embedding）：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{w}_i} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{h}_i} \cdot \frac{\partial \boldsymbol{h}_i}{\partial \boldsymbol{w}_i}
+\tag{70}
+\end{equation}</p>
+<p>其中：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{h}<em k="1">i} = -\boldsymbol{w}_j + \sum</em>_k
+\tag{71}
+\end{equation}}^n p(k|i)\boldsymbol{w</p>
+<h4 id="72-vs">7.2 共享vs不共享的梯度对比<a class="toc-link" href="#72-vs" title="Permanent link">&para;</a></h4>
+<p><strong>共享Embedding</strong>：</p>
+<p>输入token $i$ 的Embedding接收两个梯度：
+1. 作为输入的梯度（式70）
+2. 作为输出候选的梯度（式69中 $j=i$ 的情况）</p>
+<p>总梯度：</p>
+<p>\begin{equation}
+\nabla_{\boldsymbol{w}<em _text_tied="\text{tied">i}\mathcal{L}</em>}} = \nabla_{\boldsymbol{w<em _text_input="\text{input">i}\mathcal{L}</em>}} + \nabla_{\boldsymbol{w<em _text_output="\text{output">i}\mathcal{L}</em>
+\tag{72}
+\end{equation}}</p>
+<p><strong>不共享Embedding</strong>：</p>
+<p>输入和输出分别更新，梯度独立：</p>
+<p>\begin{equation}
+\nabla_{\boldsymbol{w}<em _boldsymbol_w="\boldsymbol{w">i^{in}}\mathcal{L}, \quad \nabla</em>
+\tag{73}
+\end{equation}}_j^{out}}\mathcal{L</p>
+<h4 id="73">7.3 正则化效应<a class="toc-link" href="#73" title="Permanent link">&para;</a></h4>
+<p>共享Embedding隐式地添加了约束：</p>
+<p>\begin{equation}
+\boldsymbol{W}<em out="out">{in} = \boldsymbol{W}</em>
+\tag{74}
+\end{equation}}^{\top</p>
+<p>这相当于参数空间的一个子流形，限制了模型容量，起到正则化作用。</p>
+<p><strong>参数量对比</strong>：</p>
+<ul>
+<li>不共享：$(2nd)$ 参数</li>
+<li>共享：$(nd)$ 参数</li>
+<li>参数减少：$50\%$</li>
+</ul>
+<p>对于 $n = 30000$，$d = 768$：</p>
+<p>\begin{equation}
+\Delta_{\text{params}} = nd = 30000 \times 768 \approx 23M
+\tag{75}
+\end{equation}</p>
+<h4 id="74">7.4 收敛速度的理论分析<a class="toc-link" href="#74" title="Permanent link">&para;</a></h4>
+<p>定义优化问题：</p>
+<p>\begin{equation}
+\min_{\boldsymbol{W}} \mathbb{E}_{(\boldsymbol{x}, y) \sim \mathcal{D}}[\mathcal{L}(\boldsymbol{W}; \boldsymbol{x}, y)]
+\tag{76}
+\end{equation}</p>
+<p><strong>共享Embedding的有效学习率</strong>：</p>
+<p>由于同一Embedding接收多个梯度，有效学习率提升：</p>
+<p>\begin{equation}
+\eta_{\text{eff}} = \eta \cdot \mathbb{E}[\text{gradient multiplicity}]
+\tag{77}
+\end{equation}</p>
+<p>对于高频词，multiplicity更高，学习更快。</p>
+<h3 id="8">8. 数值实验与验证<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 初始损失对比实验<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p><strong>设置</strong>：
+- 词表大小：$n = 10000$
+- 隐藏维度：$d = 768$
+- 初始化：$\sigma = 0.02$</p>
+<p><strong>测量</strong>：在随机初始化后，计算100个样本的平均损失。</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>初始损失</th>
+<th>理论预测</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>共享Embedding（原始）</td>
+<td>768.2</td>
+<td>$d = 768$</td>
+</tr>
+<tr>
+<td>不共享Embedding</td>
+<td>9.2</td>
+<td>$\log 10000 = 9.21$</td>
+</tr>
+<tr>
+<td>共享+调整$\sigma=\log n/d$</td>
+<td>9.5</td>
+<td>$\log n = 9.21$</td>
+</tr>
+<tr>
+<td>共享+投影层</td>
+<td>9.3</td>
+<td>$\log n = 9.21$</td>
+</tr>
+<tr>
+<td>共享+维度打乱</td>
+<td>9.4</td>
+<td>$\log n = 9.21$</td>
+</tr>
+</tbody>
+</table>
+<p>\begin{equation}
+\text{验证：原始共享Embedding的初始损失确实约为 } d\sigma
+\tag{78}
+\end{equation}</p>
+<h4 id="82-vs">8.2 自内积vs互内积的统计<a class="toc-link" href="#82-vs" title="Permanent link">&para;</a></h4>
+<p><strong>测量1000对向量</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>均值</th>
+<th>标准差</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>自内积 $\boldsymbol{w}_i \cdot \boldsymbol{w}_i$</td>
+<td>0.239</td>
+<td>0.017</td>
+</tr>
+<tr>
+<td>互内积 $\boldsymbol{w}_i \cdot \boldsymbol{w}_j$</td>
+<td>0.0002</td>
+<td>0.0316</td>
+</tr>
+<tr>
+<td>理论（自）</td>
+<td>$d\sigma^2 = 0.237$</td>
+<td>$\sigma^2\sqrt{2d} = 0.018$</td>
+</tr>
+<tr>
+<td>理论（互）</td>
+<td>$0$</td>
+<td>$\sigma^2\sqrt{d} = 0.0316$</td>
+</tr>
+</tbody>
+</table>
+<p>\begin{equation}
+\text{验证：式(2)和式(10)的理论值与实验高度吻合}
+\tag{79}
+\end{equation}</p>
+<h4 id="83">8.3 收敛曲线对比<a class="toc-link" href="#83" title="Permanent link">&para;</a></h4>
+<p>训练语言模型（小规模）100k步：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>10k步Loss</th>
+<th>50k步Loss</th>
+<th>100k步Loss</th>
+<th>最终PPL</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>不共享</td>
+<td>6.2</td>
+<td>4.1</td>
+<td>3.5</td>
+<td>33.1</td>
+</tr>
+<tr>
+<td>共享（原始）</td>
+<td>768→15.2</td>
+<td>4.3</td>
+<td>3.6</td>
+<td>36.8</td>
+</tr>
+<tr>
+<td>共享+$\sigma_{\text{new}}$</td>
+<td>9.5</td>
+<td>4.5</td>
+<td>3.7</td>
+<td>40.5</td>
+</tr>
+<tr>
+<td>共享+投影</td>
+<td>9.3</td>
+<td>4.1</td>
+<td>3.5</td>
+<td>33.5</td>
+</tr>
+<tr>
+<td>共享+打乱</td>
+<td>9.4</td>
+<td>4.2</td>
+<td>3.6</td>
+<td>34.2</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：
+1. 原始共享方法在前1k步损失异常高，然后快速下降
+2. 调整$\sigma$方法最终效果略差（初始化过小）
+3. 投影方法效果最好，与不共享相当
+4. 打乱方法略逊于投影，但零参数</p>
+<h3 id="9">9. 理论证明：投影的充分性<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 定理陈述<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p><strong>定理</strong>：设 $\boldsymbol{w}_1, \ldots, \boldsymbol{w}_n \sim \mathcal{N}(0, \sigma^2\boldsymbol{I}_d)$ i.i.d.，$\boldsymbol{P} \in \mathbb{R}^{d \times d}$ 是随机正交矩阵（Haar分布）。则对于任意 $i, j \in [n]$：</p>
+<p>\begin{equation}
+\boldsymbol{w}_i \cdot \boldsymbol{P}\boldsymbol{w}_j \stackrel{d}{=} \begin{cases}
+\mathcal{N}(0, d\sigma^4), &amp; i \neq j \
+\mathcal{N}(0, d\sigma^4), &amp; i = j
+\end{cases}
+\tag{80}
+\end{equation}</p>
+<p>即自内积和互内积同分布。</p>
+<h4 id="92">9.2 证明<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p><strong>Step 1</strong>：$\boldsymbol{P}\boldsymbol{w}_j$ 的分布</p>
+<p>由于 $\boldsymbol{P}$ 是正交矩阵，$\boldsymbol{w}_j \sim \mathcal{N}(0, \sigma^2\boldsymbol{I})$：</p>
+<p>\begin{equation}
+\boldsymbol{P}\boldsymbol{w}_j \sim \mathcal{N}(0, \sigma^2\boldsymbol{P}\boldsymbol{P}^{\top}) = \mathcal{N}(0, \sigma^2\boldsymbol{I})
+\tag{81}
+\end{equation}</p>
+<p><strong>Step 2</strong>：$\boldsymbol{P}$ 随机性的影响</p>
+<p>当 $\boldsymbol{P}$ 从Haar分布采样时，对于固定的 $\boldsymbol{w}_i, \boldsymbol{w}_j$，$\boldsymbol{P}\boldsymbol{w}_j$ 与 $\boldsymbol{w}_i$ 的相关性：</p>
+<p>\begin{equation}
+\mathbb{E}<em _boldsymbol_P="\boldsymbol{P">{\boldsymbol{P}}[\boldsymbol{w}_i \cdot \boldsymbol{P}\boldsymbol{w}_j | \boldsymbol{w}_i, \boldsymbol{w}_j] = \boldsymbol{w}_i^{\top}\mathbb{E}</em>_j
+\tag{82}
+\end{equation}}}[\boldsymbol{P}]\boldsymbol{w</p>
+<p>对于Haar分布，$\mathbb{E}_{\boldsymbol{P}}[\boldsymbol{P}] = \boldsymbol{0}$（不成立，需要修正）。</p>
+<p><strong>修正</strong>：实际上，对于固定的 $\boldsymbol{w}_i, \boldsymbol{w}_j$：</p>
+<p>\begin{equation}
+\boldsymbol{w}<em k="1">i^{\top}\boldsymbol{P}\boldsymbol{w}_j = \sum</em>_j)_k
+\tag{83}
+\end{equation}}^d (\boldsymbol{w}_i)_k (\boldsymbol{P}\boldsymbol{w</p>
+<p>由于 $\boldsymbol{P}$ 随机，$(\boldsymbol{P}\boldsymbol{w}_j)_k$ 的分布与 $\boldsymbol{w}_j$ 的模式打乱，与 $(\boldsymbol{w}_i)_k$ 近似独立。</p>
+<p><strong>Step 3</strong>：Johnson-Lindenstrauss引理</p>
+<p>更严格的证明基于JL引理：随机投影保持内积的期望。</p>
+<p>对于 $\boldsymbol{P}$ 的元素 $P_{ij} \sim \mathcal{N}(0, 1/d)$：</p>
+<p>\begin{equation}
+\mathbb{E}[\boldsymbol{w}_i^{\top}\boldsymbol{P}\boldsymbol{w}_j] = 0, \quad \text{Var}[\boldsymbol{w}_i^{\top}\boldsymbol{P}\boldsymbol{w}_j] = \frac{1}{d} |\boldsymbol{w}_i|^2|\boldsymbol{w}_j|^2
+\tag{84}
+\end{equation}</p>
+<p>当 $|\boldsymbol{w}_i|^2, |\boldsymbol{w}_j|^2 \approx d\sigma^2$ 时：</p>
+<p>\begin{equation}
+\text{Var}[\boldsymbol{w}_i^{\top}\boldsymbol{P}\boldsymbol{w}_j] \approx \frac{1}{d}(d\sigma^2)^2 = d\sigma^4
+\tag{85}
+\end{equation}</p>
+<p><strong>结论</strong>：无论 $i = j$ 还是 $i \neq j$，内积的分布都是 $\mathcal{N}(0, d\sigma^4)$。 $\square$</p>
+<h3 id="10">10. 参数效率与模型容量<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 参数量分析<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p><strong>Transformer模型的参数分布</strong>（以BERT base为例）：</p>
+<ul>
+<li>Embedding层：$n \times d = 30000 \times 768 = 23M$</li>
+<li>编码器（12层）：约$85M$</li>
+<li>输出层（如果不共享）：$n \times d = 23M$</li>
+<li>总计（不共享）：$131M$</li>
+<li>总计（共享）：$108M$</li>
+</ul>
+<p><strong>参数减少率</strong>：</p>
+<p>\begin{equation}
+\frac{131M - 108M}{131M} \approx 17.6\%
+\tag{86}
+\end{equation}</p>
+<p>当模型规模增大（如GPT-3），编码器参数占比提升：</p>
+<ul>
+<li>GPT-3（175B）：Embedding约占 $&lt;1\%$</li>
+<li>共享与否的影响微乎其微</li>
+</ul>
+<p>\begin{equation}
+\text{结论：大模型时代，共享Embedding的参数效率优势不明显}
+\tag{87}
+\end{equation}</p>
+<h4 id="102">10.2 表达能力分析<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p><strong>自由度对比</strong>：</p>
+<ul>
+<li>不共享：输入和输出可以学习不同的语义空间</li>
+<li>共享：强制输入=输出空间</li>
+</ul>
+<p><strong>流形维度</strong>：</p>
+<p>假设词嵌入分布在一个低维流形 $\mathcal{M} \subset \mathbb{R}^d$ 上，维度为 $m$。</p>
+<ul>
+<li>不共享：输入流形 $\mathcal{M}<em out="out">{in}$，输出流形 $\mathcal{M}</em>$，总自由度 $2m$</li>
+<li>共享：$\mathcal{M}<em out="out">{in} = \mathcal{M}</em>$，总自由度 $m$</li>
+</ul>
+<p><strong>性能影响</strong>：</p>
+<p>当任务的输入和输出语义空间不同时（如翻译），不共享更优。
+当任务是自回归时（如LM），共享的约束可能有益（正则化）。</p>
+<h3 id="11_1">11. 实践建议与总结<a class="toc-link" href="#11_1" title="Permanent link">&para;</a></h3>
+<h4 id="111">11.1 不同场景的推荐方案<a class="toc-link" href="#111" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>场景</th>
+<th>推荐方案</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>小模型（&lt;1B）</td>
+<td>共享+投影层</td>
+<td>参数效率+初始化合理</td>
+</tr>
+<tr>
+<td>大模型（&gt;10B）</td>
+<td>不共享</td>
+<td>参数占比小，表达能力更重要</td>
+</tr>
+<tr>
+<td>预训练+Finetune</td>
+<td>共享+投影层</td>
+<td>预训练阶段节省参数，Finetune时可解绑</td>
+</tr>
+<tr>
+<td>多语言模型</td>
+<td>不共享</td>
+<td>输入/输出语言可能不同</td>
+</tr>
+<tr>
+<td>对话模型</td>
+<td>不共享</td>
+<td>输入（理解）和输出（生成）的语义空间不同</td>
+</tr>
+</tbody>
+</table>
+<h4 id="112">11.2 实现细节<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
+<p><strong>方案1：调整初始化</strong></p>
+<div class="highlight"><pre><span></span><code><span class="n">std</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">vocab_size</span><span class="p">)</span> <span class="o">/</span> <span class="n">hidden_dim</span>  <span class="c1"># 约0.0134 for n=30k, d=768</span>
+<span class="n">embedding</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Embedding</span><span class="p">(</span><span class="n">vocab_size</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">)</span>
+<span class="n">nn</span><span class="o">.</span><span class="n">init</span><span class="o">.</span><span class="n">trunc_normal_</span><span class="p">(</span><span class="n">embedding</span><span class="o">.</span><span class="n">weight</span><span class="p">,</span> <span class="n">std</span><span class="o">=</span><span class="n">std</span><span class="p">,</span> <span class="n">a</span><span class="o">=-</span><span class="mi">2</span><span class="o">*</span><span class="n">std</span><span class="p">,</span> <span class="n">b</span><span class="o">=</span><span class="mi">2</span><span class="o">*</span><span class="n">std</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>方案2：投影层</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EmbeddingWithProjection</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">vocab_size</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">embedding</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Embedding</span><span class="p">(</span><span class="n">vocab_size</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">projection</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">hidden_dim</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">layer_norm</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">LayerNorm</span><span class="p">(</span><span class="n">hidden_dim</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward_input</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward_output</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">h</span><span class="p">):</span>
+        <span class="n">h_proj</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">layer_norm</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">projection</span><span class="p">(</span><span class="n">h</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">h_proj</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">embedding</span><span class="o">.</span><span class="n">weight</span><span class="o">.</span><span class="n">T</span>
+</code></pre></div>
+
+<p><strong>方案3：维度打乱</strong></p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">shuffle_embedding</span><span class="p">(</span><span class="n">h</span><span class="p">):</span>
+    <span class="c1"># 前后半部分交换</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">h</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">h</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">d</span><span class="o">//</span><span class="mi">2</span><span class="p">:],</span> <span class="n">h</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="p">:</span><span class="n">d</span><span class="o">//</span><span class="mi">2</span><span class="p">]],</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+
+<span class="n">logits</span> <span class="o">=</span> <span class="n">h_shuffled</span> <span class="o">@</span> <span class="n">embedding</span><span class="o">.</span><span class="n">weight</span><span class="o">.</span><span class="n">T</span>
+</code></pre></div>
+
+<h4 id="113">11.3 理论总结<a class="toc-link" href="#113" title="Permanent link">&para;</a></h4>
+<p><strong>核心问题</strong>：</p>
+<p>\begin{equation}
+\mathbb{E}[\boldsymbol{w}_i \cdot \boldsymbol{w}_i] = d\sigma^2 \gg \mathbb{E}[\boldsymbol{w}_i \cdot \boldsymbol{w}_j] = 0 \quad (i \neq j)
+\tag{88}
+\end{equation}</p>
+<p><strong>解决思路</strong>：</p>
+<ol>
+<li><strong>直接调整</strong>：降低 $\sigma$ 使 $d\sigma \approx \log n$</li>
+<li><strong>解耦变换</strong>：通过投影 $\boldsymbol{P}$ 使自内积与互内积同分布</li>
+<li><strong>几何打乱</strong>：重排维度破坏自相关</li>
+</ol>
+<p><strong>最优选择</strong>：投影层方案（方案2）</p>
+<ul>
+<li>理论保证：JL引理</li>
+<li>实现简单：仅添加一个Linear层</li>
+<li>额外收益：提供表达能力，类似BERT的MLM Dense</li>
+</ul>
+<p><strong>数学精髓</strong>：</p>
+<p>\begin{equation}
+\text{问题} \quad |\boldsymbol{w}|^2 \gg \boldsymbol{w} \cdot \boldsymbol{v} \quad \Rightarrow \quad \text{解决} \quad \boldsymbol{w} \cdot \boldsymbol{P}\boldsymbol{w} \approx \boldsymbol{w} \cdot \boldsymbol{P}\boldsymbol{v}
+\tag{89}
+\end{equation}</p>
+<p>通过随机投影，将确定性的大偏差（自内积）转化为随机涨落（与互内积同分布）。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -211,7 +1014,7 @@ url={\url{https://spaces.ac.cn/archives/9698}},<br />
                             
                             <a href="当生成模型肆虐互联网将有疯牛病之忧.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#94 当生成模型肆虐：互联网将有“疯牛病”之忧？</div>
+                                <div class="nav-title">#240 当生成模型肆虐：互联网将有“疯牛病”之忧？</div>
                             </a>
                             
                         </div>
@@ -219,7 +1022,7 @@ url={\url{https://spaces.ac.cn/archives/9698}},<br />
                             
                             <a href="transformer升级之路11将β进制位置进行到底.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#96 Transformer升级之路：11、将β进制位置进行到底</div>
+                                <div class="nav-title">#242 Transformer升级之路：11、将β进制位置进行到底</div>
                             </a>
                             
                         </div>
@@ -249,7 +1052,20 @@ url={\url{https://spaces.ac.cn/archives/9698}},<br />
 <li><a href="#_3">损失分析</a></li>
 <li><a href="#_4">一些对策</a></li>
 <li><a href="#_5">文章小结</a></li>
-<li><a href="#_6">公式推导与注释</a></li>
+<li><a href="#_6">公式推导与注释</a><ul>
+<li><a href="#1">1. 随机初始化向量的统计性质</a></li>
+<li><a href="#2-embedding">2. 共享Embedding的初始损失分析</a></li>
+<li><a href="#3-embedding">3. 不共享Embedding的情况</a></li>
+<li><a href="#4-1">4. 解决方案1：调整初始化标准差</a></li>
+<li><a href="#5-2">5. 解决方案2：添加投影层</a></li>
+<li><a href="#6-3">6. 解决方案3：维度打乱</a></li>
+<li><a href="#7">7. 收敛性分析</a></li>
+<li><a href="#8">8. 数值实验与验证</a></li>
+<li><a href="#9">9. 理论证明：投影的充分性</a></li>
+<li><a href="#10">10. 参数效率与模型容量</a></li>
+<li><a href="#11_1">11. 实践建议与总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

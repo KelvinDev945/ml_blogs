@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=概率">概率</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #102 大词表语言模型在续写任务上的一个问题及对策
+                    #248 大词表语言模型在续写任务上的一个问题及对策
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#102</span>
+                <span class="post-number">#248</span>
                 大词表语言模型在续写任务上的一个问题及对策
             </h1>
             <div class="post-meta">
@@ -173,7 +173,529 @@ url={\url{https://spaces.ac.cn/archives/9762}},<br />
 } </p>
 <hr />
 <h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="tokenization">一、Tokenization基础理论<a class="toc-link" href="#tokenization" title="Permanent link">&para;</a></h3>
+<h4 id="11-byte-pair-encoding-bpe">1.1 Byte-Pair Encoding (BPE)算法<a class="toc-link" href="#11-byte-pair-encoding-bpe" title="Permanent link">&para;</a></h4>
+<p><strong>基本思想</strong>：迭代合并最频繁的字符对。</p>
+<p><strong>算法流程</strong>：</p>
+<p>初始词表$\mathcal{V}_0$为所有字符集合：</p>
+<p>\begin{equation}
+\mathcal{V}_0 = {\text{'a'}, \text{'b'}, \cdots, \text{'z'}, \text{' '}, \cdots}
+\tag{1}
+\end{equation}</p>
+<p>迭代$k$步，每步执行：</p>
+<p>\begin{equation}
+\begin{aligned}
+(s_1^{(k)}, s_2^{(k)}) &amp;= \arg\max_{(s_1, s_2)} \text{count}(s_1 \circ s_2, \mathcal{C}) \
+\mathcal{V}_{k+1} &amp;= \mathcal{V}_k \cup {s_1^{(k)} \circ s_2^{(k)}}
+\end{aligned}
+\tag{2}
+\end{equation}</p>
+<p>其中$\mathcal{C}$是训练语料，$\circ$表示连接操作。</p>
+<p><strong>示例</strong>：
+- $\mathcal{V}_0 = {\text{a}, \text{b}, \text{c}, \text{ }}$
+- 语料："a b a b a b c"
+- 第1步：合并"a b" → "ab"，$\mathcal{V}_1 = {\text{a}, \text{b}, \text{c}, \text{ }, \text{ab}}$
+- 第2步：合并"ab ab" → "abab"，...</p>
+<h4 id="12">1.2 词表大小与压缩率<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p>设原始文本长度为$L_{\text{char}}$（字符数），分词后长度为$L_{\text{token}}$（token数）。</p>
+<p><strong>压缩率</strong>定义为：</p>
+<p>\begin{equation}
+\rho = \frac{L_{\text{char}}}{L_{\text{token}}}
+\tag{3}
+\end{equation}</p>
+<p><strong>词表大小与压缩率的关系</strong>：</p>
+<p>理论上，对于词表大小$|\mathcal{V}|$和语料大小$N$，压缩率近似为：</p>
+<p>\begin{equation}
+\rho \approx \alpha \log |\mathcal{V}| + \beta
+\tag{4}
+\end{equation}</p>
+<p>其中$\alpha, \beta$是与语料相关的常数。</p>
+<p><strong>实证数据</strong>（英文）：
+- $|\mathcal{V}| = 10^3$：$\rho \approx 2.5$
+- $|\mathcal{V}| = 5 \times 10^4$：$\rho \approx 4.0$
+- $|\mathcal{V}| = 10^5$：$\rho \approx 4.5$</p>
+<h4 id="13">1.3 贪心分词的数学形式化<a class="toc-link" href="#13" title="Permanent link">&para;</a></h4>
+<p>给定文本$\boldsymbol{x} = (x_1, x_2, \cdots, x_L)$和词表$\mathcal{V}$，贪心分词寻找：</p>
+<p>\begin{equation}
+\boldsymbol{t}^* = \arg\min_{\boldsymbol{t}} |\boldsymbol{t}|
+\tag{5}
+\end{equation}</p>
+<p>约束条件：</p>
+<p>\begin{equation}
+\begin{aligned}
+&amp;\boldsymbol{t} = (t_1, t_2, \cdots, t_K),\quad t_i \in \mathcal{V} \
+&amp;\text{concat}(t_1, t_2, \cdots, t_K) = \boldsymbol{x}
+\end{aligned}
+\tag{6}
+\end{equation}</p>
+<p><strong>贪心策略</strong>：从左到右，每步选择最长匹配：</p>
+<p>\begin{equation}
+t_i = \arg\max_{t \in \mathcal{V}} {|t| : \text{prefix}(\boldsymbol{x}_{pos:}, t)}
+\tag{7}
+\end{equation}</p>
+<p>其中$\text{prefix}(\boldsymbol{x}, t)$表示$t$是$\boldsymbol{x}$的前缀。</p>
+<h3 id="_7">二、续写问题的数学刻画<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 语言模型的自回归形式<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>语言模型定义联合概率分布：</p>
+<p>\begin{equation}
+P(\boldsymbol{t}) = \prod_{i=1}^K P(t_i | t_1, \cdots, t_{i-1})
+\tag{8}
+\end{equation}</p>
+<p><strong>条件概率计算</strong>：</p>
+<p>\begin{equation}
+P(t_i | t_1, \cdots, t_{i-1}) = \frac{\exp(\boldsymbol{h}<em t_i="t_i">{i-1}^T \boldsymbol{e}</em>})}{\sum_{t' \in \mathcal{V}} \exp(\boldsymbol{h<em t_="t'">{i-1}^T \boldsymbol{e}</em>
+\tag{9}
+\end{equation}})</p>
+<p>其中$\boldsymbol{h}<em _text_LM="\text{LM">{i-1} = f</em>_t$是token $t$的embedding。}}(t_1, \cdots, t_{i-1})$是隐状态，$\boldsymbol{e</p>
+<h4 id="22">2.2 续写不一致性问题<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p><strong>问题描述</strong>：用户输入前缀$\boldsymbol{x}<em _text_full="\text{full">{\text{prefix}}$，期望补全为$\boldsymbol{x}</em>$，但分词器行为导致：}</p>
+<p>\begin{equation}
+\text{tokenize}(\boldsymbol{x}<em _text_full="\text{full">{\text{prefix}}) \neq \text{tokenize}(\boldsymbol{x}</em>)[:K]
+\tag{10}
+\end{equation}}</p>
+<p>其中$K = |\text{tokenize}(\boldsymbol{x}_{\text{prefix}})|$。</p>
+<p><strong>具体例子</strong>：</p>
+<p>设词表$\mathcal{V}$包含：
+- "太阳"
+- "太阳能"
+- "能"</p>
+<p>给定前缀"太阳"：</p>
+<p>\begin{equation}
+\text{tokenize}(\text{"太阳"}) = [\text{"太阳"}]
+\tag{11}
+\end{equation}</p>
+<p>但完整文本"太阳能"：</p>
+<p>\begin{equation}
+\text{tokenize}(\text{"太阳能"}) = [\text{"太阳能"}]
+\tag{12}
+\end{equation}</p>
+<p><strong>统计分析</strong>：在训练数据中，"太阳"后面接"能"的频率为：</p>
+<p>\begin{equation}
+P(\text{"能"} | \text{"太阳"}) = \frac{\text{count}(\text{"太阳"}, \text{"能"})}{\text{count}(\text{"太阳"})}
+\tag{13}
+\end{equation}</p>
+<p>但由于"太阳能"作为单独token，训练数据中实际统计的是：</p>
+<p>\begin{equation}
+P(\text{"能"} | \text{"太阳"}) \approx \frac{\text{count}(\text{"太阳"}, \text{"能"}) - \text{count}(\text{"太阳能"})}{\text{count}(\text{"太阳"})}
+\tag{14}
+\end{equation}</p>
+<p>导致概率被严重低估。</p>
+<h4 id="23">2.3 概率质量损失定量分析<a class="toc-link" href="#23" title="Permanent link">&para;</a></h4>
+<p>设真实条件概率为$P_{\text{true}}(t | \boldsymbol{c})$，由于分词问题，模型学到的概率为$P_{\text{model}}(t | \boldsymbol{c})$。</p>
+<p><strong>KL散度</strong>衡量分布差异：</p>
+<p>\begin{equation}
+D_{KL}(P_{\text{true}} | P_{\text{model}}) = \sum_{t \in \mathcal{V}} P_{\text{true}}(t | \boldsymbol{c}) \log \frac{P_{\text{true}}(t | \boldsymbol{c})}{P_{\text{model}}(t | \boldsymbol{c})}
+\tag{15}
+\end{equation}</p>
+<p><strong>示例计算</strong>：</p>
+<p>假设词表有"太阳"、"太阳能"，真实分布：
+- $P_{\text{true}}(\text{"能"} | \text{"太阳"}) = 0.3$
+- $P_{\text{true}}(\text{"光"} | \text{"太阳"}) = 0.7$</p>
+<p>但由于"太阳能"是单独token，模型学到：
+- $P_{\text{model}}(\text{"能"} | \text{"太阳"}) \approx 0.01$
+- $P_{\text{model}}(\text{"光"} | \text{"太阳"}) \approx 0.85$</p>
+<p>KL散度：</p>
+<p>\begin{equation}
+\begin{aligned}
+D_{KL} &amp;= 0.3 \log \frac{0.3}{0.01} + 0.7 \log \frac{0.7}{0.85} \
+&amp;\approx 0.3 \times 3.4 + 0.7 \times (-0.2) \
+&amp;\approx 0.88 \text{ nats}
+\end{aligned}
+\tag{16}
+\end{equation}</p>
+<p>表示显著的分布偏差。</p>
+<h3 id="_8">三、前缀树与前缀搜索<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h3>
+<h4 id="31-trie">3.1 Trie数据结构<a class="toc-link" href="#31-trie" title="Permanent link">&para;</a></h4>
+<p><strong>定义</strong>：词表$\mathcal{V}$构建的Trie树$\mathcal{T}$，每个节点代表一个前缀。</p>
+<p><strong>节点结构</strong>：</p>
+<p>\begin{equation}
+\text{Node} = {\text{char}: c, \text{children}: {\text{Node}}, \text{is_word}: \text{bool}, \text{token_id}: \text{int}}
+\tag{17}
+\end{equation}</p>
+<p><strong>插入操作</strong>：对于token $t = (c_1, c_2, \cdots, c_m)$：</p>
+<p>\begin{equation}
+\begin{aligned}
+&amp;\text{node} \leftarrow \text{root} \
+&amp;\text{for } i = 1 \text{ to } m: \
+&amp;\quad \text{if } c_i \notin \text{node.children}: \
+&amp;\quad\quad \text{node.children}[c_i] \leftarrow \text{new Node}() \
+&amp;\quad \text{node} \leftarrow \text{node.children}[c_i] \
+&amp;\text{node.is_word} \leftarrow \text{True} \
+&amp;\text{node.token_id} \leftarrow \text{id}(t)
+\end{aligned}
+\tag{18}
+\end{equation}</p>
+<p><strong>前缀搜索</strong>：给定前缀$p = (c_1, \cdots, c_k)$，找到所有以$p$为前缀的tokens：</p>
+<p>\begin{equation}
+\text{prefix_search}(p) = {t \in \mathcal{V} : \text{prefix}(t, p)}
+\tag{19}
+\end{equation}</p>
+<p><strong>算法复杂度</strong>：
+- 插入：$O(|t|)$
+- 前缀搜索：$O(|p| + |\text{results}|)$</p>
+<h4 id="32">3.2 前缀搜索的完整性<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p><strong>引理1</strong>：若$t_1, t_2 \in \mathcal{V}$，$t_1$是$t_2$的真前缀，则：</p>
+<p>\begin{equation}
+\text{prefix_search}(t_1) \supseteq {t_2}
+\tag{20}
+\end{equation}</p>
+<p><strong>证明</strong>：由于$t_1$是$t_2$的前缀，根据Trie结构，从root沿$t_1$的路径必然可以到达$t_2$的节点。$\square$</p>
+<p><strong>推论</strong>：给定任意前缀$p$，前缀搜索能找到所有可能的补全候选。</p>
+<h4 id="33">3.3 候选集大小估计<a class="toc-link" href="#33" title="Permanent link">&para;</a></h4>
+<p>设词表大小为$|\mathcal{V}| = n$，前缀长度为$|p| = k$。</p>
+<p><strong>随机模型假设</strong>：假设tokens均匀分布在字符空间$\Sigma$（字符集，$|\Sigma| = c$）。</p>
+<p><strong>期望候选数</strong>：</p>
+<p>\begin{equation}
+\mathbb{E}[|\text{prefix_search}(p)|] = n \cdot \left(\frac{1}{c}\right)^k
+\tag{21}
+\end{equation}</p>
+<p><strong>推导</strong>：每个token有概率$(\frac{1}{c})^k$与前缀$p$匹配（假设独立）。</p>
+<p><strong>实际估计</strong>（考虑Zipf分布）：</p>
+<p>自然语言遵循Zipf定律，词频排名$r$的词频率为：</p>
+<p>\begin{equation}
+f_r \propto \frac{1}{r^\alpha},\quad \alpha \approx 1
+\tag{22}
+\end{equation}</p>
+<p>考虑高频词的前缀偏好，实际候选数通常为：</p>
+<p>\begin{equation}
+|\text{prefix_search}(p)| \approx O(\log n)
+\tag{23}
+\end{equation}</p>
+<p>对于$|\mathcal{V}| = 50000$的词表，典型前缀搜索返回5-20个候选。</p>
+<h3 id="token-healing">四、Token Healing算法详解<a class="toc-link" href="#token-healing" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 标准自回归生成<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p>标准流程：</p>
+<p>\begin{equation}
+\begin{aligned}
+\boldsymbol{t}<em _text_input="\text{input">{\text{input}} &amp;= \text{tokenize}(\boldsymbol{x}</em>) \
+\boldsymbol{h} &amp;= f_{\text{LM}}(\boldsymbol{t}}<em _text_next="\text{next">{\text{input}}) \
+t</em>)
+\end{aligned}
+\tag{24}
+\end{equation}}} &amp;\sim P(\cdot | \boldsymbol{h</p>
+<p><strong>问题</strong>：$\boldsymbol{t}_{\text{input}}$可能不是最优分词（当输入是前缀时）。</p>
+<h4 id="42-token-healing">4.2 Token Healing核心算法<a class="toc-link" href="#42-token-healing" title="Permanent link">&para;</a></h4>
+<p><strong>步骤1：回退</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+\boldsymbol{t}<em _text_input="\text{input">{\text{prefix}} &amp;= \boldsymbol{t}</em>[:-1] \
+t_{\text{last}} &amp;= \boldsymbol{t}}<em _text_last="\text{last">{\text{input}}[-1] \
+s</em>)
+\end{aligned}
+\tag{25}
+\end{equation}}} &amp;= \text{detokenize}(t_{\text{last}</p>
+<p><strong>步骤2：前缀搜索</strong></p>
+<p>\begin{equation}
+\mathcal{C} = \text{prefix_search}(s_{\text{last}}) = {t \in \mathcal{V} : \text{prefix}(t, s_{\text{last}})}
+\tag{26}
+\end{equation}</p>
+<p><strong>步骤3：候选概率计算</strong></p>
+<p>对于每个候选$t_c \in \mathcal{C}$，计算条件概率：</p>
+<p>\begin{equation}
+P(t_c | \boldsymbol{t}<em _text_prefix="\text{prefix">{\text{prefix}}) = \frac{\exp(\boldsymbol{h}</em>}}^T \boldsymbol{e<em _in="\in" _mathcal_C="\mathcal{C" t_="t'">{t_c})}{\sum</em>}} \exp(\boldsymbol{h<em t_="t'">{\text{prefix}}^T \boldsymbol{e}</em>
+\tag{27}
+\end{equation}})</p>
+<p><strong>注意</strong>：这里的归一化仅在候选集$\mathcal{C}$上进行，而非全词表$\mathcal{V}$。</p>
+<p><strong>步骤4：重采样</strong></p>
+<p>\begin{equation}
+t^* \sim P(\cdot | \boldsymbol{t}<em _mathcal_C="\mathcal{C">{\text{prefix}})\Big|</em>
+\tag{28}
+\end{equation}}</p>
+<p><strong>步骤5：输出与继续</strong></p>
+<p>若$t^* = t_{\text{last}}$：</p>
+<p>\begin{equation}
+\boldsymbol{t}<em _text_input="\text{input">{\text{new}} = \boldsymbol{t}</em>
+\tag{29}
+\end{equation}}},\quad \text{正常继续生成</p>
+<p>若$t^* \neq t_{\text{last}}$：</p>
+<p>\begin{equation}
+\begin{aligned}
+s^<em> &amp;= \text{detokenize}(t^</em>) \
+s_{\text{output}} &amp;= s^<em>[|s_{\text{last}}|:] \
+\boldsymbol{t}<em _text_prefix="\text{prefix">{\text{new}} &amp;= \boldsymbol{t}</em> \circ [t^}</em>]
+\end{aligned}
+\tag{30}
+\end{equation}</p>
+<p>输出$s_{\text{output}}$，然后基于$\boldsymbol{t}_{\text{new}}$继续生成。</p>
+<h4 id="43">4.3 算法正确性证明<a class="toc-link" href="#43" title="Permanent link">&para;</a></h4>
+<p><strong>定理1</strong>：Token Healing算法恢复了"最优分词"条件下的概率分布。</p>
+<p><strong>证明草图</strong>：</p>
+<p>设最优分词为$\boldsymbol{t}^<em> = (t_1^</em>, \cdots, t_K^*)$，用户输入的分词为$\boldsymbol{t}_{\text{input}} = (t_1, \cdots, t_K)$。</p>
+<p>假设仅最后一个token不同：$t_i = t_i^<em>$ for $i &lt; K$，$t_K \neq t_K^</em>$，但$t_K^*$是$t_K$的扩展。</p>
+<p>算法执行后：
+- 前缀搜索找到$\mathcal{C} \ni t_K^<em>$
+- 重采样选择$t^</em>$，使得$P(t^<em> | \boldsymbol{t}_{\text{prefix}})$最大化
+- 若$t^</em> = t_K^*$，则恢复最优分词</p>
+<p><strong>关键性质</strong>：由于$\boldsymbol{h}<em _text_prefix="\text{prefix">{\text{prefix}}$仅依赖于$\boldsymbol{t}</em>$上的归一化概率正确反映了真实条件概率（在候选集内）。$\square$}} = (t_1, \cdots, t_{K-1})$，不受$t_K$影响，因此在$\mathcal{C</p>
+<h4 id="44">4.4 计算复杂度分析<a class="toc-link" href="#44" title="Permanent link">&para;</a></h4>
+<p><strong>单次Token Healing开销</strong>：</p>
+<ol>
+<li><strong>前缀搜索</strong>：$O(|s_{\text{last}}| + |\mathcal{C}|)$</li>
+<li><strong>概率计算</strong>：$O(|\mathcal{C}| \cdot d)$，其中$d$是embedding维度</li>
+<li><strong>归一化与采样</strong>：$O(|\mathcal{C}|)$</li>
+</ol>
+<p><strong>总复杂度</strong>：</p>
+<p>\begin{equation}
+T_{\text{healing}} = O(|\mathcal{C}| \cdot d)
+\tag{31}
+\end{equation}</p>
+<p><strong>与标准生成对比</strong>：</p>
+<p>标准生成每步：$O(|\mathcal{V}| \cdot d)$（全词表Softmax）</p>
+<p>加速比：</p>
+<p>\begin{equation}
+\text{Speedup} \approx \frac{|\mathcal{V}|}{|\mathcal{C}|} \approx \frac{50000}{10} = 5000\times
+\tag{32}
+\end{equation}</p>
+<p><strong>注</strong>：实际中由于KV-cache等优化，标准生成可能不需要完整Softmax，但Token Healing仍带来显著优势。</p>
+<h3 id="_9">五、概率归一化的理论基础<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 受限采样的数学形式<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>设完整概率分布为$P(t | \boldsymbol{c})$，定义在$\mathcal{V}$上。</p>
+<p><strong>受限分布</strong>定义在子集$\mathcal{C} \subseteq \mathcal{V}$上：</p>
+<p>\begin{equation}
+P_{\mathcal{C}}(t | \boldsymbol{c}) = \begin{cases}
+\frac{P(t | \boldsymbol{c})}{\sum_{t' \in \mathcal{C}} P(t' | \boldsymbol{c})}, &amp; t \in \mathcal{C} \
+0, &amp; t \notin \mathcal{C}
+\end{cases}
+\tag{33}
+\end{equation}</p>
+<p><strong>性质</strong>：$P_{\mathcal{C}}$是$\mathcal{C}$上的概率分布，即：</p>
+<p>\begin{equation}
+\sum_{t \in \mathcal{C}} P_{\mathcal{C}}(t | \boldsymbol{c}) = 1
+\tag{34}
+\end{equation}</p>
+<h4 id="52-logits">5.2 Logits到概率的归一化<a class="toc-link" href="#52-logits" title="Permanent link">&para;</a></h4>
+<p>模型输出logits：</p>
+<p>\begin{equation}
+z_t = \boldsymbol{h}^T \boldsymbol{e}_t
+\tag{35}
+\end{equation}</p>
+<p><strong>全词表Softmax</strong>：</p>
+<p>\begin{equation}
+P(t | \boldsymbol{c}) = \frac{\exp(z_t)}{\sum_{t' \in \mathcal{V}} \exp(z_{t'})} = \frac{\exp(z_t)}{Z_{\mathcal{V}}}
+\tag{36}
+\end{equation}</p>
+<p>其中$Z_{\mathcal{V}} = \sum_{t' \in \mathcal{V}} \exp(z_{t'})$是配分函数。</p>
+<p><strong>候选集Softmax</strong>：</p>
+<p>\begin{equation}
+P_{\mathcal{C}}(t | \boldsymbol{c}) = \frac{\exp(z_t)}{Z_{\mathcal{C}}} = \frac{\exp(z_t)}{\sum_{t' \in \mathcal{C}} \exp(z_{t'})}
+\tag{37}
+\end{equation}</p>
+<p><strong>重要关系</strong>：</p>
+<p>\begin{equation}
+P_{\mathcal{C}}(t | \boldsymbol{c}) = \frac{P(t | \boldsymbol{c})}{\sum_{t' \in \mathcal{C}} P(t' | \boldsymbol{c})} = \frac{P(t | \boldsymbol{c})}{P(\mathcal{C} | \boldsymbol{c})}
+\tag{38}
+\end{equation}</p>
+<p>其中$P(\mathcal{C} | \boldsymbol{c}) = \sum_{t' \in \mathcal{C}} P(t' | \boldsymbol{c})$是候选集的总概率质量。</p>
+<h4 id="53">5.3 数值稳定性<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<p><strong>问题</strong>：当logits很大时，$\exp(z_t)$可能溢出。</p>
+<p><strong>Log-sum-exp技巧</strong>：</p>
+<p>\begin{equation}
+\log Z_{\mathcal{C}} = \log \sum_{t \in \mathcal{C}} \exp(z_t) = z_{\max} + \log \sum_{t \in \mathcal{C}} \exp(z_t - z_{\max})
+\tag{39}
+\end{equation}</p>
+<p>其中$z_{\max} = \max_{t \in \mathcal{C}} z_t$。</p>
+<p><strong>稳定计算</strong>：</p>
+<p>\begin{equation}
+\log P_{\mathcal{C}}(t | \boldsymbol{c}) = z_t - \log Z_{\mathcal{C}} = z_t - z_{\max} - \log \sum_{t' \in \mathcal{C}} \exp(z_{t'} - z_{\max})
+\tag{40}
+\end{equation}</p>
+<h3 id="_10">六、扩展：多步回退<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 问题动机<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p><strong>示例</strong>："import numpy as np"</p>
+<p>若词表包含"import numpy as np"作为单个token，用户输入"import numpy"可能被分为：</p>
+<p>\begin{equation}
+\text{tokenize}(\text{"import numpy"}) = [\text{"import"}, \text{" numpy"}]
+\tag{41}
+\end{equation}</p>
+<p>单步回退仅检查" numpy"的扩展，无法找到"import numpy as np"。</p>
+<h4 id="62-k">6.2 $k$步回退算法<a class="toc-link" href="#62-k" title="Permanent link">&para;</a></h4>
+<p><strong>参数</strong>：最大回退步数$k_{\max}$（如$k_{\max} = 3$）</p>
+<p><strong>算法</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+&amp;\text{for } k = 1 \text{ to } k_{\max}: \
+&amp;\quad \boldsymbol{t}<em _text_input="\text{input">{\text{prefix}}^{(k)} = \boldsymbol{t}</em>[:-k] \
+&amp;\quad s_{\text{suffix}}^{(k)} = \text{concat}(\boldsymbol{t}}<em _text_suffix="\text{suffix">{\text{input}}[-k:]) \
+&amp;\quad \mathcal{C}^{(k)} = \text{prefix_search}(s</em>) \
+&amp;\quad \text{if } |\mathcal{C}^{(k)}| &gt; 1: \
+&amp;\quad\quad \text{执行Token Healing with } \mathcal{C}^{(k)} \
+&amp;\quad\quad \text{break}
+\end{aligned}
+\tag{42}
+\end{equation}}}^{(k)</p>
+<p><strong>示例执行</strong>：</p>
+<p>输入："import numpy"
+- $k=1$: 回退" numpy"，$\mathcal{C}^{(1)} = {\text{" numpy"}}$（只有自己，无扩展）
+- $k=2$: 回退"import numpy"，$\mathcal{C}^{(2)} = {\text{"import numpy"}, \text{"import numpy as np"}}$（找到扩展）
+- 执行Token Healing，有机会选择"import numpy as np"</p>
+<h4 id="63">6.3 计算开销与权衡<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p><strong>总开销</strong>：</p>
+<p>\begin{equation}
+T_{\text{total}} = \sum_{k=1}^{k_{\max}} O(|\mathcal{C}^{(k)}| \cdot d + |s_{\text{suffix}}^{(k)}|)
+\tag{43}
+\end{equation}</p>
+<p><strong>优化策略</strong>：
+1. <strong>早停</strong>：一旦找到多个候选即停止
+2. <strong>缓存</strong>：前缀搜索结果可部分重用
+3. <strong>自适应$k_{\max}$</strong>：根据平均token长度调整</p>
+<p><strong>实践建议</strong>：$k_{\max} = 2$通常足够，覆盖绝大多数情况。</p>
+<h3 id="token-healing_1">七、理论分析：为什么Token Healing有效<a class="toc-link" href="#token-healing_1" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 信息论视角<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p><strong>熵差异</strong>：标准分词的条件熵：</p>
+<p>\begin{equation}
+H(T | C) = -\sum_{t \in \mathcal{V}} P(t | C) \log P(t | C)
+\tag{44}
+\end{equation}</p>
+<p>Token Healing后的条件熵：</p>
+<p>\begin{equation}
+H_{\text{healed}}(T | C) = -\sum_{t \in \mathcal{C}} P_{\mathcal{C}}(t | C) \log P_{\mathcal{C}}(t | C)
+\tag{45}
+\end{equation}</p>
+<p><strong>关键观察</strong>：$\mathcal{C}$通常是高概率候选集，即：</p>
+<p>\begin{equation}
+P(\mathcal{C} | C) = \sum_{t \in \mathcal{C}} P(t | C) \approx 1 - \epsilon
+\tag{46}
+\end{equation}</p>
+<p>其中$\epsilon$很小。此时：</p>
+<p>\begin{equation}
+H_{\text{healed}}(T | C) \approx H(T | C) + \epsilon \log |\mathcal{V}|
+\tag{47}
+\end{equation}</p>
+<p>熵的增加可忽略。</p>
+<h4 id="72">7.2 近似误差界<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p><strong>定理2</strong>：设$P(\mathcal{C} | C) \geq 1 - \epsilon$，则：</p>
+<p>\begin{equation}
+D_{KL}(P_{\mathcal{C}}(\cdot | C) | P(\cdot | C)) \leq -\log(1 - \epsilon) + \epsilon \log |\mathcal{V}|
+\tag{48}
+\end{equation}</p>
+<p><strong>证明</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+D_{KL} &amp;= \sum_{t \in \mathcal{C}} P_{\mathcal{C}}(t | C) \log \frac{P_{\mathcal{C}}(t | C)}{P(t | C)} \
+&amp;= \sum_{t \in \mathcal{C}} P_{\mathcal{C}}(t | C) \log \frac{1}{P(\mathcal{C} | C)} \
+&amp;= -\log P(\mathcal{C} | C) \
+&amp;\leq -\log(1-\epsilon)
+\end{aligned}
+\tag{49}
+\end{equation}</p>
+<p>当$\epsilon \ll 1$时，$-\log(1-\epsilon) \approx \epsilon$，KL散度很小。$\square$</p>
+<h4 id="73">7.3 实际效果的实证分析<a class="toc-link" href="#73" title="Permanent link">&para;</a></h4>
+<p><strong>场景1</strong>：常见短语续写</p>
+<p>设"import numpy as np"在训练数据中出现频率为$f = 10^{-4}$。</p>
+<p><strong>无Token Healing</strong>：
+- 输入："import numpy"分为$[\text{"import"}, \text{" numpy"}]$
+- 模型需要预测$P(\text{" as"} | \text{"import"}, \text{" numpy"})$
+- 由于"import numpy as"在分词后很少单独出现，概率低</p>
+<p><strong>有Token Healing</strong>：
+- 回退找到$\mathcal{C} = {\text{"import numpy"}, \text{"import numpy as np"}}$
+- 直接比较两者概率
+- "import numpy as np"在训练中完整出现，概率高</p>
+<p><strong>概率提升</strong>：</p>
+<p>\begin{equation}
+\frac{P_{\text{healed}}(\text{"import numpy as np"})}{P_{\text{standard}}(\text{" as"})} \approx 10^2 \sim 10^3
+\tag{50}
+\end{equation}</p>
+<h3 id="_11">八、实现细节与优化<a class="toc-link" href="#_11" title="Permanent link">&para;</a></h3>
+<h4 id="81-trie">8.1 Trie树构建优化<a class="toc-link" href="#81-trie" title="Permanent link">&para;</a></h4>
+<p><strong>内存优化</strong>：压缩Trie（Patricia Trie）</p>
+<p>对于词表大小$|\mathcal{V}| = 50000$，字符集$|\Sigma| = 256$：</p>
+<p><strong>原始Trie节点数</strong>：</p>
+<p>\begin{equation}
+N_{\text{nodes}} \approx |\mathcal{V}| \cdot \bar{L}
+\tag{51}
+\end{equation}</p>
+<p>其中$\bar{L}$是平均token长度（约5-8）。</p>
+<p><strong>压缩Trie节点数</strong>：</p>
+<p>\begin{equation}
+N_{\text{compressed}} \approx |\mathcal{V}| + N_{\text{branch}}
+\tag{52}
+\end{equation}</p>
+<p>其中$N_{\text{branch}}$是分支点数量（远小于$|\mathcal{V}| \cdot \bar{L}$）。</p>
+<p><strong>内存节省</strong>：</p>
+<p>\begin{equation}
+\text{Reduction} = \frac{N_{\text{nodes}} - N_{\text{compressed}}}{N_{\text{nodes}}} \approx 1 - \frac{1}{\bar{L}} \approx 80\%
+\tag{53}
+\end{equation}</p>
+<h4 id="82">8.2 批处理加速<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<p>对于beam search，同时处理$B$个beam：</p>
+<p><strong>朴素方法</strong>：逐个执行Token Healing，复杂度$O(B \cdot |\mathcal{C}| \cdot d)$</p>
+<p><strong>批处理方法</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+\mathcal{C}<em b="1">{\text{union}} &amp;= \bigcup</em>}^B \mathcal{C<em t_1="t_1">b \
+\boldsymbol{Z} &amp;= [\boldsymbol{e}</em>}, \boldsymbol{e<em t__mathcal_C="t_{|\mathcal{C">{t_2}, \cdots, \boldsymbol{e}</em>] \
+\boldsymbol{S} &amp;= \boldsymbol{H} \boldsymbol{Z}^T \quad \text{(单次矩阵乘法)}
+\end{aligned}
+\tag{54}
+\end{equation}}_{\text{union}}|}</p>
+<p>其中$\boldsymbol{H} \in \mathbb{R}^{B \times d}$是所有beam的隐状态。</p>
+<p><strong>加速比</strong>：</p>
+<p>\begin{equation}
+\text{Speedup}<em _text_union="\text{union">{\text{batch}} = \frac{B \cdot |\mathcal{C}|}{|\mathcal{C}</em>)
+\tag{55}
+\end{equation}}}|} \approx B \quad (\text{当候选集重叠度高时</p>
+<h3 id="_12">九、局限性与改进方向<a class="toc-link" href="#_12" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 候选集不完整的情况<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p><strong>问题</strong>：若真实最优token $t^*$不在前缀搜索结果$\mathcal{C}$中，Token Healing失效。</p>
+<p><strong>概率分析</strong>：设前缀为$p$，最优token为$t^*$。</p>
+<p>若$t^<em>$不以$p$为前缀，则必然$t^</em> \notin \mathcal{C}$。</p>
+<p><strong>失效概率</strong>：</p>
+<p>\begin{equation}
+P_{\text{fail}} = P(t^* \notin \mathcal{C}) = \sum_{t \notin \mathcal{C}} P(t | C)
+\tag{56}
+\end{equation}</p>
+<p><strong>缓解策略</strong>：
+1. <strong>软回退</strong>：不完全删除最后一个token，而是给予低权重
+2. <strong>混合分布</strong>：$P_{\text{final}} = \lambda P_{\mathcal{C}} + (1-\lambda) P_{\text{standard}}$</p>
+<h4 id="92-">9.2 计算-质量权衡<a class="toc-link" href="#92-" title="Permanent link">&para;</a></h4>
+<p><strong>$k_{\max}$选择</strong>：</p>
+<ul>
+<li>$k_{\max} = 0$：无Token Healing，最快但质量差</li>
+<li>$k_{\max} = 1$：覆盖大多数情况，开销小</li>
+<li>$k_{\max} \to \infty$：完整搜索，开销大</li>
+</ul>
+<p><strong>自适应策略</strong>：</p>
+<p>\begin{equation}
+k^* = \arg\min_{k} {k : |\mathcal{C}^{(k)}| \geq \tau}
+\tag{57}
+\end{equation}</p>
+<p>其中$\tau$是最小候选数阈值（如$\tau = 3$）。</p>
+<h4 id="93">9.3 与其他采样策略的兼容性<a class="toc-link" href="#93" title="Permanent link">&para;</a></h4>
+<p><strong>Top-k采样</strong>：</p>
+<p>标准Top-k：选择概率最高的$k$个tokens</p>
+<p>\begin{equation}
+\mathcal{T}<em k_1="k+1">k = {t_1, \cdots, t_k} \quad \text{where } P(t_1 | C) \geq \cdots \geq P(t_k | C) \geq P(t</em> | C)
+\tag{58}
+\end{equation}</p>
+<p>Token Healing + Top-k：</p>
+<p>\begin{equation}
+\mathcal{T}<em _mathcal_C="\mathcal{C">k^{\text{healed}} = {t \in \mathcal{C} : P</em>k}
+\tag{59}
+\end{equation}}}(t | C) \in \text{top-</p>
+<p><strong>Nucleus (Top-p)采样</strong>：</p>
+<p>\begin{equation}
+\mathcal{T}<em _in="\in" _mathcal_T="\mathcal{T" t_="t'">p = \left{t : \sum</em> P(t' | C) \geq p\right}
+\tag{60}
+\end{equation}}_p</p>
+<p>与Token Healing结合类似。</p>
+<h3 id="_13">十、总结与理论洞察<a class="toc-link" href="#_13" title="Permanent link">&para;</a></h3>
+<p>Token Healing的核心思想可总结为：</p>
+<p>\begin{equation}
+\boxed{
+\begin{aligned}
+&amp;\text{分词后退：消除贪心分词的短视性} \
+&amp;\text{前缀搜索：高效定位候选集} \
+&amp;\text{概率重归一：恢复真实条件分布}
+\end{aligned}
+}
+\tag{61}
+\end{equation}</p>
+<p><strong>适用场景</strong>：
+1. 大词表语言模型（$|\mathcal{V}| &gt; 10^4$）
+2. 交互式续写任务
+3. 对首token质量要求高的应用</p>
+<p><strong>理论保证</strong>：当候选集概率质量$P(\mathcal{C} | C) \to 1$时，Token Healing渐近最优。</p>
+<p><strong>实践价值</strong>：以微小的计算代价（&lt;1%推理时间），显著提升续写体验和一致性。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -183,7 +705,7 @@ url={\url{https://spaces.ac.cn/archives/9762}},<br />
                             
                             <a href="bytepiece更纯粹更高压缩率的tokenizer.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#101 BytePiece：更纯粹、更高压缩率的Tokenizer</div>
+                                <div class="nav-title">#247 BytePiece：更纯粹、更高压缩率的Tokenizer</div>
                             </a>
                             
                         </div>
@@ -191,7 +713,7 @@ url={\url{https://spaces.ac.cn/archives/9762}},<br />
                             
                             <a href="随机分词浅探从viterbi-decoding到viterbi-sampling.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#103 随机分词浅探：从Viterbi Decoding到Viterbi Sampling</div>
+                                <div class="nav-title">#249 随机分词浅探：从Viterbi Decoding到Viterbi Sampling</div>
                             </a>
                             
                         </div>
@@ -220,7 +742,19 @@ url={\url{https://spaces.ac.cn/archives/9762}},<br />
 <li><a href="#_3">续写问题</a></li>
 <li><a href="#_4">参考对策</a></li>
 <li><a href="#_5">文章小结</a></li>
-<li><a href="#_6">公式推导与注释</a></li>
+<li><a href="#_6">公式推导与注释</a><ul>
+<li><a href="#tokenization">一、Tokenization基础理论</a></li>
+<li><a href="#_7">二、续写问题的数学刻画</a></li>
+<li><a href="#_8">三、前缀树与前缀搜索</a></li>
+<li><a href="#token-healing">四、Token Healing算法详解</a></li>
+<li><a href="#_9">五、概率归一化的理论基础</a></li>
+<li><a href="#_10">六、扩展：多步回退</a></li>
+<li><a href="#token-healing_1">七、理论分析：为什么Token Healing有效</a></li>
+<li><a href="#_11">八、实现细节与优化</a></li>
+<li><a href="#_12">九、局限性与改进方向</a></li>
+<li><a href="#_13">十、总结与理论洞察</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

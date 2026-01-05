@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P-tuning：自动构建模版，释放语言模型潜能 | ML & Math Blog Posts</title>
+    <meta name="description" content="P-tuning：自动构建模版，释放语言模型潜能&para;
+原文链接: https://spaces.ac.cn/archives/8295
+发布日期: 
+
+在之前的文章《必须要GPT3吗？不，BERT的MLM模型也能小样本学习》中，我们介绍了一种名为Pattern-Exploiting Training（PET）的方法，它通过人工构建的模版与BERT的MLM模型结合，能够起到非常好的零样本、小...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
+
+    <!-- MathJax for math rendering with equation numbering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=语言模型">语言模型</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #34 P-tuning：自动构建模版，释放语言模型潜能
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">
+                <span class="post-number">#34</span>
+                P-tuning：自动构建模版，释放语言模型潜能
+            </h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/8295" target="_blank" rel="noopener">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=语言模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 语言模型</span>
+                </a>
+                
+                <a href="../index.html?tags=NLP" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> NLP</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+            </div>
+            
+        </header>
+
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="p-tuning">P-tuning：自动构建模版，释放语言模型潜能<a class="toc-link" href="#p-tuning" title="Permanent link">&para;</a></h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8295">https://spaces.ac.cn/archives/8295</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在之前的文章<a href="/archives/7764">《必须要GPT3吗？不，BERT的MLM模型也能小样本学习》</a>中，我们介绍了一种名为Pattern-Exploiting Training（PET）的方法，它通过人工构建的模版与BERT的MLM模型结合，能够起到非常好的零样本、小样本乃至半监督学习效果，而且该思路比较优雅漂亮，因为它将预训练任务和下游任务统一起来了。然而，人工构建这样的模版有时候也是比较困难的，而且不同的模版效果差别也很大，如果能够通过少量样本来自动构建模版，也是非常有价值的。</p>
+<p>最近Arxiv上的论文<a href="https://papers.cool/arxiv/2103.10385">《GPT Understands, Too》</a>提出了名为P-tuning的方法，成功地实现了 <em>模版的自动构建</em> 。不仅如此，借助P-tuning，GPT在SuperGLUE上的成绩首次超过了同等级别的BERT模型，这颠覆了一直以来“GPT不擅长NLU”的结论，也是该论文命名的缘由。</p>
+<h2 id="_1">什么是模版<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
+<p>所谓PET，主要的思想是借助由自然语言构成的模版（英文常称Pattern或Prompt），将下游任务也转化为一个完形填空任务，这样就可以用BERT的MLM模型来进行预测了。比如下图中通过条件前缀来实现情感分类和主题分类的例子：  </p>
+<p><a href="/usr/uploads/2021/04/957788384.png" title="点击查看原图"><img alt="通过特定模版将情感分类转换为MLM任务" src="/usr/uploads/2021/04/957788384.png" /></a></p>
+<p>通过特定模版将情感分类转换为MLM任务</p>
+<p><a href="/usr/uploads/2021/04/2064695169.png" title="点击查看原图"><img alt="通过特定模版将新闻分类转换为MLM任务" src="/usr/uploads/2021/04/2064695169.png" /></a></p>
+<p>通过特定模版将新闻分类转换为MLM任务</p>
+<p>当然，这种方案也不是只有MLM模型可行，用GPT这样的单向语言模型（LM）其实也很简单：  </p>
+<p><a href="/usr/uploads/2021/04/2581387139.png" title="点击查看原图"><img alt="通过特定模版将情感分类转换为LM任务" src="/usr/uploads/2021/04/2581387139.png" /></a></p>
+<p>通过特定模版将情感分类转换为LM任务</p>
+<p><a href="/usr/uploads/2021/04/3605052854.png" title="点击查看原图"><img alt="通过特定模版将新闻分类转换为LM任务" src="/usr/uploads/2021/04/3605052854.png" /></a></p>
+<p>通过特定模版将新闻分类转换为LM任务</p>
+<p>不过由于语言模型是从左往右解码的，因此预测部分只能放在句末了（但还可以往补充前缀说明，只不过预测部分放在最后）。</p>
+<p>某种意义上来说，这些模版属于语言模型的“探针”，我们可以通过模版来抽取语言模型的特定知识，从而做到不错的零样本效果，而配合少量标注样本，可以进一步提升效果，这些在<a href="/archives/7764">《必须要GPT3吗？不，BERT的MLM模型也能小样本学习》</a>中已经比较详细讨论过了。</p>
+<p>然而，前面已经说了，对于某些任务而言，人工构建模版并不是那么容易的事情，模型的优劣我们也不好把握，而不同模型之间的效果差别可能很大， <em>在这种情况下，人工标注一些样本可能比构建模版还要轻松得多</em> 。所以，如何根据已有的标注样本来自动构建模版，便成了一个值得研究的问题了。</p>
+<h2 id="p-tuning_1">P-tuning<a class="toc-link" href="#p-tuning_1" title="Permanent link">&para;</a></h2>
+<p>P-tuning重新审视了关于模版的定义，放弃了“模版由自然语言构成”这一常规要求，从而将模版的构建转化为连续参数优化问题，虽然简单，但却有效。</p>
+<h3 id="_2">模版的反思<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h3>
+<p>首先，我们来想一下“什么是模版”。直观来看，模版就是由自然语言构成的前缀/后缀，通过这些模版我们使得下游任务跟预训练任务一致，这样才能更加充分地利用原始预训练模型，起到更好的零样本、小样本学习效果。</p>
+<p>等等，我们真的在乎模版是不是“自然语言”构成的吗？</p>
+<p>并不是。本质上来说，我们并不关心模版长什么样，我们只需要知道模版由哪些token组成，该插入到哪里，插入后能不能完成我们的下游任务，输出的候选空间是什么。模版是不是自然语言组成的，对我们根本没影响，“自然语言”的要求，只是为了更好地实现“一致性”，但不是必须的。于是，P-tuning考虑了如下形式的模版：  </p>
+<p><a href="/usr/uploads/2021/04/2868831073.png" title="点击查看原图"><img alt="P-tuning直接使用[unused*]的token来构建模版，不关心模版的自然语言性" src="/usr/uploads/2021/04/2868831073.png" /></a></p>
+<p>P-tuning直接使用[unused*]的token来构建模版，不关心模版的自然语言性</p>
+<p>这里的[u1]～[u6]，代表BERT词表里边的[unused1]～[unused6]，也就是用几个从未见过的token来构成模板，这里的token数目是一个超参数，放在前面还是后面也可以调整。接着，为了让“模版”发挥作用，我们用标注数据来求出这个模板。</p>
+<h3 id="_3">如何去优化<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h3>
+<p>这时候，根据标注数据量的多少，我们又分两种情况讨论。</p>
+<p><strong>第一种，标注数据比较少。</strong> 这种情况下，我们固定整个模型的权重，只优化[unused1]～[unused6]这几个token的Embedding，换句话说，其实我们就是要学6个新的Embedding，使得它起到了模版的作用。这样一来，因为模型权重几乎都被固定住了，训练起来很快，而且因为要学习的参数很少，因此哪怕标注样本很少，也能把模版学出来，不容易过拟合。</p>
+<p><strong>第二种，标注数据很充足。</strong> 这时候如果还按照第一种的方案来，就会出现欠拟合的情况，因为只有6个token的可优化参数实在是太少了。因此，我们可以放开所有权重微调，原论文在SuperGLUE上的实验就是这样做的。读者可能会想：这样跟直接加个全连接微调有什么区别？原论文的结果是这样做效果更好，可能还是因为跟预训练任务更一致了吧。</p>
+<p><a href="/usr/uploads/2021/04/2403854480.png" title="点击查看原图"><img alt="P-tuning在SuperGLUE上的表现" src="/usr/uploads/2021/04/2403854480.png" /></a></p>
+<p>P-tuning在SuperGLUE上的表现</p>
+<p>此外，在上面的例子中， <em>目标token</em> 如“很”、“体育”是人为选定的，那么它们可不可以也用[unused<em>]的token代替呢？答案是可以，但也分两种情况考虑：1、在标注数据比较少的时候，人工来选定适当的目标token效果往往更好些；2、在标注数据很充足的情况下，目标token用[unused</em>]效果更好些，因为这时候模型的优化空间更大一些。</p>
+<h3 id="_4">增强相关性<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h3>
+<p>在原论文中，P-tuning并不是随机初始化几个新token然后直接训练的，而是通过一个小型的LSTM模型把这几个Embedding算出来，并且将这个LSTM模型设为可学习的。这样多绕了一步有什么好处呢？原论文大概的意思是： <em>LSTM出现的token表示相关性更强，某种程度上来说更像“自然语言”（因为自然语言的token之间不是独立的），此外还能防止局部最优</em> 。我在Github上进一步向作者确认了一下（参考<a href="https://github.com/THUDM/P-tuning/issues/5">这里</a>），效果上的差别是通过LSTM多绕一步的方法可以使得模型收敛更快、效果更优。</p>
+<p>然而，这样多了一个LSTM，总感觉有些别扭，而且实现上也略微有点麻烦。按照作者的意思，LSTM是为了帮助模版的几个token（某种程度上）更贴近自然语言，但这并不一定要用LSTM生成，而且就算用LSTM生成也不一定达到这一点。笔者认为，更自然的方法是在训练下游任务的时候，不仅仅预测下游任务的目标token（前面例子中的“很”、“新闻”），还应该同时做其他token的预测。</p>
+<p>比如， <em>如果是MLM模型，那么也随机mask掉其他的一些token来预测；如果是LM模型，则预测完整的序列，而不单单是目标词。</em> 这样做的理由是：因为我们的MLM/LM都是经过自然语言预训练的，所以我们（迷之自信地）认为能够很好完成重构的序列必然也是接近于自然语言的，因此这样增加训练目标，也能起到让模型更贴近自然语言的效果。经过笔者的测试，加上这样辅助目标，相比单纯优化下游任务的目标，确实提升了效果。</p>
+<h2 id="_5">实验与效果<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
+<p>所谓“talk is cheap, show me the code”，又到了喜闻乐见的实验时间了。这里分享一下P-tuning的实验结果，其中还包括笔者对P-tuning的实现思路，以及笔者在中文任务上的实验结果。</p>
+<h3 id="_6">停止的梯度<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h3>
+<p>怎么实现上述的P-tuning算法比较好呢？如果是放开所有权重训练，那自然是简单的，跟普通的BERT微调没有什么区别。关键是在小样本场景下， <em>如何实现“只优化几个token”呢？</em></p>
+<p>当然，实现的方法也不少，比如为那几个要优化的token重新构建一个Embedding层，然后拼接到BERT的Embedding层中，然后训练的时候只放开新Embedding层的权重。但这样写对原来模型的改动还是蛮大的，最好的方法是尽可能少改动代码，让使用者几乎无感。为此，笔者构思了一种用<code>stop_gradient</code>简单修改<code>Embedding</code>层的方案，大体上是将<code>Embedding</code>层修改如下：</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span> <span class="n">PtuningEmbedding</span>(<span class="n">Embedding</span>):
+    <span class="s">&quot;&quot;&quot;新定义Embedding层，只优化部分Token</span>
+<span class="s">    &quot;&quot;&quot;</span>
+    <span class="n">def</span> <span class="n">call</span>(<span class="nb">self</span>, <span class="n">inputs</span>, <span class="nb">mode</span>=<span class="s">&#39;embedding&#39;</span>):
+        <span class="n">embeddings</span> = <span class="nb">self</span>.<span class="n">embeddings</span>
+        <span class="n">embeddings_sg</span> = <span class="n">K</span>.<span class="n">stop_gradient</span>(<span class="n">embeddings</span>)
+        <span class="n">mask</span> = <span class="n">np</span>.<span class="n">zeros</span>((<span class="n">K</span>.<span class="n">int_shape</span>(<span class="n">embeddings</span>)[<span class="mi">0</span>], <span class="mi">1</span>))
+        <span class="n">mask</span>[<span class="mi">1</span>:<span class="mi">9</span>] += <span class="mi">1</span>  <span class="c1"># 只优化id为1～8的token</span>
+        <span class="nb">self</span>.<span class="n">embeddings</span> = <span class="n">embeddings</span> * <span class="n">mask</span> + <span class="n">embeddings_sg</span> * (<span class="mi">1</span> - <span class="n">mask</span>)
+        <span class="k">return</span> <span class="n">super</span>(<span class="n">PtuningEmbedding</span>, <span class="nb">self</span>).<span class="n">call</span>(<span class="n">inputs</span>, <span class="nb">mode</span>)
+</code></pre></div>
+
+<p>变量经过<code>stop_gradient</code>算子后，在反向传播的时候梯度为0，但是前向传播不变，因此在上述代码中，前向传播的结果不会有变化，但是反向传播求梯度的时候，梯度不为0的token由<code>mask</code>变量控制，其余token的梯度都为零，因此就实现了只更新部分token。</p>
+<p>完整代码可见：</p>
+<blockquote>
+<p><strong>Github：<a href="https://github.com/bojone/P-tuning">https://github.com/bojone/P-tuning</a></strong></p>
+</blockquote>
+<p>对了，原论文也开源了代码：</p>
+<blockquote>
+<p><strong>Github：<a href="https://github.com/THUDM/P-tuning">https://github.com/THUDM/P-tuning</a></strong></p>
+</blockquote>
+<h3 id="_7">测试与效果<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h3>
+<p>前面已经分享了原作者在SuperGLUE上的实验结果，显示出如果配合P-tuning，那么： <em>1、GPT、BERT的效果相比直接finetune都有所提升；2、GPT的效果还能超过了BERT。</em> 这表明GPT不仅有NLG的能力，也有NLU能力，可谓是把GPT的潜能充分“压榨”出来了，当然BERT配合P-tuning也有提升，说明P-tuning对语言模型潜能的释放是较为通用的。</p>
+<p>原论文的实验比较丰富，建议读者仔细阅读原论文，相信会收获颇多。特别指出的是原论文的Table 2最后一列，当预训练模型足够大的时候，我们的设备可能无法finetune整个模型，而P-tuning可以选择只优化几个Token的参数，因为优化所需要的显存和算力都会大大减少，所以<strong>P-tuning实则上给了我们一种在有限算力下调用大型预训练模型的思路</strong> 。</p>
+<p><a href="/usr/uploads/2021/04/301304097.png" title="点击查看原图"><img alt="P-tuning在各个体量的语言模型下的效果" src="/usr/uploads/2021/04/301304097.png" /></a></p>
+<p>P-tuning在各个体量的语言模型下的效果</p>
+<p>当然，笔者一直以来的观点是“没有在中文上测试过的算法是没有灵魂的”，因此笔者也在中文任务上简单测试了，测试任务跟<a href="/archives/7764">《必须要GPT3吗？不，BERT的MLM模型也能小样本学习》</a>一致，都是情感分类的小样本学习，测试模型包括BERT和GPT，两者的候选模版分别如下图：  </p>
+<p><a href="/usr/uploads/2021/04/3167211277.png" title="点击查看原图"><img alt="笔者在中文情感分类上使用的“BERT+P-tuning”模版" src="/usr/uploads/2021/04/3167211277.png" /></a></p>
+<p>笔者在中文情感分类上使用的“BERT+P-tuning”模版</p>
+<p><a href="/usr/uploads/2021/04/455411321.png" title="点击查看原图"><img alt="笔者在中文情感分类上使用的“GPT+P-tuning”模版" src="/usr/uploads/2021/04/455411321.png" /></a></p>
+<p>笔者在中文情感分类上使用的“GPT+P-tuning”模版</p>
+<p>注意，对于LM模型，前缀的引入非常重要，只引入后缀时效果会明显变差；而对于MLM模型，前缀的效果通常也优于后缀。总的效果如下表：<br />
+$$\begin{array}{c|cc}
+\hline
+&amp; \text{验证集} &amp; \text{测试集} \\
+\hline
+\text{小样本直接微调} &amp; 88.93\% &amp; 89.34\% \\
+\text{VAT半监督学习} &amp; 89.83\% &amp; 90.37\% \\
+\hline
+\text{PET零样本} &amp; 85.17\% &amp; 84.27\% \\
+\text{PET无监督} &amp; 88.05\% &amp; 87.53\% \\
+\text{PET小样本} &amp; 89.29\% &amp; 89.18\% \\
+\text{PET半监督} &amp; 90.09\% &amp; 89.76\% \\
+\hline
+\text{BERT + P-tuning} &amp; 89.81\% &amp; 89.75\% \\
+\text{GPT + P-tuning} &amp; 89.30\% &amp; 88.51\% \\
+\hline
+\end{array}$$<br />
+其中“小样本”只用到了“少量标注样本”，“无监督”则用到了“大量无标注样本”，“半监督”则用到了“少量标注样本+大量无标注样本”，“P-tuning”都是小样本，PET的几个任务报告的是最优的人工模版的结果，其实还有更差的人工模版。从小样本角度来看，P-tuning确实取得了最优的小样本学习效果；从模版构建的角度来看，P-tuning确实也比人工构建的模版要好得多；从模型角度看，P-tuning确实可以将GPT的分类性能发挥到跟BERT相近，从而揭示了GPT也有很强的NLU能力的事实。</p>
+<h2 id="_8">进一步理解<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h2>
+<p>这一节将会介绍笔者对P-tuning的进一步思考，以求从多个维度来理解P-tuning。</p>
+<h3 id="vs">离散 vs 连续<a class="toc-link" href="#vs" title="Permanent link">&para;</a></h3>
+<p>在P-tuning之前，也已经有一些在做模版的自动构建，如<a href="https://papers.cool/arxiv/1911.12543">《How Can We Know What Language Models Know?》</a>、<a href="https://papers.cool/arxiv/2010.15980">《AutoPrompt: Eliciting Knowledge from Language Models with Automatically Generated Prompts》</a>等，但它们搜索的都是在离散空间下搜索的自然语言模版，所以效果有所限制，并没有取得特别突出的结果。</p>
+<p>相反，P-tuning放弃了“模版由自然语言构成”这一要求，从而将其变成了可以简单梯度下降求解的连续参数问题，效果还更好。同时，这一改动意味着P-tuning突出了模版的本质——即模版的关键在于它是怎么用的，不在于它由什么构成——给人一种去芜存菁、眼前一亮额的感觉，确实值得点赞。</p>
+<p>（注：经读者<a href="/archives/8295/comment-page-1#comment-16015">@brotherb</a>提醒，年初有一篇论文<a href="https://papers.cool/arxiv/2101.00190">《Prefix-Tuning: Optimizing Continuous Prompts for Generation》</a>提出的Prefix-Tuning方法其实已经相当接近P-tuning，两者都设计了非自然语言的模版，只不过Prefix-Tuning主要关心NLG的应用而P-tuning更加关心NLU的应用。）</p>
+<h3 id="adapter">Adapter<a class="toc-link" href="#adapter" title="Permanent link">&para;</a></h3>
+<p>我们还可以从Adapter的角度来理解P-tuning。BERT出来后不久，Google在论文<a href="https://papers.cool/arxiv/1902.00751">《Parameter-Efﬁcient Transfer Learning for NLP》</a>中提出了一种名为Adapter的微调方式，它并不是直接微调整个模型，而是固定住BERT原始权重，然后在BERT的基础上添加一些残差模块，只优化这些残差模块，由于残差模块的参数更少，因此微调成本更低。Adapter的思路实际上来源于CV的<a href="https://papers.cool/arxiv/1705.08045">《Learning multiple visual domains with residual adapters》</a>，不过这两年似乎很少看到了，也许是因为它虽然提高了训练速度，但是预测速度却降低了，精度往往还有所损失。</p>
+<p>在P-tuning中，如果我们不将新插入的token视为“模版”，是将它视为模型的一部分，那么实际上P-tuning也是一种类似Adapter的做法，同样是固定原模型的权重，然后插入一些新的可优化参数，同样是只优化这些新参数，只不过这时候新参数插入的是Embedding层。因此，从这个角度看，P-tuning与Adapter有颇多异曲同工之处。</p>
+<h3 id="_9">为什么有效<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h3>
+<p>然后，还有一个值得思考的问题：为什么P-tuning会更好？比如全量数据下，大家都是放开所有权重，P-tuning的方法依然比直接finetune要好，为啥呢？</p>
+<p>事实上，提出这个问题的读者，应该是对BERT加个全连接层的直接finetune做法“习以为常”了。很明显，不管是PET还是P-tuning，它们其实都更接近预训练任务，而加个全连接层的做法，其实还没那么接近预训练任务，所以某种程度上来说，P-tuning有效更加“显然”，反而是加个全连接层微调为什么会有效才是值得疑问的。</p>
+<p>去年有篇论文<a href="https://papers.cool/arxiv/2010.03648">《A Mathematical Exploration of Why Language Models Help Solve Downstream Tasks》</a>试图回答这个问题，大致的论证顺序是：</p>
+<blockquote>
+<p>1、预训练模型是某种语言模型任务；</p>
+<p>2、下游任务可以表示为该种语言模型的某个特殊情形；</p>
+<p>3、当输出空间有限的时候，它又近似于加一个全连接层；</p>
+<p>4、所以加一个全连接层微调是有效的。</p>
+</blockquote>
+<p>可以看到，该论文的假设主要是第2点，其实就是直接假设了下游任务可以表达为类似PET的形式，然后才去证明的。所以这进一步说明了，PET、P-tuning等才是更自然的使用预训练模型的方式，加全连接直接finetune的做法其实只是它们的推论罢了，也就是说，PET、P-tuning才是返璞归真、回归本质的方案，所以它们更有效。</p>
+<h2 id="_10">简单的总结<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h2>
+<p>本文介绍了P-tuning，它是一种模版的自动构建方法，而通过模版我们可以从语言模型中抽取知识，完成零样本、小样本等学习任务，并且效果往往还更好。借助P-tuning，GPT也能实现优秀的NLU效果，在SuperGLUE上的表现甚至超过了BERT。除此之外，P-tuning还一种在有限算力下调用大型预训练模型的有效方案。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8295">https://spaces.ac.cn/archives/8295</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Apr. 03, 2021). 《P-tuning：自动构建模版，释放语言模型潜能 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8295">https://spaces.ac.cn/archives/8295</a></p>
+<p>@online{kexuefm-8295,<br />
+title={P-tuning：自动构建模版，释放语言模型潜能},<br />
+author={苏剑林},<br />
+year={2021},<br />
+month={Apr},<br />
+url={\url{https://spaces.ac.cn/archives/8295}},<br />
+} </p>
+<hr />
+<h2 id="_11">公式推导与注释<a class="toc-link" href="#_11" title="Permanent link">&para;</a></h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+                </div>
+
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="开局一段扯数据全靠编真被一篇神论文气到了.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#33 开局一段扯，数据全靠编？真被一篇“神论文”气到了</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="wgan的成功可能跟wasserstein距离没啥关系.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#35 WGAN的成功，可能跟Wasserstein距离没啥关系</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#p-tuning">P-tuning：自动构建模版，释放语言模型潜能</a><ul>
+<li><a href="#_1">什么是模版</a></li>
+<li><a href="#p-tuning_1">P-tuning</a><ul>
+<li><a href="#_2">模版的反思</a></li>
+<li><a href="#_3">如何去优化</a></li>
+<li><a href="#_4">增强相关性</a></li>
+</ul>
+</li>
+<li><a href="#_5">实验与效果</a><ul>
+<li><a href="#_6">停止的梯度</a></li>
+<li><a href="#_7">测试与效果</a></li>
+</ul>
+</li>
+<li><a href="#_8">进一步理解</a><ul>
+<li><a href="#vs">离散 vs 连续</a></li>
+<li><a href="#adapter">Adapter</a></li>
+<li><a href="#_9">为什么有效</a></li>
+</ul>
+</li>
+<li><a href="#_10">简单的总结</a></li>
+<li><a href="#_11">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
+</body>
+</html>

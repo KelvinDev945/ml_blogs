@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>变分自编码器（五）：VAE + BN = 更好的VAE | ML & Math Blog Posts</title>
+    <meta name="description" content="变分自编码器（五）：VAE + BN = 更好的VAE&para;
+原文链接: https://spaces.ac.cn/archives/7381
+发布日期: 
+
+本文我们继续之前的变分自编码器系列，分析一下如何防止NLP中的VAE模型出现“KL散度消失（KL Vanishing）”现象。本文受到参考文献是ACL 2020的论文《A Batch Normalized Inference Netw...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
+
+    <!-- MathJax for math rendering with equation numbering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=变分">变分</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #136 变分自编码器（五）：VAE + BN = 更好的VAE
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">
+                <span class="post-number">#136</span>
+                变分自编码器（五）：VAE + BN = 更好的VAE
+            </h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/7381" target="_blank" rel="noopener">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=变分" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 变分</span>
+                </a>
+                
+                <a href="../index.html?tags=无监督" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 无监督</span>
+                </a>
+                
+                <a href="../index.html?tags=vae" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> vae</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+            </div>
+            
+        </header>
+
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="vae-bn-vae">变分自编码器（五）：VAE + BN = 更好的VAE<a class="toc-link" href="#vae-bn-vae" title="Permanent link">&para;</a></h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7381">https://spaces.ac.cn/archives/7381</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>本文我们继续之前的<a href="/search/%E5%8F%98%E5%88%86%E8%87%AA%E7%BC%96%E7%A0%81%E5%99%A8/">变分自编码器系列</a>，分析一下如何防止NLP中的VAE模型出现“KL散度消失（KL Vanishing）”现象。本文受到参考文献是ACL 2020的论文<a href="https://papers.cool/arxiv/2004.12585">《A Batch Normalized Inference Network Keeps the KL Vanishing Away》</a>的启发，并自行做了进一步的完善。</p>
+<p>值得一提的是，本文最后得到的方案还是颇为简洁的——<strong>只需往编码输出加入BN（Batch Normalization），然后加个简单的scale</strong> ——但确实很有效，因此值得正在研究相关问题的读者一试。同时，相关结论也适用于一般的VAE模型（包括CV的），如果按照笔者的看法，它甚至可以作为VAE模型的“标配”。</p>
+<p>最后，要提醒读者这算是一篇VAE的进阶论文，所以请读者对VAE有一定了解后再来阅读本文。</p>
+<h2 id="vae">VAE简单回顾<a class="toc-link" href="#vae" title="Permanent link">&para;</a></h2>
+<p>这里我们简单回顾一下VAE模型，并且讨论一下VAE在NLP中所遇到的困难。关于VAE的更详细介绍，请读者参考笔者的旧作<a href="/archives/5253">《变分自编码器（一）：原来是这么一回事》</a>、<a href="/archives/5343">《变分自编码器（二）：从贝叶斯观点出发》</a>等。</p>
+<h3 id="vae_1">VAE的训练流程<a class="toc-link" href="#vae_1" title="Permanent link">&para;</a></h3>
+<p>VAE的训练流程大概可以图示为  </p>
+<p><a href="/usr/uploads/2020/05/1557384471.png" title="点击查看原图"><img alt="VAE训练流程图示" src="/usr/uploads/2020/05/1557384471.png" /></a></p>
+<p>VAE训练流程图示</p>
+<p>写成公式就是<br />
+$$\begin{equation}\mathcal{L} = \mathbb{E}<em p_z_x_="p(z|x)" z_sim="z\sim">{x\sim \tilde{p}(x)} \Big[\mathbb{E}</em>\big[-\log q(x|z)\big]+KL\big(p(z|x)\big\Vert q(z)\big)\Big]
+\end{equation}$$<br />
+其中第一项就是重构项，$\mathbb{E}_{z\sim p(z|x)}$是通过重参数来实现；第二项则称为KL散度项，这是它跟普通自编码器的显式差别，如果没有这一项，那么基本上退化为常规的AE。更详细的符号含义可以参考<a href="/archives/5343">《变分自编码器（二）：从贝叶斯观点出发》</a>。</p>
+<h3 id="nlpvae">NLP中的VAE<a class="toc-link" href="#nlpvae" title="Permanent link">&para;</a></h3>
+<p>在NLP中，句子被编码为离散的整数ID，所以$q(x|z)$是一个离散型分布，可以用万能的“条件语言模型”来实现，因此理论上$q(x|z)$可以精确地拟合生成分布，问题就出在$q(x|z)$太强了，训练时重参数操作会来噪声，噪声一大，$z$的利用就变得困难起来，所以它干脆不要$z$了，退化为无条件语言模型（依然很强），$KL(p(z|x)\Vert q(z))$则随之下降到0，这就出现了KL散度消失现象。</p>
+<p>这种情况下的VAE模型并没有什么价值：KL散度为0说明编码器输出的是常数向量，而解码器则是一个普通的语言模型。而我们使用VAE通常来说是看中了它无监督构建编码向量的能力，所以要应用VAE的话还是得解决KL散度消失问题。事实上从2016开始，有不少工作在做这个问题，相应地也提出了很多方案，比如退火策略、更换先验分布等，读者Google一下“KL Vanishing”就可以找到很多文献了，这里不一一溯源。</p>
+<h2 id="bn">BN的巧与妙<a class="toc-link" href="#bn" title="Permanent link">&para;</a></h2>
+<p>本文的方案则是直接针对KL散度项入手，简单有效而且没什么超参数。其思想很简单：</p>
+<blockquote>
+<p>KL散度消失不就是KL散度项变成0吗？我调整一下编码器输出，让KL散度有一个大于零的下界，这样它不就肯定不会消失了吗？</p>
+</blockquote>
+<p>这个简单的思想的直接结果就是：在$\mu$后面加入BN层，如图  </p>
+<p><a href="/usr/uploads/2020/05/3260688433.png" title="点击查看原图"><img alt="往VAE里加入BN" src="/usr/uploads/2020/05/3260688433.png" /></a></p>
+<p>往VAE里加入BN</p>
+<h3 id="_1">推导过程简述<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h3>
+<p>为什么会跟BN联系起来呢？我们来看KL散度项的形式：<br />
+\begin{equation}\mathbb{E}<em i="1">{x\sim\tilde{p}(x)}\left[KL\big(p(z|x)\big\Vert q(z)\big)\right] = \frac{1}{b} \sum</em>}^b \sum_{j=1}^d \frac{1}{2}\Big(\mu_{i,j}^2 + \sigma_{i,j}^2 - \log \sigma_{i,j}^2 - 1\Big)\end{equation
+上式是采样了$b$个样本进行计算的结果，而编码向量的维度则是$d$维。由于我们总是有$e^x \geq x + 1$，所以$\sigma_{i,j}^2 - \log \sigma_{i,j}^2 - 1 \geq 0$，因此<br />
+\begin{equation}\mathbb{E}<em i="1">{x\sim\tilde{p}(x)}\left[KL\big(p(z|x)\big\Vert q(z)\big)\right] \geq \frac{1}{b} \sum</em>}^b \sum_{j=1}^d \frac{1}{2}\mu_{i,j}^2 = \frac{1}{2}\sum_{j=1}^d \left(\frac{1}{b} \sum_{i=1}^b \mu_{i,j}^2\right)\label{eq:kl}\end{equation
+留意到括号里边的量，其实它就是$\mu$在batch内的二阶矩，如果我们往$\mu$加入BN层，那么大体上可以保证$\mu$的均值为$\beta$，方差为$\gamma^2$（$\beta,\gamma$是BN里边的可训练参数），这时候
+\begin{equation}\mathbb{E}_{x\sim\tilde{p}(x)}\left[KL\big(p(z|x)\big\Vert q(z)\big)\right] \geq \frac{d}{2}\left(\beta^2 + \gamma^2\right)\label{eq:kl-lb}\end{equation}<br />
+所以只要控制好$\beta,\gamma$（主要是固定$\gamma$为某个常数），就可以让KL散度项有个正的下界，因此就不会出现KL散度消失现象了。这样一来，KL散度消失现象跟BN就被巧妙地联系起来了，通过BN来“杜绝”了KL散度消失的可能性。</p>
+<h3 id="ln">为什么不是LN？<a class="toc-link" href="#ln" title="Permanent link">&para;</a></h3>
+<p>善于推导的读者可能会想到，按照上述思路，如果只是为了让KL散度项有个正的下界，其实LN（Layer Normalization）也可以，也就是在式$\eqref{eq:kl}$中按$j$那一维归一化。</p>
+<p><strong>那为什么用BN而不是LN呢？</strong></p>
+<p>这个问题的答案也是BN的巧妙之处。直观来理解，KL散度消失是因为$z\sim p(z|x)$的噪声比较大，解码器无法很好地辨别出$z$中的非噪声成分，所以干脆弃之不用；而当给$\mu(x)$加上BN后，相当于适当地拉开了不同样本的$z$的距离，使得哪怕$z$带了噪声，区分起来也容易一些，所以这时候解码器乐意用$z$的信息，因此能缓解这个问题；相比之下，LN是在样本内进的行归一化，没有拉开样本间差距的作用，所以LN的效果不会有BN那么好。</p>
+<h2 id="_2">进一步的结果<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
+<p>事实上，原论文的推导到上面基本上就结束了，剩下的都是实验部分，包括通过实验来确定$\gamma$的值。然而，笔者认为目前为止的结论还有一些美中不足的地方，比如没有提供关于加入BN的更深刻理解，倒更像是一个工程的技巧，又比如只是$\mu(x)$加上了BN，$\sigma(x)$没有加上，未免有些不对称之感。</p>
+<p>经过笔者的推导，发现上面的结论可以进一步完善。</p>
+<h3 id="_3">联系到先验分布<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h3>
+<p>对于VAE来说，它希望训练好后的模型的隐变量分布为先验分布$q(z)=\mathcal{N}(z;0,1)$，而后验分布则是$p(z|x)=\mathcal{N}(z; \mu(x),\sigma^2(x))$，所以VAE希望下式成立：<br />
+\begin{equation}q(z) = \int \tilde{p}(x)p(z|x)dx=\int \tilde{p}(x)\mathcal{N}(z; \mu(x),\sigma^2(x))dx\end{equation}<br />
+两边乘以$z$，并对$z$积分，得到<br />
+\begin{equation}0 = \int \tilde{p}(x)\mu(x)dx=\mathbb{E}<em _tilde_p="\tilde{p" x_sim="x\sim">{x\sim \tilde{p}(x)}[\mu(x)]\end{equation}<br />
+两边乘以$z^2$，并对$z$积分，得到<br />
+\begin{equation}1 = \int \tilde{p}(x)\left[\mu^2(x) + \sigma^2(x)\right]dx = \mathbb{E}</em>}(x)}\left[\mu^2(x)\right] + \mathbb{E<em _tilde_p="\tilde{p" x_sim="x\sim">{x\sim \tilde{p}(x)}\left[\sigma^2(x)\right]\end{equation}<br />
+如果往$\mu(x),\sigma(x)$都加入BN，那么我们就有<br />
+\begin{equation}\begin{aligned}
+&amp;0 = \mathbb{E}</em>\\}(x)}[\mu(x)] = \beta_{\mu
+&amp;1 = \mathbb{E}<em _tilde_p="\tilde{p" x_sim="x\sim">{x\sim \tilde{p}(x)}\left[\mu^2(x)\right] + \mathbb{E}</em>^2}(x)}\left[\sigma^2(x)\right] = \beta_{\mu}^2 + \gamma_{\mu}^2 + \beta_{\sigma}^2 + \gamma_{\sigma
+\end{aligned}\end{equation}<br />
+所以现在我们知道$\beta_{\mu}$一定是0，而如果我们也固定$\beta_{\sigma}=0$，那么我们就有约束关系：<br />
+\begin{equation}1 = \gamma_{\mu}^2 + \gamma_{\sigma}^2\label{eq:gamma2}\end{equation}</p>
+<h3 id="_4">参考的实现方案<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h3>
+<p>经过这样的推导，我们发现可以往$\mu(x),\sigma(x)$都加入BN，并且可以固定$\beta_{\mu}=\beta_{\sigma}=0$，但此时需要满足约束$\eqref{eq:gamma2}$。要注意的是，这部分讨论还仅仅是对VAE的一般分析，并没有涉及到KL散度消失问题，哪怕这些条件都满足了，也无法保证KL项不趋于0。结合式$\eqref{eq:kl-lb}$我们可以知道，保证KL散度不消失的关键是确保$\gamma_{\mu} &gt; 0$，所以，笔者提出的最终策略是：<br />
+\begin{equation}\begin{aligned}
+&amp;\beta_{\mu}=\beta_{\sigma}=0\\
+&amp;\gamma_{\mu} = \sqrt{\tau + (1-\tau)\cdot\text{sigmoid}(\theta)}\\
+&amp;\gamma_{\sigma} = \sqrt{(1-\tau)\cdot\text{sigmoid}(-\theta)}
+\end{aligned}\end{equation}<br />
+其中$\tau\in(0,1)$是一个常数，笔者在自己的实验中取了$\tau=0.5$，而$\theta$是可训练参数，上式利用了恒等式$\text{sigmoid}(-\theta) = 1-\text{sigmoid}(\theta)$。</p>
+<p>关键代码参考（Keras）：</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span> <span class="n">Scaler</span>(<span class="n">Layer</span>):
+    <span class="s">&quot;&quot;&quot;特殊的scale层</span>
+<span class="s">    &quot;&quot;&quot;</span>
+    <span class="n">def</span> <span class="n">__init__</span>(<span class="nb">self</span>, <span class="n">tau</span>=<span class="mf">0.5</span>, **<span class="n">kwargs</span>):
+        <span class="n">super</span>(<span class="n">Scaler</span>, <span class="nb">self</span>).<span class="n">__init__</span>(**<span class="n">kwargs</span>)
+        <span class="nb">self</span>.<span class="n">tau</span> = <span class="n">tau</span>
+
+    <span class="n">def</span> <span class="n">build</span>(<span class="nb">self</span>, <span class="n">input_shape</span>):
+        <span class="n">super</span>(<span class="n">Scaler</span>, <span class="nb">self</span>).<span class="n">build</span>(<span class="n">input_shape</span>)
+        <span class="nb">self</span>.<span class="n">scale</span> = <span class="nb">self</span>.<span class="n">add_weight</span>(
+            <span class="nb">name</span>=<span class="s">&#39;scale&#39;</span>, <span class="nb">shape</span>=(<span class="n">input_shape</span>[-<span class="mi">1</span>],), <span class="n">initializer</span>=<span class="s">&#39;zeros&#39;</span>
+        )
+
+    <span class="n">def</span> <span class="n">call</span>(<span class="nb">self</span>, <span class="n">inputs</span>, <span class="nb">mode</span>=<span class="s">&#39;positive&#39;</span>):
+        <span class="k">if</span> <span class="nb">mode</span> == <span class="s">&#39;positive&#39;</span>:
+            <span class="n">scale</span> = <span class="nb">self</span>.<span class="n">tau</span> + (<span class="mi">1</span> - <span class="nb">self</span>.<span class="n">tau</span>) * <span class="n">K</span>.<span class="n">sigmoid</span>(<span class="nb">self</span>.<span class="n">scale</span>)
+        <span class="n">else:</span>
+            <span class="n">scale</span> = (<span class="mi">1</span> - <span class="nb">self</span>.<span class="n">tau</span>) * <span class="n">K</span>.<span class="n">sigmoid</span>(-<span class="n">self</span>.<span class="n">scale</span>)
+        <span class="k">return</span> <span class="n">inputs</span> * <span class="n">K</span>.<span class="nb">sqrt</span>(<span class="n">scale</span>)
+
+    <span class="n">def</span> <span class="n">get_config</span>(<span class="nb">self</span>):
+        <span class="nb">config</span> = {<span class="s">&#39;tau&#39;</span>: <span class="nb">self</span>.<span class="n">tau</span>}
+        <span class="n">base_config</span> = <span class="n">super</span>(<span class="n">Scaler</span>, <span class="nb">self</span>).<span class="n">get_config</span>()
+        <span class="k">return</span> <span class="n">dict</span>(<span class="n">list</span>(<span class="n">base_config</span>.<span class="n">items</span>()) + <span class="n">list</span>(<span class="nb">config</span>.<span class="n">items</span>()))
+
+
+<span class="n">def</span> <span class="n">sampling</span>(<span class="n">inputs</span>):
+    <span class="s">&quot;&quot;&quot;重参数采样</span>
+<span class="s">    &quot;&quot;&quot;</span>
+    <span class="n">z_mean</span>, <span class="n">z_std</span> = <span class="n">inputs</span>
+    <span class="n">noise</span> = <span class="n">K</span>.<span class="n">random_normal</span>(<span class="nb">shape</span>=<span class="n">K</span>.<span class="nb">shape</span>(<span class="n">z_mean</span>))
+    <span class="k">return</span> <span class="n">z_mean</span> + <span class="n">z_std</span> * <span class="n">noise</span>
+
+
+<span class="n">e_outputs</span>  <span class="c1"># 假设e_outputs是编码器的输出向量</span>
+<span class="n">scaler</span> = <span class="n">Scaler</span>()
+<span class="n">z_mean</span> = <span class="n">Dense</span>(<span class="n">hidden_dims</span>)(<span class="n">e_outputs</span>)
+<span class="n">z_mean</span> = <span class="n">BatchNormalization</span>(<span class="n">scale</span>=<span class="nb">False</span>, <span class="n">center</span>=<span class="nb">False</span>, <span class="n">epsilon</span>=<span class="mf">1e-8</span>)(<span class="n">z_mean</span>)
+<span class="n">z_mean</span> = <span class="n">scaler</span>(<span class="n">z_mean</span>, <span class="nb">mode</span>=<span class="s">&#39;positive&#39;</span>)
+<span class="n">z_std</span> = <span class="n">Dense</span>(<span class="n">hidden_dims</span>)(<span class="n">e_outputs</span>)
+<span class="n">z_std</span> = <span class="n">BatchNormalization</span>(<span class="n">scale</span>=<span class="nb">False</span>, <span class="n">center</span>=<span class="nb">False</span>, <span class="n">epsilon</span>=<span class="mf">1e-8</span>)(<span class="n">z_std</span>)
+<span class="n">z_std</span> = <span class="n">scaler</span>(<span class="n">z_std</span>, <span class="nb">mode</span>=<span class="s">&#39;negative&#39;</span>)
+<span class="nb">z</span> = <span class="n">Lambda</span>(<span class="n">sampling</span>, <span class="nb">name</span>=<span class="s">&#39;Sampling&#39;</span>)([<span class="n">z_mean</span>, <span class="n">z_std</span>])
+</code></pre></div>
+
+<h2 id="_5">文章内容小结<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
+<p>本文简单分析了VAE在NLP中的KL散度消失现象，并介绍了通过BN层来防止KL散度消失、稳定训练流程的方法。这是一种简洁有效的方案，不单单是原论文，笔者私下也做了简单的实验，结果确实也表明了它的有效性，值得各位读者试用。因为其推导具有一般性，所以甚至任意场景（比如CV）中的VAE模型都可以尝试一下。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7381">https://spaces.ac.cn/archives/7381</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 06, 2020). 《 变分自编码器（五）：VAE + BN = 更好的VAE 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7381">https://spaces.ac.cn/archives/7381</a></p>
+<p>@online{kexuefm-7381,<br />
+title={ 变分自编码器（五）：VAE + BN = 更好的VAE},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/7381}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+                </div>
+
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="也来盘点一些最近的非transformer工作.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#135 也来盘点一些最近的非Transformer工作</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="苏剑林-从公式12到公式15都在推导和解释你说的这个.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#137 生成扩散模型漫谈（五）：一般框架之SDE篇</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#vae-bn-vae">变分自编码器（五）：VAE + BN = 更好的VAE</a><ul>
+<li><a href="#vae">VAE简单回顾</a><ul>
+<li><a href="#vae_1">VAE的训练流程</a></li>
+<li><a href="#nlpvae">NLP中的VAE</a></li>
+</ul>
+</li>
+<li><a href="#bn">BN的巧与妙</a><ul>
+<li><a href="#_1">推导过程简述</a></li>
+<li><a href="#ln">为什么不是LN？</a></li>
+</ul>
+</li>
+<li><a href="#_2">进一步的结果</a><ul>
+<li><a href="#_3">联系到先验分布</a></li>
+<li><a href="#_4">参考的实现方案</a></li>
+</ul>
+</li>
+<li><a href="#_5">文章内容小结</a></li>
+<li><a href="#_6">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
+</body>
+</html>

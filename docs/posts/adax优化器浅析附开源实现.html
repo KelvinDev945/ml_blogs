@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AdaX优化器浅析（附开源实现） | ML & Math Blog Posts</title>
+    <meta name="description" content="AdaX优化器浅析（附开源实现）&para;
+原文链接: https://spaces.ac.cn/archives/7387
+发布日期: 
+
+这篇文章简单介绍一个叫做AdaX的优化器，来自《AdaX: Adaptive Gradient Descent with Exponential Long Term Memory》。介绍这个优化器的原因是它再次印证了之前在《AdaFactor优化器浅析（附...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
+
+    <!-- MathJax for math rendering with equation numbering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=优化器">优化器</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #130 AdaX优化器浅析（附开源实现）
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">
+                <span class="post-number">#130</span>
+                AdaX优化器浅析（附开源实现）
+            </h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/7387" target="_blank" rel="noopener">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=优化器" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化器</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+                <a href="../index.html?tags=语言模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 语言模型</span>
+                </a>
+                
+            </div>
+            
+        </header>
+
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="adax">AdaX优化器浅析（附开源实现）<a class="toc-link" href="#adax" title="Permanent link">&para;</a></h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7387">https://spaces.ac.cn/archives/7387</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>这篇文章简单介绍一个叫做AdaX的优化器，来自<a href="https://papers.cool/arxiv/2004.09740">《AdaX: Adaptive Gradient Descent with Exponential Long Term Memory》</a>。介绍这个优化器的原因是它再次印证了之前在<a href="/archives/7302">《AdaFactor优化器浅析（附开源实现）》</a>一文中提到的一个结论，两篇文章可以对比着阅读。</p>
+<h2 id="adam-adax">Adam &amp; AdaX<a class="toc-link" href="#adam-adax" title="Permanent link">&para;</a></h2>
+<p>AdaX的更新格式是<br />
+\begin{equation}\left\{\begin{aligned}&amp;g_t = \nabla_{\theta} L(\theta_t)\\
+&amp;m_t = \beta_1 m_{t-1} + \left(1 - \beta_1\right) g_t\\
+&amp;v_t = (1 + \beta_2) v_{t-1} + \beta_2 g_t^2\\
+&amp;\hat{v}<em t-1="t-1">t = v_t\left/\left(\left(1 + \beta_2\right)^t - 1\right)\right.\\
+&amp;\theta_t = \theta</em>\right.} - \alpha_t m_t\left/\sqrt{\hat{v}_t + \epsilon
+\end{aligned}\right.\end{equation}<br />
+其中$\beta_2$的默认值是$0.0001$。对了，顺便附上自己的Keras实现：<a href="https://github.com/bojone/adax">https://github.com/bojone/adax</a></p>
+<p>作为比较，Adam的更新格式是<br />
+\begin{equation}\left\{\begin{aligned}&amp;g_t = \nabla_{\theta} L(\theta_t)\\
+&amp;m_t = \beta_1 m_{t-1} + \left(1 - \beta_1\right) g_t\\
+&amp;v_t = \beta_2 v_{t-1} + \left(1 - \beta_2\right) g_t^2\\
+&amp;\hat{m}<em t-1="t-1">t = m_t\left/\left(1 - \beta_1^t\right)\right.\\
+&amp;\hat{v}_t = v_t\left/\left(1 - \beta_2^t\right)\right.\\
+&amp;\theta_t = \theta</em>\right.} - \alpha_t \hat{m}_t\left/\sqrt{\hat{v}_t + \epsilon
+\end{aligned}\right.\end{equation}<br />
+其中$\beta_2$的默认值是$0.999$。</p>
+<h2 id="_1">等价形式变换<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
+<p>可以看到，两者的第一个差别是AdaX去掉了动量的偏置校正（$\hat{m}<em t-1="t-1">t = m_t\left/\left(1 - \beta_1^t\right)\right.$这一步），但这其实影响不大，AdaX最大的改动是在$v_t$处，本来$v_t = \beta_2 v</em> + \beta_2 g_t^2$不像是滑动平均了，而且$1 + \beta_2 &gt; 1$，似乎有指数爆炸的风险？原论文称之为“with Exponential Long Term Memory”，就是指$1 + \beta_2 &gt; 1$导致历史累积梯度的比重不会越来越小，反而会越来越大，这就是它的长期记忆性。} + \left(1 - \beta_2\right) g_t^2$是滑动平均格式，而$v_t = (1 + \beta_2) v_{t-1</p>
+<p>事实上，学习率校正用的是$\hat{v}<em t-1="t-1">t$，所以究竟有没有爆炸，我们要观察的是$\hat{v}_t$。对于Adam，我们有<br />
+\begin{equation}\begin{aligned}
+\hat{v}_t =&amp; v_t\left/\left(1 - \beta_2^t\right)\right.\\
+=&amp;\frac{\beta_2 v</em>\\} + (1-\beta_2) g_t^2}{1 - \beta_2^t
+=&amp;\frac{\beta_2 \hat{v}<em t-1="t-1">{t-1}\left(1 - \beta_2^{t-1}\right) + (1-\beta_2) g_t^2}{1 - \beta_2^t}\\
+=&amp;\beta_2\frac{1 - \beta_2^{t-1}}{1 - \beta_2^t}\hat{v}</em>\right)g_t^2} + \left(1 - \beta_2\frac{1 - \beta_2^{t-1}}{1 - \beta_2^t
+\end{aligned}\end{equation}<br />
+所以如果设$\hat{\beta}<em 2_t="2,t">{2,t}=\beta_2\frac{1 - \beta_2^{t-1}}{1 - \beta_2^t}$，那么更新公式就是<br />
+\begin{equation}\hat{v}_t =\hat{\beta}</em>}\hat{v<em 2_t="2,t">{t-1} + \left(1 - \hat{\beta}</em>}\right)g_t^2\end{equation
+基于同样的道理，如果设$\hat{\beta}_{2,t}=1 - \frac{\beta_2}{(1 + \beta_2)^t - 1}$，那么AdaX的$\hat{v}_t$的更新公式也可以写成上式。</p>
+<h2 id="_2">衰减策略比较<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
+<p>所以，从真正用来校正梯度的$\hat{v}<em 2_t="2,t">t$来看，不管是Adam还是AdaX，其更新公式都是滑动平均的格式，只不过对应的衰减系数$\hat{\beta}</em>$不一样。</p>
+<p>对于Adam来说，当$t=1$时$\hat{\beta}<em 2_t="2,t">{2,t}=0$，这时候$\hat{v}_t$就是$g_t^2$，也就是用实时梯度来校正学习率，这时候校正力度最大；当$t\to\infty$时，$\hat{\beta}</em>\to 1$。}\to \beta_2$，这时候$v_t$是累积梯度平方与当前梯度平方的加权平均，由于$\beta_2 &lt; 1$，所以意味着当前梯度的权重$1 - \beta_2$不为0，这可能导致训练不稳定，因为训练后期梯度变小，训练本身趋于稳定，校正学习率的意义就不大了，因此学习率的校正力度应该变小，并且$t\to\infty$，学习率最好恒定为常数（这时候相当于退化为SGD），这就要求$t\to\infty$时，$\hat{\beta}_{2,t</p>
+<p>对于AdaX来说，当$t=1$时$\hat{\beta}<em 2_t="2,t">{2,t}=0$，当$t\to\infty$，$\hat{\beta}</em>$，它也是从这个角度设计的。至于AdaX和AdaFactor的策略孰优孰劣，笔者认为就很难从理论上解释清楚了，估计只能靠实验。}\to 1$，满足上述的理想性质，因此，从这个角度来看，AdaX确实是Adam的一个改进。在AdaFactor中使用的则是$\hat{\beta}_{2,t} =1 - \frac{1}{t^c</p>
+<h2 id="_3">就这样结束了<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
+<p>嗯，文章就到这儿结束了。开头就说了，本文只是简单介绍一下AdaX，因为它再次印证了之前的一个结论——$\hat{\beta}<em 2_1="2,1">{2,t}$应当满足条件“$\hat{\beta}</em>=1$”，这也许会成为日后优化器改进的基本条件之一。}=0,\hat{\beta}_{2,\infty</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7387">https://spaces.ac.cn/archives/7387</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 11, 2020). 《AdaX优化器浅析（附开源实现） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7387">https://spaces.ac.cn/archives/7387</a></p>
+<p>@online{kexuefm-7387,<br />
+title={AdaX优化器浅析（附开源实现） },<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/7387}},<br />
+} </p>
+<hr />
+<h2 id="_4">公式推导与注释<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+                </div>
+
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="flatnce小批次对比学习效果差的原因竟是浮点误差.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#129 FlatNCE：小批次对比学习效果差的原因竟是浮点误差？</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="adamw的weight-rms的渐近估计上.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#131 AdamW的Weight RMS的渐近估计（上）</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#adax">AdaX优化器浅析（附开源实现）</a><ul>
+<li><a href="#adam-adax">Adam &amp; AdaX</a></li>
+<li><a href="#_1">等价形式变换</a></li>
+<li><a href="#_2">衰减策略比较</a></li>
+<li><a href="#_3">就这样结束了</a></li>
+<li><a href="#_4">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
+</body>
+</html>

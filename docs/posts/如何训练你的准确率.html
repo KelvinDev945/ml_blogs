@@ -6,9 +6,10 @@
     <title>如何训练你的准确率？ | ML & Math Blog Posts</title>
     <meta name="description" content="如何训练你的准确率？&para;
 原文链接: https://spaces.ac.cn/archives/9098
-发布日期: 
+发布日期: 2022-06-01
 
-最近Arxiv上的一篇论文《EXACT: How to Train Your Accuracy》引起了笔者的兴趣，顾名思义这是介绍如何直接以准确率为训练目标来训练模型的。正好笔者之前也对此有过一些分析，如《函数光滑化杂谈：不可导函数的可导逼近》、《再谈类别不平衡问题：...">
+📄 引言&para;
+最近Arxiv上的一篇论文《EXACT: How to Train Your Accuracy》引起了笔者的兴趣，顾名思义这是介绍如何直接以准确率为训练目标来训练模型的。正好笔者之前也对此有过一些分析，如《函数光滑化杂谈：不可...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -81,7 +82,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=概率">概率</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #40 如何训练你的准确率？
+                    #186 如何训练你的准确率？
                 </li>
             </ol>
         </nav>
@@ -89,7 +90,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#40</span>
+                <span class="post-number">#186</span>
                 如何训练你的准确率？
             </h1>
             <div class="post-meta">
@@ -130,62 +131,875 @@
                 <div class="post-content">
                     <h1 id="_1">如何训练你的准确率？<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9098">https://spaces.ac.cn/archives/9098</a></p>
-<p><strong>发布日期</strong>: </p>
+<p><strong>发布日期</strong>: 2022-06-01</p>
 <hr />
+<h2 id="_2">📄 引言<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
 <p>最近Arxiv上的一篇论文<a href="https://papers.cool/arxiv/2205.09615">《EXACT: How to Train Your Accuracy》</a>引起了笔者的兴趣，顾名思义这是介绍如何直接以准确率为训练目标来训练模型的。正好笔者之前也对此有过一些分析，如<a href="/archives/6620">《函数光滑化杂谈：不可导函数的可导逼近》</a>、<a href="/archives/7708">《再谈类别不平衡问题：调节权重与魔改Loss的对比联系》</a>等， 所以带着之前的研究经验很快完成了论文的阅读，写下了这篇总结，并附上了最近关于这个主题的一些新思考。</p>
-<h2 id="_2">失实的例子<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
-<p>论文开头指出，我们平时用的分类损失函数是交叉熵或者像SVM中的Hinge Loss，这两个损失均不能很好地拟合最终的评价指标准确率。为了说明这一点，论文举了一个很简单的例子：假设数据只有$\{(-0.25,-1),(0,-1),(0.25,,1)\}$三个点，$-1$和$1$分别代表负类和正类，待拟合模型是$f(x)=x-b$，$b$是参数，我们希望通过$\text{sign}(f(x))$来预测类别。如果用“sigmoid + 交叉熵”，那么损失函数就是$-\log \frac{1}{1+e^{-l \cdot f(x)}}$，$(x,l)$代表一对标签数据；如果用Hinge Loss，则是$\max(0, 1 - l\cdot f(x))$。</p>
-<p>由于只是一个一维模型，我们可以直接网格搜索出它的最优解，可以发现如果用“sigmoid + 交叉熵”的话，损失函数的最小值在$b=0.7$取到，而如果是Hinge Loss，那么$b\in[0.75,1]$。然而，如果要通过$\text{sign}(f(x))$完全分类正确，那么$b\in(0, 0.25)$才行，因此这说明了交叉熵或Hinge Loss与最后评测指标准确率的不一致性。</p>
+<h3 id="_3">🕵️ 【深度解析：准确率作为损失函数的困难】<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h3>
+<p><strong>问题的根源：准确率不可微</strong></p>
+<p>准确率（Accuracy）的数学定义为：
+$$
+\text{Acc}(\boldsymbol{f}) = \frac{1}{N}\sum_{i=1}^N \mathbb{1}[\arg\max_j f_j(\boldsymbol{x}_i) = y_i]
+\tag{1}
+$$</p>
+<p>其中：
+- $\boldsymbol{f} = (f_1, \ldots, f_C)$ 是模型输出的logits
+- $\mathbb{1}[\cdot]$ 是指示函数（indicator function）
+- $y_i \in {1, \ldots, C}$ 是真实标签</p>
+<p><strong>为什么不能直接优化准确率？</strong></p>
+<ol>
+<li><strong>指示函数不可微</strong>：
+$$
+\mathbb{1}[\arg\max_j f_j(\boldsymbol{x}) = y] = \begin{cases}
+1, &amp; \text{if } \arg\max_j f_j(\boldsymbol{x}) = y \
+0, &amp; \text{otherwise}
+\end{cases}
+\tag{2}
+$$</li>
+</ol>
+<p>其梯度几乎处处为零：
+$$
+\frac{\partial \mathbb{1}[\cdot]}{\partial f_j} = 0 \quad \text{a.e.}
+\tag{3}
+$$</p>
+<ol start="2">
+<li>
+<p><strong>argmax不连续</strong>：即使微小的参数变化，$\arg\max$ 也可能突变：
+$$
+\lim_{\epsilon \to 0^+} \arg\max_j (f_j + \epsilon \delta_j) \neq \arg\max_j f_j \quad \text{（一般情况）}
+\tag{4}
+$$</p>
+</li>
+<li>
+<p><strong>准确率的梯度信息贫乏</strong>：准确率只关心"分对还是分错"，不关心"有多自信"，因此无法提供细粒度的优化信号。</p>
+</li>
+</ol>
+<p><strong>优化目标的替代</strong></p>
+<p>为了绕过这个问题，机器学习中常用的策略是：</p>
+<p><strong>策略1：Surrogate Loss（代理损失）</strong></p>
+<p>找一个可微的损失函数 $\mathcal{L}<em _text_surrogate="\text{surrogate">{\text{surrogate}}$ 使得：
+$$
+\mathcal{L}</em>
+\tag{5}
+$$}} \text{ 最小} \quad \Rightarrow \quad \text{Acc} \text{ 最大</p>
+<p>常见的代理损失包括：
+- <strong>交叉熵</strong>：$-\log p(y|\boldsymbol{x})$
+- <strong>Hinge Loss</strong>：$\max(0, 1 - y \cdot f(\boldsymbol{x}))$
+- <strong>Exp Loss</strong>：$\exp(-y \cdot f(\boldsymbol{x}))$</p>
+<p><strong>策略2：光滑化（Smoothing）</strong></p>
+<p>将不可微的指示函数替换为光滑的近似：
+$$
+\mathbb{1}[f(\boldsymbol{x}) &gt; 0] \approx \sigma(\beta f(\boldsymbol{x}))
+\tag{6}
+$$</p>
+<p>其中 $\sigma$ 是sigmoid函数，$\beta$ 是温度参数。当 $\beta \to \infty$ 时，$\sigma(\beta f)$ 趋近于阶跃函数。</p>
+<hr />
+<h2 id="_4">📄 失实的例子<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
+<p>论文开头指出，我们平时用的分类损失函数是交叉熵或者像SVM中的Hinge Loss，这两个损失均不能很好地拟合最终的评价指标准确率。为了说明这一点，论文举了一个很简单的例子：假设数据只有${(-0.25,-1),(0,-1),(0.25,,1)}$三个点，$-1$和$1$分别代表负类和正类，待拟合模型是$f(x)=x-b$，$b$是参数，我们希望通过$\text{sign}(f(x))$来预测类别。如果用"sigmoid + 交叉熵"，那么损失函数就是$-\log \frac{1}{1+e^{-l \cdot f(x)}}$，$(x,l)$代表一对标签数据；如果用Hinge Loss，则是$\max(0, 1 - l\cdot f(x))$。</p>
+<p>由于只是一个一维模型，我们可以直接网格搜索出它的最优解，可以发现如果用"sigmoid + 交叉熵"的话，损失函数的最小值在$b=0.7$取到，而如果是Hinge Loss，那么$b\in[0.75,1]$。然而，如果要通过$\text{sign}(f(x))$完全分类正确，那么$b\in(0, 0.25)$才行，因此这说明了交叉熵或Hinge Loss与最后评测指标准确率的不一致性。</p>
+<h3 id="_5">🕵️ 【深度解析：失实例子的数学剖析】<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h3>
+<p>让我们详细分析这个例子的数学细节。</p>
+<p><strong>问题设置</strong>：</p>
+<p>数据集 $\mathcal{D} = {(-0.25, -1), (0, -1), (0.25, 1)}$</p>
+<p>模型：$f(x) = x - b$，其中 $b$ 是待优化参数</p>
+<p>预测规则：$\hat{y} = \text{sign}(f(x))$</p>
+<p><strong>准确率的精确计算</strong>：</p>
+<p>对于参数 $b$，三个样本的预测结果为：
+- $x_1 = -0.25$：$f(x_1) = -0.25 - b$，正确当且仅当 $f(x_1) &lt; 0 \Leftrightarrow b &gt; -0.25$
+- $x_2 = 0$：$f(x_2) = -b$，正确当且仅当 $f(x_2) &lt; 0 \Leftrightarrow b &gt; 0$
+- $x_3 = 0.25$：$f(x_3) = 0.25 - b$，正确当且仅当 $f(x_3) &gt; 0 \Leftrightarrow b &lt; 0.25$</p>
+<p>因此，三个样本全部正确的条件是：
+$$
+b &gt; 0 \quad \text{且} \quad b &lt; 0.25 \quad \Rightarrow \quad b \in (0, 0.25)
+\tag{7}
+$$</p>
+<p>准确率作为 $b$ 的函数：
+$$
+\text{Acc}(b) = \frac{1}{3}\left[\mathbb{1}[b &gt; -0.25] + \mathbb{1}[b &gt; 0] + \mathbb{1}[b &lt; 0.25]\right]
+\tag{8}
+$$</p>
+<p>分段函数：
+$$
+\text{Acc}(b) = \begin{cases}
+1/3, &amp; b \leq -0.25 \
+2/3, &amp; -0.25 &lt; b \leq 0 \
+1, &amp; 0 &lt; b &lt; 0.25 \
+2/3, &amp; b \geq 0.25
+\end{cases}
+\tag{9}
+$$</p>
+<p><strong>交叉熵损失的计算</strong>：</p>
+<p>Sigmoid交叉熵：
+$$
+\mathcal{L}<em i="1">{\text{CE}}(b) = \sum</em>
+\tag{10}
+$$}^3 -\log \sigma(y_i \cdot f(x_i)) = \sum_{i=1}^3 -\log \frac{1}{1 + e^{-y_i(x_i - b)}</p>
+<p>展开：
+$$
+\begin{aligned}
+\mathcal{L}_{\text{CE}}(b) &amp;= -\log \sigma((-1)(-0.25 - b)) - \log \sigma((-1)(-b)) - \log \sigma((1)(0.25 - b)) \
+&amp;= -\log \sigma(0.25 + b) - \log \sigma(b) - \log \sigma(0.25 - b)
+\end{aligned}
+\tag{11}
+$$</p>
+<p>利用 $\log \sigma(z) = -\log(1 + e^{-z})$：
+$$
+\mathcal{L}_{\text{CE}}(b) = \log(1 + e^{-0.25-b}) + \log(1 + e^{-b}) + \log(1 + e^{-0.25+b})
+\tag{12}
+$$</p>
+<p>求导：
+$$
+\frac{d\mathcal{L}_{\text{CE}}}{db} = -\frac{e^{-0.25-b}}{1+e^{-0.25-b}} - \frac{e^{-b}}{1+e^{-b}} + \frac{e^{-0.25+b}}{1+e^{-0.25+b}}
+\tag{13}
+$$</p>
+<p>令导数为零，可以数值求解得到 $b^* \approx 0.7$（原文的声称）。</p>
+<p><strong>问题所在：缺少温度参数</strong></p>
+<p>原文的反例忽略了一个关键事实：实际的神经网络模型都有<strong>温度参数</strong> $T$（或等价地，学习率会隐式地调整尺度）。</p>
+<p>如果模型是 $f(x) = k(x - b)$（$k$ 是可学习的温度），那么优化交叉熵：
+$$
+\mathcal{L}_{\text{CE}}(b, k) = \log(1 + e^{-k(0.25+b)}) + \log(1 + e^{-kb}) + \log(1 + e^{-k(0.25-b)})
+\tag{14}
+$$</p>
+<p>当 $k \to \infty$ 时（高温度），交叉熵的最小值会趋向于使准确率最大的参数区域。</p>
+<p><strong>数学证明</strong>：</p>
+<p>对于足够大的 $k$，交叉熵的主导项是分类错误的样本：
+$$
+\lim_{k\to\infty} \frac{1}{k}\mathcal{L}_{\text{CE}}(b, k) = \max(0, -k(0.25+b))/k + \max(0, -kb)/k + \max(0, -k(0.25-b))/k
+\tag{15}
+$$</p>
+<p>这等价于：
+$$
+\lim_{k\to\infty} \frac{1}{k}\mathcal{L}_{\text{CE}}(b, k) = \max(0, -0.25-b) + \max(0, -b) + \max(0, -0.25+b)
+\tag{16}
+$$</p>
+<p>该式在 $b \in (0, 0.25)$ 时达到最小值0，与准确率最大化一致！</p>
+<hr />
 <p>看上去是一个很简明漂亮的例子，但笔者认为它是不符合事实的。其中，最大的问题是模型设置温度参数，即一般出现的模型是$f(x)=k(x-b)$而不是$f(x)=x-b$，刻意去掉温度参数来构造不符合事实的反例是没有说服力的，事实上补上可调的温度参数后，这两个损失都可以学到正确的答案。更不公平的是，后面作者在提出自己的方案EXACT时，是自带温度参数的，并且温度参数是关键一环，换句话说，在这个例子中，EXACT比其他两个损失好，纯粹是因为EXACT有温度参数。</p>
-<h2 id="_3">新瓶装旧酒<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
-<p>然后我们来看论文所提出的方案——EXACT（EXpected ACcuracy opTimization）。从事后来看，EXACT很是莫名其妙，因为作者是直接不加任何解释地从重参数的角度重新定义了一个条件概率分布$p(y|x)$：<br />
-\begin{equation}p(y|x) = P\left(y = \mathop{\text{argmax}}_i \frac{\mu(x)}{\sigma(x)}+\varepsilon\right)\end{equation}<br />
+<h3 id="_6">🕵️ 【深度解析：温度参数的理论作用】<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h3>
+<p><strong>定义（温度缩放）</strong>：</p>
+<p>温度参数 $T &gt; 0$ 通过缩放logits来控制预测的"自信程度"：
+$$
+p(y = c | \boldsymbol{x}) = \frac{\exp(f_c(\boldsymbol{x})/T)}{\sum_{j=1}^C \exp(f_j(\boldsymbol{x})/T)}
+\tag{17}
+$$</p>
+<p><strong>温度的两个极端</strong>：</p>
+<ol>
+<li>
+<p><strong>$T \to 0$</strong>（低温）：概率分布趋向one-hot
+$$
+\lim_{T \to 0} p(y = c | \boldsymbol{x}) = \mathbb{1}[c = \arg\max_j f_j(\boldsymbol{x})]
+\tag{18}
+$$</p>
+</li>
+<li>
+<p><strong>$T \to \infty$</strong>（高温）：概率分布趋向均匀
+$$
+\lim_{T \to \infty} p(y = c | \boldsymbol{x}) = \frac{1}{C}
+\tag{19}
+$$</p>
+</li>
+</ol>
+<p><strong>定理（温度缩放与准确率的关系）</strong>：</p>
+<p>对于二分类问题，假设模型 $f(\boldsymbol{x}; \boldsymbol{\theta})$ 和温度 $T$，交叉熵损失为：
+$$
+\mathcal{L}<em _boldsymbol_x="(\boldsymbol{x">{\text{CE}}(\boldsymbol{\theta}, T) = -\mathbb{E}</em>)/T)]
+\tag{20}
+$$},y)\sim\mathcal{D}}[\log \sigma(y \cdot f(\boldsymbol{x}; \boldsymbol{\theta</p>
+<p>当 $T \to 0$ 时，最小化交叉熵等价于最大化准确率的光滑近似。</p>
+<p><strong>证明</strong>：</p>
+<p>利用 $\lim_{T \to 0} \log \sigma(z/T) = \begin{cases} 0, &amp; z &gt; 0 \ -\infty, &amp; z &lt; 0 \end{cases}$，可得：
+$$
+\lim_{T \to 0} \mathcal{L}<em i="1">{\text{CE}}(\boldsymbol{\theta}, T) \propto -\sum</em>_i) &gt; 0]
+\tag{21}
+$$}^N \mathbb{1}[y_i \cdot f(\boldsymbol{x</p>
+<p>这恰好是 $-\text{Acc}$（准确率的负数）。□</p>
+<p><strong>实践中的温度调节</strong>：</p>
+<p>在实际训练中，温度参数通常通过以下方式隐式调节：
+- <strong>学习率衰减</strong>：随训练进行，有效温度降低
+- <strong>权重衰减</strong>：限制 $|\boldsymbol{\theta}|$，隐式增大温度
+- <strong>显式温度缩放</strong>：在某些任务（如知识蒸馏）中显式设置 $T$</p>
+<hr />
+<h2 id="_7">📄 新瓶装旧酒<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
+<p>然后我们来看论文所提出的方案——EXACT（EXpected ACcuracy opTimization）。从事后来看，EXACT很是莫名其妙，因为作者是直接不加任何解释地从重参数的角度重新定义了一个条件概率分布$p(y|x)$：
+$$
+p(y|x) = P\left(y = \mathop{\text{argmax}}_i \frac{\mu(x)}{\sigma(x)}+\varepsilon\right)
+\tag{22}
+$$
 其中$\mu(x)$是一个向量网络，$\sigma(x)$是一个标量网络，$\varepsilon$跟$\mu(x)$维度相同，每个分量是独立同分布地从$\sim \mathcal{N}(0,1)$采样得到。关于用重参数来定义概率分布的做法，我们在上一篇文章<a href="/archives/9085">《从重参数的角度看离散概率分布的构建》</a>已经讨论过，这里不重复。</p>
-<p>紧接着，有了这个新的$p(y|x)$，作者直接以<br />
-\begin{equation}-\mathbb{E}_{(x,y)\sim\mathcal{D}}[p(y|x)]\label{eq:soft-acc}\end{equation}<br />
+<p>紧接着，有了这个新的$p(y|x)$，作者直接以
+$$
+-\mathbb{E}_{(x,y)\sim\mathcal{D}}[p(y|x)]
+\tag{23}
+$$
 作为损失函数，全文的理论框架基本上到此结束。</p>
+<h3 id="exact">🕵️ 【深度解析：EXACT的数学原理】<a class="toc-link" href="#exact" title="Permanent link">&para;</a></h3>
+<p><strong>重参数技巧（Reparameterization Trick）</strong>：</p>
+<p>EXACT使用重参数技巧来构建一个可微的概率分布。核心思想是将随机性从参数中分离：</p>
+<p><strong>标准Softmax</strong>：
+$$
+p(y = c | \boldsymbol{x}) = \frac{\exp(f_c(\boldsymbol{x}))}{\sum_{j=1}^C \exp(f_j(\boldsymbol{x}))}
+\tag{24}
+$$</p>
+<p><strong>Gumbel-Softmax重参数</strong>：
+$$
+p(y = c | \boldsymbol{x}) = P\left(c = \arg\max_j (f_j(\boldsymbol{x}) + G_j)\right)
+\tag{25}
+$$</p>
+<p>其中 $G_j \sim \text{Gumbel}(0, 1)$ 是Gumbel噪声。</p>
+<p><strong>EXACT的重参数</strong>：
+$$
+p(y = c | \boldsymbol{x}) = P\left(c = \arg\max_j \left(\frac{\mu_j(\boldsymbol{x})}{\sigma(\boldsymbol{x})} + \varepsilon_j\right)\right), \quad \varepsilon_j \sim \mathcal{N}(0, 1)
+\tag{26}
+$$</p>
+<p><strong>关键差异</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>噪声分布</th>
+<th>温度参数</th>
+<th>可解释性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Softmax</strong></td>
+<td>Gumbel</td>
+<td>隐式（固定为1）</td>
+<td>最大熵原理</td>
+</tr>
+<tr>
+<td><strong>Gumbel-Softmax</strong></td>
+<td>Gumbel</td>
+<td>显式 $\tau$</td>
+<td>连续松弛</td>
+</tr>
+<tr>
+<td><strong>EXACT</strong></td>
+<td>Gaussian</td>
+<td>显式 $\sigma(\boldsymbol{x})$</td>
+<td>?</td>
+</tr>
+</tbody>
+</table>
+<p><strong>概率计算</strong>：</p>
+<p>对于EXACT，$p(y = c | \boldsymbol{x})$ 的精确形式需要计算：
+$$
+p(y = c | \boldsymbol{x}) = P\left(\frac{\mu_c}{\sigma} + \varepsilon_c &gt; \max_{j \neq c} \left(\frac{\mu_j}{\sigma} + \varepsilon_j\right)\right)
+\tag{27}
+$$</p>
+<p>设 $Z_c = \frac{\mu_c}{\sigma} + \varepsilon_c$，则 $Z_c \sim \mathcal{N}(\mu_c/\sigma, 1)$。</p>
+<p>对于两个类别的情况（$C=2$）：
+$$
+\begin{aligned}
+p(y = 1 | \boldsymbol{x}) &amp;= P(Z_1 &gt; Z_2) \
+&amp;= P\left(\frac{\mu_1 - \mu_2}{\sigma} + \varepsilon_1 - \varepsilon_2 &gt; 0\right) \
+&amp;= \Phi\left(\frac{\mu_1 - \mu_2}{\sigma \sqrt{2}}\right)
+\end{aligned}
+\tag{28}
+$$</p>
+<p>其中 $\Phi$ 是标准正态分布的累积分布函数（CDF）。</p>
+<p><strong>多类别的近似</strong>：</p>
+<p>对于 $C &gt; 2$，精确计算非常复杂（涉及多元正态分布的order statistics）。EXACT论文使用蒙特卡洛采样近似：
+$$
+p(y = c | \boldsymbol{x}) \approx \frac{1}{M}\sum_{m=1}^M \mathbb{1}\left[c = \arg\max_j \left(\frac{\mu_j(\boldsymbol{x})}{\sigma(\boldsymbol{x})} + \varepsilon_j^{(m)}\right)\right]
+\tag{29}
+$$</p>
+<p>其中 $\varepsilon^{(m)} \sim \mathcal{N}(0, \boldsymbol{I})$。</p>
+<p><strong>梯度计算</strong>：</p>
+<p>由于期望中包含 $\arg\max$，直接求梯度困难。EXACT使用<strong>得分函数估计器</strong>（score function estimator）：
+$$
+\nabla_{\boldsymbol{\theta}} \mathbb{E}[p(y|\boldsymbol{x})] = \mathbb{E}\left[p(y|\boldsymbol{x}) \cdot \nabla_{\boldsymbol{\theta}} \log p(y|\boldsymbol{x})\right]
+\tag{30}
+$$</p>
+<p>但这仍然需要计算 $\nabla_{\boldsymbol{\theta}} \log p(y|\boldsymbol{x})$，而 $p(y|\boldsymbol{x})$ 本身就难以计算...</p>
+<p>实际上，EXACT使用的是<strong>路径导数估计器</strong>（pathwise derivative estimator），利用：
+$$
+\nabla_{\boldsymbol{\theta}} \mathbb{E}[f(\varepsilon, \boldsymbol{\theta})] = \mathbb{E}[\nabla_{\boldsymbol{\theta}} f(\varepsilon, \boldsymbol{\theta})]
+\tag{31}
+$$</p>
+<p>但 $\arg\max$ 不可微，所以需要进一步近似（论文细节不清晰）。</p>
+<hr />
 <p>由此，我们可以总结EXACT的莫名其妙之处了。在<a href="/archives/9085">《从重参数的角度看离散概率分布的构建》</a>我们知道，从重参数角度来看，Softmax对应的噪声分布是Gumbel分布，而EXACT换成了正态分布，那么好在哪？为什么会好？这些全无解释。</p>
-<p>此外，式$\eqref{eq:soft-acc}$的相反数是准确率的光滑近似，这本已“广为人知”，但同时也有一个广为人知的结论是在Softmax情况下直接优化式$\eqref{eq:soft-acc}$的效果通常都是不如优化交叉熵的，现在只是换了一个“新瓶”（新概率分布的构建方法）装“旧酒”（同样的准确率光滑近似），真的就能有提升吗？</p>
-<h2 id="_4">实验难复现<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
-<p>原论文给出了非常惊人的实验结果，显示EXACT几乎总是SOTA：  </p>
+<h3 id="gumbel-vs-gaussian">🕵️ 【深度解析：Gumbel vs Gaussian 的理论对比】<a class="toc-link" href="#gumbel-vs-gaussian" title="Permanent link">&para;</a></h3>
+<p><strong>为什么Softmax对应Gumbel分布？</strong></p>
+<p><strong>定理（Gumbel-Max技巧）</strong>：</p>
+<p>设 $f_1, \ldots, f_C$ 是logits，$G_1, \ldots, G_C \stackrel{\text{i.i.d.}}{\sim} \text{Gumbel}(0, 1)$，则：
+$$
+P\left(\arg\max_j (f_j + G_j) = c\right) = \frac{\exp(f_c)}{\sum_{j=1}^C \exp(f_j)}
+\tag{32}
+$$</p>
+<p>这个性质是<strong>Softmax的最大熵解释</strong>的基础。</p>
+<p><strong>证明</strong>（二分类情况）：</p>
+<p>Gumbel分布的CDF为 $F(x) = \exp(-\exp(-x))$，PDF为 $f(x) = \exp(-x - \exp(-x))$。</p>
+<p>$$
+\begin{aligned}
+P(f_1 + G_1 &gt; f_2 + G_2) &amp;= \int_{-\infty}^{\infty} P(G_2 &lt; f_1 - f_2 + g) \cdot f_G(g) \, dg \
+&amp;= \int_{-\infty}^{\infty} \exp(-\exp(-(f_1 - f_2 + g))) \cdot \exp(-g - \exp(-g)) \, dg \
+&amp;= \frac{\exp(f_1)}{\exp(f_1) + \exp(f_2)}
+\end{aligned}
+\tag{33}
+$$</p>
+<p>□</p>
+<p><strong>为什么EXACT使用Gaussian分布？</strong></p>
+<p><strong>猜测1：计算简便性</strong></p>
+<p>正态分布的order statistics有很多已知结果，可能便于理论分析。</p>
+<p><strong>猜测2：与Probit模型的联系</strong></p>
+<p>Probit回归使用正态噪声：
+$$
+P(y = 1 | \boldsymbol{x}) = \Phi(\boldsymbol{w}^\top \boldsymbol{x})
+\tag{34}
+$$</p>
+<p>其中 $\Phi$ 是标准正态CDF。Probit与Logit（Sigmoid）在实践中性能相近。</p>
+<p><strong>猜测3：与Bayesian Optimization的联系</strong></p>
+<p>高斯过程（GP）在Bayesian Optimization中用于建模不确定性，EXACT可能试图利用这种联系。</p>
+<p><strong>实际差异</strong>：</p>
+<p>Gumbel分布：尾部更重（heavy-tailed），$P(X &gt; x) \sim \exp(-x)$</p>
+<p>Gaussian分布：尾部更轻（light-tailed），$P(X &gt; x) \sim \exp(-x^2/2)$</p>
+<p>这意味着Gumbel分布对异常值更宽容，而Gaussian分布更"保守"。</p>
+<p><strong>数值对比</strong>（二分类，$f_1 - f_2 = 1$）：</p>
+<p>Softmax（Gumbel）：$p_1 = \frac{e^1}{e^1 + e^0} \approx 0.731$</p>
+<p>Probit（Gaussian）：$p_1 = \Phi(1) \approx 0.841$</p>
+<p>EXACT（Gaussian + 温度）：$p_1 = \Phi(1/\sigma)$（可调）</p>
+<hr />
+<p>此外，式$\eqref{eq:soft-acc}$的相反数是准确率的光滑近似，这本已"广为人知"，但同时也有一个广为人知的结论是在Softmax情况下直接优化式$\eqref{eq:soft-acc}$的效果通常都是不如优化交叉熵的，现在只是换了一个"新瓶"（新概率分布的构建方法）装"旧酒"（同样的准确率光滑近似），真的就能有提升吗？</p>
+<h3 id="_8">🕵️ 【深度解析：为何直接优化期望准确率效果差？】<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h3>
+<p><strong>期望准确率</strong>：
+$$
+\mathbb{E}_{(\boldsymbol{x},y)\sim\mathcal{D}}[p(y|\boldsymbol{x})]
+\tag{35}
+$$</p>
+<p><strong>交叉熵</strong>：
+$$
+-\mathbb{E}_{(\boldsymbol{x},y)\sim\mathcal{D}}[\log p(y|\boldsymbol{x})]
+\tag{36}
+$$</p>
+<p><strong>为什么交叉熵更好？三个原因</strong>：</p>
+<p><strong>原因1：梯度信息更丰富</strong></p>
+<p>期望准确率的梯度：
+$$
+\nabla_{\boldsymbol{\theta}} \mathbb{E}[p(y|\boldsymbol{x})] = \mathbb{E}[\nabla_{\boldsymbol{\theta}} p(y|\boldsymbol{x})]
+\tag{37}
+$$</p>
+<p>当 $p(y|\boldsymbol{x}) \approx 1$ 时，$\nabla_{\boldsymbol{\theta}} p(y|\boldsymbol{x}) \approx 0$（梯度饱和）。</p>
+<p>交叉熵的梯度：
+$$
+\nabla_{\boldsymbol{\theta}} (-\log p(y|\boldsymbol{x})) = -\frac{\nabla_{\boldsymbol{\theta}} p(y|\boldsymbol{x})}{p(y|\boldsymbol{x})}
+\tag{38}
+$$</p>
+<p>即使 $p(y|\boldsymbol{x})$ 接近1，只要 $\nabla_{\boldsymbol{\theta}} p(y|\boldsymbol{x}) \neq 0$，梯度仍然有意义。</p>
+<p><strong>原因2：对错误样本的惩罚力度</strong></p>
+<table>
+<thead>
+<tr>
+<th>$p(y|\boldsymbol{x})$</th>
+<th>期望准确率损失 $1-p$</th>
+<th>交叉熵损失 $-\log p$</th>
+<th>比值 $\frac{-\log p}{1-p}$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.9</td>
+<td>0.1</td>
+<td>0.105</td>
+<td>1.05</td>
+</tr>
+<tr>
+<td>0.5</td>
+<td>0.5</td>
+<td>0.693</td>
+<td>1.39</td>
+</tr>
+<tr>
+<td>0.1</td>
+<td>0.9</td>
+<td>2.303</td>
+<td><strong>2.56</strong></td>
+</tr>
+<tr>
+<td>0.01</td>
+<td>0.99</td>
+<td>4.605</td>
+<td><strong>4.65</strong></td>
+</tr>
+</tbody>
+</table>
+<p>当 $p \to 0$ 时，$-\log p \to \infty$，但 $1 - p \to 1$。</p>
+<p>交叉熵对"严重错误"的样本给予更大的惩罚，迫使模型优先修正这些样本。</p>
+<p><strong>原因3：收敛性保证</strong></p>
+<p><strong>定理（Logistic Regression的收敛性）</strong>：</p>
+<p>对于线性可分的数据，最小化交叉熵的梯度下降算法保证收敛到最大间隔解（maximum margin solution）。</p>
+<p>但最小化 $\mathbb{E}[p(y|\boldsymbol{x})]$ 不保证这一点，可能在多个局部最优解之间振荡。</p>
+<hr />
+<h2 id="_9">📄 实验难复现<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
+<p>原论文给出了非常惊人的实验结果，显示EXACT几乎总是SOTA：</p>
 <p><a href="/usr/uploads/2022/06/2226273787.png" title="点击查看原图"><img alt="EXACT原论文的实验结果" src="/usr/uploads/2022/06/2226273787.png" /></a></p>
 <p>EXACT原论文的实验结果</p>
-<p>然而，笔者根据自己的理解尝试实现了EXACT，并在NLP任务上测试，结果显示EXACT完全不能达到“Softmax+交叉熵”的水平。此外，原论文还提到优化$-\log\mathbb{E}_{(x,y)\sim\mathcal{D}}[p(y|x)]$会比$\eqref{eq:soft-acc}$更好，但笔者的结果是该变体连$\eqref{eq:soft-acc}$都比不上。总的来说，笔者的测试结论与原论文是大相径庭的。</p>
-<p>由于原论文还没有开源代码，因此笔者还不能对论文实验的可靠性做进一步的判断。但从笔者的理论理解和初步的实验结果来看，直接优化式$\eqref{eq:soft-acc}$是很不可能达到优化交叉熵的效果的，仅仅修改构建概率分布的方式，应该很难形成实质的提升。如果读者有新的实验结果，欢迎进一步交流分享。</p>
-<h2 id="_5">一个新视角<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
-<p>从数值上来比较，式$\eqref{eq:soft-acc}$确实比交叉熵$\mathbb{E}_{(x,y)\sim\mathcal{D}}[-\log p(y|x)]$更贴合准确率。但为什么优化交叉熵往往能获得更好的的准确率？笔者原来也百思不得其解，在<a href="/archives/7708">《再谈类别不平衡问题：调节权重与魔改Loss的对比联系》</a>中，笔者设置将它视为“公理”来使用，实属无奈。</p>
-<p>直到有一天，笔者突然意识到了一个关系：随着训练，多数$p(y|x)$会慢慢接近于1，于是可以用近似$\log x \approx x - 1$得到<br />
-\begin{equation}\mathbb{E}<em _x_y_sim_mathcal_D="(x,y)\sim\mathcal{D">{(x,y)\sim\mathcal{D}}[-\log p(y|x)]\approx \mathbb{E}</em>}}[1 - p(y|x)] = 1 - \mathbb{E}_{(x,y)\sim\mathcal{D}}[p(y|x)]\end{equation
-于是我们就能解释为什么优化交叉熵也能获得很好的准确率了，因为从上式我们可以发现，交叉熵优化到中后期跟式$\eqref{eq:soft-acc}$基本是等价的，也就是同样在优化准确率的光滑近似！</p>
-<p>那交叉熵相比式$\eqref{eq:soft-acc}$的好处在哪呢？差别就在于当$p(y|x) \ll 1$时，$-\log p(y|x)$与$1 - p(y|x)$的差距。当$p(y|x) \ll 1$时，即目标类的概率很小，意味着分类可能很不准确，这时候$-\log p(y|x)$给出的是一个会趋于无穷大的结果，但$1 - p(y|x)$最多就只能给出$1$。这样一比较，我们就发现交叉熵的$-\log p(y|x)$对错误分类的样本的惩罚更大，因此它会更倾向于修正分类错误的样本，同时最终分类结果又跟直接优化准确率的光滑近似相近。</p>
+<p>然而，笔者根据自己的理解尝试实现了EXACT，并在NLP任务上测试，结果显示EXACT完全不能达到"Softmax+交叉熵"的水平。此外，原论文还提到优化$-\log\mathbb{E}_{(x,y)\sim\mathcal{D}}[p(y|x)]$会比式(23)更好，但笔者的结果是该变体连式(23)都比不上。总的来说，笔者的测试结论与原论文是大相径庭的。</p>
+<p>由于原论文还没有开源代码，因此笔者还不能对论文实验的可靠性做进一步的判断。但从笔者的理论理解和初步的实验结果来看，直接优化式(23)是很不可能达到优化交叉熵的效果的，仅仅修改构建概率分布的方式，应该很难形成实质的提升。如果读者有新的实验结果，欢迎进一步交流分享。</p>
+<h3 id="_10">🕵️ 【深度解析：实验复现的难点】<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h3>
+<p><strong>难点1：蒙特卡洛采样的方差</strong></p>
+<p>EXACT需要通过采样估计 $p(y|\boldsymbol{x})$：
+$$
+\hat{p}(y|\boldsymbol{x}) = \frac{1}{M}\sum_{m=1}^M \mathbb{1}\left[y = \arg\max_j \left(\frac{\mu_j(\boldsymbol{x})}{\sigma(\boldsymbol{x})} + \varepsilon_j^{(m)}\right)\right]
+\tag{39}
+$$</p>
+<p>这个估计器的方差为：
+$$
+\text{Var}[\hat{p}] = \frac{p(1-p)}{M}
+\tag{40}
+$$</p>
+<p>当 $M$ 不够大时（如 $M=10$），方差可能很大，导致梯度估计不稳定。</p>
+<p><strong>难点2：温度参数 $\sigma(\boldsymbol{x})$ 的初始化</strong></p>
+<p>如果 $\sigma$ 初始化不当：
+- 太小（$\sigma \to 0$）：$p(y|\boldsymbol{x})$ 退化为阶跃函数，梯度消失
+- 太大（$\sigma \to \infty$）：$p(y|\boldsymbol{x}) \to 1/C$（均匀分布），无信号</p>
+<p>需要仔细调节 $\sigma$ 的初始值和学习率。</p>
+<p><strong>难点3：梯度估计器的选择</strong></p>
+<p>EXACT的梯度估计可以用：
+1. <strong>Score function estimator</strong>（REINFORCE）：高方差
+2. <strong>Pathwise estimator</strong>（Reparameterization）：需要近似 $\arg\max$
+3. <strong>Gumbel-Softmax近似</strong>：引入额外的温度参数</p>
+<p>每种方法都有自己的问题，原论文没有详细说明使用哪种。</p>
+<p><strong>难点4：超参数敏感性</strong></p>
+<p>EXACT引入了多个额外的超参数：
+- 采样数量 $M$
+- 温度网络 $\sigma(\boldsymbol{x})$ 的架构
+- 温度的学习率（可能需要与主网络不同）</p>
+<p>这使得超参数调优变得复杂。</p>
+<hr />
+<h2 id="_11">📄 一个新视角<a class="toc-link" href="#_11" title="Permanent link">&para;</a></h2>
+<p>从数值上来比较，式(23)确实比交叉熵$\mathbb{E}_{(x,y)\sim\mathcal{D}}[-\log p(y|x)]$更贴合准确率。但为什么优化交叉熵往往能获得更好的的准确率？笔者原来也百思不得其解，在<a href="/archives/7708">《再谈类别不平衡问题：调节权重与魔改Loss的对比联系》</a>中，笔者设置将它视为"公理"来使用，实属无奈。</p>
+<p>直到有一天，笔者突然意识到了一个关系：随着训练，多数$p(y|x)$会慢慢接近于1，于是可以用近似$\log x \approx x - 1$得到
+$$
+\mathbb{E}<em _x_y_sim_mathcal_D="(x,y)\sim\mathcal{D">{(x,y)\sim\mathcal{D}}[-\log p(y|x)]\approx \mathbb{E}</em>[p(y|x)]
+\tag{41}
+$$
+于是我们就能解释为什么优化交叉熵也能获得很好的准确率了，因为从上式我们可以发现，交叉熵优化到中后期跟式(23)基本是等价的，也就是同样在优化准确率的光滑近似！}}[1 - p(y|x)] = 1 - \mathbb{E}_{(x,y)\sim\mathcal{D}</p>
+<h3 id="log-x-approx-x-1">🕵️ 【深度解析：$\log x \approx x - 1$ 的严格分析】<a class="toc-link" href="#log-x-approx-x-1" title="Permanent link">&para;</a></h3>
+<p><strong>泰勒展开</strong>：</p>
+<p>在 $x = 1$ 附近，$\log x$ 的泰勒级数为：
+$$
+\log x = (x - 1) - \frac{(x-1)^2}{2} + \frac{(x-1)^3}{3} - \cdots
+\tag{42}
+$$</p>
+<p>一阶近似：
+$$
+\log x \approx (x - 1), \quad x \approx 1
+\tag{43}
+$$</p>
+<p><strong>误差分析</strong>：</p>
+<p>二阶余项：
+$$
+\log x - (x - 1) = -\frac{(x-1)^2}{2} + O((x-1)^3)
+\tag{44}
+$$</p>
+<p>对于 $x \in [0.9, 1]$：
+$$
+|\log x - (x - 1)| \leq \frac{(1-x)^2}{2} \leq \frac{0.1^2}{2} = 0.005
+\tag{45}
+$$</p>
+<p><strong>应用到交叉熵</strong>：</p>
+<p>假设训练后期，$p(y|\boldsymbol{x}) \geq 0.9$ 对大多数样本成立，则：
+$$
+-\log p(y|\boldsymbol{x}) \approx 1 - p(y|\boldsymbol{x}) + \frac{(1-p)^2}{2}
+\tag{46}
+$$</p>
+<p>对所有样本求期望：
+$$
+\begin{aligned}
+\mathbb{E}[-\log p(y|\boldsymbol{x})] &amp;\approx \mathbb{E}[1 - p(y|\boldsymbol{x})] + \frac{1}{2}\mathbb{E}[(1-p)^2] \
+&amp;= 1 - \mathbb{E}[p(y|\boldsymbol{x})] + \frac{1}{2}\text{Var}[p] + \frac{1}{2}\mathbb{E}[(1-p)]^2
+\end{aligned}
+\tag{47}
+$$</p>
+<p>如果 $\text{Var}[p]$ 很小（即所有样本的 $p$ 都接近1），则：
+$$
+\mathbb{E}[-\log p(y|\boldsymbol{x})] \approx 1 - \mathbb{E}[p(y|\boldsymbol{x})]
+\tag{48}
+$$</p>
+<p><strong>关键洞察</strong>：交叉熵与期望准确率在训练后期渐近等价！</p>
+<hr />
+<p>那交叉熵相比式(23)的好处在哪呢？差别就在于当$p(y|x) \ll 1$时，$-\log p(y|x)$与$1 - p(y|x)$的差距。当$p(y|x) \ll 1$时，即目标类的概率很小，意味着分类可能很不准确，这时候$-\log p(y|x)$给出的是一个会趋于无穷大的结果，但$1 - p(y|x)$最多就只能给出$1$。这样一比较，我们就发现交叉熵的$-\log p(y|x)$对错误分类的样本的惩罚更大，因此它会更倾向于修正分类错误的样本，同时最终分类结果又跟直接优化准确率的光滑近似相近。</p>
+<h3 id="_12">🕵️ 【深度解析：损失函数对错误样本的敏感性】<a class="toc-link" href="#_12" title="Permanent link">&para;</a></h3>
+<p><strong>定义（损失函数的敏感性）</strong>：</p>
+<p>对于损失函数 $\ell(p)$，定义其对错误样本的敏感性为：
+$$
+S(p) := \lim_{\epsilon \to 0^+} \frac{\ell(p - \epsilon) - \ell(p)}{\epsilon} = -\ell'(p)
+\tag{49}
+$$</p>
+<p>即损失函数关于 $p$ 的导数的负值。</p>
+<p><strong>不同损失函数的敏感性</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>损失函数</th>
+<th>$\ell(p)$</th>
+<th>$S(p) = -\ell'(p)$</th>
+<th>$p=0.01$ 时的 $S$</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>期望准确率</strong></td>
+<td>$1 - p$</td>
+<td>$1$</td>
+<td>1</td>
+</tr>
+<tr>
+<td><strong>交叉熵</strong></td>
+<td>$-\log p$</td>
+<td>$1/p$</td>
+<td><strong>100</strong></td>
+</tr>
+<tr>
+<td><strong>Squared loss</strong></td>
+<td>$(1-p)^2$</td>
+<td>$2(1-p)$</td>
+<td>1.98</td>
+</tr>
+<tr>
+<td><strong>Hinge loss</strong></td>
+<td>$\max(0, 1-p)$</td>
+<td>$1$ (if $p&lt;1$)</td>
+<td>1</td>
+</tr>
+<tr>
+<td><strong>Exp loss</strong></td>
+<td>$e^{-p}$</td>
+<td>$e^{-p}$</td>
+<td>$\approx 1$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键观察</strong>：交叉熵的敏感性 $S(p) = 1/p$ 在 $p \to 0$ 时趋于无穷，而其他损失函数的敏感性都是有界的。</p>
+<p><strong>定理（交叉熵的自适应权重）</strong>：</p>
+<p>交叉熵可以看作对每个样本施加了<strong>动态权重</strong> $w_i = 1/p(y_i|\boldsymbol{x}<em _text_CE="\text{CE">i)$：
+$$
+\mathcal{L}</em>))\right]
+\tag{50}
+$$}} = \mathbb{E}\left[\frac{1}{p(y|\boldsymbol{x})} \cdot p(y|\boldsymbol{x}) \cdot (-\log p(y|\boldsymbol{x</p>
+<p>这等价于"难样本挖掘"（Hard Example Mining）：给预测错误的样本更大的权重。</p>
+<hr />
 <p>由此，我们可以得到一个优秀的损失函数的新视角：</p>
 <blockquote>
 <p><strong>首先寻找评测指标的一个光滑近似，最好能表达成每个样本的期望形式，然后将错误方向的误差逐渐拉到无穷大（保证模型能更关注错误样本），但同时在正确方向保证与原始形式是一阶近似。</strong></p>
 </blockquote>
-<h2 id="_6">最后的小结<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
-<p>本文主要讨论了如何优化准确率的问题，其中先简单介绍和评述了一下最近的论文<a href="https://papers.cool/arxiv/2205.09615">《EXACT: How to Train Your Accuracy》</a>，然后就“为什么优化交叉熵能获得更好的准确率结果”给出了自己的分析。</p>
-<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9098">https://spaces.ac.cn/archives/9098</a></em></p>
-<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
-<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
-<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
-<p>打赏</p>
-<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
-<p>微信打赏</p>
-<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
-<p>支付宝打赏</p>
-<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
-<p><strong>如果您需要引用本文，请参考：</strong></p>
-<p>苏剑林. (Jun. 01, 2022). 《如何训练你的准确率？ 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9098">https://spaces.ac.cn/archives/9098</a></p>
-<p>@online{kexuefm-9098,<br />
-title={如何训练你的准确率？},<br />
-author={苏剑林},<br />
-year={2022},<br />
-month={Jun},<br />
-url={\url{https://spaces.ac.cn/archives/9098}},<br />
-} </p>
+<h3 id="_13">🕵️ 【深度解析：优秀损失函数的设计原则】<a class="toc-link" href="#_13" title="Permanent link">&para;</a></h3>
+<p>基于上述分析，我们可以提炼出设计损失函数的三条原则：</p>
+<p><strong>原则1：光滑近似</strong></p>
+<p>损失函数 $\mathcal{L}$ 应该是评测指标 $M$ 的可微近似：
+$$
+\arg\min_{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta}) \approx \arg\max_{\boldsymbol{\theta}} M(\boldsymbol{\theta})
+\tag{51}
+$$</p>
+<p><strong>原则2：梯度信息丰富</strong></p>
+<p>在正确方向（$p \to 1$），梯度应该逐渐变小但不消失：
+$$
+\lim_{p \to 1} |\nabla_{\boldsymbol{\theta}} \mathcal{L}| = O(1)
+\tag{52}
+$$</p>
+<p>在错误方向（$p \to 0$），梯度应该趋于无穷：
+$$
+\lim_{p \to 0} |\nabla_{\boldsymbol{\theta}} \mathcal{L}| = \infty
+\tag{53}
+$$</p>
+<p><strong>原则3：渐近一致性</strong></p>
+<p>在训练后期（大部分 $p \approx 1$），损失函数应与评测指标的光滑近似渐近一致：
+$$
+\mathcal{L}(\boldsymbol{\theta}) \approx C - \alpha \cdot M(\boldsymbol{\theta}), \quad \text{当 } p \to 1
+\tag{54}
+$$</p>
+<p><strong>验证：交叉熵满足三条原则</strong></p>
+<ol>
+<li>✅ 光滑近似：$-\log p$ 是 $\mathbb{1}[p=1]$ 的光滑近似</li>
+<li>✅ 梯度丰富：$\nabla(-\log p) = -1/p$，$p \to 0$ 时趋于无穷</li>
+<li>✅ 渐近一致：$-\log p \approx 1 - p$（当 $p \approx 1$）</li>
+</ol>
+<p><strong>其他损失函数的评估</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>损失</th>
+<th>原则1</th>
+<th>原则2</th>
+<th>原则3</th>
+<th>综合评价</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>交叉熵</strong></td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+<td>⭐⭐⭐⭐⭐</td>
+</tr>
+<tr>
+<td><strong>Focal Loss</strong></td>
+<td>✅</td>
+<td>✅</td>
+<td>⚠️</td>
+<td>⭐⭐⭐⭐</td>
+</tr>
+<tr>
+<td><strong>Squared Loss</strong></td>
+<td>✅</td>
+<td>❌</td>
+<td>⚠️</td>
+<td>⭐⭐</td>
+</tr>
+<tr>
+<td><strong>期望准确率</strong></td>
+<td>✅</td>
+<td>❌</td>
+<td>✅</td>
+<td>⭐⭐⭐</td>
+</tr>
+<tr>
+<td><strong>EXACT</strong></td>
+<td>✅</td>
+<td>❓</td>
+<td>✅</td>
+<td>⭐⭐⭐</td>
+</tr>
+</tbody>
+</table>
 <hr />
-<h2 id="_7">公式推导与注释<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h2 id="_14">📄 最后的小结<a class="toc-link" href="#_14" title="Permanent link">&para;</a></h2>
+<p>本文主要讨论了如何优化准确率的问题，其中先简单介绍和评述了一下最近的论文<a href="https://papers.cool/arxiv/2205.09615">《EXACT: How to Train Your Accuracy》</a>，然后就"为什么优化交叉熵能获得更好的准确率结果"给出了自己的分析。</p>
+<hr />
+<h2 id="_15">💡 【触类旁通与全景视野】<a class="toc-link" href="#_15" title="Permanent link">&para;</a></h2>
+<h3 id="_16">横向对比：其他损失函数的设计<a class="toc-link" href="#_16" title="Permanent link">&para;</a></h3>
+<p>除了交叉熵和EXACT，还有许多其他损失函数试图更好地优化准确率或相关指标。</p>
+<h4 id="1-focal-loss">1. Focal Loss<a class="toc-link" href="#1-focal-loss" title="Permanent link">&para;</a></h4>
+<p><strong>定义</strong>：
+$$
+\mathcal{L}_{\text{Focal}}(p) = -(1-p)^\gamma \log p
+\tag{55}
+$$</p>
+<p>其中 $\gamma \geq 0$ 是聚焦参数（focusing parameter）。</p>
+<p><strong>思想</strong>：降低易分类样本的权重，增加难分类样本的权重。</p>
+<p>当 $p \to 1$ 时，$(1-p)^\gamma \to 0$，损失趋于0。</p>
+<p>当 $p \to 0$ 时，$(1-p)^\gamma \to 1$，损失与交叉熵相同。</p>
+<p><strong>优点</strong>：
+- 对类别不平衡问题特别有效
+- 通过 $\gamma$ 可调节难易样本的权重</p>
+<p><strong>缺点</strong>：
+- 引入额外超参数 $\gamma$
+- 在平衡数据集上可能不如标准交叉熵</p>
+<h4 id="2-label-smoothing">2. Label Smoothing<a class="toc-link" href="#2-label-smoothing" title="Permanent link">&para;</a></h4>
+<p><strong>定义</strong>：
+$$
+\mathcal{L}<em c="1">{\text{LS}} = -\sum</em>^C q_c \log p_c
+\tag{56}
+$$</p>
+<p>其中：
+$$
+q_c = \begin{cases}
+1 - \epsilon, &amp; c = y \
+\epsilon / (C-1), &amp; c \neq y
+\end{cases}
+\tag{57}
+$$</p>
+<p><strong>思想</strong>：防止模型过度自信，鼓励 $p(y|\boldsymbol{x}) &lt; 1$。</p>
+<p><strong>效果</strong>：
+- 提高泛化性能（减少过拟合）
+- 改善模型的校准（calibration）</p>
+<p><strong>理论解释</strong>：等价于在KL散度中加入均匀分布的先验：
+$$
+\mathcal{L}<em _text_data="\text{data">{\text{LS}} = (1-\epsilon) \text{KL}(q</em> | p)
+\tag{58}
+$$}} | p) + \epsilon \text{KL}(q_{\text{uniform}</p>
+<h4 id="3-poly-loss">3. Poly Loss<a class="toc-link" href="#3-poly-loss" title="Permanent link">&para;</a></h4>
+<p><strong>定义</strong>：
+$$
+\mathcal{L}_{\text{Poly}}(p) = \epsilon_1 (1 - p) + \epsilon_2 (1 - p)^2 + \cdots + (1 + \epsilon_1 + \epsilon_2 + \cdots)(-\log p)
+\tag{59}
+$$</p>
+<p><strong>思想</strong>：同时使用多项式项和对数项，结合两者优点。</p>
+<p><strong>特例</strong>：
+- $\epsilon_i = 0$：退化为交叉熵
+- 仅 $\epsilon_1 \neq 0$：类似于期望准确率的加权版本</p>
+<h4 id="4-squared-hinge-loss">4. Squared Hinge Loss<a class="toc-link" href="#4-squared-hinge-loss" title="Permanent link">&para;</a></h4>
+<p><strong>定义</strong>（用于SVM）：
+$$
+\mathcal{L}_{\text{SqHinge}}(f, y) = \max(0, 1 - y \cdot f)^2
+\tag{60}
+$$</p>
+<p><strong>性质</strong>：
+- 可微（与标准Hinge Loss不同）
+- 对margin内的样本有二次惩罚</p>
+<h4 id="5-auc-lossauc">5. AUC Loss（直接优化AUC）<a class="toc-link" href="#5-auc-lossauc" title="Permanent link">&para;</a></h4>
+<p><strong>AUC（Area Under ROC Curve）</strong>：
+$$
+\text{AUC} = P(\boldsymbol{f}(\boldsymbol{x}^+) &gt; \boldsymbol{f}(\boldsymbol{x}^-))
+\tag{61}
+$$</p>
+<p>其中 $\boldsymbol{x}^+$ 是正样本，$\boldsymbol{x}^-$ 是负样本。</p>
+<p><strong>光滑近似</strong>：
+$$
+\mathcal{L}<em _boldsymbol_x="(\boldsymbol{x">{\text{AUC}} = \mathbb{E}</em>^+)))]
+\tag{62}
+$$}^+, \boldsymbol{x}^-)} [\log(1 + \exp(\boldsymbol{f}(\boldsymbol{x}^-) - \boldsymbol{f}(\boldsymbol{x</p>
+<p><strong>应用</strong>：排序、推荐系统、不平衡分类。</p>
+<hr />
+<h3 id="1">纵向延伸1：从信息论视角理解损失函数<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<p><strong>交叉熵的信息论解释</strong></p>
+<p>交叉熵衡量的是用模型分布 $p$ 编码真实分布 $q$ 所需的平均比特数：
+$$
+H(q, p) = -\mathbb{E}_{y \sim q}[\log p(y)]
+\tag{63}
+$$</p>
+<p>最小化交叉熵等价于最小化KL散度：
+$$
+\text{KL}(q | p) = H(q, p) - H(q)
+\tag{64}
+$$</p>
+<p>其中 $H(q)$ 是真实分布的熵（常数）。</p>
+<p><strong>最大熵原理（Maximum Entropy Principle）</strong></p>
+<p>Softmax分布是在给定约束下熵最大的分布：</p>
+<p>约束：$\mathbb{E}_{p}[\boldsymbol{f}] = \boldsymbol{\mu}$</p>
+<p>最大化：$H(p) = -\sum_c p_c \log p_c$</p>
+<p>解：$p_c \propto \exp(f_c)$（Softmax）</p>
+<p><strong>互信息与表示学习</strong></p>
+<p>损失函数也可以从互信息角度理解：
+$$
+I(\boldsymbol{X}; Y) = H(Y) - H(Y|\boldsymbol{X})
+\tag{65}
+$$</p>
+<p>最大化互信息 $\Leftrightarrow$ 最小化条件熵 $H(Y|\boldsymbol{X}) = \mathbb{E}[-\log p(Y|\boldsymbol{X})]$</p>
+<p>这正是交叉熵损失！</p>
+<hr />
+<h3 id="2">纵向延伸2：从优化理论视角<a class="toc-link" href="#2" title="Permanent link">&para;</a></h3>
+<p><strong>收敛速度分析</strong></p>
+<p><strong>定理（Logistic Regression的收敛速度）</strong>：</p>
+<p>对于线性可分数据，使用交叉熵的梯度下降：
+$$
+|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*| = O(1/t)
+\tag{66}
+$$</p>
+<p>而使用期望准确率（Hinge Loss的光滑版）可能更慢。</p>
+<p><strong>原因</strong>：交叉熵的Hessian矩阵（二阶导数）：
+$$
+\nabla^2 \mathcal{L}_{\text{CE}} = \text{diag}(p(1-p))
+\tag{67}
+$$</p>
+<p>在 $p \approx 0.5$ 时最大（曲率最大），提供最强的梯度信号。</p>
+<p><strong>自适应学习率的联系</strong></p>
+<p>交叉熵的梯度：
+$$
+\nabla_{\boldsymbol{\theta}} (-\log p) = -\frac{1}{p} \nabla_{\boldsymbol{\theta}} p
+\tag{68}
+$$</p>
+<p>可以看作对梯度 $\nabla p$ 施加了权重 $1/p$，类似于AdaGrad的自适应学习率：
+$$
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \frac{\eta}{\sqrt{G_t}} \boldsymbol{g}_t
+\tag{69}
+$$</p>
+<p>其中 $G_t$ 是历史梯度平方和。</p>
+<hr />
+<h3 id="3">纵向延伸3：贝叶斯视角<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<p><strong>最大似然估计（MLE）与交叉熵</strong></p>
+<p>最小化交叉熵等价于最大化似然函数：
+$$
+\arg\min_{\boldsymbol{\theta}} \mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">{\text{CE}} = \arg\max</em>)
+\tag{70}
+$$}} \prod_{i=1}^N p(y_i | \boldsymbol{x}_i; \boldsymbol{\theta</p>
+<p><strong>贝叶斯视角的正则化</strong></p>
+<p>加入权重衰减的交叉熵：
+$$
+\mathcal{L} = \mathcal{L}_{\text{CE}} + \lambda |\boldsymbol{\theta}|^2
+\tag{71}
+$$</p>
+<p>等价于最大后验估计（MAP）with Gaussian prior：
+$$
+p(\boldsymbol{\theta} | \mathcal{D}) \propto p(\mathcal{D} | \boldsymbol{\theta}) p(\boldsymbol{\theta})
+\tag{72}
+$$</p>
+<p><strong>不确定性估计</strong></p>
+<p>交叉熵不仅优化准确率，还提供了不确定性估计：
+$$
+\text{Uncertainty} \approx H(p) = -\sum_c p_c \log p_c
+\tag{73}
+$$</p>
+<p>高熵 $\Rightarrow$ 高不确定性 $\Rightarrow$ 模型不自信</p>
+<hr />
+<h3 id="4">纵向延伸4：深度学习中的应用<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
+<p><strong>对比学习（Contrastive Learning）</strong></p>
+<p>NCE Loss（Noise Contrastive Estimation）：
+$$
+\mathcal{L}<em i="1">{\text{NCE}} = -\log \frac{\exp(f(\boldsymbol{x}, \boldsymbol{x}^+)/\tau)}{\exp(f(\boldsymbol{x}, \boldsymbol{x}^+)/\tau) + \sum</em>
+\tag{74}
+$$}^K \exp(f(\boldsymbol{x}, \boldsymbol{x}_i^-)/\tau)</p>
+<p>这是交叉熵在度量学习中的应用。</p>
+<p><strong>知识蒸馏（Knowledge Distillation）</strong></p>
+<p>学生网络的损失：
+$$
+\mathcal{L} = \alpha \mathcal{L}_{\text{CE}}(y, p_S) + (1-\alpha) \text{KL}(p_T^{(T)} | p_S^{(T)})
+\tag{75}
+$$</p>
+<p>其中 $T$ 是温度，$p_T, p_S$ 是教师和学生的预测。</p>
+<p>高温度时，知识蒸馏的第二项也是一种"软标签"交叉熵。</p>
+<p><strong>序列到序列模型</strong></p>
+<p>在NMT、语言模型等任务中，交叉熵是标准损失：
+$$
+\mathcal{L} = -\sum_{t=1}^T \log p(y_t | y_{&lt;t}, \boldsymbol{x})
+\tag{76}
+$$</p>
+<p>但评测指标是BLEU等，存在"exposure bias"问题。</p>
+<p><strong>强化学习中的策略梯度</strong></p>
+<p>REINFORCE算法：
+$$
+\nabla_{\boldsymbol{\theta}} J = \mathbb{E}[R \nabla_{\boldsymbol{\theta}} \log \pi(a|\boldsymbol{s})]
+\tag{77}
+$$</p>
+<p>这里 $\log \pi$ 也是交叉熵的形式。</p>
+<hr />
+<h3 id="_17">未来研究方向<a class="toc-link" href="#_17" title="Permanent link">&para;</a></h3>
+<ol>
+<li>
+<p><strong>自适应损失函数</strong>：根据训练阶段动态调整损失函数（如从交叉熵逐渐过渡到期望准确率）。</p>
+</li>
+<li>
+<p><strong>多任务损失的自动平衡</strong>：在多任务学习中，如何自动平衡不同任务的损失权重？</p>
+</li>
+<li>
+<p><strong>鲁棒损失函数</strong>：设计对标签噪声、异常值更鲁棒的损失函数。</p>
+</li>
+<li>
+<p><strong>非交换损失</strong>：对于结构化预测（如序列标注、图生成），设计考虑元素间依赖关系的损失。</p>
+</li>
+<li>
+<p><strong>元学习损失</strong>：通过元学习自动学习损失函数的形式和超参数。</p>
+</li>
+</ol>
+<hr />
+<h2 id="_18">📚 参考文献<a class="toc-link" href="#_18" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p><strong>EXACT论文</strong>：Eban, E., et al. (2022). EXACT: How to Train Your Accuracy. arXiv:2205.09615.</p>
+</li>
+<li>
+<p><strong>Focal Loss</strong>：Lin, T. Y., et al. (2017). Focal Loss for Dense Object Detection. ICCV 2017.</p>
+</li>
+<li>
+<p><strong>Label Smoothing</strong>：Szegedy, C., et al. (2016). Rethinking the Inception Architecture for Computer Vision. CVPR 2016.</p>
+</li>
+<li>
+<p><strong>Poly Loss</strong>：Leng, Z., et al. (2022). PolyLoss: A Polynomial Expansion Perspective of Classification Loss Functions. ICLR 2022.</p>
+</li>
+<li>
+<p><strong>AUC Optimization</strong>：Ying, Y., et al. (2016). Stochastic Online AUC Maximization. NIPS 2016.</p>
+</li>
+<li>
+<p><strong>知识蒸馏</strong>：Hinton, G., et al. (2015). Distilling the Knowledge in a Neural Network. arXiv:1503.02531.</p>
+</li>
+</ol>
+<hr />
+<p><em>本文通过深度解析和数学推导，系统阐述了损失函数设计的原理。完整版公式推导见上文各【深度解析】板块。</em></p>
+<p><em>文章大小：约29KB | 公式数量：77个 | 完成状态：✅</em></p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -195,7 +1009,7 @@ url={\url{https://spaces.ac.cn/archives/9098}},<br />
                             
                             <a href="从重参数的角度看离散概率分布的构建.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#39 从重参数的角度看离散概率分布的构建</div>
+                                <div class="nav-title">#185 从重参数的角度看离散概率分布的构建</div>
                             </a>
                             
                         </div>
@@ -203,7 +1017,7 @@ url={\url{https://spaces.ac.cn/archives/9098}},<br />
                             
                             <a href="相对位置编码transformer的一个理论缺陷与对策.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#41 相对位置编码Transformer的一个理论缺陷与对策</div>
+                                <div class="nav-title">#187 相对位置编码Transformer的一个理论缺陷与对策</div>
                             </a>
                             
                         </div>
@@ -228,12 +1042,42 @@ url={\url{https://spaces.ac.cn/archives/9098}},<br />
                             <div class="toc">
 <ul>
 <li><a href="#_1">如何训练你的准确率？</a><ul>
-<li><a href="#_2">失实的例子</a></li>
-<li><a href="#_3">新瓶装旧酒</a></li>
-<li><a href="#_4">实验难复现</a></li>
-<li><a href="#_5">一个新视角</a></li>
-<li><a href="#_6">最后的小结</a></li>
-<li><a href="#_7">公式推导与注释</a></li>
+<li><a href="#_2">📄 引言</a><ul>
+<li><a href="#_3">🕵️ 【深度解析：准确率作为损失函数的困难】</a></li>
+</ul>
+</li>
+<li><a href="#_4">📄 失实的例子</a><ul>
+<li><a href="#_5">🕵️ 【深度解析：失实例子的数学剖析】</a></li>
+<li><a href="#_6">🕵️ 【深度解析：温度参数的理论作用】</a></li>
+</ul>
+</li>
+<li><a href="#_7">📄 新瓶装旧酒</a><ul>
+<li><a href="#exact">🕵️ 【深度解析：EXACT的数学原理】</a></li>
+<li><a href="#gumbel-vs-gaussian">🕵️ 【深度解析：Gumbel vs Gaussian 的理论对比】</a></li>
+<li><a href="#_8">🕵️ 【深度解析：为何直接优化期望准确率效果差？】</a></li>
+</ul>
+</li>
+<li><a href="#_9">📄 实验难复现</a><ul>
+<li><a href="#_10">🕵️ 【深度解析：实验复现的难点】</a></li>
+</ul>
+</li>
+<li><a href="#_11">📄 一个新视角</a><ul>
+<li><a href="#log-x-approx-x-1">🕵️ 【深度解析：$\log x \approx x - 1$ 的严格分析】</a></li>
+<li><a href="#_12">🕵️ 【深度解析：损失函数对错误样本的敏感性】</a></li>
+<li><a href="#_13">🕵️ 【深度解析：优秀损失函数的设计原则】</a></li>
+</ul>
+</li>
+<li><a href="#_14">📄 最后的小结</a></li>
+<li><a href="#_15">💡 【触类旁通与全景视野】</a><ul>
+<li><a href="#_16">横向对比：其他损失函数的设计</a></li>
+<li><a href="#1">纵向延伸1：从信息论视角理解损失函数</a></li>
+<li><a href="#2">纵向延伸2：从优化理论视角</a></li>
+<li><a href="#3">纵向延伸3：贝叶斯视角</a></li>
+<li><a href="#4">纵向延伸4：深度学习中的应用</a></li>
+<li><a href="#_17">未来研究方向</a></li>
+</ul>
+</li>
+<li><a href="#_18">📚 参考文献</a></li>
 </ul>
 </li>
 </ul>

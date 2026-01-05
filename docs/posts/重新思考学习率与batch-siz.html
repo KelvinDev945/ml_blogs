@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=学习率">学习率</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #198 重新思考学习率与Batch Siz...
+                    #345 重新思考学习率与Batch Siz...
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#198</span>
+                <span class="post-number">#345</span>
                 重新思考学习率与Batch Siz...
             </h1>
             <div class="post-meta">
@@ -236,7 +236,292 @@ url={\url{https://spaces.ac.cn/archives/11301}},<br />
 } </p>
 <hr />
 <h2 id="_9">公式推导与注释<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1">1. 线性缩放规则的理论基础<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 噪声尺度理论<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>考虑mini-batch梯度估计:
+\begin{equation}\tilde{\boldsymbol{g}}<em i="1">B = \frac{1}{B}\sum</em>}^B \nabla L(\boldsymbol{x}_i; \boldsymbol{\theta})\tag{1}\end{equation</p>
+<p><strong>期望</strong>: $\mathbb{E}[\tilde{\boldsymbol{g}}<em _boldsymbol_x="\boldsymbol{x">B] = \boldsymbol{g}$,其中$\boldsymbol{g} = \mathbb{E}</em>)]$}}[\nabla L(\boldsymbol{x}; \boldsymbol{\theta</p>
+<p><strong>方差</strong>: 由中心极限定理,
+\begin{equation}\text{Cov}[\tilde{\boldsymbol{g}}_B] = \frac{\boldsymbol{\Sigma}}{B}\tag{2}\end{equation}</p>
+<p>其中$\boldsymbol{\Sigma} = \mathbb{E}[(\nabla L - \boldsymbol{g})(\nabla L - \boldsymbol{g})^{\top}]$是单样本梯度的协方差矩阵。</p>
+<p><strong>数学直觉</strong>: Batch size越大,梯度估计的方差越小,噪声按$1/\sqrt{B}$衰减。</p>
+<h4 id="12-sgdsde">1.2 SGD的离散化SDE近似<a class="toc-link" href="#12-sgdsde" title="Permanent link">&para;</a></h4>
+<p>将SGD视为随机微分方程(SDE)的离散化:
+\begin{equation}d\boldsymbol{\theta} = -\boldsymbol{g}(\boldsymbol{\theta})dt + \sqrt{2\eta\boldsymbol{\Sigma}/B}d\boldsymbol{W}\tag{3}\end{equation}</p>
+<p>其中$d\boldsymbol{W}$是Wiener过程(布朗运动)。</p>
+<p><strong>离散化</strong>:
+\begin{equation}\boldsymbol{\theta}<em B_t="B,t">{t+1} = \boldsymbol{\theta}_t - \eta\tilde{\boldsymbol{g}}</em>}\tag{4}\end{equation</p>
+<p>对应于Euler-Maruyama离散化,时间步长$dt = \eta$。</p>
+<p><strong>数学直觉</strong>: SGD在参数空间的轨迹类似于带漂移项的布朗运动,噪声强度由$\eta/B$决定。</p>
+<h4 id="13">1.3 平衡点分析<a class="toc-link" href="#13" title="Permanent link">&para;</a></h4>
+<p>在平衡态附近,损失函数可以二次近似:
+\begin{equation}L(\boldsymbol{\theta}) \approx L(\boldsymbol{\theta}^<em>) + \frac{1}{2}(\boldsymbol{\theta} - \boldsymbol{\theta}^</em>)^{\top}\boldsymbol{H}(\boldsymbol{\theta} - \boldsymbol{\theta}^*)\tag{5}\end{equation}</p>
+<p>其中$\boldsymbol{H}$是Hessian矩阵。</p>
+<p><strong>平衡分布</strong>: 当$\eta$足够小,SDE(3)的平衡分布是Gibbs分布:
+\begin{equation}p(\boldsymbol{\theta}) \propto \exp\left(-\frac{B}{\eta}L(\boldsymbol{\theta})\right)\tag{6}\end{equation}</p>
+<p><strong>温度</strong>: 定义有效温度$T = \eta/B$,则:
+\begin{equation}p(\boldsymbol{\theta}) \propto \exp\left(-\frac{L(\boldsymbol{\theta})}{T}\right)\tag{7}\end{equation}</p>
+<p><strong>数学直觉</strong>: $\eta/B$决定了SGD探索参数空间的"温度"。相同温度下,SGD收敛到相似的解。</p>
+<h4 id="14">1.4 线性缩放规则的推导<a class="toc-link" href="#14" title="Permanent link">&para;</a></h4>
+<p>若希望保持相同的平衡分布,当$B \to kB$时,需要:
+\begin{equation}\frac{\eta'}{kB} = \frac{\eta}{B} \Rightarrow \eta' = k\eta\tag{8}\end{equation}</p>
+<p><strong>定理1</strong>(线性缩放规则): 若Batch size从$B$增加到$kB$,为保持相同的收敛行为,学习率应从$\eta$增加到$k\eta$。</p>
+<p><strong>适用范围</strong>: 该规则在以下条件下成立:
+1. $B$足够大,CLT成立
+2. $\eta$足够小,SDE近似有效
+3. 训练未进入强噪声主导的regime</p>
+<h3 id="2-batch-size">2. 临界Batch Size理论<a class="toc-link" href="#2-batch-size" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 噪声尺度与梯度尺度的比较<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>定义<strong>噪声尺度</strong>(noise scale):
+\begin{equation}\mathcal{B}_{noise} = \frac{\text{tr}(\boldsymbol{\Sigma}\boldsymbol{H})}{\boldsymbol{g}^{\top}\boldsymbol{H}\boldsymbol{g}}\tag{9}\end{equation}</p>
+<p><strong>物理意义</strong>: 噪声在Hessian度量下与梯度的相对强度。</p>
+<h4 id="22-batch-size">2.2 临界Batch Size的定义<a class="toc-link" href="#22-batch-size" title="Permanent link">&para;</a></h4>
+<p><strong>定义</strong>: 临界batch size $B_c$是使梯度噪声与梯度信号相当的batch size:
+\begin{equation}B_c = \mathcal{B}_{noise} = \frac{\text{tr}(\boldsymbol{\Sigma}\boldsymbol{H})}{\boldsymbol{g}^{\top}\boldsymbol{H}\boldsymbol{g}}\tag{10}\end{equation}</p>
+<p><strong>简化版本</strong>: 若假设$\boldsymbol{\Sigma} \propto \boldsymbol{g}\boldsymbol{g}^{\top}$(Assumption 在训练初期近似成立):
+\begin{equation}B_c^{simple} = \frac{\text{tr}(\boldsymbol{\Sigma})}{\boldsymbol{g}^{\top}\boldsymbol{g}} = \frac{\text{tr}(\boldsymbol{\Sigma})}{|\boldsymbol{g}|^2}\tag{11}\end{equation}</p>
+<h4 id="23-batch-size">2.3 最优学习率与Batch Size的关系<a class="toc-link" href="#23-batch-size" title="Permanent link">&para;</a></h4>
+<p>基于二阶Taylor展开,最优学习率为:
+\begin{equation}\eta^* \approx \frac{\eta_{max}}{1 + \mathcal{B}_{noise}/B}\tag{12}\end{equation}</p>
+<p>其中$\eta_{max} = \frac{\boldsymbol{g}^{\top}\boldsymbol{g}}{\boldsymbol{g}^{\top}\boldsymbol{H}\boldsymbol{g}}$是无噪声情况下的最优学习率。</p>
+<p><strong>分析</strong>:
+- <strong>小batch regime</strong> ($B \ll B_c$): $\eta^<em> \approx \frac{\eta_{max}B}{\mathcal{B}_{noise}}$,学习率线性缩放
+- </em><em>大batch regime</em><em> ($B \gg B_c$): $\eta^</em> \approx \eta_{max}$,学习率饱和</p>
+<p><strong>数学直觉</strong>: 当$B &gt; B_c$时,继续增大batch size的边际收益递减,这就是"surge现象"的根源。</p>
+<h4 id="24">2.4 训练时间分析<a class="toc-link" href="#24" title="Permanent link">&para;</a></h4>
+<p><strong>每步计算成本</strong>: 正比于$B$
+<strong>收敛步数</strong>: 反比于$\eta^*$</p>
+<p><strong>总计算成本</strong>:
+\begin{equation}Cost \propto \frac{B}{\eta^*} \approx \begin{cases}
+\text{const}, &amp; B \ll B_c \
+B/\eta_{max}, &amp; B \gg B_c
+\end{cases}\tag{13}\end{equation}</p>
+<p><strong>数学直觉</strong>: 在$B &lt; B_c$时,增大batch size可以保持总成本不变(线性缩放);超过$B_c$后,总成本线性增加。</p>
+<h3 id="3">3. 动量机制的影响<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<h4 id="31-sgdmbatch-size">3.1 SGDM的等效Batch Size<a class="toc-link" href="#31-sgdmbatch-size" title="Permanent link">&para;</a></h4>
+<p>从主文档式(54)-(57),动量的EMA机制相当于对优化轨迹上的梯度做平均:
+\begin{equation}\boldsymbol{m}<em s="1">t = (1-\beta_1)\sum</em>}^t \beta_1^{t-s}\tilde{\boldsymbol{g}}_{B,s}\tag{14}\end{equation</p>
+<p><strong>有效样本数</strong>: 考虑EMA的有效窗口长度:
+\begin{equation}T_{eff} = \sum_{s=0}^{\infty}\beta_1^s = \frac{1}{1-\beta_1}\tag{15}\end{equation}</p>
+<p><strong>等效batch size</strong>:
+\begin{equation}B_{eff} = B \cdot \frac{1+\beta_1}{1-\beta_1}\tag{16}\end{equation}</p>
+<p><strong>数学直觉</strong>: 动量通过时间维度的平均,将有效batch size放大了$\frac{1+\beta_1}{1-\beta_1}$倍。</p>
+<h4 id="32-adamema">3.2 Adam的双重EMA<a class="toc-link" href="#32-adamema" title="Permanent link">&para;</a></h4>
+<p>Adam同时对一阶和二阶矩进行EMA:
+\begin{equation}\boldsymbol{m}<em t-1="t-1">t = \beta_1\boldsymbol{m}</em>} + (1-\beta_1)\tilde{\boldsymbol{g}<em t-1="t-1">t, \quad \boldsymbol{v}_t = \beta_2\boldsymbol{v}</em>} + (1-\beta_2)\tilde{\boldsymbol{g}}_t^2\tag{17}\end{equation</p>
+<p><strong>更新方向</strong>: $\tilde{\boldsymbol{\varphi}}_B = \boldsymbol{m}_t/\sqrt{\boldsymbol{v}_t}$</p>
+<p>从主文档式(91):
+\begin{equation}\mathbb{E}[\tilde{\boldsymbol{\varphi}}_B] \approx \frac{\boldsymbol{g}}{\sqrt{\boldsymbol{g}^2 + \boldsymbol{\sigma}^2/B}}\tag{18}\end{equation}</p>
+<p><strong>临界batch size调整</strong>: Adam的$B_c$比SGD小,因为二阶矩的归一化削弱了噪声影响。</p>
+<h3 id="4-scaling-law">4. 不同优化器的Scaling Law<a class="toc-link" href="#4-scaling-law" title="Permanent link">&para;</a></h3>
+<h4 id="41-sgd">4.1 SGD的缩放规律<a class="toc-link" href="#41-sgd" title="Permanent link">&para;</a></h4>
+<p><strong>最优学习率</strong>:
+\begin{equation}\eta_{SGD}^* = \frac{2}{L + \mu} \cdot \frac{1}{1 + B_c/B}\tag{19}\end{equation}</p>
+<p>其中$L$是光滑常数,$\mu$是强凸常数。</p>
+<p><strong>缩放行为</strong>:
+- $B \ll B_c$: $\eta^<em> \propto B$(线性)
+- $B \gg B_c$: $\eta^</em> = \text{const}$(饱和)</p>
+<h4 id="42-adam">4.2 Adam的缩放规律<a class="toc-link" href="#42-adam" title="Permanent link">&para;</a></h4>
+<p>从主文档式(102),Adam在$\beta_1 &gt; 1/3$时会出现surge现象。</p>
+<p><strong>最优学习率</strong>(对角Hessian假设):
+\begin{equation}\eta_{Adam}^* \propto \frac{1}{\frac{1}{\beta(B)}\frac{1-\beta_1}{1+\beta_1} + \beta(B)\frac{2\beta_1}{1+\beta_1}}\tag{20}\end{equation}</p>
+<p>其中$\beta(B) = (1 + B_c^{simple}/B)^{-1/2}$。</p>
+<p><strong>临界点</strong>: $B_c^{Adam} = \frac{1-\beta_1}{3\beta_1-1}B_c^{simple}$(当$\beta_1 &gt; 1/3$)</p>
+<h4 id="43-muon">4.3 Muon的缩放规律<a class="toc-link" href="#43-muon" title="Permanent link">&para;</a></h4>
+<p>Muon使用矩阵符号函数,更新方向接近SignSGD+Momentum。</p>
+<p>从主文档分析,Muon在特定Hessian结构下不会出现surge现象:
+\begin{equation}\eta_{Muon}^* \approx \eta_{max}^{sign} \cdot f(B, B_{eff})\tag{21}\end{equation}</p>
+<p>其中$B_{eff} = B \cdot \frac{1+\beta_1}{1-\beta_1}$,$f$是平滑递增函数。</p>
+<p><strong>优势</strong>: 支持更大batch size而不牺牲效率。</p>
+<h3 id="5-warmup">5. Warmup与学习率调度<a class="toc-link" href="#5-warmup" title="Permanent link">&para;</a></h3>
+<h4 id="51-warmup">5.1 Warmup的必要性<a class="toc-link" href="#51-warmup" title="Permanent link">&para;</a></h4>
+<p><strong>训练初期的特点</strong>:
+1. 梯度范数$|\boldsymbol{g}|$很大
+2. Hessian特征值不稳定
+3. $B_c$可能很大</p>
+<p><strong>大学习率的风险</strong>:
+\begin{equation}|\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}_t| = \eta|\tilde{\boldsymbol{g}}_B| \approx \eta|\boldsymbol{g}|\tag{22}\end{equation}</p>
+<p>若$\eta$过大,一步更新可能跨越多个局部最优,导致不稳定。</p>
+<h4 id="52-warmup">5.2 线性Warmup<a class="toc-link" href="#52-warmup" title="Permanent link">&para;</a></h4>
+<p><strong>策略</strong>:
+\begin{equation}\eta_t = \begin{cases}
+\eta_{max} \cdot \frac{t}{T_{warmup}}, &amp; t \leq T_{warmup}\
+\eta_{max}, &amp; t &gt; T_{warmup}
+\end{cases}\tag{23}\end{equation}</p>
+<p><strong>理论解释</strong>: 渐进增大学习率,让模型逐步适应大步长更新。</p>
+<p><strong>Warmup长度</strong>: 典型设置$T_{warmup} = 0.05 \sim 0.1 \times T_{total}$</p>
+<h4 id="53">5.3 批量大小的动态调整<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<p><strong>渐进增大Batch Size</strong>:
+\begin{equation}B_t = \min(B_{max}, B_0 \cdot 2^{\lfloor t/T_B \rfloor})\tag{24}\end{equation}</p>
+<p><strong>优点</strong>:
+1. 训练初期:小batch,高随机性,探索广
+2. 训练后期:大batch,低噪声,收敛快</p>
+<p><strong>与学习率的协调</strong>: 可以同时调整:
+\begin{equation}\eta_t = \eta_0 \cdot \sqrt{B_t/B_0}\tag{25}\end{equation}</p>
+<p>使用平方根缩放而非线性缩放,介于两种极端之间。</p>
+<h3 id="6-gap">6. 泛化性Gap分析<a class="toc-link" href="#6-gap" title="Permanent link">&para;</a></h3>
+<h4 id="61-sharp-vs-flat-minima">6.1 Sharp vs Flat Minima<a class="toc-link" href="#61-sharp-vs-flat-minima" title="Permanent link">&para;</a></h4>
+<p><strong>定义</strong>: 损失函数在最小值附近的Hessian:
+- <strong>Sharp minimum</strong>: $\lambda_{max}(\boldsymbol{H}^<em>)$大,损失对参数敏感
+- </em><em>Flat minimum</em><em>: $\lambda_{max}(\boldsymbol{H}^</em>)$小,损失对参数不敏感</p>
+<p><strong>泛化能力</strong>: Flat minima通常泛化更好(PAC-Bayes理论支持)。</p>
+<h4 id="62-sgd">6.2 SGD的隐式正则化<a class="toc-link" href="#62-sgd" title="Permanent link">&para;</a></h4>
+<p>从式(7),SGD倾向于收敛到满足以下条件的$\boldsymbol{\theta}^<em>$:
+\begin{equation}\nabla L(\boldsymbol{\theta}^</em>) = 0, \quad \text{且} \quad \lambda_{max}(\boldsymbol{H}^*) \lesssim \frac{B}{\eta}\tag{26}\end{equation}</p>
+<p><strong>数学直觉</strong>: 较小的$\eta/B$(低温度)偏好flatter minima。</p>
+<h4 id="63-large-batchgap">6.3 Large Batch的泛化Gap<a class="toc-link" href="#63-large-batchgap" title="Permanent link">&para;</a></h4>
+<p><strong>现象</strong>: 大batch训练的模型测试误差通常更高。</p>
+<p><strong>理论解释</strong>:
+1. <strong>高温度</strong>: 大$B$需要大$\eta$,导致$\eta/B$未必减小
+2. <strong>探索不足</strong>: 大batch噪声小,难以逃离sharp minima
+3. <strong>有效迭代数少</strong>: 相同epoch下,大batch的更新次数少</p>
+<p><strong>缓解方法</strong>:
+- 延长训练(更多epoch)
+- 降低学习率(牺牲速度)
+- Ghost Batch Normalization
+- 使用更好的优化器(如Muon)</p>
+<h3 id="7-scaling">7. 分布式训练的Scaling<a class="toc-link" href="#7-scaling" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 数据并行<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p><strong>基本设置</strong>: $N$个worker,每个计算$B_{local}$样本:
+\begin{equation}B_{global} = N \cdot B_{local}\tag{27}\end{equation}</p>
+<p><strong>梯度聚合</strong>:
+\begin{equation}\tilde{\boldsymbol{g}}<em i="1">{global} = \frac{1}{N}\sum</em>}^N \tilde{\boldsymbol{g}}_{i,local}\tag{28}\end{equation</p>
+<p><strong>学习率缩放</strong>: 根据线性规则,$\eta_{global} = N \cdot \eta_{base}$</p>
+<h4 id="72">7.2 通信开销<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p><strong>每步通信量</strong>: $\mathcal{O}(d)$,其中$d$是参数维度</p>
+<p><strong>All-Reduce复杂度</strong>: $\mathcal{O}(\log N)$使用tree-based算法</p>
+<p><strong>通信/计算比</strong>:
+\begin{equation}R = \frac{T_{comm}}{T_{comp}} = \frac{c \cdot d}{B_{local} \cdot n_{samples}}\tag{29}\end{equation}</p>
+<p>其中$c$是通信常数。</p>
+<p><strong>数学直觉</strong>: 增大$B_{local}$可以减少通信开销,但需权衡泛化性能。</p>
+<h4 id="73-larslamb">7.3 LARS/LAMB优化器<a class="toc-link" href="#73-larslamb" title="Permanent link">&para;</a></h4>
+<p><strong>Layer-wise Adaptive Rate Scaling (LARS)</strong>:
+\begin{equation}\eta_l = \eta_{global} \cdot \frac{|\boldsymbol{W}<em _boldsymbol_W="\boldsymbol{W">l|}{|\nabla</em>}_l}L| + \lambda|\boldsymbol{W}_l|}\tag{30}\end{equation</p>
+<p>为每层自适应调整学习率,允许更激进的全局学习率缩放。</p>
+<p><strong>LAMB</strong>(Layer-wise Adaptive Moments for Batch training):
+\begin{equation}\eta_l = \eta_{global} \cdot \frac{|\boldsymbol{W}_l|}{|\boldsymbol{m}_l/\sqrt{\boldsymbol{v}_l}|}\tag{31}\end{equation}</p>
+<p>结合Adam的自适应矩估计和LARS的层级缩放。</p>
+<p><strong>应用</strong>: 成功将BERT训练扩展到batch size 32k。</p>
+<h3 id="8">8. 实验验证与案例研究<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81-imagenet">8.1 ImageNet分类<a class="toc-link" href="#81-imagenet" title="Permanent link">&para;</a></h4>
+<p><strong>实验设置</strong>: ResNet-50,初始学习率$\eta_0 = 0.1$,batch size $B_0 = 256$</p>
+<p><strong>缩放实验</strong>:
+| Batch Size | 学习率 | Top-1准确率 | 训练时间 |
+|-----------|-------|-----------|---------|
+| 256 | 0.1 | 76.2% | 100% |
+| 512 | 0.2 | 76.1% | 55% |
+| 1024 | 0.4 | 75.9% | 32% |
+| 2048 | 0.8 | 75.5% | 20% |
+| 8192 | 2.4 | 74.8% | 8% |</p>
+<p><strong>观察</strong>:
+- $B \leq 1024$:线性缩放有效,准确率几乎无损
+- $B &gt; 2048$:出现泛化gap,需要特殊技巧(warmup、LARS等)</p>
+<h4 id="82-gpt-3">8.2 GPT-3训练<a class="toc-link" href="#82-gpt-3" title="Permanent link">&para;</a></h4>
+<p><strong>参数</strong>: 175B参数,300B tokens</p>
+<p><strong>Batch Size策略</strong>: 动态增大
+- 前10%训练: $B = 0.5M$ tokens
+- 中期: $B = 2M$ tokens
+- 后期: $B = 3.2M$ tokens</p>
+<p><strong>学习率</strong>: 随batch size调整,使用cosine decay</p>
+<p><strong>数学直觉</strong>: 大模型有更大的$B_c$,可以使用更大batch size。</p>
+<h4 id="83-clipsimclr">8.3 对比学习(CLIP/SimCLR)<a class="toc-link" href="#83-clipsimclr" title="Permanent link">&para;</a></h4>
+<p><strong>特殊性</strong>: 需要大batch来构建负样本对</p>
+<p><strong>SimCLR</strong>: 最佳性能在$B = 4096 \sim 8192$</p>
+<p><strong>解释</strong>: 对比损失的$B_c$与batch size正相关:
+\begin{equation}B_c^{contrast} \propto B^{contrast}\tag{32}\end{equation}</p>
+<p>因为增大batch同时增加了有效负样本数。</p>
+<h3 id="9">9. 实践建议总结<a class="toc-link" href="#9" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 学习率选择流程<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p><strong>步骤1</strong>: 确定基准学习率
+- 小batch($B = 32 \sim 128$)下grid search
+- 找到最佳$\eta_{base}$</p>
+<p><strong>步骤2</strong>: 估计临界batch size
+- 监控训练过程中的梯度统计量
+- 估算$B_c \approx \text{tr}(\boldsymbol{\Sigma})/|\boldsymbol{g}|^2$</p>
+<p><strong>步骤3</strong>: 应用缩放规则
+- 若$B \leq B_c$:使用线性缩放$\eta = \eta_{base} \cdot (B/B_{base})$
+- 若$B &gt; B_c$:使用次线性缩放$\eta = \eta_{base} \cdot \sqrt{B/B_{base}}$</p>
+<p><strong>步骤4</strong>: 调优
+- 添加warmup(长度$\sim 5\%$训练步数)
+- 监控验证集性能,必要时降低学习率</p>
+<h4 id="92">9.2 不同优化器的推荐设置<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p><strong>SGD+Momentum</strong>:
+- $\beta_1 = 0.9$(标准)
+- 学习率:严格遵循线性缩放(在$B &lt; B_c$时)
+- 适合:CNN分类任务</p>
+<p><strong>Adam/AdamW</strong>:
+- $\beta_1 = 0.9, \beta_2 = 0.999$(标准)
+- 学习率:对batch size不太敏感,但$B$过大仍会有gap
+- 适合:Transformer模型、初步实验</p>
+<p><strong>LARS/LAMB</strong>:
+- 在Adam/SGD基础上加layer-wise缩放
+- 允许$B$扩展到$10k \sim 32k$
+- 适合:分布式训练、大模型</p>
+<p><strong>Muon</strong>:
+- 类似SignSGD+Momentum
+- 支持大batch size,surge现象较轻
+- 适合:需要高throughput的场景</p>
+<h4 id="93-checklist">9.3 调试Checklist<a class="toc-link" href="#93-checklist" title="Permanent link">&para;</a></h4>
+<p><strong>症状1</strong>: 损失不下降
+- 检查学习率是否过小
+- 验证梯度是否正确计算
+- 尝试降低batch size</p>
+<p><strong>症状2</strong>: 损失震荡/NaN
+- 学习率过大,降低10x
+- 添加gradient clipping
+- 检查数据预处理</p>
+<p><strong>症状3</strong>: 训练慢但最终性能好
+- 可以增大batch size和学习率
+- 使用更激进的学习率调度</p>
+<p><strong>症状4</strong>: 训练快但泛化差(large batch gap)
+- 延长训练时间
+- 降低学习率
+- 考虑Ghost Batch Normalization
+- 尝试更小的batch size</p>
+<h3 id="10">10. 理论前沿与开放问题<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101-scaling-law">10.1 非凸优化的Scaling Law<a class="toc-link" href="#101-scaling-law" title="Permanent link">&para;</a></h4>
+<p><strong>现状</strong>: 大部分理论基于凸/强凸假设</p>
+<p><strong>挑战</strong>: 深度神经网络高度非凸
+- 多个局部最优
+- 鞍点众多
+- Hessian谱不稳定</p>
+<p><strong>进展</strong>:
+- 神经正切核(NTK)理论:在无限宽度极限下,网络近似线性
+- Polyak-Łojasiewicz条件:某些非凸函数满足,保证收敛</p>
+<h4 id="102-sharpness-aware-minimization-sam">10.2 Sharpness-Aware Minimization (SAM)<a class="toc-link" href="#102-sharpness-aware-minimization-sam" title="Permanent link">&para;</a></h4>
+<p><strong>思想</strong>: 显式寻找flat minima
+\begin{equation}\min_{\boldsymbol{\theta}} \max_{|\boldsymbol{\epsilon}| \leq \rho} L(\boldsymbol{\theta} + \boldsymbol{\epsilon})\tag{33}\end{equation}</p>
+<p><strong>与batch size的关系</strong>: SAM可能改变$B_c$,需要重新研究scaling law</p>
+<h4 id="103-adaptive-batch-size">10.3 Adaptive Batch Size<a class="toc-link" href="#103-adaptive-batch-size" title="Permanent link">&para;</a></h4>
+<p><strong>问题</strong>: 能否动态调整batch size以最大化效率?</p>
+<p><strong>方案</strong>:
+- 基于梯度方差估计$B_c$
+- 在线调整$B_t$使其始终 $\approx B_c$</p>
+<p><strong>挑战</strong>: 需要高效估计$B_c$,避免过大开销</p>
+<h4 id="104-meta-learning-scaling">10.4 Meta-Learning Scaling<a class="toc-link" href="#104-meta-learning-scaling" title="Permanent link">&para;</a></h4>
+<p><strong>问题</strong>: Few-shot learning中batch size如何影响元学习?</p>
+<p><strong>特殊性</strong>:
+- Inner loop和outer loop有不同的batch size
+- Support set和query set的平衡</p>
+<p><strong>开放问题</strong>: Scaling law在MAML等算法中如何体现?</p>
+<h3 id="11_1">11. 全文总结<a class="toc-link" href="#11_1" title="Permanent link">&para;</a></h3>
+<p>本文深入分析了学习率与batch size的关系,主要结论:</p>
+<p><strong>核心原理</strong>:
+1. <strong>线性缩放规则</strong>: $B \to kB \Rightarrow \eta \to k\eta$(在$B &lt; B_c$时)
+2. <strong>临界batch size</strong>: $B_c = \text{tr}(\boldsymbol{\Sigma}\boldsymbol{H})/(\boldsymbol{g}^{\top}\boldsymbol{H}\boldsymbol{g})$
+3. <strong>Surge现象</strong>: $B &gt; B_c$时,增大batch size边际收益递减</p>
+<p><strong>优化器特性</strong>:
+- SGD: 严格遵循线性缩放
+- Adam: $\beta_1 &gt; 1/3$时有surge现象
+- Muon: 支持更大batch size</p>
+<p><strong>实践指南</strong>:
+- 使用warmup缓解训练初期不稳定
+- 监控梯度统计量估计$B_c$
+- 大batch训练需要特殊技巧(LARS/LAMB)</p>
+<p><strong>未来方向</strong>:
+- 非凸情况的精确理论
+- 自适应batch size算法
+- Sharpness-aware优化的scaling</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -244,17 +529,17 @@ url={\url{https://spaces.ac.cn/archives/11301}},<br />
                     <div class="row g-3">
                         <div class="col-6">
                             
-                            <a href="重新思考学习率与batch-size三muon.html" class="nav-link-prev">
+                            <a href="重新思考学习率与batch-size四ema.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#197 重新思考学习率与Batch Size（三）：Muon</div>
+                                <div class="nav-title">#344 重新思考学习率与Batch Size（四）：EMA</div>
                             </a>
                             
                         </div>
                         <div class="col-6">
                             
-                            <a href="重新思考学习率与batch-size四ema.html" class="nav-link-next">
+                            <a href="adamw的weight-rms的.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#199 重新思考学习率与Batch Size（四）：EMA</div>
+                                <div class="nav-title">#346 AdamW的Weight RMS的...</div>
                             </a>
                             
                         </div>
@@ -287,7 +572,20 @@ url={\url{https://spaces.ac.cn/archives/11301}},<br />
 <li><a href="#_6">两个特例</a></li>
 <li><a href="#_7">一般分析</a></li>
 <li><a href="#_8">文章小结</a></li>
-<li><a href="#_9">公式推导与注释</a></li>
+<li><a href="#_9">公式推导与注释</a><ul>
+<li><a href="#1">1. 线性缩放规则的理论基础</a></li>
+<li><a href="#2-batch-size">2. 临界Batch Size理论</a></li>
+<li><a href="#3">3. 动量机制的影响</a></li>
+<li><a href="#4-scaling-law">4. 不同优化器的Scaling Law</a></li>
+<li><a href="#5-warmup">5. Warmup与学习率调度</a></li>
+<li><a href="#6-gap">6. 泛化性Gap分析</a></li>
+<li><a href="#7-scaling">7. 分布式训练的Scaling</a></li>
+<li><a href="#8">8. 实验验证与案例研究</a></li>
+<li><a href="#9">9. 实践建议总结</a></li>
+<li><a href="#10">10. 理论前沿与开放问题</a></li>
+<li><a href="#11_1">11. 全文总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

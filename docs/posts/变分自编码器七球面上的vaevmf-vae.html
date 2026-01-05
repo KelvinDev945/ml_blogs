@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>变分自编码器（七）：球面上的VAE（vMF-VAE） | ML & Math Blog Posts</title>
+    <meta name="description" content="变分自编码器（七）：球面上的VAE（vMF-VAE）&para;
+原文链接: https://spaces.ac.cn/archives/8404
+发布日期: 
+
+在《变分自编码器（五）：VAE + BN = 更好的VAE》中，我们讲到了NLP中训练VAE时常见的KL散度消失现象，并且提到了通过BN来使得KL散度项有一个正的下界，从而保证KL散度项不会消失。事实上，早在2018年的时候，就有类似思...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
+
+    <!-- MathJax for math rendering with equation numbering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=变分">变分</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #60 变分自编码器（七）：球面上的VAE（vMF-VAE）
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">
+                <span class="post-number">#60</span>
+                变分自编码器（七）：球面上的VAE（vMF-VAE）
+            </h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/8404" target="_blank" rel="noopener">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=变分" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 变分</span>
+                </a>
+                
+                <a href="../index.html?tags=无监督" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 无监督</span>
+                </a>
+                
+                <a href="../index.html?tags=vae" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> vae</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+            </div>
+            
+        </header>
+
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="vaevmf-vae">变分自编码器（七）：球面上的VAE（vMF-VAE）<a class="toc-link" href="#vaevmf-vae" title="Permanent link">&para;</a></h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8404">https://spaces.ac.cn/archives/8404</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在<a href="/archives/7381">《变分自编码器（五）：VAE + BN = 更好的VAE》</a>中，我们讲到了NLP中训练VAE时常见的KL散度消失现象，并且提到了通过BN来使得KL散度项有一个正的下界，从而保证KL散度项不会消失。事实上，早在2018年的时候，就有类似思想的工作就被提出了，它们是通过在VAE中改用新的先验分布和后验分布，来使得KL散度项有一个正的下界。</p>
+<p>该思路出现在2018年的两篇相近的论文中，分别是<a href="https://papers.cool/arxiv/1804.00891">《Hyperspherical Variational Auto-Encoders》</a>和<a href="https://papers.cool/arxiv/1808.10805">《Spherical Latent Spaces for Stable Variational Autoencoders》</a>，它们都是用定义在超球面的von Mises–Fisher（vMF）分布来构建先后验分布。某种程度上来说，该分布比我们常用的高斯分布还更简单和有趣～</p>
+<h2 id="kl">KL散度消失<a class="toc-link" href="#kl" title="Permanent link">&para;</a></h2>
+<p>我们知道，VAE的训练目标是<br />
+\begin{equation}\mathcal{L} = \mathbb{E}<em p_z_x_="p(z|x)" z_sim="z\sim">{x\sim \tilde{p}(x)} \Big[\mathbb{E}</em>\big[-\log q(x|z)\big]+KL\big(p(z|x)\big\Vert q(z)\big)\Big]
+\end{equation}<br />
+其中第一项是重构项，第二项是KL散度项，在<a href="/archives/5253">《变分自编码器（一）：原来是这么一回事》</a>中我们就说过，这两项某种意义上是“对抗”的，KL散度项的存在，会加大解码器利用编码信息的难度，如果KL散度项为0，那么说明解码器完全没有利用到编码器的信息。</p>
+<p>在NLP中，输入和重构的对象是句子，为了保证效果，解码器一般用自回归模型。然而，自回归模型是非常强大的模型，强大到哪怕没有输入，也能完成训练（退化为无条件语言模型），而刚才我们说了，KL散度项会加大解码器利用编码信息的难度，所以解码器干脆弃之不用，这就出现了KL散度消失现象。</p>
+<p>早期比较常见的应对方案是逐渐增加KL项的权重，以引导解码器去利用编码信息。现在比较流行的方案就是通过某些改动，直接让KL散度项有一个正的下界。将先后验分布换为vMF分布，就是这种方案的经典例子之一。</p>
+<h2 id="vmf">vMF分布<a class="toc-link" href="#vmf" title="Permanent link">&para;</a></h2>
+<p>vMF分布是定义在$d-1$维超球面的分布，其样本空间为$S^{d-1}=\{x|x\in\mathbb{R}^d, \Vert x\Vert=1\}$，概率密度函数则为<br />
+\begin{equation}p(x) = \frac{e^{\langle\xi,x\rangle}}{Z_{d, \Vert\xi\Vert}},\quad Z_{d, \Vert\xi\Vert}=\int_{S^{d-1}}e^{\langle\xi,x\rangle} dS^{d-1}\end{equation}<br />
+其中$\xi\in\mathbb{R}^d$是预先给定的参数向量。不难想象，这是$S^{d-1}$上一个以$\xi$为中心的分布，归一化因子写成$Z_{d, \Vert\xi\Vert}$的形式，意味着它只依赖于$\xi$的模长，这是由于各向同性导致的。由于这个特性，vMF分布更常见的记法是设$\mu=\xi/\Vert\xi\Vert, \kappa=\Vert\xi\Vert, C_{d,\kappa}=1/Z_{d, \Vert\xi\Vert}$，从而<br />
+\begin{equation}p(x) = C_{d,\kappa} e^{\kappa\langle\mu,x\rangle}\end{equation}<br />
+这时候$\langle\mu,x\rangle$就是$\mu,x$的夹角余弦，所以说，vMF分布实际上就是以余弦相似度为度量的一种分布。由于我们经常用余弦值来度量两个向量的相似度，因此基于vMF分布做出来的模型，通常更能满足我们的这个需求。当$\kappa=0$的时候，vMF分布是球面上的均匀分布。</p>
+<p>从归一化因子$Z_{d, \Vert\xi\Vert}$的积分形式来看，它实际上也是vMF的母函数，从而vMF的各阶矩也可以通过$Z_{d, \Vert\xi\Vert}$来表达，比如一阶矩为<br />
+\begin{equation}\mathbb{E}<em _xi="\xi">{x\sim p(x)} [x] = \nabla</em>} \log Z_{d, \Vert\xi\Vert}=\frac{d \log Z_{d,\Vert\xi\Vert}}{d\Vert\xi\Vert}\frac{\xi}{\Vert\xi\Vert}\end{equation
+可以看到$\mathbb{E}<em _Vert_xi_Vert="\Vert\xi\Vert" d_="d,">{x\sim p(x)} [x]$在方向上跟$\xi$一致。$Z</em>$的精确形式可以算出来，但比较复杂，而且很多时候我们也不需要精确知道这个归一化因子，所以这里我们就不算了。</p>
+<p>至于参数$\kappa$的含义，或许设$\tau=1/\kappa$我们更好理解，此时$p(x)\sim e^{\langle\mu,x\rangle/\tau}$，熟悉能量模型的同学都知道，这里的$\tau$就是温度参数，如果$\tau$越小（$\kappa$越大），那么分布就越集中在$\mu$附近，反之则越分散（越接近球面上的均匀分布）。因此，$\kappa$也被形象地称为“凝聚度（concentration）”参数。</p>
+<h2 id="vmf_1">从vMF采样<a class="toc-link" href="#vmf_1" title="Permanent link">&para;</a></h2>
+<p>对于vMF分布来说，需要解决的第一个难题是如何实现从它里边采样出具体的样本来。尤其是如果我们要将它应用到VAE中，那么这一步是至关重要的。</p>
+<h3 id="_1">均匀分布<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h3>
+<p>最简单是$\kappa=0$的情形，也就是$d-1$维球面上的均匀分布，因为标准正态分布本来就是各向同性的，其概率密度正比于$e^{-\Vert x\Vert^2/2}$只依赖于模长，所以我们只需要从$d$为标准正态分布中采样一个$z$，然后让$x=z/\Vert z\Vert$就得到了球面上的均匀采样结果。</p>
+<h3 id="_2">特殊方向<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h3>
+<p>接着，对于$\kappa &gt; 0$的情形，我们记$x=[x_1,x_2,\cdots,x_d]$，首先考虑一种特殊的情况：$\mu = [1, 0, \cdots, 0]$。事实上，由于各向同性的原因，很多时候我们都只需要考虑这个特殊情况，然后就可以平行地推广到一般情形。</p>
+<p>此时概率密度正比于$e^{\kappa x_1}$，然后我们转换到球坐标系：<br />
+\begin{equation}
+\left\{\begin{aligned}
+x_1 &amp;= \cos\varphi_1\\
+x_2 &amp;= \sin\varphi_1 \cos\varphi_2 \\
+x_3 &amp;= \sin\varphi_1 \sin\varphi_2 \cos\varphi_3 \\
+&amp;\,\,\vdots \\
+x_{d-1} &amp;= \sin\varphi_1 \cdots \sin\varphi_{d-2} \cos\varphi_{d-1}\\
+x_d &amp;= \sin\varphi_1 \cdots \sin\varphi_{d-2} \sin\varphi_{d-1}
+\end{aligned}\right.<br />
+\end{equation}<br />
+那么（超球坐标的积分变换，请直接参考“<a href="https://en.wikipedia.org/wiki/N-sphere">维基百科</a>”）<br />
+\begin{equation}\begin{aligned}
+e^{\kappa x_1}dS^{d-1} =&amp; e^{\kappa\cos\varphi_1}\sin^{d-2}\varphi_1 \sin^{d-3}\varphi_2 \cdots \sin\varphi_{d-2} d\varphi_1 d\varphi_2 \cdots d\varphi_{d-1} \\
+=&amp; \left(e^{\kappa\cos\varphi_1}\sin^{d-2}\varphi_1 d\varphi_1\right)\left(\sin^{d-3}\varphi_2 \cdots \sin\varphi_{d-2} d\varphi_2 \cdots d\varphi_{d-1}\right) \\
+=&amp; \left(e^{\kappa\cos\varphi_1}\sin^{d-2}\varphi_1 d\varphi_1\right)dS^{d-2} \\
+\end{aligned}\end{equation}<br />
+这个分解表明，从该vMF分布中采样，等价于先从概率密度正比于$e^{\kappa\cos\varphi_1}\sin^{d-2}\varphi_1$的分布采样一个$\varphi_1$，然后从$d-2$维超球面上均匀采样一个$d-1$维向量$\varepsilon = [\varepsilon_2,\varepsilon_3,\cdots,\varepsilon_d]$，通过如下方式组合成最终采样结果<br />
+\begin{equation}x = [\cos\varphi_1, \varepsilon_2\sin\varphi_1, \varepsilon_3\sin\varphi_1, \cdots, \varepsilon_d\sin\varphi_1]\end{equation}<br />
+设$w=\cos\phi_1\in[-1,1]$，那么<br />
+\begin{equation}\left|e^{\kappa\cos\varphi_1}\sin^{d-2}\varphi_1 d\varphi_1\right| = \left|e^{\kappa w} (1-w^2)^{(d-3)/2}dw\right|\end{equation}<br />
+所以我们主要研究从概率密度正比于$e^{\kappa w} (1-w^2)^{(d-3)/2}$的分布中采样。</p>
+<p>然而，笔者所不理解的是，大多数涉及到vMF分布的论文，都采用了1994年的论文<a href="https://www.tandfonline.com/doi/abs/10.1080/03610919408813161">《Simulation of the von mises fisher distribution》</a>提出的基于beta分布的拒绝采样方案，整个采样流程还是颇为复杂的。但现在都2021年了，对于一维分布的采样，居然还需要拒绝采样这么低效的方案？</p>
+<p>事实上，对于任意一维分布$p(w)$，设它的累积概率函数为$\Phi(w)$，那么$w=\Phi^{-1}(\varepsilon),\varepsilon\sim U[0,1]$就是一个最方便通用的采样方案。可能有读者抗议说“累积概率函数不好算呀”、“它的逆函数更不好算呀”，但是在用代码实现采样的时候，我们压根就不需要知道$\Phi(w)$长啥样，只要直接数值计算就行了，参考实现如下：</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sample_from_pw</span><span class="p">(</span><span class="kp">size</span><span class="p">,</span> <span class="n">kappa</span><span class="p">,</span> <span class="n">dims</span><span class="p">,</span> <span class="n">epsilon</span><span class="o">=</span><span class="mf">1e-7</span><span class="p">):</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">arange</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span> <span class="o">+</span> <span class="n">epsilon</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">epsilon</span><span class="p">)</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="n">kappa</span> <span class="o">*</span> <span class="n">x</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="kp">log</span><span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">dims</span> <span class="o">-</span> <span class="mi">3</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">cumsum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="kp">exp</span><span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="n">y</span><span class="o">.</span><span class="kp">max</span><span class="p">()))</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="n">y</span> <span class="o">/</span> <span class="n">y</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="kp">interp</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">(</span><span class="kp">size</span><span class="p">),</span> <span class="n">y</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+</code></pre></div>
+
+<p>这里的实现中，计算量最大的是变量<code>y</code>的计算，而一旦计算好之后，可以缓存下来，之后只需要执行最后一步来完成采样，其速度是非常快的。这样再怎么看，也比从beta分布中拒绝采样要简单方便吧。顺便说，实现上这里还用到了一个技巧，即先计算对数值，然后减去最大值，最后才算指数，这样可以防止溢出，哪怕$\kappa$成千上万，也可以成功计算。</p>
+<h3 id="_3">一般情形<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h3>
+<p>现在我们已经实现了从$\mu=[1,0,\cdots,0]$的vMF分布中采样了，我们可以将采样结果分解为<br />
+\begin{equation}x = w\times\underbrace{[1,0,\cdots,0]}<em _begin_array="\begin{array">{\text{参数向量}\mu} + \sqrt{1-w^2}\times\underbrace{[0,\varepsilon_2,\cdots,\varepsilon_d]}</em>}{c}\text{与}\mu\text{正交的}d-2\text{维}\\ \text{超球面均匀采样}\end{array}}\end{equation<br />
+同样由于各向同性的原因，对于一般的$\mu$，采样结果依然具有同样的形式：<br />
+\begin{equation}\begin{aligned}
+&amp;x = w\mu + \sqrt{1-w^2}\nu\\
+&amp;w\sim e^{\kappa w} (1-w^2)^{(d-3)/2}\\
+&amp;\nu\sim \text{与}\mu\text{正交的}d-2\text{维超球面均匀分布}
+\end{aligned}\end{equation}<br />
+对于$\nu$的采样，关键之处是与$\mu$正交，这也不难实现，先从标准正态分布中采样一个$d$维向量$z$，然后保留与$\mu$正交的分量并归一化即可：<br />
+\begin{equation}\nu = \frac{\varepsilon - \langle \varepsilon,\mu\rangle \mu}{\Vert \varepsilon - \langle \varepsilon,\mu\rangle \mu\Vert},\quad \varepsilon\sim\mathcal{N}(0,1_d)\end{equation}</p>
+<h2 id="vmf-vae">vMF-VAE<a class="toc-link" href="#vmf-vae" title="Permanent link">&para;</a></h2>
+<p>至此，我们可谓是已经完成了本篇文章最艰难的部分，剩下的构建vMF-VAE可谓是水到渠成了。vMF-VAE选用球面上的均匀分布（$\kappa=0$）作为先验分布$q(z)$，并将后验分布选取为vMF分布：<br />
+\begin{equation}p(z|x) = C_{d,\kappa} e^{\kappa\langle\mu(x),z\rangle}\end{equation}<br />
+简单起见，我们将$\kappa$设为超参数（也可以理解为通过人工而不是梯度下降来更新这个参数），这样一来，$p(z|x)$的唯一参数来源就是$\mu(x)$了。此时我们可以计算KL散度项<br />
+\begin{equation}\begin{aligned}
+\int p(z|x) \log\frac{p(z|x)}{q(z)} dz =&amp;\, \int C_{d,\kappa} e^{\kappa\langle\mu(x),z\rangle}\left(\kappa\langle\mu(x),z\rangle + \log C_{d,\kappa} - \log C_{d,0}\right)dz\\
+=&amp;\,\kappa\left\langle\mu(x),\mathbb{E}<em d_kappa="d,\kappa">{z\sim p(z|x)}[z]\right\rangle + \log C</em>} - \log C_{d,0
+\end{aligned}\end{equation}<br />
+前面我们已经讨论过，vMF分布的均值方向跟$\mu(x)$一致，模长则只依赖于$d$和$\kappa$，所以代入上式后我们可以知道KL散度项只依赖于$d$和$\kappa$，当这两个参数被选定之后，那么它就是一个常数（根据KL散度的性质，当$\kappa\neq 0$时，它必然大于0），绝对不会出现KL散度消失现象了。</p>
+<p>那么现在就剩下重构项了，我们需要用“重参数（Reparameterization）”来完成采样并保留梯度，在前面我们已经研究了vMF的采样过程，所以也不难实现，综合的流程为：<br />
+\begin{equation}\begin{aligned}
+&amp;\mathcal{L} = \Vert x - g(z)\Vert^2\\
+&amp;z = w\mu(x) + \sqrt{1-w^2}\nu\\
+&amp;w\sim e^{\kappa w} (1-w^2)^{(d-3)/2}\\
+&amp;\nu=\frac{\varepsilon - \langle \varepsilon,\mu\rangle \mu}{\Vert \varepsilon - \langle \varepsilon,\mu\rangle \mu\Vert}\\
+&amp;\varepsilon\sim\mathcal{N}(0,1_d)
+\end{aligned}\end{equation}<br />
+这里的重构loss以MSE为例，如果是句子重构，那么换用交叉熵就好。其中$\mu(x)$就是编码器，而$g(z)$就是解码器，由于KL散度项为常数，对优化没影响，所以vMF-VAE相比于普通的自编码器，只是多了一项稍微有点复杂的重参数操作（以及人工调整$\kappa$）而已，相比基于高斯分布的标准VAE可谓简化了不少了。</p>
+<p>此外，从该流程我们也可以看出，除了“简单起见”之外，不将$\kappa$设为可训练还有一个主要原因，那就是$\kappa$关系到$w$的采样，而在$w$的采样过程中要保留$\kappa$的梯度是比较困难的。</p>
+<h2 id="_4">参考实现<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
+<p>vMF-VAE的实现难度主要是重参数部分，也就还是从vMF分布中采样，而关键之处就是$w$的采样。前面我们已经给出了$w$的采样的numpy实现，但是在tf中未见类似<code>np.interp</code>的函数，因此不容易转换为纯tf的实现。当然，如果是torch或者tf2这种动态图框架，直接跟numpy的代码混合使用也无妨，但这里还是想构造一种比较通用的方案。</p>
+<p>其实也不难，由于$w$只是一个一维变量，每步训练只需要用到<code>batch_size</code>个采样结果，所以我们完全可以事先用numpy函数采样好足够多（几十万）个$w$存好，然后训练的时候直接从这批采样好的结果随机抽就行了，参考实现如下：</p>
+<div class="highlight"><pre><span></span><code><span class="n">def</span><span class="w"> </span><span class="n">sampling</span><span class="p">(</span><span class="n">mu</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;vMF分布重参数操作</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+<span class="w">    </span><span class="n">dims</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="o">.</span><span class="n">int_shape</span><span class="p">(</span><span class="n">mu</span><span class="p">)[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+<span class="w">    </span><span class="c1"># 预先计算一批w</span>
+<span class="w">    </span><span class="n">epsilon</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1e-7</span>
+<span class="w">    </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">epsilon</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">epsilon</span><span class="p">)</span>
+<span class="w">    </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kappa</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">dims</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">3</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mi">2</span>
+<span class="w">    </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="o">.</span><span class="n">cumsum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">y</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">y</span><span class="o">.</span><span class="n">max</span><span class="p">()))</span>
+<span class="w">    </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">y</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+<span class="w">    </span><span class="n">W</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="o">.</span><span class="n">constant</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">interp</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">(</span><span class="mi">10</span><span class="o">**</span><span class="mi">6</span><span class="p">),</span><span class="w"> </span><span class="n">y</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">))</span>
+<span class="w">    </span><span class="c1"># 实时采样w</span>
+<span class="w">    </span><span class="n">idxs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="o">.</span><span class="n">random_uniform</span><span class="p">(</span><span class="n">K</span><span class="o">.</span><span class="n">shape</span><span class="p">(</span><span class="n">mu</span><span class="p">[:,</span><span class="w"> </span><span class="p">:</span><span class="mi">1</span><span class="p">]),</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">10</span><span class="o">**</span><span class="mi">6</span><span class="p">,</span><span class="w"> </span><span class="n">dtype</span><span class="o">=</span><span class="s1">&#39;int32&#39;</span><span class="p">)</span>
+<span class="w">    </span><span class="n">w</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="o">.</span><span class="n">gather</span><span class="p">(</span><span class="n">W</span><span class="p">,</span><span class="w"> </span><span class="n">idxs</span><span class="p">)</span>
+<span class="w">    </span><span class="c1"># 实时采样z</span>
+<span class="w">    </span><span class="n">eps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="o">.</span><span class="n">random_normal</span><span class="p">(</span><span class="n">K</span><span class="o">.</span><span class="n">shape</span><span class="p">(</span><span class="n">mu</span><span class="p">))</span>
+<span class="w">    </span><span class="n">nu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">eps</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">K</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">eps</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">mu</span><span class="p">,</span><span class="w"> </span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">keepdims</span><span class="o">=</span><span class="n">True</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">mu</span>
+<span class="w">    </span><span class="n">nu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="o">.</span><span class="n">l2_normalize</span><span class="p">(</span><span class="n">nu</span><span class="p">,</span><span class="w"> </span><span class="n">axis</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">w</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">mu</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">w</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">**</span><span class="mf">0.5</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">nu</span>
+</code></pre></div>
+
+<p>一个基于MNIST的完整例子可见：</p>
+<blockquote>
+<p><strong><a href="https://github.com/bojone/vae/blob/master/vae_vmf_keras.py">https://github.com/bojone/vae/blob/master/vae_vmf_keras.py</a></strong></p>
+</blockquote>
+<p>至于vMF-VAE用于NLP的例子，我们日后有机会再分享。本文主要还是以理论介绍和简单演示为主～</p>
+<h2 id="_5">文章小结<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
+<p>本文介绍了基于vMF分布的VAE实现，其主要难度在于vMF分布的采样。总的来说，vMF分布建立在余弦相似度度量之上，在某些方面的性质更符合我们的直观认知，将其用于VAE中，能够使得KL散度项为一个常数，从而防止了KL散度消失现象，并且简化了VAE结构。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8404">https://spaces.ac.cn/archives/8404</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 17, 2021). 《变分自编码器（七）：球面上的VAE（vMF-VAE） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8404">https://spaces.ac.cn/archives/8404</a></p>
+<p>@online{kexuefm-8404,<br />
+title={变分自编码器（七）：球面上的VAE（vMF-VAE）},<br />
+author={苏剑林},<br />
+year={2021},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/8404}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+                </div>
+
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="智能家居之手搓一套能接入米家的零冷水装置.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#59 智能家居之手搓一套能接入米家的零冷水装置</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="写了个刷论文的辅助网站cool-papers.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#61 写了个刷论文的辅助网站：Cool Papers</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#vaevmf-vae">变分自编码器（七）：球面上的VAE（vMF-VAE）</a><ul>
+<li><a href="#kl">KL散度消失</a></li>
+<li><a href="#vmf">vMF分布</a></li>
+<li><a href="#vmf_1">从vMF采样</a><ul>
+<li><a href="#_1">均匀分布</a></li>
+<li><a href="#_2">特殊方向</a></li>
+<li><a href="#_3">一般情形</a></li>
+</ul>
+</li>
+<li><a href="#vmf-vae">vMF-VAE</a></li>
+<li><a href="#_4">参考实现</a></li>
+<li><a href="#_5">文章小结</a></li>
+<li><a href="#_6">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
+</body>
+</html>

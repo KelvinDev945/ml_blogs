@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>如何划分一个跟测试集更接近的验证集？ | ML & Math Blog Posts</title>
+    <meta name="description" content="如何划分一个跟测试集更接近的验证集？&para;
+原文链接: https://spaces.ac.cn/archives/7805
+发布日期: 
+
+不管是打比赛、做实验还是搞工程，我们经常会遇到训练集与测试集分布不一致的情况。一般来说我们会从训练集中划分出来一个验证集，通过这个验证集来调整一些超参数（参考《训练集、验证集和测试集的意义》），比如控制模型的训练轮数以防止过拟合。然而，如果验证集本身跟...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
+
+    <!-- MathJax for math rendering with equation numbering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=模型">模型</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #39 如何划分一个跟测试集更接近的验证集？
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">
+                <span class="post-number">#39</span>
+                如何划分一个跟测试集更接近的验证集？
+            </h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/7805" target="_blank" rel="noopener">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 模型</span>
+                </a>
+                
+                <a href="../index.html?tags=概率" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 概率</span>
+                </a>
+                
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+                <a href="../index.html?tags=采样" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 采样</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+            </div>
+            
+        </header>
+
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="_1">如何划分一个跟测试集更接近的验证集？<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7805">https://spaces.ac.cn/archives/7805</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>不管是打比赛、做实验还是搞工程，我们经常会遇到训练集与测试集分布不一致的情况。一般来说我们会从训练集中划分出来一个验证集，通过这个验证集来调整一些超参数（参考<a href="/archives/4638">《训练集、验证集和测试集的意义》</a>），比如控制模型的训练轮数以防止过拟合。然而，如果验证集本身跟测试集差别比较大，那么验证集上很好的模型也不代表在测试集上很好，因此如何让划分出来验证集跟测试集的分布差异更小一些，是一个值得研究的题目。</p>
+<h2 id="_2">两种情况<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
+<p>首先，明确一下，本文所考虑的，是能给拿到测试集数据本身、但不知道测试集标签的场景。如果是那种提交模型封闭评测的场景，我们完全看不到测试集的，那就没什么办法了。为什么会出现测试集跟训练集分布不一致的现象呢？主要有两种情况。</p>
+<p>第一种是<strong>标签</strong> 的分布不一致。也就是说，如果只看输入$x$，那么分布基本上是差不多的，但是对应的$y$分布不一样，典型的例子就是信息抽取任务，训练集往往是通过“远程监督 + 人工粗标”的方式构建的，量很大，但是里边可能错漏比较多，而测试集可能是通过“人工反复精标”构建的，错漏很少。这种情况下就无法通过划分数据的方式构建一个更好的验证集了。</p>
+<p>第二种是<strong>输入</strong> 的分布不一致。说白了就是$x$的分布不一致，但是$y$的标注情况基本上是正确的。比如分类问题中，训练集的类别分布跟测试集的类别分布可能不一样；又或者在阅读理解问题中，训练集的事实类/非事实类题型比例跟测试集不一样，等等。这种情况下我们可以适当调整采样策略，使得验证集跟测试集分布更一致些，从而验证集的结果能够更好反映测试集的结果。</p>
+<h2 id="_3">判别器<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
+<p>为了达到我们的目的，我们让 <em>训练集的标签为0，测试集的标签为1</em> ，训练一个二分类判别器$D(x)$：<br />
+\begin{equation}-\mathbb{E}<em q_x_="q(x)" x_sim="x\sim">{x\sim p(x)}[\log (1 - D(x))] - \mathbb{E}</em>}[\log D(x)]\end{equation
+其中$p(x)$代表了训练集的分布，$q(x)$则是测试集的分布。要注意的是，我们不是要将训练集和测试集直接混合起来采样训练，而是分别从训练集和测试集采样同样多的样本来组成每一个batch，也就是说需要过采样到类别均衡。</p>
+<p>可能有读者担心过拟合问题，即判别器彻底地训练集和测试集分开了。事实上，在训练判别器的时候，我们应该也要像普通监督训练一样，划分个验证集出来，通过验证集决定训练的epoch数，这样就不会严重过拟合了；或者像网上有些案例一样，直接用逻辑回归做判别器，因为逻辑回归足够简单，过拟合风险也更小了。</p>
+<p>跟GAN的判别器类似，不难推导$D(x)$的理论最优解是
+\begin{equation}D(x) = \frac{q(x)}{p(x)+q(x)}\label{eq:d}\end{equation}<br />
+也就是说，判别器训练完后，可以认为它就等于测试集分布的相对大小。</p>
+<h2 id="_4">重要性采样<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
+<p>优化模型也好，算指标也好，其实我们是希望在测试集上进行，也就是说，对于给定目标$f(x)$（比如模型的loss），我们希望算的是<br />
+\begin{equation}\mathbb{E}<em p_x_="p(x)" x_sim="x\sim">{x\sim q(x)}[f(x)] = \int q(x) f(x) dx\end{equation}<br />
+但是要算目标$f(x)$通常要知道$x$的真实标签，但对于测试集来说我们不知道它的标签，所以不能直接算。不过我们知道训练集的标签，于是我们可以解决它来做重要性采样：<br />
+\begin{equation}\int q(x) f(x) dx=\int p(x)\frac{q(x)}{p(x)} f(x) dx=\mathbb{E}</em>}\left[\frac{q(x)}{p(x)} f(x)\right]\end{equation
+根据公式$\eqref{eq:d}$，我们知道$\frac{q(x)}{p(x)}=\frac{D(x)}{1-D(x)}$，所以最终变成<br />
+\begin{equation}\mathbb{E}<em p_x_="p(x)" x_sim="x\sim">{x\sim q(x)}[f(x)] = \mathbb{E}</em>}\left[\frac{D(x)}{1-D(x)} f(x)\right]\label{eq:w}\end{equation
+说白了，重要性采样的思想就是从训练集里边“挑出”那些跟测试集相近的样本，赋予更高的权重。</p>
+<h2 id="_5">最终策略<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
+<p>从公式$\eqref{eq:w}$，我们可以得到两个策略：</p>
+<p>第一是直接按照公式加权，也就是说，还是按随机打乱的方式划分训练集和验证集，但是给每个样本配上权重$w(x)=\frac{D(x)}{1-D(x)}$。值得指出的是，类似的做法有些选手做比赛时已经用过了，只不过流传的权重是$D(x)$，当然哪个好我没法断言，只是从理论推导的角度来看应该是$\frac{D(x)}{1-D(x)}$更加合理一些。</p>
+<p>另一个策略就是实际地把对应的验证集采样出来。这也不难，假设训练集的所有样本为$x_1,x_2,\dots,x_N$，我们把权重归一化<br />
+\begin{equation}p_i = \frac{w(x_i)}{\sum\limits_{i=1}^N w(x_i)}\end{equation}<br />
+然后按照$p_1,p_2,\dots,p_N$为分布做独立重复采样，直到采样到指定数目即可。注意需要做 <em>有放回</em> 的独立重复采样，因此同一个样本可能被采样多次，在验证集里边也要保留多次，不能去重，去重后分布就不一致了。</p>
+<h2 id="_6">文末小结<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
+<p>本文从训练判别器的角度来比较训练集和测试集的差异，并且结合重要性采样，我们可以得到一个跟测试集更接近的验证集，或者对训练样本进行加权，从而使得训练集的优化过程和测试集差异性更小。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7805">https://spaces.ac.cn/archives/7805</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Oct. 16, 2020). 《如何划分一个跟测试集更接近的验证集？ 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7805">https://spaces.ac.cn/archives/7805</a></p>
+<p>@online{kexuefm-7805,<br />
+title={如何划分一个跟测试集更接近的验证集？},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={Oct},<br />
+url={\url{https://spaces.ac.cn/archives/7805}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+                </div>
+
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="nyströmformer基于矩阵分解的线性化attention方案.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#38 Nyströmformer：基于矩阵分解的线性化Attention方案</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="seq2seq中exposure-bias现象的浅析与对策.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#40 Seq2Seq中Exposure Bias现象的浅析与对策</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#_1">如何划分一个跟测试集更接近的验证集？</a><ul>
+<li><a href="#_2">两种情况</a></li>
+<li><a href="#_3">判别器</a></li>
+<li><a href="#_4">重要性采样</a></li>
+<li><a href="#_5">最终策略</a></li>
+<li><a href="#_6">文末小结</a></li>
+<li><a href="#_7">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
+</body>
+</html>

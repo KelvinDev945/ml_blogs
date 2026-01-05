@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>从EMD、WMD到WRD：文本向量序列的相似度计算 | ML & Math Blog Posts</title>
+    <meta name="description" content="从EMD、WMD到WRD：文本向量序列的相似度计算&para;
+原文链接: https://spaces.ac.cn/archives/7388
+发布日期: 
+
+在NLP中，我们经常要去比较两个句子的相似度，其标准方法是想办法将句子编码为固定大小的向量，然后用某种几何距离（欧氏距离、$\cos$距离等）作为相似度。这种方案相对来说比较简单，而且检索起来比较快速，一定程度上能满足工程需求。
+此外，还...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
+
+    <!-- MathJax for math rendering with equation numbering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=最优">最优</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #1 从EMD、WMD到WRD：文本向量序列的相似度计算
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">
+                <span class="post-number">#1</span>
+                从EMD、WMD到WRD：文本向量序列的相似度计算
+            </h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/7388" target="_blank" rel="noopener">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=最优" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 最优</span>
+                </a>
+                
+                <a href="../index.html?tags=优化" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 优化</span>
+                </a>
+                
+                <a href="../index.html?tags=语义" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 语义</span>
+                </a>
+                
+                <a href="../index.html?tags=线性规划" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 线性规划</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+            </div>
+            
+        </header>
+
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="emdwmdwrd">从EMD、WMD到WRD：文本向量序列的相似度计算<a class="toc-link" href="#emdwmdwrd" title="Permanent link">&para;</a></h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7388">https://spaces.ac.cn/archives/7388</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在NLP中，我们经常要去比较两个句子的相似度，其标准方法是想办法将句子编码为固定大小的向量，然后用某种几何距离（欧氏距离、$\cos$距离等）作为相似度。这种方案相对来说比较简单，而且检索起来比较快速，一定程度上能满足工程需求。</p>
+<p>此外，还可以直接比较两个变长序列的差异性，比如编辑距离，它通过动态规划找出两个字符串之间的最优映射，然后算不匹配程度；现在我们还有Word2Vec、BERT等工具，可以将文本序列转换为对应的向量序列，所以也可以直接比较这两个向量序列的差异，而不是先将向量序列弄成单个向量。</p>
+<p>后一种方案速度相对慢一点，但可以比较得更精细一些，并且理论比较优雅，所以也有一定的应用场景。本文就来简单介绍一下属于后者的两个相似度指标，分别简称为WMD、WRD。</p>
+<h2 id="earth-movers-distance">Earth Mover's Distance<a class="toc-link" href="#earth-movers-distance" title="Permanent link">&para;</a></h2>
+<p>本文要介绍的两个指标都是以Wasserstein距离为基础，这里会先对它做一个简单的介绍，相关内容也可以阅读笔者旧作<a href="/archives/6280">《从Wasserstein距离、对偶理论到WGAN》</a>。Wasserstein距离也被形象地称之为“推土机距离”（Earth Mover's Distance，EMD），因为它可以用一个“推土”的例子来通俗地表达它的含义。</p>
+<h3 id="_1">最优传输<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h3>
+<p>假设在位置$i=1,2,\dots,n$处我们分布有$p_1,p_2,\dots,p_n$那么多的土，简单起见我们设土的总数量为1，即$p_1 + p_2 + \dots + p_n=1$，现在要将土推到位置$j=1,2,\dots,n'$上，每处的量为$q_1, q_2, \dots, q_{n'}$，而从$i$推到$j$的成本为$d_{i,j}$，求成本最低的方案以及对应的最低成本。</p>
+<p>这其实就是一个经典的最优传输问题。我们将最优方案表示为$\gamma_{i,j}$，表示这个方案中要从$i$中把$\gamma_{i,j}$数量的土推到$j$处，很明显我们有约束<br />
+\begin{equation}\sum_j \gamma_{i,j}=p_i,\quad \sum_i \gamma_{i,j}=q_j,\quad \gamma_{i,j} \geq 0\label{eq:cond}\end{equation}<br />
+所以我们的优化问题是<br />
+\begin{equation}\min_{\gamma_{i,j} \geq 0} \sum_{i,j} \gamma_{i,j} d_{i,j}\quad \text{s.t.} \quad \sum_j \gamma_{i,j}=p_i,\sum_i \gamma_{i,j}=q_j\end{equation}</p>
+<h3 id="_2">参考实现<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h3>
+<p>看上去复杂，但认真观察下就能发现上式其实就是一个线性规划问题——在线性约束下求线性函数的极值。而<code>scipy</code>就自带了线性规划求解函数<code>linprog</code>，因此我们可以利用它实现求Wasserstein距离的函数：</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">linprog</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">wasserstein_distance</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="n">D</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;通过线性规划求Wasserstein距离</span>
+<span class="sd">    p.shape=[m], q.shape=[n], D.shape=[m, n]</span>
+<span class="sd">    p.sum()=1, q.sum()=1, p∈[0,1], q∈[0,1]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">A_eq</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">p</span><span class="p">)):</span>
+        <span class="n">A</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">zeros_like</span><span class="p">(</span><span class="n">D</span><span class="p">)</span>
+        <span class="n">A</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="n">A_eq</span><span class="o">.</span><span class="kp">append</span><span class="p">(</span><span class="n">A</span><span class="o">.</span><span class="kp">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">q</span><span class="p">)):</span>
+        <span class="n">A</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">zeros_like</span><span class="p">(</span><span class="n">D</span><span class="p">)</span>
+        <span class="n">A</span><span class="p">[:,</span> <span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+        <span class="n">A_eq</span><span class="o">.</span><span class="kp">append</span><span class="p">(</span><span class="n">A</span><span class="o">.</span><span class="kp">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+    <span class="n">A_eq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">array</span><span class="p">(</span><span class="n">A_eq</span><span class="p">)</span>
+    <span class="n">b_eq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">concatenate</span><span class="p">([</span><span class="n">p</span><span class="p">,</span> <span class="n">q</span><span class="p">])</span>
+    <span class="n">D</span> <span class="o">=</span> <span class="n">D</span><span class="o">.</span><span class="kp">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">linprog</span><span class="p">(</span><span class="n">D</span><span class="p">,</span> <span class="n">A_eq</span><span class="o">=</span><span class="n">A_eq</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">b_eq</span><span class="o">=</span><span class="n">b_eq</span><span class="p">[:</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">result</span><span class="o">.</span><span class="n">fun</span>
+</code></pre></div>
+
+<p>读者可以留意到，在传入约束的时候用的是<code>A_eq=A_eq[:-1], b_eq=b_eq[:-1]</code>，也就是去掉了最后一个约束。这是因为$1=\sum\limits_{i=1}^n p_i = \sum\limits_{j=1}^{n'} q_j$，所以$\eqref{eq:cond}$中的等式约束本身存在冗余，而实际计算中有时候可能存在浮点误差，导致冗余的约束之间相互矛盾，从而使得线性规划的求解失败，所以干脆去掉最后一个冗余的约束，减少出错的可能性。</p>
+<h2 id="word-movers-distance">Word Mover's Distance<a class="toc-link" href="#word-movers-distance" title="Permanent link">&para;</a></h2>
+<p>很明显，Wasserstein距离适合于用来计算两个不同长度的序列的差异性，而我们要做语义相似度的时候，两个句子通常也是不同长度的，刚好对应这个特性，因此很自然地就会联想到Wasserstein距离也许可以用来比较句子相似度，而首次进行这个尝试的是论文<a href="http://proceedings.mlr.press/v37/kusnerb15.html">《From Word Embeddings To Document Distances》</a>。</p>
+<h3 id="_3">基本形式<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h3>
+<p>设有两个句子$s = (t_1,t_2,\dots,t_n), s' = (t'<em n_="n'">1, t'_2, \dots, t'</em>})$，经过某种映射（比如Word2Vec或者BERT）后，它们变成了对应的向量序列$(\boldsymbol{w<em n_="n'">1,\boldsymbol{w}_2,\dots,\boldsymbol{w}_n), (\boldsymbol{w}'_1, \boldsymbol{w}'_2, \dots, \boldsymbol{w}'</em>)$，现在我们就想办法用Wasserstein距离来比较这两个序列的相似度。</p>
+<p>根据前一节的介绍，Wasserstein距离需要知道$p_i,q_j,d_{i,j}$三个量，我们逐一把它们都定义好即可。由于没有什么先验知识，所以我们可以很朴素地将让$p_i\equiv \frac{1}{n}, q_j\equiv \frac{1}{n'}$，所以现在还剩$d_{i,j}$。显然，$d_{i,j}$代表着第一个序列的向量$\boldsymbol{w}<em _gamma__i_j="\gamma_{i,j">i$与第二个序列的向量$\boldsymbol{w}'_j$的某种差异性，简单起见我们可以用欧氏距离$\left\Vert \boldsymbol{w}_i - \boldsymbol{w}'_j\right\Vert$，所以两个句子的差异程度可以表示为<br />
+\begin{equation}\min</em>} \geq 0} \sum_{i,j} \gamma_{i,j} \left\Vert \boldsymbol{w<em i_j="i,j">i - \boldsymbol{w}'_j\right\Vert\quad \text{s.t.} \quad \sum_j \gamma</em>}=\frac{1}{n},\sum_i \gamma_{i,j}=\frac{1}{n'}\end{equation
+这便是Word Mover's Distance（WMD）（推词机距离？？），大概可以理解为将一个句子变为另一个句子的最短路径，某种意义上也可以理解为编辑距离的光滑版。实际使用的时候，通常会去掉停用词后再计算WMD。</p>
+<p><a href="/usr/uploads/2020/05/1630018657.png" title="点击查看原图"><img alt="Word Mover's Distance的示意图，来自论文《From Word Embeddings To Document Distances》" src="/usr/uploads/2020/05/1630018657.png" /></a></p>
+<p>Word Mover's Distance的示意图，来自论文《From Word Embeddings To Document Distances》</p>
+<h3 id="_4">参考实现<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h3>
+<p>参考实现如下：</p>
+<div class="highlight"><pre><span></span><code>def word_mover_distance(x, y):
+    &quot;&quot;&quot;WMD（Word Mover&#39;s Distance）的参考实现
+    x.shape=[m,d], y.shape=[n,d]
+    &quot;&quot;&quot;
+    p = np.ones(x.shape[0]) / x.shape[0]
+    q = np.ones(y.shape[0]) / y.shape[0]
+    D = np.sqrt(np.square(x[:, None] - y[None, :]).mean(axis=2))
+    return wasserstein_distance(p, q, D)
+</code></pre></div>
+
+<h3 id="_5">下界公式<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h3>
+<p>如果是检索场景，要将输入句子跟数据库里边所有句子一一算WMD并排序的话，那计算成本是相当大的，所以我们要尽量减少算WMD的次数，比如通过一些更简单高效的指标来过滤掉一些样本，然后才对剩下的样本算WMD。</p>
+<p>幸运的是，我们确实可以推导出WMD的一个下界公式，原论文称之为Word Centroid Distance（WCD）：
+\begin{equation}\begin{aligned}
+\sum_{i,j} \gamma_{i,j} \left\Vert \boldsymbol{w}<em i_j="i,j">i - \boldsymbol{w}'_j\right\Vert =&amp; \sum</em>} \left\Vert \gamma_{i,j}(\boldsymbol{w<em i_j="i,j">i - \boldsymbol{w}'_j)\right\Vert\\
+\geq&amp; \left\Vert \sum</em>}\gamma_{i,j}(\boldsymbol{w<em i_j="i,j">i - \boldsymbol{w}'_j)\right\Vert\\
+=&amp; \left\Vert \sum_i\left(\sum_j\gamma</em>}\right)\boldsymbol{w<em i_j="i,j">i - \sum_j\left(\sum_i\gamma</em>'_j\right\Vert\\}\right)\boldsymbol{w
+=&amp; \left\Vert \frac{1}{n}\sum_i\boldsymbol{w}_i - \frac{1}{n'}\sum_j\boldsymbol{w}'_j\right\Vert\\
+\end{aligned}\end{equation}<br />
+也就是说，WMD大于两个句子的平均向量的欧氏距离，所以我们要检索WMD比较小的句子时，可以先用WCD把距离比较大的句子先过滤掉，然后剩下的采用WMD比较。</p>
+<h2 id="word-rotators-distance">Word Rotator's Distance<a class="toc-link" href="#word-rotators-distance" title="Permanent link">&para;</a></h2>
+<p>WMD其实已经挺不错了，但非要鸡蛋里挑骨头的话，还是能挑出一些缺点来：</p>
+<blockquote>
+<p>1、它使用的是欧氏距离作为语义差距度量，但从Word2Vec的经验我们就知道要算词向量的相似度的话，用$\cos$往往比欧氏距离要好；</p>
+<p>2、WMD理论上是一个无上界的量，这意味着我们不大好直观感知相似程度，从而不能很好调整相似与否的阈值。</p>
+</blockquote>
+<p>为了解决这两个问题，一个比较朴素的想法是将所有向量除以各自的模长来归一化后再算WMD，但这样就完全失去了模长信息了。最近的论文<a href="https://papers.cool/arxiv/2004.15003">《Word Rotator's Distance: Decomposing Vectors Gives Better Representations》</a>则巧妙地提出，在归一化的同时可以把模长融入到约束条件$p,q$里边去，这就形成了WRD。</p>
+<h3 id="_6">基本形式<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h3>
+<p>首先，WRD提出了“词向量的模长正相关于这个词的重要程度”的观点，并通过一些实验结果验证了这个观点。事实上，这个观点跟笔者之前提出的simpler glove模型的观点一致，参考<a href="/archives/4677">《更别致的词向量模型(五)：有趣的结果》</a>。而在WMD中，$p_i,q_j$某种意义上也代表着对应句子中某个词的重要程度，所以我们可以设<br />
+\begin{equation}\begin{aligned}&amp;p_i = \frac{\left\Vert \boldsymbol{w}<em i="1">i\right\Vert}{Z}, &amp;Z=\sum</em>}^n \left\Vert\boldsymbol{w<em j="1">i\right\Vert\\
+&amp;q_j = \frac{\left\Vert \boldsymbol{w}'_j\right\Vert}{Z'}, &amp;Z'=\sum</em>'}^{n'}\left\Vert\boldsymbol{w<em i_j="i,j">j\right\Vert
+\end{aligned}\end{equation}<br />
+然后$d</em>$就用余弦距离：<br />
+\begin{equation}d_{i,j}=1 - \frac{\boldsymbol{w}<em _gamma__i_j="\gamma_{i,j">i\cdot \boldsymbol{w}'_j}{\left\Vert\boldsymbol{w}_i\right\Vert\times \left\Vert\boldsymbol{w}'_j\right\Vert}\end{equation}<br />
+得到<br />
+\begin{equation}\min</em>} \geq 0} \sum_{i,j} \gamma_{i,j} \left(1 - \frac{\boldsymbol{w<em i_j="i,j">i\cdot \boldsymbol{w}'_j}{\left\Vert\boldsymbol{w}_i\right\Vert\times \left\Vert\boldsymbol{w}'_j\right\Vert}\right)\quad \text{s.t.} \quad \sum_j \gamma</em>}=\frac{\left\Vert \boldsymbol{w<em i_j="i,j">i\right\Vert}{Z},\sum_i \gamma</em>}=\frac{\left\Vert \boldsymbol{w}'_j\right\Vert}{Z'}\end{equation
+这就是Word Rotator's Distance（WRD）了。由于使用的度量是余弦距离，所以两个向量之间的变换更像是一种旋转（rotate）而不是移动（move），所以有了这个命名；同样由于使用了余弦距离，所以它的结果在$[0,2]$内，相对来说更容易去感知其相似程度。</p>
+<h3 id="_7">参考实现<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h3>
+<p>参考实现如下：</p>
+<div class="highlight"><pre><span></span><code>def word_rotator_distance(x, y):
+    &quot;&quot;&quot;WRD（Word Rotator&#39;s Distance）的参考实现
+    x.shape=[m,d], y.shape=[n,d]
+    &quot;&quot;&quot;
+    x_norm = (x**2).sum(axis=1, keepdims=True)**0.5
+    y_norm = (y**2).sum(axis=1, keepdims=True)**0.5
+    p = x_norm[:, 0] / x_norm.sum()
+    q = y_norm[:, 0] / y_norm.sum()
+    D = 1 - np.dot(x / x_norm, (y / y_norm).T)
+    return wasserstein_distance(p, q, D)
+
+
+def word_rotator_similarity(x, y):
+    &quot;&quot;&quot;1 - WRD
+    x.shape=[m,d], y.shape=[n,d]
+    &quot;&quot;&quot;
+    return 1 - word_rotator_distance(x, y)
+</code></pre></div>
+
+<h3 id="_8">下界公式<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h3>
+<p>同WMD一样，我们也可以推导出WRD的一个下界公式：
+\begin{equation}\begin{aligned}
+2\sum_{i,j} \gamma_{i,j} \left(1 - \frac{\boldsymbol{w}<em i_j="i,j">i\cdot \boldsymbol{w}'_j}{\left\Vert\boldsymbol{w}_i\right\Vert\times \left\Vert\boldsymbol{w}'_j\right\Vert}\right)=&amp;\sum</em>} \gamma_{i,j} \left\Vert \frac{\boldsymbol{w<em i_j="i,j">i}{\left\Vert \boldsymbol{w}_i\right\Vert} - \frac{\boldsymbol{w}'_j}{\left\Vert \boldsymbol{w}'_j\right\Vert}\right\Vert^2 \\
+\geq&amp; \left\Vert \sum</em>}\gamma_{i,j}\left(\frac{\boldsymbol{w<em i_j="i,j">i}{\left\Vert \boldsymbol{w}_i\right\Vert} - \frac{\boldsymbol{w}'_j}{\left\Vert \boldsymbol{w}'_j\right\Vert}\right)\right\Vert^2\\
+=&amp; \left\Vert \sum_i\left(\sum_j\gamma</em>}\right)\frac{\boldsymbol{w<em i_j="i,j">i}{\left\Vert \boldsymbol{w}_i\right\Vert} - \sum_j\left(\sum_i\gamma</em>\right\Vert^2\\}\right)\frac{\boldsymbol{w}'_j}{\left\Vert \boldsymbol{w}'_j\right\Vert
+=&amp; \left\Vert \frac{1}{Z}\sum_i\boldsymbol{w}_i - \frac{1}{Z'}\sum_j\boldsymbol{w}'_j\right\Vert^2\\
+\end{aligned}\end{equation}<br />
+其中不等号基于詹森不等式（或者基本不等式的推广版）。不过这部分内容并没有出现在WRD的论文中，只是笔者自行补充的。</p>
+<h2 id="_9">又到了文末小结的时候<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
+<p>文本介绍了两种文本相似度算法WMD、WRD，它们都是利用Wasserstein距离（Earth Mover's Distance，推土机距离）来直接比较两个不定长向量的差异性。这类相似度算法在效率上会有所欠缺，但是理论上比较优雅，而且效果也颇为不错，值得学习一番。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7388">https://spaces.ac.cn/archives/7388</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 13, 2020). 《从EMD、WMD到WRD：文本向量序列的相似度计算 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7388">https://spaces.ac.cn/archives/7388</a></p>
+<p>@online{kexuefm-7388,<br />
+title={从EMD、WMD到WRD：文本向量序列的相似度计算},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/7388}},<br />
+} </p>
+<hr />
+<h2 id="_10">公式推导与注释<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+                </div>
+
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <div class="nav-link-disabled">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title text-muted">已是第一篇</div>
+                            </div>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="bert4keras在手baseline我有百度lic2020.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#2 bert4keras在手，baseline我有：百度LIC2020</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#emdwmdwrd">从EMD、WMD到WRD：文本向量序列的相似度计算</a><ul>
+<li><a href="#earth-movers-distance">Earth Mover's Distance</a><ul>
+<li><a href="#_1">最优传输</a></li>
+<li><a href="#_2">参考实现</a></li>
+</ul>
+</li>
+<li><a href="#word-movers-distance">Word Mover's Distance</a><ul>
+<li><a href="#_3">基本形式</a></li>
+<li><a href="#_4">参考实现</a></li>
+<li><a href="#_5">下界公式</a></li>
+</ul>
+</li>
+<li><a href="#word-rotators-distance">Word Rotator's Distance</a><ul>
+<li><a href="#_6">基本形式</a></li>
+<li><a href="#_7">参考实现</a></li>
+<li><a href="#_8">下界公式</a></li>
+</ul>
+</li>
+<li><a href="#_9">又到了文末小结的时候</a></li>
+<li><a href="#_10">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
+</body>
+</html>

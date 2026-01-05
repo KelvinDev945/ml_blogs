@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=概率">概率</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #9 变分自编码器（八）：估计样本概率密度
+                    #155 变分自编码器（八）：估计样本概率密度
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#9</span>
+                <span class="post-number">#155</span>
                 变分自编码器（八）：估计样本概率密度
             </h1>
             <div class="post-meta">
@@ -186,7 +186,401 @@ url={\url{https://spaces.ac.cn/archives/8791}},<br />
 } </p>
 <hr />
 <h2 id="_7">公式推导与注释<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="_8">一、概率密度估计的基本框架<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 极大似然估计的数学基础<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p><strong>目标函数的推导</strong>：给定训练样本 $\mathcal{D} = {x_1, x_2, \ldots, x_N}$，我们假设它们独立同分布地从未知真实分布 $\tilde{p}(x)$ 中采样得到。我们的目标是用参数化的概率密度函数 $q_\theta(x)$ 来逼近这个真实分布。</p>
+<p>\begin{equation}
+\mathcal{L}(\theta) = -\frac{1}{N}\sum_{i=1}^N \log q_\theta(x_i) \tag{1}
+\end{equation}</p>
+<p><strong>注释</strong>：这个目标函数本质上是经验风险的负对数似然形式。最小化它等价于最大化样本的对数似然。</p>
+<p><strong>与KL散度的关系</strong>：我们可以将上述目标重写为期望形式：</p>
+<p>\begin{equation}
+\mathcal{L}(\theta) = \mathbb{E}<em>{x\sim\tilde{p}(x)}[-\log q</em>\theta(x)] = -\int \tilde{p}(x)\log q_\theta(x)\,dx \tag{2}
+\end{equation}</p>
+<p>这与真实分布 $\tilde{p}(x)$ 和模型分布 $q_\theta(x)$ 之间的KL散度密切相关：</p>
+<p>\begin{equation}
+D_{\text{KL}}(\tilde{p}|q_\theta) = \int \tilde{p}(x)\log\frac{\tilde{p}(x)}{q_\theta(x)}\,dx = \mathbb{E}<em _tilde_p="\tilde{p">{\tilde{p}}[\log\tilde{p}(x)] - \mathbb{E}</em>
+\end{equation}}}[\log q_\theta(x)] \tag{3</p>
+<p><strong>注释</strong>：由于第一项 $\mathbb{E}_{\tilde{p}}[\log\tilde{p}(x)]$ 是真实分布的负熵，与参数 $\theta$ 无关，因此最小化负对数似然等价于最小化KL散度。这为我们的优化目标提供了信息论解释。</p>
+<h4 id="12">1.2 参数化分布的挑战<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p><strong>归一化约束</strong>：概率密度函数必须满足两个基本条件：</p>
+<p>\begin{equation}
+q_\theta(x) \geq 0, \quad \forall x \tag{4}
+\end{equation}</p>
+<p>\begin{equation}
+\int q_\theta(x)\,dx = 1 \tag{5}
+\end{equation}</p>
+<p><strong>注释</strong>：虽然神经网络具有强大的函数拟合能力，但直接用神经网络输出来表示概率密度函数存在困难。非负性可以通过激活函数（如softplus、指数函数）来保证，但归一化条件 $\int q_\theta(x)\,dx = 1$ 通常难以显式满足，尤其是在高维空间中。</p>
+<p><strong>维度灾难</strong>：在 $d$ 维空间中，如果我们用网格化方法来近似积分，每个维度划分 $m$ 个区间，总的计算复杂度为 $\mathcal{O}(m^d)$，这在维度较高时是不可行的。</p>
+<h3 id="_9">二、隐变量模型与混合分布<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 混合模型的构建<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p>为了绕过显式归一化的困难，我们引入隐变量 $z$ 并构建层次化的概率模型：</p>
+<p>\begin{equation}
+q_\theta(x) = \int q_\theta(x|z)q(z)\,dz \tag{6}
+\end{equation}</p>
+<p><strong>注释</strong>：这里的关键思想是将复杂的边缘分布 $q_\theta(x)$ 分解为简单的条件分布 $q_\theta(x|z)$ 和先验分布 $q(z)$ 的乘积的积分。</p>
+<p><strong>先验选择</strong>：通常我们选择 $q(z) = \mathcal{N}(z|0, I)$ 为标准正态分布，原因包括：
+1. 数学上简单易处理
+2. 无需引入额外参数
+3. 具有良好的数学性质（如旋转不变性）</p>
+<p><strong>条件分布的参数化</strong>：条件分布 $q_\theta(x|z)$ 通常选择为：</p>
+<p>\begin{equation}
+q_\theta(x|z) = \mathcal{N}(x|\mu_\theta(z), \sigma_\theta^2(z)I) \tag{7}
+\end{equation}</p>
+<p>其中 $\mu_\theta(z)$ 和 $\sigma_\theta(z)$ 是由神经网络参数化的函数（解码器）。</p>
+<p><strong>展开形式</strong>：</p>
+<p>\begin{equation}
+q_\theta(x|z) = \frac{1}{(2\pi)^{d/2}|\sigma_\theta(z)I|^{1/2}}\exp\left(-\frac{1}{2\sigma_\theta^2(z)}|x-\mu_\theta(z)|^2\right) \tag{8}
+\end{equation}</p>
+<h4 id="22">2.2 混合模型的拟合能力<a class="toc-link" href="#22" title="Permanent link">&para;</a></h4>
+<p><strong>高斯混合模型的万能逼近性</strong>：理论上，任意连续的概率密度函数都可以用高斯混合模型任意精确地逼近。具体来说，对于任意概率密度 $p(x)$ 和任意 $\epsilon &gt; 0$，存在高斯混合模型：</p>
+<p>\begin{equation}
+q(x) = \sum_{k=1}^K w_k \mathcal{N}(x|\mu_k, \Sigma_k) \tag{9}
+\end{equation}</p>
+<p>使得 $D_{\text{KL}}(p|q) &lt; \epsilon$。</p>
+<p><strong>注释</strong>：式(6)可以看作是连续版本的高斯混合模型，其中混合组件的数量是无限的（由连续的 $z$ 参数化），因此理论上具有更强的表达能力。</p>
+<p><strong>直观理解</strong>：每个 $z$ 值对应一个高斯分布 $q_\theta(x|z)$，最终的 $q_\theta(x)$ 是所有这些高斯分布按照 $q(z)$ 的权重进行加权平均。通过调整神经网络参数 $\theta$，我们可以让这些高斯分布的均值和方差适应数据的复杂结构。</p>
+<h3 id="_10">三、重要性采样与方差缩减<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 蒙特卡洛积分的基本原理<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p>对于式(6)中的积分，如果我们直接从先验 $q(z)$ 中采样来估计，会遇到效率问题：</p>
+<p>\begin{equation}
+q_\theta(x) = \mathbb{E}<em>{z\sim q(z)}[q</em>\theta(x|z)] \approx \frac{1}{M}\sum_{i=1}^M q_\theta(x|z_i), \quad z_i\sim q(z) \tag{10}
+\end{equation}</p>
+<p><strong>方差分析</strong>：这个估计量的方差为：</p>
+<p>\begin{equation}
+\text{Var}\left[\frac{1}{M}\sum_{i=1}^M q_\theta(x|z_i)\right] = \frac{1}{M}\text{Var}<em>{z\sim q(z)}[q</em>\theta(x|z)] \tag{11}
+\end{equation}</p>
+<p><strong>问题诊断</strong>：当 $q_\theta(x|z)$ 的方差设置得很小时（这在实践中很常见，以便精确拟合数据），对于给定的 $x$，只有一小部分 $z$ 值能使 $q_\theta(x|z)$ 较大，而大部分从 $q(z)$ 采样的 $z$ 值会使 $q_\theta(x|z) \approx 0$。这导致估计量的方差非常大，需要大量样本才能获得准确的估计。</p>
+<h4 id="32">3.2 重要性采样的引入<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p><strong>基本思想</strong>：我们希望从一个更"有针对性"的分布 $p_\theta(z|x)$ 中采样，使得采样得到的 $z$ 值更可能使 $q_\theta(x|z)$ 较大。</p>
+<p><strong>重要性加权公式</strong>：利用重要性采样，我们可以将期望转换为：</p>
+<p>\begin{equation}
+q_\theta(x) = \int q_\theta(x|z)q(z)\,dz = \int q_\theta(x|z)\frac{q(z)}{p_\theta(z|x)}p_\theta(z|x)\,dz = \mathbb{E}<em>{z\sim p</em>\theta(z|x)}\left[q_\theta(x|z)\frac{q(z)}{p_\theta(z|x)}\right] \tag{12}
+\end{equation}</p>
+<p><strong>蒙特卡洛估计</strong>：</p>
+<p>\begin{equation}
+q_\theta(x) \approx \frac{1}{M}\sum_{i=1}^M q_\theta(x|z_i)\frac{q(z_i)}{p_\theta(z_i|x)}, \quad z_i\sim p_\theta(z|x) \tag{13}
+\end{equation}</p>
+<h4 id="33">3.3 最优重要性分布<a class="toc-link" href="#33" title="Permanent link">&para;</a></h4>
+<p><strong>理论最优解</strong>：可以证明，使得估计量方差最小的重要性分布是：</p>
+<p>\begin{equation}
+p^*<em>\theta(z|x) = \frac{q</em>\theta(x|z)q(z)}{q_\theta(x)} = \frac{q_\theta(x|z)q(z)}{\int q_\theta(x|z')q(z')\,dz'} \tag{14}
+\end{equation}</p>
+<p><strong>注释</strong>：这正是贝叶斯公式给出的后验分布！然而，计算这个后验分布需要知道归一化常数 $q_\theta(x)$，而这正是我们要估计的量，因此无法直接使用。</p>
+<p><strong>变分近似</strong>：实践中，我们用一个参数化的分布族 $p_\theta(z|x)$ 来近似这个最优后验。通常选择：</p>
+<p>\begin{equation}
+p_\theta(z|x) = \mathcal{N}(z|\mu_\phi(x), \sigma_\phi^2(x)I) \tag{15}
+\end{equation}</p>
+<p>其中 $\mu_\phi(x)$ 和 $\sigma_\phi(x)$ 是由神经网络（编码器）参数化的函数。</p>
+<p><strong>方差缩减效果</strong>：使用接近最优的重要性分布后，估计量的方差显著降低：</p>
+<p>\begin{equation}
+\text{Var}<em>{z\sim p</em>\theta(z|x)}\left[q_\theta(x|z)\frac{q(z)}{p_\theta(z|x)}\right] \ll \text{Var}<em>{z\sim q(z)}[q</em>\theta(x|z)] \tag{16}
+\end{equation}</p>
+<h3 id="_11">四、训练目标与梯度估计<a class="toc-link" href="#_11" title="Permanent link">&para;</a></h3>
+<h4 id="41-m1">4.1 单样本估计（M=1）<a class="toc-link" href="#41-m1" title="Permanent link">&para;</a></h4>
+<p>当我们只采样一个 $z$ 样本时，训练目标变为：</p>
+<p>\begin{equation}
+\mathcal{L}(\theta, \phi) = \mathbb{E}<em p__phi_z_x_="p_\phi(z|x)" z_sim="z\sim">{x\sim\tilde{p}(x)}\mathbb{E}</em>
+\end{equation}}\left[-\log q_\theta(x|z) - \log\frac{q(z)}{p_\phi(z|x)}\right] \tag{17</p>
+<p><strong>对数变换的优势</strong>：在对数空间中计算有助于数值稳定性，避免下溢问题。</p>
+<p><strong>分解形式</strong>：我们可以将目标函数分解为两项：</p>
+<p>\begin{equation}
+\mathcal{L}(\theta, \phi) = \mathbb{E}<em p__phi_z_x_="p_\phi(z|x)" z_sim="z\sim">{x\sim\tilde{p}(x)}\left[\mathbb{E}</em>
+\end{equation}}[-\log q_\theta(x|z)] + D_{\text{KL}}(p_\phi(z|x)|q(z))\right] \tag{18</p>
+<p><strong>注释</strong>：
+- 第一项是<strong>重构误差</strong>：衡量在给定隐变量 $z$ 的条件下，模型能多好地重构原始数据 $x$。
+- 第二项是<strong>正则化项</strong>：KL散度使得后验分布 $p_\phi(z|x)$ 接近先验分布 $q(z)$，防止编码器学习到过于复杂或过拟合的表示。</p>
+<h4 id="42-elbo">4.2 ELBO的替代视角<a class="toc-link" href="#42-elbo" title="Permanent link">&para;</a></h4>
+<p><strong>变分下界推导</strong>：从另一个角度，我们可以直接推导ELBO（证据下界）：</p>
+<p>\begin{equation}
+\log q_\theta(x) = \log\int q_\theta(x, z)\,dz = \log\int q_\theta(x|z)q(z)\,dz \tag{19}
+\end{equation}</p>
+<p>引入任意分布 $p_\phi(z|x)$：</p>
+<p>\begin{equation}
+\log q_\theta(x) = \log\int \frac{q_\theta(x|z)q(z)}{p_\phi(z|x)}p_\phi(z|x)\,dz \tag{20}
+\end{equation}</p>
+<p>应用Jensen不等式（$\log$ 是凹函数）：</p>
+<p>\begin{equation}
+\log q_\theta(x) \geq \int p_\phi(z|x)\log\frac{q_\theta(x|z)q(z)}{p_\phi(z|x)}\,dz = \mathcal{L}_{\text{ELBO}}(\theta, \phi; x) \tag{21}
+\end{equation}</p>
+<p><strong>ELBO展开</strong>：</p>
+<p>\begin{equation}
+\mathcal{L}<em p__phi_z_x_="p_\phi(z|x)" z_sim="z\sim">{\text{ELBO}}(\theta, \phi; x) = \mathbb{E}</em>
+\end{equation}}[\log q_\theta(x|z)] - D_{\text{KL}}(p_\phi(z|x)|q(z)) \tag{22</p>
+<p><strong>最大化ELBO</strong>：最大化ELBO等价于最小化式(18)中的损失函数。这就是VAE的标准训练目标。</p>
+<h4 id="43-reparameterization-trick">4.3 重参数化技巧（Reparameterization Trick）<a class="toc-link" href="#43-reparameterization-trick" title="Permanent link">&para;</a></h4>
+<p><strong>梯度估计的挑战</strong>：直接对式(18)中的期望求梯度时，由于期望是对参数 $\phi$ 依赖的分布 $p_\phi(z|x)$ 取的，我们无法简单地交换梯度和期望的顺序。</p>
+<p><strong>重参数化变换</strong>：对于高斯分布 $p_\phi(z|x) = \mathcal{N}(z|\mu_\phi(x), \sigma_\phi^2(x)I)$，我们可以将随机采样过程重写为：</p>
+<p>\begin{equation}
+z = \mu_\phi(x) + \sigma_\phi(x)\odot\epsilon, \quad \epsilon\sim\mathcal{N}(0, I) \tag{23}
+\end{equation}</p>
+<p>其中 $\odot$ 表示逐元素乘法。</p>
+<p><strong>注释</strong>：这个技巧的关键是将随机性从参数依赖的分布中分离出来，转移到独立于参数的噪声 $\epsilon$ 上。</p>
+<p><strong>梯度计算</strong>：现在损失函数可以重写为：</p>
+<p>\begin{equation}
+\mathcal{L}(\theta, \phi) = \mathbb{E}<em _epsilon_sim_mathcal_N="\epsilon\sim\mathcal{N">{x\sim\tilde{p}(x)}\mathbb{E}</em>
+\end{equation}}(0,I)}\left[f(\theta, \phi, x, \epsilon)\right] \tag{24</p>
+<p>其中 $f(\theta, \phi, x, \epsilon) = -\log q_\theta(x|\mu_\phi(x)+\sigma_\phi(x)\odot\epsilon) - \log\frac{q(\mu_\phi(x)+\sigma_\phi(x)\odot\epsilon)}{p_\phi(\mu_\phi(x)+\sigma_\phi(x)\odot\epsilon|x)}$。</p>
+<p>现在梯度可以简单地估计为：</p>
+<p>\begin{equation}
+\nabla_\theta\mathcal{L} \approx \nabla_\theta f(\theta, \phi, x, \epsilon), \quad \nabla_\phi\mathcal{L} \approx \nabla_\phi f(\theta, \phi, x, \epsilon) \tag{25}
+\end{equation}</p>
+<h4 id="44-kl">4.4 KL散度的解析计算<a class="toc-link" href="#44-kl" title="Permanent link">&para;</a></h4>
+<p>对于高斯分布，KL散度可以解析计算。设：
+- $p_\phi(z|x) = \mathcal{N}(z|\mu, \sigma^2I)$，其中 $\mu = \mu_\phi(x)$，$\sigma^2 = \sigma_\phi^2(x)$
+- $q(z) = \mathcal{N}(z|0, I)$</p>
+<p>则：</p>
+<p>\begin{equation}
+D_{\text{KL}}(p_\phi(z|x)|q(z)) = \int p_\phi(z|x)\log\frac{p_\phi(z|x)}{q(z)}\,dz \tag{26}
+\end{equation}</p>
+<p><strong>逐步推导</strong>：</p>
+<p>\begin{align}
+D_{\text{KL}} &amp;= \int \mathcal{N}(z|\mu,\sigma^2I)\left[\log\mathcal{N}(z|\mu,\sigma^2I) - \log\mathcal{N}(z|0,I)\right]dz \tag{27}\
+&amp;= \mathbb{E}<em i="1">{z\sim\mathcal{N}(\mu,\sigma^2I)}\left[-\frac{d}{2}\log(2\pi) - \frac{1}{2}\sum</em>(z_i-\mu_i)^2\right] \nonumber\
+&amp;\quad - \mathbb{E}}^d\log\sigma_i^2 - \frac{1}{2\sigma_i^2<em i="1">{z\sim\mathcal{N}(\mu,\sigma^2I)}\left[-\frac{d}{2}\log(2\pi) - \frac{1}{2}\sum</em>
+\end{align}}^d z_i^2\right] \tag{28</p>
+<p>利用 $\mathbb{E}[(z_i-\mu_i)^2] = \sigma_i^2$ 和 $\mathbb{E}[z_i^2] = \mu_i^2 + \sigma_i^2$：</p>
+<p>\begin{equation}
+D_{\text{KL}} = -\frac{1}{2}\sum_{i=1}^d\left[\log\sigma_i^2 - \sigma_i^2 - \mu_i^2 + 1\right] = \frac{1}{2}\sum_{i=1}^d\left[\mu_i^2 + \sigma_i^2 - \log\sigma_i^2 - 1\right] \tag{29}
+\end{equation}</p>
+<p><strong>注释</strong>：这个解析形式使得VAE的训练非常高效，无需对KL散度进行蒙特卡洛估计。</p>
+<h3 id="iwae">五、重要性加权自编码器（IWAE）<a class="toc-link" href="#iwae" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 多样本重要性加权<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p>当使用 $M &gt; 1$ 个样本进行重要性采样时，我们得到更紧的下界：</p>
+<p>\begin{equation}
+\log q_\theta(x) \geq \mathbb{E}<em>{z_1,\ldots,z_M\sim p</em>\phi(z|x)}\left[\log\frac{1}{M}\sum_{i=1}^M\frac{q_\theta(x|z_i)q(z_i)}{p_\phi(z_i|x)}\right] = \mathcal{L}_{\text{IWAE}}^{(M)}(\theta,\phi;x) \tag{30}
+\end{equation}</p>
+<p><strong>下界的紧密性</strong>：可以证明：</p>
+<p>\begin{equation}
+\mathcal{L}<em _text_IWAE="\text{IWAE">{\text{IWAE}}^{(1)} \leq \mathcal{L}</em>}}^{(2)} \leq \cdots \leq \mathcal{L<em>{\text{IWAE}}^{(M)} \leq \log q</em>\theta(x) \tag{31}
+\end{equation}</p>
+<p>并且当 $M\to\infty$ 时，$\mathcal{L}<em>{\text{IWAE}}^{(M)} \to \log q</em>\theta(x)$。</p>
+<p><strong>证明思路</strong>（$M=2$ 的情况）：</p>
+<p>设 $w_i = \frac{q_\theta(x|z_i)q(z_i)}{p_\phi(z_i|x)}$，则：</p>
+<p>\begin{align}
+\mathcal{L}<em _text_IWAE="\text{IWAE">{\text{IWAE}}^{(2)} - \mathcal{L}</em>}}^{(1)} &amp;= \mathbb{E<em z_1="z_1">{z_1,z_2}\left[\log\frac{w_1+w_2}{2}\right] - \mathbb{E}</em>\
+&amp;= \mathbb{E}_{z_1,z_2}\left[\log\frac{w_1+w_2}{2} - \frac{\log w_1 + \log w_2}{2}\right] \tag{33}\
+&amp;\geq 0 \tag{34}
+\end{align}}\left[\log w_1\right] \tag{32</p>
+<p>最后一步利用了对数的凹性：$\log\frac{w_1+w_2}{2} \geq \frac{\log w_1+\log w_2}{2}$。</p>
+<h4 id="52-iwae">5.2 IWAE的训练目标<a class="toc-link" href="#52-iwae" title="Permanent link">&para;</a></h4>
+<p>IWAE的负对数似然估计为：</p>
+<p>\begin{equation}
+\mathcal{L}<em x_sim_tilde_p="x\sim\tilde{p">{\text{IWAE}}(\theta,\phi) = -\mathbb{E}</em>}(x)}\mathbb{E<em>{z_1,\ldots,z_M\sim p</em>\phi(z|x)}\left[\log\frac{1}{M}\sum_{i=1}^M\frac{q_\theta(x|z_i)q(z_i)}{p_\phi(z_i|x)}\right] \tag{35}
+\end{equation}</p>
+<p><strong>梯度估计</strong>：虽然对数内有求和，但仍可通过重参数化技巧来估计梯度。设 $z_i = \mu_\phi(x) + \sigma_\phi(x)\odot\epsilon_i$，其中 $\epsilon_i\sim\mathcal{N}(0,I)$，则：</p>
+<p>\begin{equation}
+\nabla_\theta\mathcal{L}<em>{\text{IWAE}} \approx -\nabla</em>\theta\log\frac{1}{M}\sum_{i=1}^M w_i(\theta,\phi,x,\epsilon_i) \tag{36}
+\end{equation}</p>
+<p>\begin{equation}
+= -\frac{\sum_{i=1}^M w_i\nabla_\theta\log w_i}{\sum_{j=1}^M w_j} = -\sum_{i=1}^M \tilde{w}<em>i\nabla</em>\theta\log w_i \tag{37}
+\end{equation}</p>
+<p>其中 $\tilde{w}<em j="1">i = \frac{w_i}{\sum</em>$ 是归一化的重要性权重。}^M w_j</p>
+<p><strong>注释</strong>：这表明IWAE的梯度是加权平均的梯度，权重由重要性权重决定。权重大的样本对梯度贡献更大，这是合理的，因为它们对对数似然估计的贡献也更大。</p>
+<h3 id="_12">六、数值稳定性与实现细节<a class="toc-link" href="#_12" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 对数空间计算<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p>为避免数值下溢/上溢，所有涉及概率的计算都应在对数空间进行。</p>
+<p><strong>高斯分布的对数概率密度</strong>：</p>
+<p>\begin{equation}
+\log q_\theta(x|z) = -\frac{d}{2}\log(2\pi) - \sum_{i=1}^d\log\sigma_{\theta,i}(z) - \frac{1}{2}\sum_{i=1}^d\frac{(x_i-\mu_{\theta,i}(z))^2}{\sigma_{\theta,i}^2(z)} \tag{38}
+\end{equation}</p>
+<p><strong>对数和指数（LogSumExp）技巧</strong>：计算 $\log\sum_{i=1}^M e^{a_i}$ 时，直接计算会导致溢出。稳定的计算方法是：</p>
+<p>\begin{equation}
+\log\sum_{i=1}^M e^{a_i} = a_{\max} + \log\sum_{i=1}^M e^{a_i - a_{\max}} \tag{39}
+\end{equation}</p>
+<p>其中 $a_{\max} = \max_i a_i$。</p>
+<p><strong>注释</strong>：减去最大值后，指数项的范围在 $(0, 1]$ 之间，避免了溢出问题。</p>
+<h4 id="62">6.2 方差的参数化<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p>实践中，我们不直接预测方差 $\sigma^2$，而是预测 $\log\sigma^2$：</p>
+<p>\begin{equation}
+\log\sigma_\phi^2(x) = \text{NN}_{\phi}(x) \tag{40}
+\end{equation}</p>
+<p><strong>优势</strong>：
+1. 保证 $\sigma^2 = e^{\log\sigma^2} &gt; 0$，满足方差的非负性约束
+2. 数值稳定性更好
+3. KL散度公式中直接使用 $\log\sigma^2$，无需额外计算对数</p>
+<p><strong>KL散度的稳定计算</strong>：</p>
+<p>\begin{equation}
+D_{\text{KL}} = \frac{1}{2}\sum_{i=1}^d\left[\mu_i^2 + e^{\log\sigma_i^2} - \log\sigma_i^2 - 1\right] \tag{41}
+\end{equation}</p>
+<h4 id="63">6.3 梯度裁剪与正则化<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p><strong>梯度爆炸问题</strong>：在训练初期或遇到异常样本时，梯度可能非常大。常用的解决方法是梯度裁剪：</p>
+<p>\begin{equation}
+g \leftarrow \begin{cases}
+g &amp; \text{if } |g| \leq \tau \
+\frac{\tau g}{|g|} &amp; \text{if } |g| &gt; \tau
+\end{cases} \tag{42}
+\end{equation}</p>
+<p><strong>KL项的权重退火</strong>：实践中常使用KL项的加权版本：</p>
+<p>\begin{equation}
+\mathcal{L} = \mathbb{E}<em>{z\sim p</em>\phi(z|x)}[-\log q_\theta(x|z)] + \beta \cdot D_{\text{KL}}(p_\phi(z|x)|q(z)) \tag{43}
+\end{equation}</p>
+<p>其中 $\beta$ 从0逐渐增加到1（KL退火），有助于避免后验坍塌问题。</p>
+<h3 id="_13">七、概率密度估计的实际应用<a class="toc-link" href="#_13" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 对数似然的蒙特卡洛估计<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p>训练完成后，给定新样本 $x^<em>$，我们如何估计其对数似然 $\log q_\theta(x^</em>)$？</p>
+<p><strong>IWAE估计器</strong>：</p>
+<p>\begin{equation}
+\log q_\theta(x^<em>) \approx \log\frac{1}{M}\sum_{i=1}^M\frac{q_\theta(x^</em>|z_i)q(z_i)}{p_\phi(z_i|x^<em>)}, \quad z_i\sim p_\phi(z|x^</em>) \tag{44}
+\end{equation}</p>
+<p><strong>注释</strong>：$M$ 越大，估计越准确。在评估时通常使用较大的 $M$（如5000），而训练时使用较小的 $M$（如1或5）。</p>
+<p><strong>方差估计</strong>：可以通过多次独立估计来评估方差：</p>
+<p>\begin{equation}
+\text{Var}[\log q_\theta(x^*)] \approx \frac{1}{K-1}\sum_{k=1}^K\left(L_k - \bar{L}\right)^2 \tag{45}
+\end{equation}</p>
+<p>其中 $L_k$ 是第 $k$ 次独立的IWAE估计，$\bar{L} = \frac{1}{K}\sum_{k=1}^K L_k$。</p>
+<h4 id="72">7.2 异常检测应用<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p><strong>原理</strong>：正常样本应该有较高的似然值，而异常样本应该有较低的似然值。</p>
+<p><strong>检测统计量</strong>：</p>
+<p>\begin{equation}
+\text{score}(x) = \log q_\theta(x) \tag{46}
+\end{equation}</p>
+<p><strong>决策规则</strong>：</p>
+<p>\begin{equation}
+\text{决策}(x) = \begin{cases}
+\text{正常} &amp; \text{if } \text{score}(x) &gt; \tau \
+\text{异常} &amp; \text{if } \text{score}(x) \leq \tau
+\end{cases} \tag{47}
+\end{equation}</p>
+<p>其中阈值 $\tau$ 可以通过验证集上的ROC曲线确定。</p>
+<h4 id="73">7.3 数据压缩应用<a class="toc-link" href="#73" title="Permanent link">&para;</a></h4>
+<p><strong>信息论背景</strong>：最优编码长度（以nats为单位）等于负对数似然：</p>
+<p>\begin{equation}
+\text{编码长度}(x) = -\log_2 q_\theta(x) \quad \text{(bits)} \tag{48}
+\end{equation}</p>
+<p><strong>实用编码方案</strong>：可以使用算术编码或渐近数据压缩（ADC）方案，理论上可以达到接近 $-\log q_\theta(x)$ 的压缩率。</p>
+<h3 id="_14">八、与其他密度估计方法的比较<a class="toc-link" href="#_14" title="Permanent link">&para;</a></h3>
+<h4 id="81-normalizing-flows">8.1 归一化流（Normalizing Flows）<a class="toc-link" href="#81-normalizing-flows" title="Permanent link">&para;</a></h4>
+<p>归一化流通过可逆变换 $f_\theta$ 将简单分布转换为复杂分布：</p>
+<p>\begin{equation}
+x = f_\theta(z), \quad z\sim q(z) \tag{49}
+\end{equation}</p>
+<p>\begin{equation}
+\log q_\theta(x) = \log q(z) - \log\left|\det\frac{\partial f_\theta}{\partial z}\right| \tag{50}
+\end{equation}</p>
+<p><strong>优势</strong>：可以精确计算对数似然，无需近似。</p>
+<p><strong>劣势</strong>：变换必须可逆，限制了模型架构；雅可比行列式的计算可能很昂贵。</p>
+<h4 id="82">8.2 自回归模型<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<p>自回归模型通过链式法则分解联合分布：</p>
+<p>\begin{equation}
+q_\theta(x) = \prod_{i=1}^d q_\theta(x_i|x_{&lt;i}) \tag{51}
+\end{equation}</p>
+<p><strong>优势</strong>：可以精确计算对数似然；灵活的条件分布选择。</p>
+<p><strong>劣势</strong>：生成速度慢（需要顺序生成）；难以学习到有意义的隐表示。</p>
+<h4 id="83-vae">8.3 VAE的优劣势总结<a class="toc-link" href="#83-vae" title="Permanent link">&para;</a></h4>
+<p><strong>优势</strong>：
+1. 高效的并行生成
+2. 学习到有意义的隐表示 $z$
+3. 训练稳定</p>
+<p><strong>劣势</strong>：
+1. 对数似然只能近似估计
+2. 生成质量通常不如GAN
+3. 可能存在后验坍塌问题</p>
+<h3 id="_15">九、理论深化：变分推断视角<a class="toc-link" href="#_15" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 变分推断的一般框架<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p>变分推断的核心思想是用一个易处理的分布 $p_\phi(z|x)$ 来近似难以计算的真实后验 $p^*(z|x) = \frac{q_\theta(x|z)q(z)}{q_\theta(x)}$。</p>
+<p><strong>优化目标</strong>：最小化近似后验与真实后验之间的KL散度：</p>
+<p>\begin{equation}
+\phi^<em> = \arg\min_\phi D_{\text{KL}}(p_\phi(z|x)|p^</em>(z|x)) \tag{52}
+\end{equation}</p>
+<p><strong>展开</strong>：</p>
+<p>\begin{align}
+D_{\text{KL}}(p_\phi(z|x)|p^<em>(z|x)) &amp;= \mathbb{E}<em>{z\sim p</em>\phi(z|x)}\left[\log\frac{p_\phi(z|x)}{p^</em>(z|x)}\right] \tag{53}\
+&amp;= \mathbb{E}<em>{z\sim p</em>\phi(z|x)}\left[\log p_\phi(z|x) - \log q_\theta(x|z) - \log q(z) + \log q_\theta(x)\right] \tag{54}\
+&amp;= -\mathcal{L}<em>{\text{ELBO}}(\theta,\phi;x) + \log q</em>\theta(x) \tag{55}
+\end{align}</p>
+<p><strong>注释</strong>：由于 $\log q_\theta(x)$ 与 $\phi$ 无关，最小化KL散度等价于最大化ELBO。这就是为什么VAE训练等价于变分推断。</p>
+<h4 id="92">9.2 平均场近似<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p>在更一般的变分推断中，常用平均场假设：</p>
+<p>\begin{equation}
+p_\phi(z|x) = \prod_{i=1}^d p_{\phi_i}(z_i|x) \tag{56}
+\end{equation}</p>
+<p>假设各个隐变量维度之间独立。VAE中的对角协方差高斯后验就是一种平均场近似。</p>
+<p><strong>完全协方差的扩展</strong>：</p>
+<p>\begin{equation}
+p_\phi(z|x) = \mathcal{N}(z|\mu_\phi(x), \Sigma_\phi(x)) \tag{57}
+\end{equation}</p>
+<p>其中 $\Sigma_\phi(x)$ 是完全协方差矩阵。这增加了模型的表达能力，但也增加了参数数量（$\mathcal{O}(d^2)$ vs $\mathcal{O}(d)$）和计算复杂度。</p>
+<h3 id="_16">十、数值示例与直观理解<a class="toc-link" href="#_16" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 一维高斯混合的例子<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p><strong>设定</strong>：真实分布是两个高斯分布的混合：</p>
+<p>\begin{equation}
+p_{\text{true}}(x) = 0.3\mathcal{N}(x|-2, 0.5^2) + 0.7\mathcal{N}(x|3, 1^2) \tag{58}
+\end{equation}</p>
+<p><strong>VAE模型</strong>：
+- 先验：$q(z) = \mathcal{N}(z|0, 1)$
+- 解码器：$q_\theta(x|z) = \mathcal{N}(x|\mu_\theta(z), 0.1^2)$，其中 $\mu_\theta(z) = w_1z + b_1$
+- 编码器：$p_\phi(z|x) = \mathcal{N}(z|\mu_\phi(x), \sigma_\phi^2(x))$，其中 $\mu_\phi(x) = w_2x + b_2$，$\log\sigma_\phi^2(x) = w_3x + b_3$</p>
+<p><strong>训练后的参数</strong>（示意性的）：
+- $w_1 \approx 2.5$，$b_1 \approx 0.5$
+- 这意味着当 $z \approx -1$ 时，$\mu_\theta(z) \approx -2$；当 $z \approx 1$ 时，$\mu_\theta(z) \approx 3$</p>
+<p><strong>边缘分布</strong>：</p>
+<p>\begin{equation}
+q_\theta(x) = \int \mathcal{N}(x|\mu_\theta(z), 0.1^2)\mathcal{N}(z|0,1)\,dz \tag{59}
+\end{equation}</p>
+<p>这个积分会产生一个接近真实混合分布的近似。</p>
+<h4 id="102">10.2 重要性采样的效果演示<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p><strong>场景</strong>：估计 $q_\theta(x=0)$，其中真实值为：</p>
+<p>\begin{equation}
+q_\theta(x=0) = \int \mathcal{N}(0|\mu_\theta(z), 0.1^2)\mathcal{N}(z|0,1)\,dz \tag{60}
+\end{equation}</p>
+<p><strong>朴素蒙特卡洛</strong>（从先验采样）：</p>
+<p>\begin{equation}
+\hat{q}<em i="1">{\text{naive}} = \frac{1}{M}\sum</em>
+\end{equation}}^M \mathcal{N}(0|\mu_\theta(z_i), 0.1^2), \quad z_i\sim\mathcal{N}(0,1) \tag{61</p>
+<p><strong>重要性采样</strong>（从后验采样）：</p>
+<p>\begin{equation}
+\hat{q}<em i="1">{\text{IS}} = \frac{1}{M}\sum</em>
+\end{equation}}^M \mathcal{N}(0|\mu_\theta(z_i), 0.1^2)\frac{\mathcal{N}(z_i|0,1)}{\mathcal{N}(z_i|\mu_\phi(0), \sigma_\phi^2(0))}, \quad z_i\sim\mathcal{N}(\mu_\phi(0), \sigma_\phi^2(0)) \tag{62</p>
+<p><strong>标准差比较</strong>（$M=100$的模拟）：
+- 朴素MC：$\text{std}(\hat{q}<em _text_IS="\text{IS">{\text{naive}}) \approx 0.05$
+- 重要性采样：$\text{std}(\hat{q}</em>) \approx 0.01$}</p>
+<p>方差减少了约25倍！</p>
+<h3 id="_17">十一、实践建议与调试技巧<a class="toc-link" href="#_17" title="Permanent link">&para;</a></h3>
+<h4 id="111">11.1 超参数选择<a class="toc-link" href="#111" title="Permanent link">&para;</a></h4>
+<p><strong>隐变量维度 $d_z$</strong>：
+- 小型数据集（如MNIST）：$d_z = 2\sim 10$
+- 中型数据集（如CIFAR-10）：$d_z = 32\sim 128$
+- 大型数据集（如ImageNet）：$d_z = 128\sim 512$</p>
+<p><strong>解码器方差 $\sigma_\theta^2$</strong>：
+- 固定方差：简单但可能欠拟合
+- 学习方差：更灵活，但训练可能不稳定
+- 实践中常固定为 $\sigma^2 = 1$ 或使用数据方差的估计</p>
+<p><strong>KL权重 $\beta$</strong>：
+- 标准VAE：$\beta = 1$
+- $\beta$-VAE：$\beta &gt; 1$ 鼓励解耦表示
+- KL退火：$\beta$ 从0逐渐增加到1</p>
+<h4 id="112">11.2 训练诊断<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
+<p><strong>后验坍塌检测</strong>：计算每个隐变量维度的KL散度：</p>
+<p>\begin{equation}
+\text{KL}<em x="x">i = \mathbb{E}</em>
+\end{equation}}\left[D_{\text{KL}}(\mathcal{N}(z_i|\mu_{\phi,i}(x), \sigma_{\phi,i}^2(x))|\mathcal{N}(0,1))\right] \tag{63</p>
+<p>如果大多数 $\text{KL}_i &lt; 0.01$，则说明发生了后验坍塌。</p>
+<p><strong>重构质量监控</strong>：</p>
+<p>\begin{equation}
+\text{Recon}<em x="x">{\text{quality}} = \mathbb{E}</em>}\left[|x - \mathbb{E<em>{z\sim p</em>\phi(z|x)}[\mu_\theta(z)]|^2\right] \tag{64}
+\end{equation}</p>
+<h4 id="113">11.3 常见问题与解决方案<a class="toc-link" href="#113" title="Permanent link">&para;</a></h4>
+<p><strong>问题1：后验坍塌</strong>
+- 症状：KL项接近0，隐变量未被使用
+- 解决：KL退火、自由位（Free bits）、更强的解码器正则化</p>
+<p><strong>问题2：重构模糊</strong>
+- 症状：生成的图像模糊
+- 解决：减小解码器方差、使用更复杂的解码器、尝试adversarial训练</p>
+<p><strong>问题3：训练不稳定</strong>
+- 症状：损失振荡、梯度爆炸
+- 解决：梯度裁剪、学习率调整、Batch Normalization</p>
+<h3 id="_18">十二、总结与展望<a class="toc-link" href="#_18" title="Permanent link">&para;</a></h3>
+<p>本文从概率密度估计的角度深入推导了VAE模型，核心内容包括：</p>
+<ol>
+<li><strong>混合模型构建</strong>：通过引入隐变量 $z$，将复杂分布表示为简单分布的混合</li>
+<li><strong>重要性采样</strong>：利用变分后验 $p_\phi(z|x)$ 进行高效采样，显著降低估计方差</li>
+<li><strong>ELBO推导</strong>：从多个角度理解VAE的训练目标</li>
+<li><strong>重参数化技巧</strong>：使得梯度估计成为可能</li>
+<li><strong>IWAE扩展</strong>：通过多样本重要性加权获得更紧的下界</li>
+<li><strong>数值稳定性</strong>：对数空间计算、LogSumExp技巧等实现细节</li>
+</ol>
+<p>VAE作为一个优雅的框架，将深度学习与贝叶斯推断、信息论巧妙结合，为概率密度估计、表示学习、生成建模等任务提供了强大的工具。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -196,7 +590,7 @@ url={\url{https://spaces.ac.cn/archives/8791}},<br />
                             
                             <a href="dropout视角下的mlm和mae一些新的启发.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#8 Dropout视角下的MLM和MAE：一些新的启发</div>
+                                <div class="nav-title">#154 Dropout视角下的MLM和MAE：一些新的启发</div>
                             </a>
                             
                         </div>
@@ -204,7 +598,7 @@ url={\url{https://spaces.ac.cn/archives/8791}},<br />
                             
                             <a href="输入梯度惩罚与参数梯度惩罚的一个不等式.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#10 输入梯度惩罚与参数梯度惩罚的一个不等式</div>
+                                <div class="nav-title">#156 输入梯度惩罚与参数梯度惩罚的一个不等式</div>
                             </a>
                             
                         </div>
@@ -234,7 +628,21 @@ url={\url{https://spaces.ac.cn/archives/8791}},<br />
 <li><a href="#_4">重要采样</a></li>
 <li><a href="#_5">训练目标</a></li>
 <li><a href="#_6">文章小结</a></li>
-<li><a href="#_7">公式推导与注释</a></li>
+<li><a href="#_7">公式推导与注释</a><ul>
+<li><a href="#_8">一、概率密度估计的基本框架</a></li>
+<li><a href="#_9">二、隐变量模型与混合分布</a></li>
+<li><a href="#_10">三、重要性采样与方差缩减</a></li>
+<li><a href="#_11">四、训练目标与梯度估计</a></li>
+<li><a href="#iwae">五、重要性加权自编码器（IWAE）</a></li>
+<li><a href="#_12">六、数值稳定性与实现细节</a></li>
+<li><a href="#_13">七、概率密度估计的实际应用</a></li>
+<li><a href="#_14">八、与其他密度估计方法的比较</a></li>
+<li><a href="#_15">九、理论深化：变分推断视角</a></li>
+<li><a href="#_16">十、数值示例与直观理解</a></li>
+<li><a href="#_17">十一、实践建议与调试技巧</a></li>
+<li><a href="#_18">十二、总结与展望</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

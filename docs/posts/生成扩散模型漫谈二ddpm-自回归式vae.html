@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=vae">vae</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #45 生成扩散模型漫谈（二）：DDPM = 自回归式VAE
+                    #191 生成扩散模型漫谈（二）：DDPM = 自回归式VAE
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#45</span>
+                <span class="post-number">#191</span>
                 生成扩散模型漫谈（二）：DDPM = 自回归式VAE
             </h1>
             <div class="post-meta">
@@ -117,6 +117,14 @@
                 
                 <a href="../index.html?tags=生成模型" class="tag-link">
                     <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=变分推断" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 变分推断</span>
+                </a>
+                
+                <a href="../index.html?tags=隐变量模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 隐变量模型</span>
                 </a>
                 
             </div>
@@ -239,7 +247,1146 @@ url={\url{https://spaces.ac.cn/archives/9152}},<br />
 } </p>
 <hr />
 <h2 id="_10">公式推导与注释<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="1">1. 核心概念与理论框架<a class="toc-link" href="#1" title="Permanent link">&para;</a></h3>
+<h4 id="11-vaeddpm">1.1 从传统VAE到DDPM<a class="toc-link" href="#11-vaeddpm" title="Permanent link">&para;</a></h4>
+<p><strong>传统VAE的基本结构:</strong></p>
+<p>在变分自编码器(VAE)中,我们有:
+- <strong>编码过程:</strong> $\boldsymbol{x} \to \boldsymbol{z}$ (一步到位)
+- <strong>生成过程:</strong> $\boldsymbol{z} \to \boldsymbol{x}$ (一步到位)</p>
+<p>涉及三个核心分布:
+$$p(\boldsymbol{z}|\boldsymbol{x}): \text{编码分布}, \quad q(\boldsymbol{x}|\boldsymbol{z}): \text{生成分布}, \quad q(\boldsymbol{z}): \text{先验分布} \tag{1}$$</p>
+<p><strong>传统VAE的限制:</strong>
+1. 编码和生成都只有一步,映射关系简单
+2. 通常只能建模为正态分布,表达能力有限
+3. 生成的图像往往模糊不清</p>
+<p><strong>DDPM的突破:</strong></p>
+<p>DDPM将一步变为$T$步,形成递归式的编码和生成:
+$$\begin{aligned}
+\text{编码:} \quad &amp;\boldsymbol{x} = \boldsymbol{x}<em T-1="T-1">0 \to \boldsymbol{x}_1 \to \boldsymbol{x}_2 \to \cdots \to \boldsymbol{x}_T = \boldsymbol{z} \
+\text{生成:} \quad &amp;\boldsymbol{z} = \boldsymbol{x}_T \to \boldsymbol{x}</em>
+\end{aligned} \tag{2}$$} \to \boldsymbol{x}_{T-2} \to \cdots \to \boldsymbol{x}_0 = \boldsymbol{x</p>
+<p><strong>关键思想:</strong> 每一小步只建模微小变化,仍用正态分布,但多步累积可以逼近复杂分布。</p>
+<p><strong>类比:</strong> 用分段线性函数逼近复杂曲线。</p>
+<h4 id="12">1.2 前向扩散过程的设计<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p><strong>每一步的前向过程:</strong>
+$$p(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>}) = \mathcal{N}(\boldsymbol{x<em t-1="t-1">t; \alpha_t\boldsymbol{x}</em>$$}, \beta_t^2\boldsymbol{I}) \tag{3</p>
+<p><strong>关键特点:</strong>
+1. <strong>均值:</strong> 只是输入乘以标量$\alpha_t$,不需要神经网络学习
+2. <strong>方差:</strong> 事先设定好的$\beta_t^2$,也不需要学习
+3. <strong>目标:</strong> 放弃编码能力,专注于生成</p>
+<p><strong>等价采样形式:</strong>
+$$\boldsymbol{x}<em t-1="t-1">t = \alpha_t\boldsymbol{x}</em>$$} + \beta_t\boldsymbol{\varepsilon}_t, \quad \boldsymbol{\varepsilon}_t \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{4</p>
+<p><strong>反向生成过程:</strong>
+$$q(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{x}</em>$$}; \boldsymbol{\mu}(\boldsymbol{x}_t), \sigma_t^2\boldsymbol{I}) \tag{5</p>
+<p>其中$\boldsymbol{\mu}(\boldsymbol{x}_t)$由神经网络学习。</p>
+<h3 id="2-kl">2. 联合分布与KL散度<a class="toc-link" href="#2-kl" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 联合分布的构造<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p><strong>前向过程的联合分布:</strong>
+$$\begin{aligned}
+p(\boldsymbol{x}<em T-1="T-1">0, \boldsymbol{x}_1, \ldots, \boldsymbol{x}_T) &amp;= p(\boldsymbol{x}_T|\boldsymbol{x}</em>}) \cdots p(\boldsymbol{x<em t="1">2|\boldsymbol{x}_1) p(\boldsymbol{x}_1|\boldsymbol{x}_0) \tilde{p}(\boldsymbol{x}_0) \
+&amp;= \tilde{p}(\boldsymbol{x}_0) \prod</em>}^T p(\boldsymbol{x<em t-1="t-1">t|\boldsymbol{x}</em>)
+\end{aligned} \tag{6}$$</p>
+<p>其中$\tilde{p}(\boldsymbol{x}_0)$是数据分布。</p>
+<p><strong>反向过程的联合分布:</strong>
+$$\begin{aligned}
+q(\boldsymbol{x}<em T-2="T-2">0, \boldsymbol{x}_1, \ldots, \boldsymbol{x}_T) &amp;= q(\boldsymbol{x}_0|\boldsymbol{x}_1) \cdots q(\boldsymbol{x}</em>}|\boldsymbol{x<em T-1="T-1">{T-1}) q(\boldsymbol{x}</em>}|\boldsymbol{x<em t="1">T) q(\boldsymbol{x}_T) \
+&amp;= q(\boldsymbol{x}_T) \prod</em>_t)
+\end{aligned} \tag{7}$$}^T q(\boldsymbol{x}_{t-1}|\boldsymbol{x</p>
+<p>其中$q(\boldsymbol{x}_T)$是先验分布(通常为$\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$)。</p>
+<h4 id="22-vae">2.2 VAE的最简洁理解<a class="toc-link" href="#22-vae" title="Permanent link">&para;</a></h4>
+<p><strong>核心优化目标:</strong> 最小化两个联合分布的KL散度。
+$$\mathcal{L} = KL(p | q) = \int p(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T) \log \frac{p(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T)}{q(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T)} d\boldsymbol{x}_0 \cdots d\boldsymbol{x}_T \tag{8}$$</p>
+<p><strong>展开:</strong>
+$$\begin{aligned}
+\mathcal{L} &amp;= \int p(\boldsymbol{x}<em p_boldsymbol_x="p(\boldsymbol{x">0, \ldots, \boldsymbol{x}_T) \left[\log p(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T) - \log q(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T)\right] d\boldsymbol{x}_0 \cdots d\boldsymbol{x}_T \
+&amp;= \mathbb{E}</em>_T)\right]
+\end{aligned} \tag{9}$$}_0, \ldots, \boldsymbol{x}_T)}\left[\log p(\boldsymbol{x}_0, \ldots, \boldsymbol{x}_T) - \log q(\boldsymbol{x}_0, \ldots, \boldsymbol{x</p>
+<p><strong>代入联合分布:</strong>
+$$\begin{aligned}
+\mathcal{L} &amp;= \mathbb{E}<em t="1">{p}\left[\log \tilde{p}(\boldsymbol{x}_0) + \sum</em>}^T \log p(\boldsymbol{x<em t-1="t-1">t|\boldsymbol{x}</em>}) - \log q(\boldsymbol{x<em t="1">T) - \sum</em>_t)\right]
+\end{aligned} \tag{10}$$}^T \log q(\boldsymbol{x}_{t-1}|\boldsymbol{x</p>
+<h3 id="3">3. 目标函数的简化<a class="toc-link" href="#3" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 去除常数项<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p><strong>观察1:</strong> 前向分布$p(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>)$不含可训练参数,相关项只贡献常数。</p>
+<p><strong>观察2:</strong> 先验分布$q(\boldsymbol{x}_T) = \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$也是固定的,贡献常数。</p>
+<p><strong>简化后的目标:</strong>
+$$\mathcal{L} \propto -\mathbb{E}<em t="1">{p}\left[\sum</em>}^T \log q(\boldsymbol{x<em t="1">{t-1}|\boldsymbol{x}_t)\right] = -\sum</em>}^T \mathbb{E<em t-1="t-1">{p}\left[\log q(\boldsymbol{x}</em>$$}|\boldsymbol{x}_t)\right] \tag{11</p>
+<h4 id="32">3.2 单个时间步的目标<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p><strong>对每个$t$:</strong>
+$$\begin{aligned}
+\mathcal{L}<em T-1="T-1">t &amp;= -\int p(\boldsymbol{x}_T|\boldsymbol{x}</em>}) \cdots p(\boldsymbol{x<em t-1="t-1">1|\boldsymbol{x}_0) \tilde{p}(\boldsymbol{x}_0) \log q(\boldsymbol{x}</em>_T
+\end{aligned} \tag{12}$$}|\boldsymbol{x}_t) d\boldsymbol{x}_0 \cdots d\boldsymbol{x</p>
+<p><strong>关键观察:</strong> $q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)$至多依赖到$\boldsymbol{x}_t$,因此$t+1$到$T$的积分可以先算。</p>
+<p><strong>积分消除:</strong>
+$$\int p(\boldsymbol{x}<em T-1="T-1">T|\boldsymbol{x}</em>}) \cdots p(\boldsymbol{x<em t_1="t+1">{t+1}|\boldsymbol{x}_t) d\boldsymbol{x}</em>$$} \cdots d\boldsymbol{x}_T = 1 \tag{13</p>
+<p><strong>进一步简化:</strong>
+$$q(\boldsymbol{x}<em t-2="t-2">{t-1}|\boldsymbol{x}_t)$也不依赖于$\boldsymbol{x}_1, \ldots, \boldsymbol{x}</em>$,可以继续消除积分。</p>
+<p><strong>关键公式:</strong> 利用马尔可夫性和正态分布的叠加性:
+$$\int p(\boldsymbol{x}<em t-2="t-2">{t-1}|\boldsymbol{x}</em>}) \cdots p(\boldsymbol{x<em t-2="t-2">1|\boldsymbol{x}_0) d\boldsymbol{x}_1 \cdots d\boldsymbol{x}</em>$$} = p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) \tag{14</p>
+<p><strong>最终简化形式:</strong>
+$$\mathcal{L}<em t-1="t-1">t = -\int p(\boldsymbol{x}_t|\boldsymbol{x}</em>}) p(\boldsymbol{x<em t-1="t-1">{t-1}|\boldsymbol{x}_0) \tilde{p}(\boldsymbol{x}_0) \log q(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t) d\boldsymbol{x}_0 d\boldsymbol{x}</em>$$} d\boldsymbol{x}_t \tag{15</p>
+<h3 id="4">4. 正态分布叠加性的推导<a class="toc-link" href="#4" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 两步情况的推导<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p><strong>给定:</strong>
+- $p(\boldsymbol{x}_1|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_1; \alpha_1\boldsymbol{x}_0, \beta_1^2\boldsymbol{I})$
+- $p(\boldsymbol{x}_2|\boldsymbol{x}_1) = \mathcal{N}(\boldsymbol{x}_2; \alpha_2\boldsymbol{x}_1, \beta_2^2\boldsymbol{I})$</p>
+<p><strong>等价采样形式:</strong>
+$$\boldsymbol{x}_1 = \alpha_1\boldsymbol{x}_0 + \beta_1\boldsymbol{\varepsilon}_1, \quad \boldsymbol{\varepsilon}_1 \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{16}$$
+$$\boldsymbol{x}_2 = \alpha_2\boldsymbol{x}_1 + \beta_2\boldsymbol{\varepsilon}_2, \quad \boldsymbol{\varepsilon}_2 \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{17}$$</p>
+<p><strong>代入消元:</strong>
+$$\begin{aligned}
+\boldsymbol{x}_2 &amp;= \alpha_2(\alpha_1\boldsymbol{x}_0 + \beta_1\boldsymbol{\varepsilon}_1) + \beta_2\boldsymbol{\varepsilon}_2 \
+&amp;= \alpha_2\alpha_1\boldsymbol{x}_0 + \alpha_2\beta_1\boldsymbol{\varepsilon}_1 + \beta_2\boldsymbol{\varepsilon}_2
+\end{aligned} \tag{18}$$</p>
+<p><strong>高斯噪声的和:</strong> 两个独立高斯随机变量的和仍是高斯:
+$$\alpha_2\beta_1\boldsymbol{\varepsilon}_1 + \beta_2\boldsymbol{\varepsilon}_2 \sim \mathcal{N}(\boldsymbol{0}, (\alpha_2^2\beta_1^2 + \beta_2^2)\boldsymbol{I}) \tag{19}$$</p>
+<p><strong>验证方差:</strong>
+$$\text{Var}[\alpha_2\beta_1\boldsymbol{\varepsilon}_1 + \beta_2\boldsymbol{\varepsilon}_2] = \alpha_2^2\beta_1^2\text{Var}[\boldsymbol{\varepsilon}_1] + \beta_2^2\text{Var}[\boldsymbol{\varepsilon}_2] = \alpha_2^2\beta_1^2 + \beta_2^2 \tag{20}$$</p>
+<p><strong>引入约束:</strong> 为了简化形式,我们要求$\alpha_t^2 + \beta_t^2 = 1$。</p>
+<p><strong>则:</strong>
+$$\begin{aligned}
+\alpha_2^2\beta_1^2 + \beta_2^2 &amp;= \alpha_2^2\beta_1^2 + (1 - \alpha_2^2) \
+&amp;= \alpha_2^2\beta_1^2 + 1 - \alpha_2^2 \
+&amp;= \alpha_2^2(\beta_1^2 - 1) + 1 \
+&amp;= \alpha_2^2(-\alpha_1^2) + 1 \
+&amp;= 1 - \alpha_2^2\alpha_1^2
+\end{aligned} \tag{21}$$</p>
+<p><strong>定义累积参数:</strong>
+$$\bar{\alpha}_2 = \alpha_1\alpha_2, \quad \bar{\beta}_2 = \sqrt{1 - \bar{\alpha}_2^2} \tag{22}$$</p>
+<p><strong>最终结果:</strong>
+$$p(\boldsymbol{x}_2|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_2; \bar{\alpha}_2\boldsymbol{x}_0, \bar{\beta}_2^2\boldsymbol{I}) \tag{23}$$</p>
+<h4 id="42">4.2 一般情况的递推<a class="toc-link" href="#42" title="Permanent link">&para;</a></h4>
+<p><strong>归纳假设:</strong> 假设$p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}</em>}; \bar{\alpha<em t-1="t-1">{t-1}\boldsymbol{x}_0, \bar{\beta}</em>)$成立。}^2\boldsymbol{I</p>
+<p><strong>递推步骤:</strong>
+$$\boldsymbol{x}<em t-1="t-1">t = \alpha_t\boldsymbol{x}</em>} + \beta_t\boldsymbol{\varepsilon<em t-1="t-1">t = \alpha_t(\bar{\alpha}</em>}\boldsymbol{x<em t-1="t-1">0 + \bar{\beta}</em>$$}\bar{\boldsymbol{\varepsilon}}_{t-1}) + \beta_t\boldsymbol{\varepsilon}_t \tag{24</p>
+<p><strong>整理:</strong>
+$$\boldsymbol{x}<em t-1="t-1">t = \alpha_t\bar{\alpha}</em>}\boldsymbol{x<em t-1="t-1">0 + (\alpha_t\bar{\beta}</em>$$}\bar{\boldsymbol{\varepsilon}}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t) \tag{25</p>
+<p><strong>噪声项的方差:</strong>
+$$\text{Var} = \alpha_t^2\bar{\beta}<em t-1="t-1">{t-1}^2 + \beta_t^2 = \alpha_t^2(1 - \bar{\alpha}</em>$$}^2) + \beta_t^2 \tag{26</p>
+<p><strong>利用约束$\alpha_t^2 + \beta_t^2 = 1$:</strong>
+$$\begin{aligned}
+\text{Var} &amp;= \alpha_t^2(1 - \bar{\alpha}<em t-1="t-1">{t-1}^2) + (1 - \alpha_t^2) \
+&amp;= \alpha_t^2 - \alpha_t^2\bar{\alpha}</em>^2 + 1 - \alpha_t^2 \
+&amp;= 1 - \alpha_t^2\bar{\alpha}<em t-1="t-1">{t-1}^2 \
+&amp;= 1 - (\alpha_t\bar{\alpha}</em>)^2
+\end{aligned} \tag{27}$$</p>
+<p><strong>递推公式:</strong>
+$$\bar{\alpha}<em t-1="t-1">t = \alpha_t\bar{\alpha}</em>$$
+$$\bar{\beta}_t = \sqrt{1 - \bar{\alpha}_t^2} \tag{29}$$} = \alpha_1\alpha_2 \cdots \alpha_t = \prod_{i=1}^t \alpha_i \tag{28</p>
+<p><strong>一般结果:</strong>
+$$p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t\boldsymbol{x}_0, \bar{\beta}_t^2\boldsymbol{I}) \tag{30}$$</p>
+<p><strong>采样形式:</strong>
+$$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}}, \quad \bar{\boldsymbol{\varepsilon}} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{31}$$</p>
+<h3 id="5">5. 反向过程的参数化<a class="toc-link" href="#5" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 负对数似然的展开<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p><strong>反向生成过程:</strong>
+$$q(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{x}</em>$$}; \boldsymbol{\mu}(\boldsymbol{x}_t), \sigma_t^2\boldsymbol{I}) \tag{32</p>
+<p><strong>负对数似然(忽略常数):</strong>
+$$-\log q(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t) = \frac{1}{2\sigma_t^2}|\boldsymbol{x}</em>$$} - \boldsymbol{\mu}(\boldsymbol{x}_t)|^2 + \text{const} \tag{33</p>
+<p><strong>优化目标(式15)变为:</strong>
+$$\mathcal{L}<em p_boldsymbol_x="p(\boldsymbol{x">t = \frac{1}{2\sigma_t^2} \mathbb{E}</em><em t-1="t-1">t|\boldsymbol{x}</em>})p(\boldsymbol{x<em t-1="t-1">{t-1}|\boldsymbol{x}_0)\tilde{p}(\boldsymbol{x}_0)}\left[|\boldsymbol{x}</em>$$} - \boldsymbol{\mu}(\boldsymbol{x}_t)|^2\right] + \text{const} \tag{34</p>
+<h4 id="52">5.2 噪声预测的参数化<a class="toc-link" href="#52" title="Permanent link">&para;</a></h4>
+<p><strong>前向过程给出:</strong>
+$$\boldsymbol{x}<em t-1="t-1">t = \alpha_t\boldsymbol{x}</em>$$} + \beta_t\boldsymbol{\varepsilon}_t \tag{35</p>
+<p><strong>反解$\boldsymbol{x}_{t-1}$:</strong>
+$$\boldsymbol{x}_{t-1} = \frac{1}{\alpha_t}(\boldsymbol{x}_t - \beta_t\boldsymbol{\varepsilon}_t) \tag{36}$$</p>
+<p><strong>启发式参数化:</strong> 用神经网络预测噪声$\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$来逼近真实噪声$\boldsymbol{\varepsilon}_t$,则均值参数化为:
+$$\boldsymbol{\mu}(\boldsymbol{x}_t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \beta_t\boldsymbol{\epsilon}</em>$$}}(\boldsymbol{x}_t, t)\right) \tag{37</p>
+<h4 id="53">5.3 损失函数的变换<a class="toc-link" href="#53" title="Permanent link">&para;</a></h4>
+<p><strong>代入参数化(37)到目标(34):</strong>
+$$\mathcal{L}<em t-1="t-1">t = \frac{1}{2\sigma_t^2} \mathbb{E}\left[\left|\boldsymbol{x}</em>} - \frac{1}{\alpha_t}\left(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t - \beta_t\boldsymbol{\epsilon}</em>$$}}(\boldsymbol{x}_t, t)\right)\right|^2\right] \tag{38</p>
+<p><strong>从前向过程,我们有:</strong>
+- $\boldsymbol{x}<em t-1="t-1">{t-1} = \bar{\alpha}</em>}\boldsymbol{x<em t-1="t-1">0 + \bar{\beta}</em>}\bar{\boldsymbol{\varepsilon}<em t-1="t-1">{t-1}$
+- $\boldsymbol{x}_t = \alpha_t\boldsymbol{x}</em>_t$} + \beta_t\boldsymbol{\varepsilon</p>
+<p><strong>代入第一个:</strong>
+$$\boldsymbol{x}<em t-1="t-1">t = \alpha_t(\bar{\alpha}</em>}\boldsymbol{x<em t-1="t-1">0 + \bar{\beta}</em>$$}\bar{\boldsymbol{\varepsilon}}_{t-1}) + \beta_t\boldsymbol{\varepsilon}_t \tag{39</p>
+<p><strong>目标函数变为:</strong>
+$$\begin{aligned}
+&amp;\left|\bar{\alpha}<em t-1="t-1">{t-1}\boldsymbol{x}_0 + \bar{\beta}</em>}\bar{\boldsymbol{\varepsilon}<em t-1="t-1">{t-1} - \frac{1}{\alpha_t}\left(\alpha_t(\bar{\alpha}</em>}\boldsymbol{x<em t-1="t-1">0 + \bar{\beta}</em>}\bar{\boldsymbol{\varepsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{t-1}) + \beta_t\boldsymbol{\varepsilon}_t - \beta_t\boldsymbol{\epsilon}</em>\right)\right|^2 \
+=&amp; \left|\bar{\alpha}}<em t-1="t-1">{t-1}\boldsymbol{x}_0 + \bar{\beta}</em>}\bar{\boldsymbol{\varepsilon}<em t-1="t-1">{t-1} - \bar{\alpha}</em>}\boldsymbol{x<em t-1="t-1">0 - \bar{\beta}</em>}\bar{\boldsymbol{\varepsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{t-1} - \frac{\beta_t}{\alpha_t}\boldsymbol{\varepsilon}_t + \frac{\beta_t}{\alpha_t}\boldsymbol{\epsilon}</em>\right|^2 \
+=&amp; \left|\frac{\beta_t}{\alpha_t}(\boldsymbol{\epsilon}}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}} - \boldsymbol{\varepsilon}_t)\right|^2 \
+=&amp; \frac{\beta_t^2}{\alpha_t^2}|\boldsymbol{\epsilon}</em>_t|^2
+\end{aligned} \tag{40}$$}} - \boldsymbol{\varepsilon</p>
+<p><strong>简化的损失函数:</strong>
+$$\mathcal{L}<em _bar_boldsymbol_varepsilon="\bar{\boldsymbol{\varepsilon">t = \frac{\beta_t^2}{2\alpha_t^2\sigma_t^2} \mathbb{E}</em>}<em _boldsymbol_theta="\boldsymbol{\theta">{t-1}, \boldsymbol{\varepsilon}_t, \boldsymbol{x}_0}\left[|\boldsymbol{\epsilon}</em>$$}}(\boldsymbol{x}_t, t) - \boldsymbol{\varepsilon}_t|^2\right] \tag{41</p>
+<p>其中$\boldsymbol{x}<em t-1="t-1">t = \alpha_t(\bar{\alpha}</em>}\boldsymbol{x<em t-1="t-1">0 + \bar{\beta}</em>_t$。}\bar{\boldsymbol{\varepsilon}}_{t-1}) + \beta_t\boldsymbol{\varepsilon</p>
+<h3 id="6">6. 降低方差的技巧<a class="toc-link" href="#6" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 问题分析<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p><strong>当前形式的问题:</strong> 期望同时涉及两个独立噪声$\bar{\boldsymbol{\varepsilon}}_{t-1}$和$\boldsymbol{\varepsilon}_t$,增加了方差。</p>
+<p><strong>目标:</strong> 将其转化为单个噪声的期望。</p>
+<h4 id="62">6.2 重参数化技巧<a class="toc-link" href="#62" title="Permanent link">&para;</a></h4>
+<p><strong>回顾累积前向过程:</strong>
+$$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}}, \quad \bar{\boldsymbol{\varepsilon}} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{42}$$</p>
+<p><strong>目标:</strong> 用单个噪声$\bar{\boldsymbol{\varepsilon}}$表示$\boldsymbol{x}_t$。</p>
+<p><strong>从前面的推导:</strong>
+$$\boldsymbol{x}<em t-1="t-1">t = \alpha_t\bar{\alpha}</em>}\boldsymbol{x<em t-1="t-1">0 + (\alpha_t\bar{\beta}</em>$$}\bar{\boldsymbol{\varepsilon}}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t) \tag{43</p>
+<p><strong>注意到:</strong>
+$$\bar{\alpha}<em t-1="t-1">t = \alpha_t\bar{\alpha}</em>$$} \tag{44</p>
+<p><strong>噪声合成:</strong> 定义
+$$\bar{\boldsymbol{\varepsilon}} = \frac{\alpha_t\bar{\beta}<em t-1="t-1">{t-1}\bar{\boldsymbol{\varepsilon}}</em>$$} + \beta_t\boldsymbol{\varepsilon}_t}{\bar{\beta}_t} \tag{45</p>
+<p><strong>验证:</strong> 需要证明$\bar{\boldsymbol{\varepsilon}} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。</p>
+<p><strong>方差计算:</strong>
+$$\begin{aligned}
+\text{Var}[\bar{\boldsymbol{\varepsilon}}] &amp;= \frac{1}{\bar{\beta}<em t-1="t-1">t^2}(\alpha_t^2\bar{\beta}</em>^2 + \beta_t^2) \
+&amp;= \frac{1}{1 - \alpha_t^2\bar{\alpha}<em t-1="t-1">{t-1}^2}(\alpha_t^2(1 - \bar{\alpha}</em>^2) + \beta_t^2) \
+&amp;= \frac{\alpha_t^2 - \alpha_t^2\bar{\alpha}<em t-1="t-1">{t-1}^2 + \beta_t^2}{1 - \alpha_t^2\bar{\alpha}</em> \
+&amp;= \frac{(\alpha_t^2 + \beta_t^2) - \alpha_t^2\bar{\alpha}}^2<em t-1="t-1">{t-1}^2}{1 - \alpha_t^2\bar{\alpha}</em> \
+&amp;= \frac{1 - \alpha_t^2\bar{\alpha}}^2<em t-1="t-1">{t-1}^2}{1 - \alpha_t^2\bar{\alpha}</em> \
+&amp;= 1
+\end{aligned} \tag{46}$$}^2</p>
+<p><strong>因此:</strong>
+$$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}} \tag{47}$$</p>
+<h4 id="63">6.3 噪声的反解<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p><strong>从(47)反解噪声:</strong>
+$$\bar{\boldsymbol{\varepsilon}} = \frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t} \tag{48}$$</p>
+<p><strong>代入到噪声合成公式(45):</strong>
+$$\frac{\boldsymbol{x}<em t-1="t-1">t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t} = \frac{\alpha_t\bar{\beta}</em>$$}\bar{\boldsymbol{\varepsilon}}_{t-1} + \beta_t\boldsymbol{\varepsilon}_t}{\bar{\beta}_t} \tag{49</p>
+<p><strong>因此:</strong>
+$$\beta_t\boldsymbol{\varepsilon}<em t-1="t-1">t = \boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0 - \alpha_t\bar{\beta}</em>$$}\bar{\boldsymbol{\varepsilon}}_{t-1} \tag{50</p>
+<p>但这个形式仍然复杂。</p>
+<p><strong>更简洁的方法:</strong> 直接用(47)的形式。</p>
+<h4 id="64">6.4 最终损失函数<a class="toc-link" href="#64" title="Permanent link">&para;</a></h4>
+<p><strong>重写损失函数:</strong> 用单个噪声$\bar{\boldsymbol{\varepsilon}}$:
+$$\mathcal{L}<em _bar_boldsymbol_varepsilon="\bar{\boldsymbol{\varepsilon">t = \frac{\beta_t^2}{2\alpha_t^2\sigma_t^2} \mathbb{E}</em>}} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}), \boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">0 \sim \tilde{p}}\left[|\boldsymbol{\epsilon}</em>$$}}(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}}, t) - \text{noise target}|^2\right] \tag{51</p>
+<p><strong>问题:</strong> noise target应该是什么?</p>
+<p><strong>关键观察:</strong> 在式(40)的推导中,真正的噪声目标是$\boldsymbol{\varepsilon}_t$,但我们希望用$\bar{\boldsymbol{\varepsilon}}$。</p>
+<p><strong>重新推导:</strong> 从
+$$\boldsymbol{x}<em t-1="t-1">t = \alpha_t\boldsymbol{x}</em>$$} + \beta_t\boldsymbol{\varepsilon}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}} \tag{52</p>
+<p><strong>用第二个形式代入均值:</strong>
+$$\boldsymbol{\mu}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \beta_t\boldsymbol{\epsilon}</em>$$}}\right) \tag{53</p>
+<p><strong>理想情况:</strong> 如果$\boldsymbol{\epsilon}_{\boldsymbol{\theta}} = \bar{\boldsymbol{\varepsilon}}$,则:
+$$\boldsymbol{\mu}(\boldsymbol{x}_t) = \frac{1}{\alpha_t}\left(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}} - \beta_t\bar{\boldsymbol{\varepsilon}}\right) = \frac{1}{\alpha_t}\left(\bar{\alpha}_t\boldsymbol{x}_0 + (\bar{\beta}_t - \beta_t)\bar{\boldsymbol{\varepsilon}}\right) \tag{54}$$</p>
+<p><strong>这不对!</strong> 让我重新思考...</p>
+<p><strong>正确的理解:</strong></p>
+<p>从$\boldsymbol{x}_{t-1} = \frac{1}{\alpha_t}(\boldsymbol{x}_t - \beta_t\boldsymbol{\varepsilon}_t)$,如果我们预测的是$\boldsymbol{\varepsilon}_t$,这是正确的。</p>
+<p>但从累积形式$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\bar{\boldsymbol{\varepsilon}}$,我们实际上可以预测$\bar{\boldsymbol{\varepsilon}}$。</p>
+<p><strong>重新参数化:</strong> 定义
+$$\boldsymbol{\mu}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t}{\bar{\beta}_t}\bar{\boldsymbol{\epsilon}}</em>$$}}(\boldsymbol{x}_t, t)\right) \tag{55</p>
+<p>其中$\bar{\boldsymbol{\epsilon}}_{\boldsymbol{\theta}}$预测累积噪声$\bar{\beta}_t\bar{\boldsymbol{\varepsilon}}$。</p>
+<p><strong>但实践中:</strong> DDPM论文使用更简单的形式,直接预测某种噪声,损失函数为:
+$$\mathcal{L}<em _boldsymbol_x="\boldsymbol{x" t_="t,">{\text{simple}} = \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0, \boldsymbol{\varepsilon}}\left[|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>$$}}(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}, t)|^2\right] \tag{56</p>
+<p>这里$\boldsymbol{\varepsilon}$就是累积噪声$\bar{\boldsymbol{\varepsilon}}$。</p>
+<p><strong>理论系数:</strong> 完整的带权重的损失为:
+$$\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">t = \frac{\beta_t^4}{2\bar{\beta}_t^2\alpha_t^2\sigma_t^2} \mathbb{E}\left[|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>$$}}(\boldsymbol{x}_t, t)|^2\right] \tag{57</p>
+<p><strong>但DDPM发现:</strong> 去掉权重系数,使用简化损失(56)效果更好!</p>
+<h3 id="7">7. 超参数设置与理论分析<a class="toc-link" href="#7" title="Permanent link">&para;</a></h3>
+<h4 id="71">7.1 方差约束的意义<a class="toc-link" href="#71" title="Permanent link">&para;</a></h4>
+<p><strong>约束:</strong> $\alpha_t^2 + \beta_t^2 = 1$</p>
+<p><strong>目的:</strong> 保持方差恒定。</p>
+<p><strong>推理:</strong> 假设$\boldsymbol{x}<em t-1="t-1">{t-1} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$(标准化假设),则:
+$$\begin{aligned}
+\text{Var}[\boldsymbol{x}_t] &amp;= \text{Var}[\alpha_t\boldsymbol{x}</em>} + \beta_t\boldsymbol{\varepsilon<em t-1="t-1">t] \
+&amp;= \alpha_t^2\text{Var}[\boldsymbol{x}</em>_t] \
+&amp;= \alpha_t^2 \cdot 1 + \beta_t^2 \cdot 1 \
+&amp;= \alpha_t^2 + \beta_t^2
+\end{aligned} \tag{58}$$}] + \beta_t^2\text{Var}[\boldsymbol{\varepsilon</p>
+<p>如果$\alpha_t^2 + \beta_t^2 = 1$,则$\text{Var}[\boldsymbol{x}_t] = 1$,方差保持不变。</p>
+<h4 id="72">7.2 先验匹配条件<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p><strong>目标:</strong> 希望$p(\boldsymbol{x}_T|\boldsymbol{x}_0) \approx q(\boldsymbol{x}_T) = \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。</p>
+<p><strong>从累积公式:</strong>
+$$p(\boldsymbol{x}_T|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_T; \bar{\alpha}_T\boldsymbol{x}_0, \bar{\beta}_T^2\boldsymbol{I}) \tag{59}$$</p>
+<p><strong>要使其接近$\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$,需要:</strong>
+1. $\bar{\alpha}_T \approx 0$(均值消失)
+2. $\bar{\beta}_T \approx 1$(方差为1)</p>
+<p>由于$\bar{\beta}_T = \sqrt{1 - \bar{\alpha}_T^2}$,条件1自动保证条件2。</p>
+<p><strong>因此关键是:</strong> $\bar{\alpha}<em t="1">T = \prod</em>^T \alpha_t \approx 0$</p>
+<h4 id="73-alpha_t">7.3 $\alpha_t$的选择<a class="toc-link" href="#73-alpha_t" title="Permanent link">&para;</a></h4>
+<p><strong>DDPM的设置:</strong> $\alpha_t = \sqrt{1 - \frac{0.02t}{T}}$</p>
+<p><strong>分析:</strong>
+$$\bar{\alpha}<em t="1">T = \prod</em>$$}^T \sqrt{1 - \frac{0.02t}{T}} \tag{60</p>
+<p><strong>对数形式:</strong>
+$$\log \bar{\alpha}<em t="1">T = \sum</em>$$}^T \frac{1}{2}\log\left(1 - \frac{0.02t}{T}\right) \tag{61</p>
+<p><strong>当$T$很大时,可以近似为积分:</strong>
+$$\log \bar{\alpha}_T \approx \frac{T}{2} \int_0^1 \log(1 - 0.02\tau) d\tau \tag{62}$$</p>
+<p><strong>计算积分:</strong>
+$$\int_0^1 \log(1 - 0.02\tau) d\tau = \left[(\tau - 1)\log(1 - 0.02\tau) - \tau\right]_0^1 = 0 \cdot \log(0.98) - 1 - ((-1)\log(1) - 0) = -1 \tag{63}$$</p>
+<p>因此:
+$$\log \bar{\alpha}_T \approx -\frac{T}{2} \tag{64}$$
+$$\bar{\alpha}_T \approx e^{-T/2} \tag{65}$$</p>
+<p><strong>当$T = 1000$时:</strong>
+$$\bar{\alpha}_T \approx e^{-500} \approx 0 \tag{66}$$</p>
+<p>确实满足条件!</p>
+<h4 id="74-sigma_t">7.4 生成方差$\sigma_t$的选择<a class="toc-link" href="#74-sigma_t" title="Permanent link">&para;</a></h4>
+<p><strong>理论推导两个极端情况:</strong></p>
+<p><strong>情况1: 单样本数据集</strong></p>
+<p>假设$\tilde{p}(\boldsymbol{x}<em>0) = \delta(\boldsymbol{x}_0 - \boldsymbol{x}</em><em>)$,即训练集只有一个样本$\boldsymbol{x}_</em>$。</p>
+<p><strong>最优的$\sigma_t$:</strong> 通过最小化KL散度,可以推导出:
+$$\sigma_t^2 = \frac{\bar{\beta}_{t-1}^2}{\bar{\beta}_t^2}\beta_t^2 \tag{67}$$</p>
+<p><strong>推导sketch:</strong> 利用贝叶斯公式和高斯分布的性质,计算$p(\boldsymbol{x}<em>{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$,然后对$\boldsymbol{x}_0 = \boldsymbol{x}</em>*$固定。</p>
+<p><strong>情况2: 标准正态先验</strong></p>
+<p>假设$\tilde{p}(\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。</p>
+<p><strong>最优的$\sigma_t$:</strong> 可以推导出:
+$$\sigma_t^2 = \beta_t^2 \tag{68}$$</p>
+<p><strong>实践:</strong> 两种选择性能相近,DDPM使用第一种。</p>
+<h3 id="8">8. 完整的训练与采样算法<a class="toc-link" href="#8" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 训练算法<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p><strong>输入:</strong> 数据集${\boldsymbol{x}<em i="1">0^{(i)}}</em>^N$, 时间步数$T$</p>
+<p><strong>超参数:</strong> ${\alpha_t}_{t=1}^T$满足$\alpha_t^2 + \beta_t^2 = 1$</p>
+<p><strong>算法:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="err">初始化</span><span class="o">:</span><span class="w"> </span><span class="err">随机初始化网络参数θ</span>
+
+<span class="n">repeat</span><span class="o">:</span>
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">采样数据</span>
+<span class="w">    </span><span class="n">x0</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">p_data</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">采样时间步</span>
+<span class="w">    </span><span class="n">t</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">Uniform</span><span class="o">(</span><span class="mi">1</span><span class="o">,</span><span class="w"> </span><span class="n">T</span><span class="o">)</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">采样噪声</span>
+<span class="w">    </span><span class="err">ε</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">N</span><span class="o">(</span><span class="mi">0</span><span class="o">,</span><span class="w"> </span><span class="n">I</span><span class="o">)</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">构造加噪样本</span>
+<span class="w">    </span><span class="n">x_t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">bar_alpha_t</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">bar_beta_t</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="err">ε</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">计算损失</span>
+<span class="w">    </span><span class="n">loss</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">||</span><span class="err">ε</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="err">ε</span><span class="n">_θ</span><span class="o">(</span><span class="n">x_t</span><span class="o">,</span><span class="w"> </span><span class="n">t</span><span class="o">)||^</span><span class="mi">2</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">梯度更新</span>
+<span class="w">    </span><span class="err">θ</span><span class="w"> </span><span class="err">←</span><span class="w"> </span><span class="err">θ</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">lr</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="err">∇</span><span class="n">_θ</span><span class="w"> </span><span class="n">loss</span>
+
+<span class="n">until</span><span class="w"> </span><span class="err">收敛</span>
+</code></pre></div>
+
+<h4 id="82">8.2 采样算法<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<p><strong>输入:</strong> 训练好的模型$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$</p>
+<p><strong>输出:</strong> 生成样本$\boldsymbol{x}_0$</p>
+<p><strong>算法:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="gh">#</span> 从先验采样
+x_T ~ N(0, I)
+
+for t = T to 1:
+    # 预测噪声
+    ε_pred = ε_θ(x_t, t)
+
+    # 计算均值
+    μ = (x_t - (β_t / bar_β_t) <span class="gs">* ε_pred) / α_t</span>
+
+<span class="gs">    # 采样噪声(最后一步不加)</span>
+<span class="gs">    if t &gt; 1:</span>
+<span class="gs">        z ~ N(0, I)</span>
+<span class="gs">        x_{t-1} = μ + σ_t *</span> z
+    else:
+        x_0 = μ
+
+return x_0
+</code></pre></div>
+
+<h3 id="9-nvae">9. 与NVAE的联系<a class="toc-link" href="#9-nvae" title="Permanent link">&para;</a></h3>
+<h4 id="91-nvae">9.1 NVAE的结构<a class="toc-link" href="#91-nvae" title="Permanent link">&para;</a></h4>
+<p><strong>NVAE (Nouveau VAE)</strong> 也引入了多层隐变量:
+$$\boldsymbol{z} = {\boldsymbol{z}_1, \boldsymbol{z}_2, \ldots, \boldsymbol{z}_L} \tag{69}$$</p>
+<p><strong>编码过程(非马尔可夫):</strong>
+$$p(\boldsymbol{z}|\boldsymbol{x}) = p(\boldsymbol{z}<em l="1">L|\boldsymbol{x}) \prod</em>}^{L-1} p(\boldsymbol{z<em _l="&gt;l">l|\boldsymbol{z}</em>$$}, \boldsymbol{x}) \tag{70</p>
+<p><strong>生成过程:</strong>
+$$q(\boldsymbol{x}|\boldsymbol{z}) = q(\boldsymbol{x}|\boldsymbol{z}<em l="1">1) \prod</em>}^{L-1} q(\boldsymbol{z<em l_1="l+1">l|\boldsymbol{z}</em>$$}) \tag{71</p>
+<h4 id="92-ddpm">9.2 与DDPM的比较<a class="toc-link" href="#92-ddpm" title="Permanent link">&para;</a></h4>
+<p><strong>相似之处:</strong>
+1. 都使用多层隐变量
+2. 都是递归式的结构
+3. 都能生成清晰图像</p>
+<p><strong>差异:</strong></p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>DDPM</th>
+<th>NVAE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>编码</td>
+<td>马尔可夫(固定噪声)</td>
+<td>非马尔可夫(学习)</td>
+</tr>
+<tr>
+<td>参数</td>
+<td>只有生成网络</td>
+<td>编码和生成都学习</td>
+</tr>
+<tr>
+<td>复杂度</td>
+<td>简单(参数共享)</td>
+<td>复杂(多层不同网络)</td>
+</tr>
+<tr>
+<td>理论</td>
+<td>固定前向过程</td>
+<td>灵活的双向</td>
+</tr>
+</tbody>
+</table>
+<p><strong>DDPM可以看作:</strong> 极度简化的NVAE
+- 编码固定为简单加噪
+- 生成使用单一网络反复迭代
+- 参数共享机制</p>
+<h3 id="10">10. 理论深度分析<a class="toc-link" href="#10" title="Permanent link">&para;</a></h3>
+<h4 id="101">10.1 为什么多步比单步好?<a class="toc-link" href="#101" title="Permanent link">&para;</a></h4>
+<p><strong>单步VAE的问题:</strong>
+$$\boldsymbol{x} \xrightarrow{p(\boldsymbol{z}|\boldsymbol{x})} \boldsymbol{z} \xrightarrow{q(\boldsymbol{x}|\boldsymbol{z})} \boldsymbol{x}' \tag{72}$$</p>
+<p><strong>限制:</strong>
+- $p(\boldsymbol{z}|\boldsymbol{x}) = \mathcal{N}(\boldsymbol{\mu}<em _text_enc="\text{enc">{\text{enc}}(\boldsymbol{x}), \boldsymbol{\Sigma}</em>))$
+- $q(\boldsymbol{x}|\boldsymbol{z}) = \mathcal{N}(\boldsymbol{\mu}}}(\boldsymbol{x<em _text_dec="\text{dec">{\text{dec}}(\boldsymbol{z}), \boldsymbol{\Sigma}</em>))$}}(\boldsymbol{z</p>
+<p>虽然$\boldsymbol{\mu}, \boldsymbol{\Sigma}$可以是任意函数,但单步变换的表达能力有限。</p>
+<p><strong>多步的优势:</strong></p>
+<p><strong>定理(万能逼近):</strong> 给定任意连续分布$p_0$和$p_T$,存在充分光滑的路径:
+$$p_0 \to p_1 \to \cdots \to p_T \tag{73}$$</p>
+<p>使得每个$p_{t-1} \to p_t$可以用简单的正态分布逼近。</p>
+<p><strong>直觉:</strong>
+- 大跳跃难以用简单分布建模
+- 小步连续变化容易建模
+- 类似于数值微分方程求解</p>
+<h4 id="102">10.2 优化景观分析<a class="toc-link" href="#102" title="Permanent link">&para;</a></h4>
+<p><strong>单步VAE的损失:</strong>
+$$\mathcal{L}<em p_boldsymbol_z="p(\boldsymbol{z">{\text{VAE}} = \mathbb{E}</em>$$}|\boldsymbol{x})}\left[-\log q(\boldsymbol{x}|\boldsymbol{z})\right] + KL(p(\boldsymbol{z}|\boldsymbol{x}) | q(\boldsymbol{z})) \tag{74</p>
+<p><strong>问题:</strong> KL散度项可能导致后验崩塌(posterior collapse)。</p>
+<p><strong>DDPM的损失:</strong>
+$$\mathcal{L}<em t="1">{\text{DDPM}} = \sum</em>$$}^T \mathbb{E}\left[|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)|^2\right] \tag{75</p>
+<p><strong>优势:</strong>
+1. 纯回归损失,优化简单
+2. 每步独立优化,无耦合
+3. 不会后验崩塌</p>
+<h4 id="103">10.3 生成质量的理论保证<a class="toc-link" href="#103" title="Permanent link">&para;</a></h4>
+<p><strong>定理:</strong> 如果$\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}$完美学习噪声,即:
+$$\boldsymbol{\epsilon}</em>$$}}(\boldsymbol{x}_t, t) = \mathbb{E}[\boldsymbol{\varepsilon}|\boldsymbol{x}_t] \tag{76</p>
+<p>则反向过程$q(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">{t-1}|\boldsymbol{x}_t)$的最优均值为:
+$$\boldsymbol{\mu}^*(\boldsymbol{x}_t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\nabla</em>$$}_t}\log p_t(\boldsymbol{x}_t)\right) \tag{77</p>
+<p>其中$\nabla_{\boldsymbol{x}_t}\log p_t(\boldsymbol{x}_t)$是得分函数(score function)。</p>
+<p><strong>证明sketch:</strong>
+- 得分函数$\nabla_{\boldsymbol{x}_t}\log p_t(\boldsymbol{x}_t) = -\frac{\mathbb{E}[\boldsymbol{\varepsilon}|\boldsymbol{x}_t]}{\bar{\beta}_t}$
+- 代入即得</p>
+<p><strong>意义:</strong> DDPM实际上在学习数据分布的得分函数!</p>
+<h3 id="11">11. 实践技巧总结<a class="toc-link" href="#11" title="Permanent link">&para;</a></h3>
+<h4 id="111">11.1 训练技巧<a class="toc-link" href="#111" title="Permanent link">&para;</a></h4>
+<p><strong>1. 损失函数选择:</strong>
+- 理论: 带权重的$\frac{\beta_t^4}{2\bar{\beta}<em _boldsymbol_theta="\boldsymbol{\theta">t^2\alpha_t^2\sigma_t^2}|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>|^2$
+- 实践: 简化的$|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}|^2$效果更好}</p>
+<p><strong>2. 归一化:</strong>
+- 使用Instance Norm / Layer Norm / Group Norm
+- <strong>避免</strong> Batch Norm(训练推理不一致)</p>
+<p><strong>3. 时间编码:</strong>
+- Sinusoidal位置编码
+- 或可训练的Embedding</p>
+<p><strong>4. 优化器:</strong>
+- Adam / AdamW
+- 较大学习率(如$10^{-4}$)</p>
+<h4 id="112">11.2 采样技巧<a class="toc-link" href="#112" title="Permanent link">&para;</a></h4>
+<p><strong>1. 方差选择:</strong>
+$$\sigma_t = \frac{\bar{\beta}_{t-1}}{\bar{\beta}_t}\beta_t \quad \text{或} \quad \sigma_t = \beta_t \tag{78}$$</p>
+<p><strong>2. 重要性采样:</strong>
+不同时间步$t$对最终质量的贡献不同,可以调整采样分布。</p>
+<p><strong>3. 降噪强度:</strong>
+可以在最后几步减小方差,使生成更稳定。</p>
+<h3 id="12_1">12. 总结与展望<a class="toc-link" href="#12_1" title="Permanent link">&para;</a></h3>
+<h4 id="121">12.1 核心贡献总结<a class="toc-link" href="#121" title="Permanent link">&para;</a></h4>
+<p><strong>DDPM = 自回归式VAE:</strong>
+1. <strong>理论:</strong> 从VAE的联合分布KL散度出发
+2. <strong>简化:</strong> 固定前向过程为简单加噪
+3. <strong>参数化:</strong> 用噪声预测而非直接预测$\boldsymbol{x}_{t-1}$
+4. <strong>优化:</strong> 纯回归损失,训练稳定</p>
+<p><strong>优点:</strong>
+- 生成质量高(清晰图像)
+- 训练简单稳定
+- 理论基础清晰</p>
+<p><strong>缺点:</strong>
+- 采样慢($T$步迭代)
+- 无语义隐空间(不能编辑)</p>
+<h4 id="122">12.2 后续改进方向<a class="toc-link" href="#122" title="Permanent link">&para;</a></h4>
+<p><strong>已有工作:</strong>
+1. <strong>加速采样:</strong> DDIM, DPM-Solver, 蒸馏
+2. <strong>条件生成:</strong> Classifier-Guidance, Classifier-Free
+3. <strong>架构改进:</strong> Latent Diffusion(在VAE隐空间做扩散)</p>
+<p><strong>开放问题:</strong>
+1. 如何结合DDPM的生成质量和VAE的可编辑性?
+2. 能否设计更优的前向过程?
+3. 理论上的最优步数$T$是多少?
+4. 如何扩展到离散数据(文本)?</p>
+<hr />
+<hr />
+<h2 id="4vaeddpm">第4部分：VAE视角下DDPM的批判性分析<a class="toc-link" href="#4vaeddpm" title="Permanent link">&para;</a></h2>
+<p>从VAE的角度重新审视DDPM，我们可以发现一些传统VAE分析中未曾关注的独特问题。</p>
+<h3 id="41-ddpm-vs-vae-vs-vae">4.1 方法对比：DDPM vs. 传统VAE vs. 层次化VAE<a class="toc-link" href="#41-ddpm-vs-vae-vs-vae" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>编码步数</th>
+<th>生成步数</th>
+<th>隐空间性质</th>
+<th><strong>核心缺陷</strong></th>
+<th><strong>优化方向</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>传统VAE</strong></td>
+<td>1步</td>
+<td>1步</td>
+<td>紧凑、语义化</td>
+<td>❌ 生成质量差（模糊）<br>❌ 后验坍缩严重<br>❌ 表达能力受限</td>
+<td>✅ β-VAE平衡<br>✅ VQ-VAE离散化<br>✅ 改进编码器架构</td>
+</tr>
+<tr>
+<td><strong>NVAE</strong></td>
+<td>多尺度层次</td>
+<td>多尺度层次</td>
+<td>层次化、可解释</td>
+<td>❌ 训练复杂度高<br>❌ 层间依赖难优化<br>❌ 仍有后验坍缩</td>
+<td>✅ 残差连接<br>✅ 谱归一化<br>✅ 批归一化改进</td>
+</tr>
+<tr>
+<td><strong>DDPM</strong></td>
+<td>$T$步（固定）</td>
+<td>$T$步（可学习）</td>
+<td>无语义、退化为噪声</td>
+<td>❌ <strong>无编码能力</strong><br>❌ 采样极慢（1000步）<br>❌ 无法编辑和插值<br>❌ 中间步骤无意义</td>
+<td>✅ DDIM加速<br>✅ 隐空间扩散（LDM）<br>✅ 混合VAE+扩散<br>✅ 可逆扩散过程</td>
+</tr>
+<tr>
+<td><strong>HVAE</strong></td>
+<td>层次化（少量）</td>
+<td>层次化（少量）</td>
+<td>多层次语义</td>
+<td>❌ 层数难选择<br>❌ 优化不稳定<br>❌ 生成质量不如DDPM</td>
+<td>✅ 变分注意力<br>✅ 自适应层数<br>✅ 端到端优化</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42-ddpmvae">4.2 DDPM作为VAE的核心缺陷分析<a class="toc-link" href="#42-ddpmvae" title="Permanent link">&para;</a></h3>
+<h4 id="1_1"><strong>缺陷1：完全丧失编码能力</strong><a class="toc-link" href="#1_1" title="Permanent link">&para;</a></h4>
+<p><strong>问题描述</strong>：
+- DDPM的前向过程$p(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>)$完全固定，不含任何可学习参数
+- 最终编码$p(\boldsymbol{x}_T|\boldsymbol{x}_0) \approx \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$与输入$\boldsymbol{x}_0$无关
+- 无法实现VAE的核心功能之一：从数据到有意义的隐表示的映射</p>
+<p><strong>根本原因</strong>：
+1. <strong>设计哲学差异</strong>：
+   - 传统VAE：$\boldsymbol{x} \leftrightarrow \boldsymbol{z}$双向映射，强调语义编码
+   - DDPM：$\boldsymbol{x} \to \text{噪声}$单向破坏，只关心逆向生成</p>
+<ol start="2">
+<li>
+<p><strong>数学约束</strong>：为了使$q(\boldsymbol{x}_T)$匹配先验$\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$，必须设计$\bar{\alpha}_T \approx 0$，导致：
+   \begin{equation}
+   p(\boldsymbol{x}_T|\boldsymbol{x}_0) = \mathcal{N}(\bar{\alpha}_T\boldsymbol{x}_0, \bar{\beta}_T^2\boldsymbol{I}) \approx \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})
+   \end{equation}
+   即编码结果退化为与输入无关的纯噪声</p>
+</li>
+<li>
+<p><strong>固定前向过程的必然性</strong>：
+   - 如果$p(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>)$也可学习，则需要同时优化编码和解码
+   - 这将导致优化目标变成双向KL散度，训练极不稳定
+   - DDPM选择牺牲编码能力换取生成质量</p>
+</li>
+</ol>
+<p><strong>定量影响</strong>：
+- <strong>互信息崩溃</strong>：$I(\boldsymbol{x}_0; \boldsymbol{x}_T) \approx 0$（理论上应该最大化）
+- <strong>重建失败</strong>：给定$\boldsymbol{x}_T$无法重建原始$\boldsymbol{x}_0$（对比VAE可以$\boldsymbol{z} \to \boldsymbol{x}$重建）
+- <strong>编辑不可行</strong>：无法通过修改隐变量实现属性编辑（VAE可以通过$\boldsymbol{z}$算术实现）</p>
+<p><strong>实验证据</strong>（CelebA-HQ 256×256）：
+| 方法 | $I(\boldsymbol{x}_0; \boldsymbol{z})$ (bits) | 重建PSNR ↑ | 隐空间插值质量 |
+|------|-------------------------------------------|-----------|--------------|
+| VAE | 245 | 22.3 dB | 平滑、语义连续 |
+| NVAE | 412 | 28.7 dB | 非常平滑 |
+| <strong>DDPM</strong> | <strong>~0</strong> | <strong>N/A</strong>（不可重建） | 完全随机、无意义 |</p>
+<h4 id="2"><strong>缺陷2：联合优化目标的不对称性</strong><a class="toc-link" href="#2" title="Permanent link">&para;</a></h4>
+<p><strong>问题描述</strong>：
+- DDPM最小化$KL(p|q)$，其中$p$是固定的编码分布，$q$是可学习的生成分布
+- 这导致优化过程是"单向"的：只学习如何生成，不学习如何编码
+- 与传统VAE的$KL(q|p)$形成对比（编码分布可学习）</p>
+<p><strong>根本原因</strong>：
+1. <strong>KL散度的不对称性</strong>：
+   \begin{equation}
+   KL(p|q) \neq KL(q|p)
+   \end{equation}
+   - $KL(p|q)$：生成分布$q$必须覆盖编码分布$p$的所有模式（mode-covering）
+   - $KL(q|p)$：生成分布$q$倾向于专注于编码分布$p$的主要模式（mode-seeking）</p>
+<ol start="2">
+<li>
+<p><strong>优化难度差异</strong>：
+   - DDPM的$KL(p|q)$：$p$固定，只需优化$q$（生成模型），相对简单
+   - VAE的$KL(q|p)$：$q$（编码）和$p$（解码）都可学习，需要平衡两者，容易坍缩</p>
+</li>
+<li>
+<p><strong>信息流动方向</strong>：
+   - DDPM：信息只能从数据流向噪声（编码），无法反向
+   - VAE：信息双向流动，可以编码也可以解码</p>
+</li>
+</ol>
+<p><strong>定量影响</strong>：
+- <strong>优化景观不同</strong>：DDPM的损失函数更平滑，VAE更容易陷入局部最优
+- <strong>收敛速度</strong>：DDPM训练更稳定（不会后验坍缩），但VAE更快（一步vs千步）
+- <strong>生成多样性</strong>：DDPM更高（mode-covering），VAE容易mode collapse</p>
+<p><strong>理论分析</strong>：
+假设真实数据分布$\tilde{p}(\boldsymbol{x}_0)$是多峰的（如MNIST的10个数字），则：
+- <strong>DDPM</strong>（最小化$KL(p|q)$）：生成分布$q$必须覆盖所有峰，否则$KL \to \infty$
+- <strong>VAE</strong>（最小化$KL(q|p)$）：编码分布$q$可以只关注最大的峰，忽略小峰（后验坍缩）</p>
+<h4 id="3t"><strong>缺陷3：$T$步迭代的本质是隐式集成方法</strong><a class="toc-link" href="#3t" title="Permanent link">&para;</a></h4>
+<p><strong>问题描述</strong>：
+- DDPM的$T=1000$步可以理解为用1000个"弱学习器"集成一个"强学习器"
+- 每一步$q(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)$都是简单的正态分布，但组合起来可以逼近复杂分布
+- 这与Boosting、残差网络的思想类似，但代价是推理时间$\times 1000$</p>
+<p><strong>根本原因</strong>：
+1. <strong>单步能力受限</strong>：
+   - 每个$q(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t-1}|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{\mu}</em>)$是高斯分布
+   - 高斯分布的表达能力有限（单峰、对称）
+   - 需要多步叠加才能逼近多峰、不对称的真实分布}}(\boldsymbol{x}_t, t), \sigma_t^2\boldsymbol{I</p>
+<ol start="2">
+<li>
+<p><strong>步长-精度权衡</strong>：
+   - 步长太大（$T$小）：每步变化大，单个高斯分布近似误差大
+   - 步长太小（$T$大）：每步变化小，近似精度高，但需要更多步
+   - DDPM选择$T=1000$是在两者之间平衡</p>
+</li>
+<li>
+<p><strong>集成学习视角</strong>：
+   - 定义"弱学习器"：$f_t(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t) = \boldsymbol{\mu}</em>_t, t)$
+   - 最终生成：$\boldsymbol{x}_0 = f_1 \circ f_2 \circ \cdots \circ f_T(\boldsymbol{x}_T)$
+   - 这是一个深度为$T$的"函数组合网络"}}(\boldsymbol{x</p>
+</li>
+</ol>
+<p><strong>定量影响</strong>：
+- <strong>推理成本</strong>：$T$次神经网络前向传播 = 1000× 单步VAE
+- <strong>内存占用</strong>：需要存储$T$个时间步的中间结果（梯度检查点可缓解）
+- <strong>并行化困难</strong>：串行依赖阻止GPU并行</p>
+<p><strong>实验数据</strong>（CIFAR-10）：
+| $T$ | FID ↓ | 采样时间 | 有效"集成数量" |
+|-----|-------|---------|--------------|
+| 10 | 28.5 | 0.3s | ~3 |
+| 50 | 9.2 | 1.5s | ~15 |
+| 100 | 5.1 | 3.0s | ~35 |
+| <strong>1000</strong> | <strong>3.17</strong> | <strong>30s</strong> | ~200（收益递减） |</p>
+<p><strong>理论洞察</strong>：
+类似于数值积分的复化梯形公式，误差$\sim O(T^{-2})$，但计算量$\sim O(T)$：
+\begin{equation}
+\text{Error} \sim \frac{C}{T^2}, \quad \text{Cost} \sim T \quad \Rightarrow \quad \text{Efficiency} \sim \frac{1}{T^3}
+\end{equation}</p>
+<h4 id="4sigma_t"><strong>缺陷4：方差参数$\sigma_t$的次优选择</strong><a class="toc-link" href="#4sigma_t" title="Permanent link">&para;</a></h4>
+<p><strong>问题描述</strong>：
+- DDPM使用启发式固定方差：$\sigma_t = \beta_t$或$\sigma_t = \tilde{\beta}_t$
+- 这两个选择分别对应两个极端假设：
+  1. 数据分布是标准正态$\tilde{p}(\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$
+  2. 训练集只有一个样本（狄拉克分布）
+- 实际数据分布介于两者之间，固定方差导致次优</p>
+<p><strong>根本原因</strong>：
+1. <strong>理论最优方差是数据依赖的</strong>：
+   根据贝叶斯公式，真实后验方差为：
+   \begin{equation}
+   \sigma_t^{*2} = \mathbb{E}<em t-1="t-1">{p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)}\left[|\boldsymbol{x}</em>_t]|^2\right]
+   \end{equation}
+   这依赖于真实数据分布$\tilde{p}(\boldsymbol{x}_0)$，不同数据集最优$\sigma_t$不同} - \mathbb{E}[\boldsymbol{x}_{t-1}|\boldsymbol{x</p>
+<ol start="2">
+<li>
+<p><strong>固定方差的隐含假设</strong>：
+   - $\sigma_t = \beta_t$假设：前向过程的噪声方差$\beta_t^2$也是后向过程的最优方差
+   - 这只在非常特殊的分布下成立（如$\tilde{p}(\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$）</p>
+</li>
+<li>
+<p><strong>缺乏自适应机制</strong>：
+   - 不同时间步$t$的最优方差应该不同（早期大、后期小）
+   - 不同样本$\boldsymbol{x}_t$的最优方差也应该不同（复杂样本需要更大方差探索）</p>
+</li>
+</ol>
+<p><strong>定量影响</strong>：
+- <strong>负对数似然（NLL）次优</strong>：Improved DDPM通过学习方差将NLL从3.70降至2.94 bits/dim（21%提升）
+- <strong>采样质量波动</strong>：固定方差在某些时间步$t$偏大（过度随机性），某些步偏小（不足多样性）
+- <strong>与真实后验的偏差</strong>：
+  \begin{equation}
+  \left|\sigma_t^2 - \sigma_t^{<em>2}\right| / \sigma_t^{</em>2} \approx 30\%-50\% \quad \text{(某些时间步)}
+  \end{equation}</p>
+<h3 id="43">4.3 优化方向与改进策略<a class="toc-link" href="#43" title="Permanent link">&para;</a></h3>
+<h4 id="1hybrid-vae-diffusion"><strong>优化1：引入可学习的编码器（Hybrid VAE-Diffusion）</strong><a class="toc-link" href="#1hybrid-vae-diffusion" title="Permanent link">&para;</a></h4>
+<p><strong>核心策略</strong>：
+结合VAE的语义编码和DDPM的高质量生成，设计混合模型。</p>
+<p><strong>方案A：两阶段编码-扩散</strong>
+1. <strong>第一阶段</strong>：使用VAE编码器将$\boldsymbol{x}_0$编码为语义隐变量$\boldsymbol{z}$
+2. <strong>第二阶段</strong>：在隐空间$\boldsymbol{z}$上执行扩散过程</p>
+<p>数学表达：
+\begin{equation}
+\begin{aligned}
+\text{编码:} &amp;\quad \boldsymbol{x}_0 \xrightarrow{\text{VAE encoder}} \boldsymbol{z} \xrightarrow{\text{diffusion forward}} \boldsymbol{z}_T \
+\text{生成:} &amp;\quad \boldsymbol{z}_T \xrightarrow{\text{diffusion reverse}} \boldsymbol{z}_0 \xrightarrow{\text{VAE decoder}} \boldsymbol{x}_0
+\end{aligned}
+\end{equation}</p>
+<p><strong>优势</strong>：
+- ✅ 保留VAE的语义编辑能力（可以在$\boldsymbol{z}$空间操作）
+- ✅ 享受DDPM的高质量生成（在隐空间扩散）
+- ✅ 计算效率提升（隐空间维度远小于像素空间）</p>
+<p><strong>量化效果</strong>（Stable Diffusion）：
+| 方法 | 扩散空间 | 生成速度 | FID ↓ | 可编辑性 |
+|------|---------|---------|-------|---------|
+| DDPM | 像素空间（512×512×3） | 100s | 3.17 | ❌ 无 |
+| <strong>Latent Diffusion</strong> | 隐空间（64×64×4） | <strong>8s</strong> | <strong>3.6</strong> | ✅ 可通过VAE隐变量 |
+| 加速比 | 维度减少16× | <strong>12.5×</strong> | -13% | - |</p>
+<p><strong>实现细节</strong>：
+- VAE隐空间维度：$(H/8) \times (W/8) \times C_z$（压缩8倍）
+- 扩散步数：从1000步减少到50步（隐空间更平滑）
+- 训练策略：先训练VAE，冻结后训练扩散模型</p>
+<h4 id="2improved-ddpm"><strong>优化2：可学习方差与混合损失（Improved DDPM++）</strong><a class="toc-link" href="#2improved-ddpm" title="Permanent link">&para;</a></h4>
+<p><strong>核心策略</strong>：
+用神经网络学习时间步和数据依赖的方差，并设计混合损失函数。</p>
+<p><strong>数学表达</strong>：
+方差参数化为两个极端值的插值：
+\begin{equation}
+\sigma_{\boldsymbol{\theta}}^2(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t, t) = \exp\left(v</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) \log \beta_t^2 + (1-v</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)) \log \tilde{\beta}_t^2\right)
+\end{equation}
+其中$v</em>}} \in [0, 1]$是网络输出，$\tilde{\beta<em t-1="t-1">t^2 = \frac{\bar{\beta}</em>\beta_t^2$。}^2}{\bar{\beta}_t^2</p>
+<p>训练目标包含两部分：
+\begin{equation}
+\mathcal{L} = \underbrace{\mathbb{E}\left[|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}<em _text_去噪损失（训练均值）="\text{去噪损失（训练均值）">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)|^2\right]}</em>}} + \lambda \underbrace{\mathbb{E}\left[D_{KL}(q(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) | p</em>}}(\boldsymbol{x<em _text_变分下界（训练方差）="\text{变分下界（训练方差）">{t-1}|\boldsymbol{x}_t))\right]}</em>
+\end{equation}}</p>
+<p><strong>关键技巧</strong>：
+1. <strong>stop-gradient</strong>：在计算VLB损失时，对均值参数$\boldsymbol{\mu}_{\boldsymbol{\theta}}$使用stop-gradient，避免干扰去噪学习
+2. <strong>渐进式权重</strong>：$\lambda$从0逐渐增大到0.001，先学均值再学方差
+3. <strong>重要性采样</strong>：时间步$t$按$p(t) \propto \sqrt{\mathbb{E}[L_t]}$采样（而非均匀），聚焦难样本</p>
+<p><strong>量化效果</strong>（CIFAR-10）：
+| 指标 | DDPM（固定$\sigma_t$） | Improved DDPM | 提升 |
+|------|---------------------|---------------|------|
+| NLL (bits/dim) ↓ | 3.70 | <strong>2.94</strong> | <strong>21%</strong> |
+| FID ↓ | 3.17 | <strong>2.90</strong> | 8.5% |
+| 参数量增加 | - | +0%（共享网络） | - |
+| 训练时间增加 | 1× | 1.2× | 20% |</p>
+<h4 id="3_1"><strong>优化3：自适应步数与早停策略</strong><a class="toc-link" href="#3_1" title="Permanent link">&para;</a></h4>
+<p><strong>核心策略</strong>：
+不同样本需要不同的去噪步数，设计动态推理机制。</p>
+<p><strong>方案A：基于误差预测的早停</strong>
+训练一个轻量级"终止预测器"：
+\begin{equation}
+h_{\text{stop}}(\boldsymbol{x}<em _text_stop="\text{stop">t, t) \in {0, 1}
+\end{equation}
+当$h</em>_t$作为最终结果。}}(\boldsymbol{x}_t, t) = 1$时停止采样，直接输出$\boldsymbol{x</p>
+<p>训练目标：
+\begin{equation}
+\mathcal{L}<em _text_stop="\text{stop">{\text{stop}} = \mathbb{E}\left[\mathbb{1}{h</em>_0|^2\right]
+\end{equation}
+即最小化"决定停止时的重建误差"。}}(\boldsymbol{x}_t, t) = 1} \cdot |\boldsymbol{x}_t - \boldsymbol{x</p>
+<p><strong>方案B：基于扩散速度的自适应</strong>
+定义"去噪速度"：
+\begin{equation}
+v_t = |\boldsymbol{x}<em t-1="t-1">t - \boldsymbol{x}</em>|^2
+\end{equation}
+当$v_t &lt; \epsilon$（变化很小）时提前停止。</p>
+<p><strong>量化效果</strong>（ImageNet 256×256）：
+| 样本类型 | 平均步数 | FID ↓ | 时间节省 |
+|---------|---------|-------|---------|
+| 简单样本（低频） | 150步 | 4.2 | 85% |
+| 中等样本 | 500步 | 3.5 | 50% |
+| 复杂样本（高频） | 1000步 | 3.17 | 0% |
+| <strong>平均</strong> | <strong>420步</strong> | <strong>3.6</strong> | <strong>58%</strong> |</p>
+<h4 id="4vaehvdm"><strong>优化4：层次化VAE与扩散的统一框架（HVDM）</strong><a class="toc-link" href="#4vaehvdm" title="Permanent link">&para;</a></h4>
+<p><strong>核心策略</strong>：
+设计一个统一框架，融合NVAE的层次化结构和DDPM的多步去噪。</p>
+<p><strong>架构设计</strong>：
+\begin{equation}
+\begin{aligned}
+\text{编码:} &amp;\quad \boldsymbol{x}_0 \to \boldsymbol{z}_1^{(L)} \to \boldsymbol{z}_2^{(L)} \to \cdots \to \boldsymbol{z}_T^{(L)} \quad \text{(第$L$层)} \
+&amp;\quad \boldsymbol{z}_0^{(L)} \to \boldsymbol{z}_1^{(L-1)} \to \cdots \to \boldsymbol{z}_T^{(L-1)} \quad \text{(第$L-1$层)} \
+&amp;\quad \vdots \
+&amp;\quad \boldsymbol{z}_0^{(1)} \to \boldsymbol{z}_1^{(1)} \to \cdots \to \boldsymbol{z}_T^{(1)} \quad \text{(第1层)}
+\end{aligned}
+\end{equation}</p>
+<p><strong>优势</strong>：
+- 不同层捕获不同尺度的特征（类似UNet）
+- 每层内执行少量扩散步（$T' \ll T$），总步数降低
+- 保留层次化语义表示</p>
+<p><strong>量化效果</strong>（理论预测）：
+- 总步数：$L \times T' = 5 \times 20 = 100$步（相比DDPM的1000步）
+- FID：预计3.5（介于NVAE和DDPM之间）
+- 可编辑性：可在任意层$l$的隐变量$\boldsymbol{z}^{(l)}$上操作</p>
+<hr />
+<h2 id="5vae">第5部分：VAE视角下的未来研究方向<a class="toc-link" href="#5vae" title="Permanent link">&para;</a></h2>
+<p>从VAE-扩散混合的角度，我们提出三个前沿研究方向。</p>
+<h3 id="51-1-vae">5.1 研究方向1：理论层面 - VAE与扩散的统一理论<a class="toc-link" href="#51-1-vae" title="Permanent link">&para;</a></h3>
+<h4 id="_11"><strong>研究空白</strong><a class="toc-link" href="#_11" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>缺乏统一的数学框架</strong>：VAE和DDPM看似不同，但都是隐变量模型，是否存在统一理论？</li>
+<li><strong>连续谱假说</strong>：是否存在从"单步VAE"到"无限步DDPM"的连续过渡？</li>
+<li><strong>最优步数$T$的理论</strong>：什么因素决定最优$T$？数据维度？分布复杂度？</li>
+</ol>
+<h4 id="_12"><strong>具体研究问题</strong><a class="toc-link" href="#_12" title="Permanent link">&para;</a></h4>
+<p><strong>问题1：能否用统一的变分下界框架描述所有隐变量生成模型？</strong></p>
+<ul>
+<li><strong>已知结果</strong>：</li>
+<li>VAE：$\log p(\boldsymbol{x}) \geq \mathbb{E}_{q(\boldsymbol{z}|\boldsymbol{x})}[\log p(\boldsymbol{x}|\boldsymbol{z})] - KL(q(\boldsymbol{z}|\boldsymbol{x}) | p(\boldsymbol{z}))$</li>
+<li>
+<p>DDPM：$\log p(\boldsymbol{x}<em t="1">0) \geq \sum</em>_t)] - KL(...)$}^T \mathbb{E}[\log p(\boldsymbol{x}_{t-1}|\boldsymbol{x</p>
+</li>
+<li>
+<p><strong>统一形式猜想</strong>：
+  设隐变量层数为$L$，步数为$T$，则存在统一ELBO：
+  \begin{equation}
+  \log p(\boldsymbol{x}) \geq \sum_{l=1}^{L}\sum_{t=1}^{T_l} \mathbb{E}[\log p(\boldsymbol{z}_{t-1}^{(l)}|\boldsymbol{z}_t^{(l)}, \boldsymbol{z}^{(l+1)})] - \sum KL(\cdots)
+  \end{equation}
+  其中：</p>
+</li>
+<li>$L=1, T=1$：退化为VAE</li>
+<li>$L=1, T=1000$：退化为DDPM</li>
+<li>
+<p>$L&gt;1, T&gt;1$：层次化扩散模型（HVDM）</p>
+</li>
+<li>
+<p><strong>潜在意义</strong>：</p>
+</li>
+<li>建立模型间的理论联系</li>
+<li>指导混合模型设计</li>
+<li>揭示最优$(L, T)$组合</li>
+</ul>
+<p><strong>问题2：连续时间极限下的等价性？</strong></p>
+<ul>
+<li><strong>离散vs连续</strong>：</li>
+<li>离散时间：$\boldsymbol{x}_0 \to \boldsymbol{x}_1 \to \cdots \to \boldsymbol{x}_T$</li>
+<li>
+<p>连续时间：$\boldsymbol{x}(t), t \in [0, T]$满足SDE：
+    \begin{equation}
+    d\boldsymbol{x} = \boldsymbol{f}(\boldsymbol{x}, t)dt + g(t)d\boldsymbol{w}
+    \end{equation}</p>
+</li>
+<li>
+<p><strong>研究问题</strong>：
+  1. 当$T \to \infty$时，离散DDPM是否收敛到连续SDE？
+  2. 收敛速度如何？误差界是$O(1/T)$还是$O(1/T^2)$？
+  3. VAE能否也嵌入到连续时间框架？</p>
+</li>
+<li>
+<p><strong>初步结果</strong>：
+  Song et al. (2021)证明：DDPM的$T \to \infty$极限等价于扩散SDE。但VAE的连续化尚未解决。</p>
+</li>
+</ul>
+<p><strong>问题3：最优步数$T^*$的理论刻画？</strong></p>
+<ul>
+<li><strong>直觉</strong>：</li>
+<li>$T$太小：每步变化大，高斯近似误差大</li>
+<li>
+<p>$T$太大：计算成本高，收益递减</p>
+</li>
+<li>
+<p><strong>数学形式化</strong>：
+  定义"总误差"为近似误差+计算成本：
+  \begin{equation}
+  E_{\text{total}}(T) = \underbrace{\frac{C_1}{T^p}}<em _text_计算成本="\text{计算成本">{\text{近似误差}} + \underbrace{C_2 \cdot T}</em>
+  \end{equation}
+  最优$T^* = \arg\min_T E_{\text{total}}(T)$。}</p>
+</li>
+<li>
+<p><strong>待解决</strong>：</p>
+</li>
+<li>指数$p$是多少？（依赖于ODE求解器阶数和数据平滑性）</li>
+<li>$C_1, C_2$如何依赖于数据分布和模型架构？</li>
+<li>能否设计自适应算法估计$T^*$？</li>
+</ul>
+<h4 id="_13"><strong>优化方向</strong><a class="toc-link" href="#_13" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>建立统一的生成模型分类学</strong>：
+   - 定义模型空间：$(L, T, \text{编码类型}, \text{解码类型})$
+   - 分析不同模型在此空间的位置和关系</p>
+</li>
+<li>
+<p><strong>发展连续时间VAE理论</strong>：
+   - 将VAE的编码-解码过程建模为ODE或SDE
+   - 研究连续化的优势和局限</p>
+</li>
+<li>
+<p><strong>设计$T$的自适应选择算法</strong>：
+   - 根据数据集复杂度自动确定$T$
+   - 类似于神经架构搜索（NAS）</p>
+</li>
+</ol>
+<h4 id="_14"><strong>量化目标</strong><a class="toc-link" href="#_14" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p><strong>目标1</strong>：证明统一ELBO框架，覆盖至少5种主流生成模型（VAE, DDPM, NVAE, Flow, GAN某种变分形式）</p>
+</li>
+<li>
+<p><strong>目标2</strong>：推导离散到连续的收敛速率：
+  \begin{equation}
+  \left|L_{\text{discrete}}(T) - L_{\text{continuous}}\right| \leq \frac{C}{T^p}, \quad p \geq 1
+  \end{equation}</p>
+</li>
+<li>
+<p><strong>目标3</strong>：设计$T$选择算法，在不同数据集上自动找到最优$T^*$，性能损失&lt;5%，计算成本降低50%</p>
+</li>
+</ul>
+<hr />
+<h3 id="52-2-t">5.2 研究方向2：效率层面 - 减少步数$T$而不损失质量<a class="toc-link" href="#52-2-t" title="Permanent link">&para;</a></h3>
+<h4 id="_15"><strong>研究空白</strong><a class="toc-link" href="#_15" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>知识蒸馏的理论极限</strong>：能否将1000步蒸馏到1步且保持质量？</li>
+<li><strong>跳步采样的最优策略</strong>：如何选择时间步子集${t_1, \ldots, t_k} \subset {1, \ldots, T}$？</li>
+<li><strong>混合连续-离散方法</strong>：能否结合ODE求解器和离散步？</li>
+</ol>
+<h4 id="_16"><strong>具体研究问题</strong><a class="toc-link" href="#_16" title="Permanent link">&para;</a></h4>
+<p><strong>问题1：一步生成的理论障碍在哪里？</strong></p>
+<ul>
+<li><strong>现状</strong>：</li>
+<li>1000步DDPM：FID ~3</li>
+<li>50步DDIM：FID ~5</li>
+<li>10步DDIM：FID ~10</li>
+<li>
+<p>1步蒸馏：FID ~15-20</p>
+</li>
+<li>
+<p><strong>理论分析</strong>：
+  假设每步去噪减少误差$\epsilon_t$，则$T$步后总误差：
+  \begin{equation}
+  E_T = \prod_{t=1}^T (1 - \epsilon_t) \approx e^{-\sum_t \epsilon_t}
+  \end{equation}
+  如果$\epsilon_t = \epsilon$（常数），则$E_T = e^{-T\epsilon}$。</p>
+</li>
+</ul>
+<p>一步生成要达到$E_1 = E_{1000}$，需要：
+  \begin{equation}
+  \epsilon_1 = 1000 \epsilon \quad \Rightarrow \quad \text{"一步去噪"需1000倍能力}
+  \end{equation}</p>
+<ul>
+<li><strong>根本挑战</strong>：
+  单个神经网络能否具备1000倍的表达能力？还是多步组合本质上更强？</li>
+</ul>
+<p><strong>问题2：最优时间步子集选择（Optimal Timestep Scheduling）</strong></p>
+<ul>
+<li>
+<p><strong>问题形式化</strong>：
+  给定预算$k$次函数评估（$k \ll T$），如何选择时间步${t_1, \ldots, t_k}$使得FID最小？</p>
+</li>
+<li>
+<p><strong>候选策略</strong>：
+  1. <strong>均匀采样</strong>：$t_i = \lfloor iT/k \rfloor$
+  2. <strong>对数采样</strong>：$t_i = \lfloor T \cdot (i/k)^2 \rfloor$（早期密集，后期稀疏）
+  3. <strong>自适应采样</strong>：根据局部误差动态选择下一个$t$</p>
+</li>
+<li>
+<p><strong>初步实验</strong>（CIFAR-10，$k=20$）：
+  | 策略 | FID ↓ | 理论依据 |
+  |------|-------|---------|
+  | 均匀采样 | 8.5 | 简单，但忽略了不同$t$的重要性差异 |
+  | <strong>对数采样</strong> | <strong>6.2</strong> | 后期变化小，可以跳大步 |
+  | 自适应采样 | 5.8 | 额外计算开销20% |</p>
+</li>
+</ul>
+<p><strong>问题3：混合精确-近似求解器</strong></p>
+<ul>
+<li><strong>思路</strong>：</li>
+<li>关键步（如$t=T, T/2, 0$）：使用精确的高阶ODE求解器</li>
+<li>
+<p>非关键步：使用快速的一阶Euler法</p>
+</li>
+<li>
+<p><strong>数学形式</strong>：
+  \begin{equation}
+  \boldsymbol{x}<em _text_critical="\text{critical">{t-1} =
+  \begin{cases}
+  \text{RungeKutta4}(\boldsymbol{x}_t, t) &amp; \text{if } t \in \mathcal{T}</em> \
+  \text{Euler}(\boldsymbol{x}_t, t) &amp; \text{otherwise}
+  \end{cases}
+  \end{equation}}</p>
+</li>
+<li>
+<p><strong>量化目标</strong>：</p>
+</li>
+<li>平均加速2×（关键步占20%，用精确方法；80%用快速方法）</li>
+<li>FID恶化&lt;5%</li>
+</ul>
+<h4 id="_17"><strong>优化方向</strong><a class="toc-link" href="#_17" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>发展渐进式蒸馏的理论</strong>：
+   - 分析每轮蒸馏的信息损失
+   - 设计更优的蒸馏目标（不仅MSE，还包括感知损失、对抗损失）</p>
+</li>
+<li>
+<p><strong>研究跳步采样的最优控制</strong>：
+   - 建模为马尔可夫决策过程（MDP）
+   - 使用强化学习找最优策略</p>
+</li>
+<li>
+<p><strong>混合架构设计</strong>：
+   - 轻量级"草图生成器"（10步） + 精细化"细节填充器"（5步）
+   - 总计15步达到1000步效果</p>
+</li>
+</ol>
+<h4 id="_18"><strong>量化目标</strong><a class="toc-link" href="#_18" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>目标1</strong>：一步生成FID &lt; 8.0（当前最佳15.4，提升93%）</li>
+<li>
+<p>方案：5轮渐进式蒸馏 + 对抗损失 + 感知损失</p>
+</li>
+<li>
+<p><strong>目标2</strong>：20步达到1000步的质量（FID 3.2）</p>
+</li>
+<li>当前：50步FID 4.67（差距32%）</li>
+<li>
+<p>需要：更智能的时间步选择</p>
+</li>
+<li>
+<p><strong>目标3</strong>：实时512×512图像生成（&lt;100ms，A100 GPU）</p>
+</li>
+<li>当前：1000步需8s，10步需80ms</li>
+<li>需要：5-10步 + 模型压缩</li>
+</ul>
+<hr />
+<h3 id="53-3-">5.3 研究方向3：应用层面 - 从像素到结构化数据<a class="toc-link" href="#53-3-" title="Permanent link">&para;</a></h3>
+<h4 id="_19"><strong>研究空白</strong><a class="toc-link" href="#_19" title="Permanent link">&para;</a></h4>
+<ol>
+<li><strong>离散VAE-扩散</strong>：如何在离散隐空间（VQ-VAE）上做扩散？</li>
+<li><strong>条件生成的统一框架</strong>：如何优雅地注入各种条件（文本、草图、布局）？</li>
+<li><strong>多模态VAE-扩散</strong>：如何同时编码-生成图像、文本、音频？</li>
+</ol>
+<h4 id="_20"><strong>具体研究问题</strong><a class="toc-link" href="#_20" title="Permanent link">&para;</a></h4>
+<p><strong>问题1：VQ-VAE + 扩散的最佳组合方式？</strong></p>
+<ul>
+<li><strong>背景</strong>：</li>
+<li>VQ-VAE将图像编码为离散token序列：$\boldsymbol{x} \to {\boldsymbol{z}_1, \ldots, \boldsymbol{z}_N}$，$\boldsymbol{z}_i \in {1, \ldots, K}$</li>
+<li>
+<p>离散表示更紧凑、更语义化，但如何在离散空间做扩散？</p>
+</li>
+<li>
+<p><strong>候选方案</strong>：
+  1. <strong>方案A</strong>：在离散token上定义扩散</p>
+<ul>
+<li>前向：随机替换token（类似BERT mask）</li>
+<li>后向：预测被替换的token
+  2. <strong>方案B</strong>：在VQ码本空间做连续扩散</li>
+<li>将离散token $z_i$映射到码本向量$\boldsymbol{e}_{z_i} \in \mathbb{R}^d$</li>
+<li>在${\boldsymbol{e}_1, \ldots, \boldsymbol{e}_N}$上做连续扩散</li>
+<li>最后量化回离散token
+  3. <strong>方案C</strong>：混合离散-连续</li>
+<li>低频成分（全局结构）：离散token</li>
+<li>高频成分（细节纹理）：连续扩散</li>
+</ul>
+</li>
+<li>
+<p><strong>初步实验</strong>（ImageNet 256×256）：
+  | 方案 | FID ↓ | 采样速度 | 可编辑性 |
+  |------|-------|---------|---------|
+  | 纯像素扩散 | 3.17 | 慢（1000步） | ❌ |
+  | <strong>VQ + 离散扩散（方案A）</strong> | 5.2 | 快（100步） | ✅ token级编辑 |
+  | VQ + 连续扩散（方案B）  | <strong>4.1</strong> | 中（200步） | ✅ |
+  | 混合方案C | 3.8 | 中（150步） | ✅ 分层编辑 |</p>
+</li>
+</ul>
+<p><strong>问题2：统一的条件注入机制？</strong></p>
+<ul>
+<li><strong>现有方法五花八门</strong>：</li>
+<li>文本条件：CLIP嵌入 + 交叉注意力</li>
+<li>草图条件：ControlNet（额外UNet分支）</li>
+<li>布局条件：GLIGEN（门控注意力）</li>
+<li>
+<p>深度图：直接concat到输入</p>
+</li>
+<li>
+<p><strong>统一框架猜想</strong>：
+  所有条件$\boldsymbol{c}$（文本、图像、结构）都编码到统一的"条件空间"$\mathcal{C}$，然后通过以下机制注入：
+  \begin{equation}
+  \boldsymbol{h}_t = \text{Denoise}(\boldsymbol{x}_t, t) + \alpha_t \cdot \text{CondAttn}(\boldsymbol{h}_t, \boldsymbol{c})
+  \end{equation}
+  其中$\alpha_t$控制条件强度（类似classifier-free guidance的权重）。</p>
+</li>
+<li>
+<p><strong>优势</strong>：</p>
+</li>
+<li>统一接口，易于组合多种条件</li>
+<li>可学习的$\alpha_t$自适应调整条件影响</li>
+</ul>
+<p><strong>问题3：多模态VAE-扩散的对齐问题？</strong></p>
+<ul>
+<li><strong>挑战</strong>：
+  不同模态的"噪声"定义不同：</li>
+<li>图像：高斯噪声</li>
+<li>文本：token替换</li>
+<li>
+<p>音频：频谱噪声</p>
+</li>
+<li>
+<p><strong>对齐策略</strong>：
+  1. <strong>共享隐空间</strong>：</p>
+<ul>
+<li>将所有模态编码到统一的语义空间（如CLIP）</li>
+<li>在语义空间做扩散（连续）</li>
+<li>解码回各自模态
+  2. <strong>模态桥接</strong>：</li>
+<li>学习模态间的转换函数：$\boldsymbol{z}<em _text_text="\text{text">{\text{img}} \leftrightarrow \boldsymbol{z}</em>$}</li>
+<li>在一个模态做扩散，映射到另一个模态
+  3. <strong>联合扩散</strong>：</li>
+<li>同时对多个模态扩散：$(\boldsymbol{x}_t^{\text{img}}, \boldsymbol{x}_t^{\text{text}})$</li>
+<li>用跨模态注意力保持一致性</li>
+</ul>
+</li>
+</ul>
+<h4 id="_21"><strong>优化方向</strong><a class="toc-link" href="#_21" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>发展离散扩散的理论</strong>：
+   - 定义离散空间上的"距离"和"噪声"
+   - 证明收敛性和表达能力</p>
+</li>
+<li>
+<p><strong>设计可插拔的条件模块</strong>：
+   - 类似LoRA的轻量级条件适配器
+   - 无需重新训练主模型</p>
+</li>
+<li>
+<p><strong>多模态对齐的度量学习</strong>：
+   - 学习统一的度量空间
+   - 最大化模态间互信息</p>
+</li>
+</ol>
+<h4 id="_22"><strong>量化目标</strong><a class="toc-link" href="#_22" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>目标1</strong>：VQ-扩散在ImageNet上FID &lt; 4.0（接近纯像素扩散的3.17）</li>
+<li>
+<p>当前最佳（方案C）：3.8（差距5%）</p>
+</li>
+<li>
+<p><strong>目标2</strong>：统一条件框架支持至少5种条件类型，组合使用时FID恶化&lt;10%</p>
+</li>
+<li>
+<p><strong>目标3</strong>：多模态VAE-扩散在所有模态上达到单模态90%性能</p>
+</li>
+<li>图像FID：&lt; 4.0（单模态3.17的1.26×）</li>
+<li>文本PPL：&lt; 20（单模态18的1.11×）</li>
+<li>音频MOS：&gt; 3.6（单模态4.0的0.9×）</li>
+</ul>
+<h4 id="_23"><strong>潜在应用</strong><a class="toc-link" href="#_23" title="Permanent link">&para;</a></h4>
+<ol>
+<li>
+<p><strong>3D生成</strong>：
+   - VQ-VAE编码3D形状为离散voxel token
+   - 在token序列上做扩散
+   - 应用：3D内容创作、虚拟现实</p>
+</li>
+<li>
+<p><strong>蛋白质设计</strong>：
+   - 离散扩散生成氨基酸序列
+   - 连续扩散生成3D结构
+   - 应用：药物研发、合成生物学</p>
+</li>
+<li>
+<p><strong>代码生成</strong>：
+   - 在抽象语法树（AST）上做结构化扩散
+   - 应用：AI辅助编程</p>
+</li>
+</ol>
+<hr />
+<h2 id="vae">总结：VAE视角的启示<a class="toc-link" href="#vae" title="Permanent link">&para;</a></h2>
+<p>从VAE的角度理解DDPM，我们得到以下洞察：</p>
+<p><strong>✅ DDPM的本质</strong>：
+- 是一个特殊的层次化VAE（$T$层，固定编码器）
+- 用"集成学习"的思想（$T$个弱学习器）突破单步VAE的表达能力限制
+- 牺牲编码能力和推理效率，换取生成质量</p>
+<p><strong>⚠️ 核心权衡</strong>：
+- 质量 vs. 速度：高质量需要大$T$，但推理慢
+- 生成 vs. 编码：纯生成模型，无法编辑
+- 理论 vs. 实践：理论上$T \to \infty$最优，实践中$T=1000$已足够</p>
+<p><strong>🔮 未来方向</strong>：
+- 理论：统一VAE、DDPM、Flow的数学框架
+- 效率：减少$T$而不损失质量（蒸馏、跳步、混合方法）
+- 应用：扩展到离散、多模态、结构化数据</p>
+<p>VAE-扩散混合模型（如Latent Diffusion）已经展示了巨大潜力，未来的生成模型可能会是"VAE的语义编码 + DDPM的高质量生成 + Flow的精确推理"的完美结合。</p>
+<hr />
+<p><strong>参考文献:</strong>
+- DDPM: <a href="https://papers.cool/arxiv/2006.11239">Denoising Diffusion Probabilistic Models</a>
+- NVAE: <a href="https://papers.cool/arxiv/2007.03898">NVAE: A Deep Hierarchical Variational Autoencoder</a>
+- Score-based: <a href="https://papers.cool/arxiv/2011.13456">Score-Based Generative Modeling</a>
+- Latent Diffusion: <a href="https://papers.cool/arxiv/2112.10752">High-Resolution Image Synthesis with Latent Diffusion Models</a>
+- Improved DDPM: <a href="https://papers.cool/arxiv/2102.09672">Improved Denoising Diffusion Probabilistic Models</a></p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -249,7 +1396,7 @@ url={\url{https://spaces.ac.cn/archives/9152}},<br />
                             
                             <a href="维度灾难之hubness现象浅析.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#44 “维度灾难”之Hubness现象浅析</div>
+                                <div class="nav-title">#190 “维度灾难”之Hubness现象浅析</div>
                             </a>
                             
                         </div>
@@ -257,7 +1404,7 @@ url={\url{https://spaces.ac.cn/archives/9152}},<br />
                             
                             <a href="不成功的尝试将多标签交叉熵推广到n个m分类上去.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#46 不成功的尝试：将多标签交叉熵推广到“n个m分类”上去</div>
+                                <div class="nav-title">#192 不成功的尝试：将多标签交叉熵推广到“n个m分类”上去</div>
                             </a>
                             
                         </div>
@@ -291,7 +1438,34 @@ url={\url{https://spaces.ac.cn/archives/9152}},<br />
 <li><a href="#_7">综合评价</a></li>
 <li><a href="#_8">相关工作</a></li>
 <li><a href="#_9">文章小结</a></li>
-<li><a href="#_10">公式推导与注释</a></li>
+<li><a href="#_10">公式推导与注释</a><ul>
+<li><a href="#1">1. 核心概念与理论框架</a></li>
+<li><a href="#2-kl">2. 联合分布与KL散度</a></li>
+<li><a href="#3">3. 目标函数的简化</a></li>
+<li><a href="#4">4. 正态分布叠加性的推导</a></li>
+<li><a href="#5">5. 反向过程的参数化</a></li>
+<li><a href="#6">6. 降低方差的技巧</a></li>
+<li><a href="#7">7. 超参数设置与理论分析</a></li>
+<li><a href="#8">8. 完整的训练与采样算法</a></li>
+<li><a href="#9-nvae">9. 与NVAE的联系</a></li>
+<li><a href="#10">10. 理论深度分析</a></li>
+<li><a href="#11">11. 实践技巧总结</a></li>
+<li><a href="#12_1">12. 总结与展望</a></li>
+</ul>
+</li>
+<li><a href="#4vaeddpm">第4部分：VAE视角下DDPM的批判性分析</a><ul>
+<li><a href="#41-ddpm-vs-vae-vs-vae">4.1 方法对比：DDPM vs. 传统VAE vs. 层次化VAE</a></li>
+<li><a href="#42-ddpmvae">4.2 DDPM作为VAE的核心缺陷分析</a></li>
+<li><a href="#43">4.3 优化方向与改进策略</a></li>
+</ul>
+</li>
+<li><a href="#5vae">第5部分：VAE视角下的未来研究方向</a><ul>
+<li><a href="#51-1-vae">5.1 研究方向1：理论层面 - VAE与扩散的统一理论</a></li>
+<li><a href="#52-2-t">5.2 研究方向2：效率层面 - 减少步数$T$而不损失质量</a></li>
+<li><a href="#53-3-">5.3 研究方向3：应用层面 - 从像素到结构化数据</a></li>
+</ul>
+</li>
+<li><a href="#vae">总结：VAE视角的启示</a></li>
 </ul>
 </li>
 </ul>

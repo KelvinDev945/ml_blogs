@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=语言模型">语言模型</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #106 预训练一下，Transformer的长序列成绩还能涨不少！
+                    #252 预训练一下，Transformer的长序列成绩还能涨不少！
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#106</span>
+                <span class="post-number">#252</span>
                 预训练一下，Transformer的长序列成绩还能涨不少！
             </h1>
             <div class="post-meta">
@@ -174,7 +174,427 @@ url={\url{https://spaces.ac.cn/archives/9787}},<br />
 } </p>
 <hr />
 <h2 id="_4">公式推导与注释<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="transformer_1">一、Transformer长序列建模的数学基础<a class="toc-link" href="#transformer_1" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 长序列的复杂度问题<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p>标准Transformer的自注意力机制的时间和空间复杂度为：</p>
+<p>\begin{equation}
+\text{Time}(\text{Attention}) = \mathcal{O}(L^2 d)
+\tag{1}
+\end{equation}</p>
+<p>\begin{equation}
+\text{Space}(\text{Attention}) = \mathcal{O}(L^2)
+\tag{2}
+\end{equation}</p>
+<p>其中 $L$ 是序列长度，$d$ 是模型维度。</p>
+<p><strong>瓶颈分析</strong>: 当 $L$ 从2K增加到16K时：</p>
+<p>\begin{equation}
+\frac{\text{Cost}<em L="2K">{L=16K}}{\text{Cost}</em>\right)^2 = 64
+\tag{3}
+\end{equation}}} = \left(\frac{16K}{2K</p>
+<p>计算和内存开销增加64倍！</p>
+<h4 id="12">1.2 长序列的位置编码挑战<a class="toc-link" href="#12" title="Permanent link">&para;</a></h4>
+<p><strong>问题1: 外推失败</strong> - 训练长度 $L_{\text{train}}$，测试长度 $L_{\text{test}} &gt; L_{\text{train}}$：</p>
+<p>对于绝对位置编码：</p>
+<p>\begin{equation}
+\boldsymbol{x}_i' = \boldsymbol{x}_i + \boldsymbol{PE}(i)
+\tag{4}
+\end{equation}</p>
+<p>当 $i &gt; L_{\text{train}}$ 时，$\boldsymbol{PE}(i)$ 是模型从未见过的，导致性能急剧下降。</p>
+<p><strong>问题2: 远程依赖衰减</strong> - Softmax的归一化效应：</p>
+<p>\begin{equation}
+\alpha_{i,j} = \frac{\exp(s_{i,j})}{\sum_{k=1}^{L} \exp(s_{i,k})}
+\tag{5}
+\end{equation}</p>
+<p>当 $L$ 很大时，每个位置分配到的注意力权重被稀释：</p>
+<p>\begin{equation}
+\mathbb{E}[\alpha_{i,j}] = \frac{1}{L}
+\tag{6}
+\end{equation}</p>
+<p><strong>数值示例</strong>: $L=2048$ vs $L=16384$:</p>
+<p>\begin{equation}
+\frac{\mathbb{E}[\alpha_{i,j}]<em i_j="i,j">{L=16K}}{\mathbb{E}[\alpha</em>
+\tag{7}
+\end{equation}}]_{L=2K}} = \frac{1/16384}{1/2048} = \frac{1}{8</p>
+<p>每个token的注意力降低到原来的1/8。</p>
+<h3 id="_5">二、预训练对长序列的数学作用<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h3>
+<h4 id="21-inductive-bias">2.1 Inductive Bias的数学定义<a class="toc-link" href="#21-inductive-bias" title="Permanent link">&para;</a></h4>
+<p><strong>定义</strong>: Inductive Bias是模型假设空间的先验约束。</p>
+<p>对于函数空间 $\mathcal{F}$，Inductive Bias $\mathcal{B}$ 限制了可学习的函数：</p>
+<p>\begin{equation}
+f \in \mathcal{F}_{\mathcal{B}} \subset \mathcal{F}
+\tag{8}
+\end{equation}</p>
+<h4 id="22-inductive-bias">2.2 预训练作为Inductive Bias注入<a class="toc-link" href="#22-inductive-bias" title="Permanent link">&para;</a></h4>
+<p><strong>无预训练</strong>: 模型从随机初始化开始，$\mathcal{F}_{\text{random}}$ 很大。</p>
+<p><strong>有预训练</strong>: 模型从预训练权重开始，$\mathcal{F}_{\text{pretrain}}$ 更聚焦。</p>
+<p>\begin{equation}
+\mathcal{F}<em _text_random="\text{random">{\text{pretrain}} \subset \mathcal{F}</em>
+\tag{9}
+\end{equation}}</p>
+<p><strong>数学直觉</strong>: 预训练在数据的特定流形上"雕刻"出了模型，减少了优化难度。</p>
+<h4 id="23">2.3 长序列预训练的优化视角<a class="toc-link" href="#23" title="Permanent link">&para;</a></h4>
+<p>考虑损失函数 $\mathcal{L}(\boldsymbol{\theta}; L)$，其中 $L$ 是序列长度。</p>
+<p><strong>泛化界</strong>: 根据PAC学习理论，泛化误差满足：</p>
+<p>\begin{equation}
+\mathcal{L}<em _text_train="\text{train">{\text{test}} \leq \mathcal{L}</em>\right)
+\tag{10}
+\end{equation}}} + \mathcal{O}\left(\sqrt{\frac{d \log L}{n}</p>
+<p>其中 $n$ 是训练样本数，$d$ 是模型复杂度。</p>
+<p><strong>关键洞察</strong>: 在长序列 $L$ 上预训练，可以直接减小第二项（泛化gap）！</p>
+<h4 id="24">2.4 位置编码的分布适应<a class="toc-link" href="#24" title="Permanent link">&para;</a></h4>
+<p><strong>原始分布</strong>: 训练集位置编码分布 $P_{\text{train}}(i)$，$i \in [1, L_{\text{train}}]$</p>
+<p><strong>目标分布</strong>: 测试集位置编码分布 $P_{\text{test}}(i)$，$i \in [1, L_{\text{test}}]$</p>
+<p>预训练使得：</p>
+<p>\begin{equation}
+D_{\text{KL}}(P_{\text{test}} | P_{\text{model}}) &lt; D_{\text{KL}}(P_{\text{test}} | P_{\text{random}})
+\tag{11}
+\end{equation}</p>
+<p>其中 $D_{\text{KL}}$ 是KL散度。</p>
+<h3 id="long-range-arena-lra">三、Long Range Arena (LRA) 基准的数学分析<a class="toc-link" href="#long-range-arena-lra" title="Permanent link">&para;</a></h3>
+<h4 id="31-lra">3.1 LRA任务的特征<a class="toc-link" href="#31-lra" title="Permanent link">&para;</a></h4>
+<p>LRA包含多个长序列任务：
+- ListOps: 序列长度 ~2K
+- Text: 字符级文本，长度 ~4K
+- Retrieval: 文档检索，长度 ~4K
+- Image: 像素级图像，长度 ~1K (32×32)
+- PathFinder: 视觉路径，长度 ~1K
+- Path-X: 扩展路径，长度 ~16K</p>
+<p><strong>共同特点</strong>: Token粒度细（字符级、像素级），需要捕捉长程依赖。</p>
+<h4 id="32">3.2 局域性的数学刻画<a class="toc-link" href="#32" title="Permanent link">&para;</a></h4>
+<p><strong>定义</strong>: 局域性指相邻位置的相关性强于远距离位置。</p>
+<p>\begin{equation}
+\text{Corr}(\boldsymbol{x}_i, \boldsymbol{x}_j) = f(|i - j|)
+\tag{12}
+\end{equation}</p>
+<p>其中 $f$ 是单调递减函数。</p>
+<p>对于字符级文本：</p>
+<p>\begin{equation}
+f(d) \approx \exp(-\lambda d), \quad \lambda &gt; 0
+\tag{13}
+\end{equation}</p>
+<p><strong>数值示例</strong>: 相邻字符相关性约0.8，间隔10个字符降到0.1。</p>
+<h4 id="33-rnn">3.3 线性RNN的局域性优势<a class="toc-link" href="#33-rnn" title="Permanent link">&para;</a></h4>
+<p>线性RNN (如SSM) 的更新公式：</p>
+<p>\begin{equation}
+\boldsymbol{h}<em t-1="t-1">t = \boldsymbol{A} \boldsymbol{h}</em>_t
+\tag{14}
+\end{equation}} + \boldsymbol{B} \boldsymbol{x</p>
+<p><strong>隐式局域性</strong>: 当 $\boldsymbol{A}$ 的谱半径 $\rho(\boldsymbol{A}) &lt; 1$ 时：</p>
+<p>\begin{equation}
+|\boldsymbol{h}<em k="0">t| \leq |\boldsymbol{A}|^t |\boldsymbol{h}_0| + \sum</em>|
+\tag{15}
+\end{equation}}^{t-1} |\boldsymbol{A}|^k |\boldsymbol{B}| |\boldsymbol{x}_{t-k</p>
+<p>远距离的 $\boldsymbol{x}_{t-k}$ 贡献按 $|\boldsymbol{A}|^k$ 指数衰减！</p>
+<h4 id="34-transformer">3.4 Transformer的全局注意力困境<a class="toc-link" href="#34-transformer" title="Permanent link">&para;</a></h4>
+<p>Transformer的注意力是全局的，没有先验的局域性偏置：</p>
+<p>\begin{equation}
+\boldsymbol{o}<em j="1">i = \sum</em>_j
+\tag{16}
+\end{equation}}^{L} \alpha_{i,j} \boldsymbol{v</p>
+<p>$\alpha_{i,j}$ 在初始化时对所有 $j$ 几乎均匀分布。</p>
+<p><strong>需要学习</strong>: 模型需要从数据中学习局域性模式，而预训练正是提供这种学习的机会！</p>
+<h3 id="_6">四、位置插值的深入数学推导<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 朴素外推的失败分析<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p>对于RoPE，位置 $n$ 的编码：</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em d_2-1="d/2-1">n = \text{diag}(\boldsymbol{R}(n\theta_0), \ldots, \boldsymbol{R}(n\theta</em>))
+\tag{17}
+\end{equation}</p>
+<p><strong>训练范围</strong>: $n \in [0, L_{\text{train}}-1]$，角度范围 $\theta_i n \in [0, (L_{\text{train}}-1)\theta_i]$</p>
+<p><strong>测试范围</strong>: $n \in [0, L_{\text{test}}-1]$，角度范围扩大到 $[0, (L_{\text{test}}-1)\theta_i]$</p>
+<p><strong>问题</strong>: 对于小的 $\theta_i$ (高频)，角度超出训练范围导致外推失败。</p>
+<p><strong>数值示例</strong>: $L_{\text{train}}=2048, L_{\text{test}}=8192, \theta_0=1$:</p>
+<p>\begin{equation}
+\theta_0 \cdot 8191 = 8191 \gg \theta_0 \cdot 2047 = 2047
+\tag{18}
+\end{equation}</p>
+<p>角度增加了4倍，完全超出训练范围！</p>
+<h4 id="42-pi">4.2 位置插值 (PI) 的数学原理<a class="toc-link" href="#42-pi" title="Permanent link">&para;</a></h4>
+<p><strong>核心思想</strong>: 将测试位置缩放到训练范围内。</p>
+<p>\begin{equation}
+n_{\text{scaled}} = n \cdot \frac{L_{\text{train}}}{L_{\text{test}}}
+\tag{19}
+\end{equation}</p>
+<p><strong>相对距离保持</strong>: 对于位置 $m, n$:</p>
+<p>\begin{equation}
+\frac{n_{\text{scaled}} - m_{\text{scaled}}}{L_{\text{test}}} = \frac{n - m}{L_{\text{train}}}
+\tag{20}
+\end{equation}</p>
+<p>相对距离的比例不变！</p>
+<h4 id="43-pi">4.3 PI的频率分析<a class="toc-link" href="#43-pi" title="Permanent link">&para;</a></h4>
+<p>PI等效于降低所有频率：</p>
+<p>\begin{equation}
+\theta_i \cdot n_{\text{scaled}} = \theta_i \cdot n \cdot \frac{L_{\text{train}}}{L_{\text{test}}} = \left(\theta_i \cdot \frac{L_{\text{train}}}{L_{\text{test}}}\right) \cdot n
+\tag{21}
+\end{equation}</p>
+<p>等价于频率从 $\theta_i$ 变为 $\theta_i' = \theta_i \cdot s$，其中 $s = L_{\text{train}} / L_{\text{test}} &lt; 1$。</p>
+<p><strong>信息损失</strong>: 所有频率统一降低，高频信息被压缩。</p>
+<h4 id="44-pi">4.4 PI的理论保证<a class="toc-link" href="#44-pi" title="Permanent link">&para;</a></h4>
+<p><strong>定理</strong>: 如果训练时模型学习到了相对位置模式，PI保持这些模式。</p>
+<p><strong>证明</strong>: RoPE的内积形式：</p>
+<p>\begin{equation}
+(\boldsymbol{\mathcal{R}}<em n-m="n-m">m \boldsymbol{q})^\top (\boldsymbol{\mathcal{R}}_n \boldsymbol{k}) = \boldsymbol{q}^\top \boldsymbol{\mathcal{R}}</em>
+\tag{22}
+\end{equation}} \boldsymbol{k</p>
+<p>PI后：</p>
+<p>\begin{equation}
+(\boldsymbol{\mathcal{R}}<em ns="ns">{ms} \boldsymbol{q})^\top (\boldsymbol{\mathcal{R}}</em>
+\tag{23}
+\end{equation}} \boldsymbol{k}) = \boldsymbol{q}^\top \boldsymbol{\mathcal{R}}_{(n-m)s} \boldsymbol{k</p>
+<p>相对位置 $(n-m)$ 缩放了相同因子 $s$，模式保持！□</p>
+<h3 id="_7">五、注意力稀疏化的数学策略<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 滑动窗口注意力<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p><strong>定义</strong>: 每个位置只关注局部窗口内的token。</p>
+<p>\begin{equation}
+\alpha_{i,j} = \begin{cases}
+\frac{\exp(s_{i,j})}{\sum_{k \in W_i} \exp(s_{i,k})}, &amp; j \in W_i \
+0, &amp; \text{otherwise}
+\end{cases}
+\tag{24}
+\end{equation}</p>
+<p>其中窗口 $W_i = {j : |i - j| \leq w}$，$w$ 是窗口大小。</p>
+<p><strong>复杂度降低</strong>:</p>
+<p>\begin{equation}
+\text{Time} = \mathcal{O}(Lwd) = \mathcal{O}(Ld) \quad (w \ll L)
+\tag{25}
+\end{equation}</p>
+<p>从 $\mathcal{O}(L^2d)$ 降为 $\mathcal{O}(Ld)$，线性复杂度！</p>
+<h4 id="52-longformer">5.2 Longformer的膨胀窗口<a class="toc-link" href="#52-longformer" title="Permanent link">&para;</a></h4>
+<p><strong>组合策略</strong>: 局部窗口 + 全局token + 膨胀注意力</p>
+<p>\begin{equation}
+\text{Attention Pattern} = W_{\text{local}} \cup G_{\text{global}} \cup W_{\text{dilated}}
+\tag{26}
+\end{equation}</p>
+<p>其中：
+- $W_{\text{local}}$: 滑动窗口，$|W_{\text{local}}| = 2w$
+- $G_{\text{global}}$: 全局token (如[CLS])，$|G_{\text{global}}| = g$
+- $W_{\text{dilated}}$: 膨胀窗口，间隔 $r$ 采样</p>
+<p><strong>有效感受野</strong>: 经过 $L_{\text{layer}}$ 层后：</p>
+<p>\begin{equation}
+\text{Receptive Field} = w \times L_{\text{layer}} + g \times L + r \times \lfloor w/r \rfloor
+\tag{27}
+\end{equation}</p>
+<h4 id="53-bigbird">5.3 BigBird的随机注意力<a class="toc-link" href="#53-bigbird" title="Permanent link">&para;</a></h4>
+<p><strong>三种注意力模式</strong>:
+1. 全局注意力: $g$ 个随机选择的token对所有位置
+2. 窗口注意力: 窗口大小 $w$
+3. 随机注意力: 每个位置随机关注 $r$ 个token</p>
+<p><strong>复杂度</strong>:</p>
+<p>\begin{equation}
+\text{Time} = \mathcal{O}((g + w + r) \cdot L \cdot d)
+\tag{28}
+\end{equation}</p>
+<p><strong>理论保证</strong>: 随机图的连通性理论保证，$r = \mathcal{O}(\log L)$ 即可保证图连通，实现全局信息传播。</p>
+<h3 id="_8">六、预训练策略的数学设计<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h3>
+<h4 id="61-mlm">6.1 掩码语言模型 (MLM) 的长序列扩展<a class="toc-link" href="#61-mlm" title="Permanent link">&para;</a></h4>
+<p>标准MLM：</p>
+<p>\begin{equation}
+\mathcal{L}<em _in="\in" _mathcal_M="\mathcal{M" i="i">{\text{MLM}} = -\sum</em>}} \log P(\boldsymbol{x<em _mathcal_M="\mathcal{M" _setminus="\setminus">i | \boldsymbol{x}</em>)
+\tag{29}
+\end{equation}}</p>
+<p>其中 $\mathcal{M}$ 是被掩码的位置集合。</p>
+<p><strong>长序列挑战</strong>: $|\boldsymbol{x}|$ 很大时，上下文过长可能导致：
+1. 过拟合局部模式
+2. 全局信息被稀释</p>
+<p><strong>改进: 跨度掩码</strong>:</p>
+<p>\begin{equation}
+\mathcal{M} = \bigcup_{k=1}^{K} [s_k, s_k + l_k)
+\tag{30}
+\end{equation}</p>
+<p>连续掩码多个token，迫使模型学习更长程的依赖。</p>
+<h4 id="62-gpt-style">6.2 自回归预训练 (GPT-style)<a class="toc-link" href="#62-gpt-style" title="Permanent link">&para;</a></h4>
+<p>\begin{equation}
+\mathcal{L}<em i="1">{\text{AR}} = -\sum</em>}^{L} \log P(\boldsymbol{x<em _i="&lt;i">i | \boldsymbol{x}</em>)
+\tag{31}
+\end{equation}</p>
+<p><strong>长序列优势</strong>: 每个token都作为预测目标，充分利用长序列数据。</p>
+<p><strong>困难</strong>: 早期位置的预测依赖的上下文少，晚期位置的上下文过长。</p>
+<p><strong>解决: 文档级预训练</strong>: 将多个文档拼接，学习跨文档的长程模式。</p>
+<h4 id="63">6.3 对比学习的长序列视角<a class="toc-link" href="#63" title="Permanent link">&para;</a></h4>
+<p><strong>SimCLR for Sequences</strong>:</p>
+<p>\begin{equation}
+\mathcal{L}<em j="1">{\text{contrastive}} = -\log \frac{\exp(\text{sim}(\boldsymbol{h}_i, \boldsymbol{h}_i^+) / \tau)}{\sum</em>
+\tag{32}
+\end{equation}}^{B} \exp(\text{sim}(\boldsymbol{h}_i, \boldsymbol{h}_j) / \tau)</p>
+<p>其中 $\boldsymbol{h}_i^+$ 是正样本（同一序列的不同视角），$\boldsymbol{h}_j$ 是负样本。</p>
+<p><strong>长序列的增强策略</strong>:
+1. 随机裁剪不同长度片段
+2. 时间扭曲 (temporal warping)
+3. 位置打乱</p>
+<h3 id="_9">七、长序列的计算优化<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h3>
+<h4 id="71-flashattention">7.1 FlashAttention的数学原理<a class="toc-link" href="#71-flashattention" title="Permanent link">&para;</a></h4>
+<p><strong>核心思想</strong>: 减少HBM (高带宽内存) 访问，利用SRAM (片上内存)。</p>
+<p><strong>标准Attention的内存访问</strong>:
+1. 从HBM读取Q, K, V: $\mathcal{O}(Ld)$
+2. 计算 $\boldsymbol{S} = \boldsymbol{Q}\boldsymbol{K}^\top$，写入HBM: $\mathcal{O}(L^2)$
+3. 计算 $\boldsymbol{P} = \text{softmax}(\boldsymbol{S})$，写入HBM: $\mathcal{O}(L^2)$
+4. 计算 $\boldsymbol{O} = \boldsymbol{P}\boldsymbol{V}$: $\mathcal{O}(L^2d)$</p>
+<p>总HBM访问: $\mathcal{O}(L^2 + Ld)$</p>
+<p><strong>FlashAttention的分块策略</strong>:</p>
+<p>将Q, K, V分成大小为 $B$ 的块，在SRAM中完成计算：</p>
+<p>\begin{equation}
+\boldsymbol{O}<em j="j">{[i]} = \sum</em>} \text{softmax}\left(\frac{\boldsymbol{Q<em _j_="[j]">{[i]} \boldsymbol{K}</em>
+\tag{33}
+\end{equation}}^\top}{\sqrt{d}}\right) \boldsymbol{V}_{[j]</p>
+<p><strong>HBM访问降低</strong>: $\mathcal{O}(L^2 / B + Ld)$，当 $B \sim \sqrt{L}$ 时接近线性！</p>
+<h4 id="72-flash-decoupled-attention">7.2 Flash-Decoupled Attention<a class="toc-link" href="#72-flash-decoupled-attention" title="Permanent link">&para;</a></h4>
+<p><strong>分离QK和V的计算</strong>:</p>
+<p>\begin{equation}
+\boldsymbol{A} = \text{softmax}\left(\frac{\boldsymbol{Q}\boldsymbol{K}^\top}{\sqrt{d}}\right)
+\tag{34}
+\end{equation}</p>
+<p>\begin{equation}
+\boldsymbol{O} = \boldsymbol{A} \boldsymbol{V}
+\tag{35}
+\end{equation}</p>
+<p><strong>优化</strong>: 可以先计算稀疏的 $\boldsymbol{A}$ (只保留top-k)，再乘 $\boldsymbol{V}$。</p>
+<p>\begin{equation}
+\text{Sparse}(\boldsymbol{A})<em i_j="i,j">{i,j} = \begin{cases}
+A</em>) \
+0, &amp; \text{otherwise}
+\end{cases}
+\tag{36}
+\end{equation}}, &amp; j \in \text{top-k}(A_{i,:</p>
+<p><strong>复杂度</strong>: $\mathcal{O}(Lkd)$ vs $\mathcal{O}(L^2d)$，当 $k \ll L$ 时显著降低。</p>
+<h4 id="73-gradient-checkpointing">7.3 梯度检查点 (Gradient Checkpointing)<a class="toc-link" href="#73-gradient-checkpointing" title="Permanent link">&para;</a></h4>
+<p><strong>标准反向传播</strong>: 需要存储所有中间激活，内存 $\mathcal{O}(N \times L \times d)$</p>
+<p><strong>梯度检查点</strong>: 只存储部分激活，需要时重新计算。</p>
+<p>分 $C$ 个检查点：</p>
+<p>\begin{equation}
+\text{Memory} = \mathcal{O}(C \times L \times d)
+\tag{37}
+\end{equation}</p>
+<p>\begin{equation}
+\text{Computation} = \mathcal{O}(N \times L \times d) \times \left(1 + \frac{N}{C}\right)
+\tag{38}
+\end{equation}</p>
+<p><strong>最优策略</strong>: $C = \sqrt{N}$，内存降低 $\sqrt{N}$ 倍，计算增加常数倍。</p>
+<h3 id="_10">八、实验结果的数学解释<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h3>
+<h4 id="81-lra">8.1 LRA性能提升的分解<a class="toc-link" href="#81-lra" title="Permanent link">&para;</a></h4>
+<p>预训练后的性能提升可以分解为：</p>
+<p>\begin{equation}
+\Delta_{\text{Acc}} = \Delta_{\text{pos}} + \Delta_{\text{local}} + \Delta_{\text{global}}
+\tag{39}
+\end{equation}</p>
+<p>其中：
+- $\Delta_{\text{pos}}$: 位置编码适应
+- $\Delta_{\text{local}}$: 局部模式学习
+- $\Delta_{\text{global}}$: 全局依赖建模</p>
+<p><strong>Transformer的优势</strong>: $\Delta_{\text{global}}$ 更大，因为全局注意力机制。</p>
+<p><strong>数值示例</strong>: 在ListOps任务上：
+- 无预训练: 36.4%
+- 有预训练: 38.6%
+- $\Delta_{\text{pos}} \approx 1.0\%$
+- $\Delta_{\text{local}} \approx 0.5\%$
+- $\Delta_{\text{global}} \approx 0.7\%$</p>
+<h4 id="82-transformer-vs-ssm">8.2 Transformer vs SSM的对比<a class="toc-link" href="#82-transformer-vs-ssm" title="Permanent link">&para;</a></h4>
+<p><strong>SSM的优势</strong>: 天然的局域性偏置</p>
+<p>\begin{equation}
+\text{Score}_{\text{SSM}} = \alpha \cdot \text{Local} + \beta \cdot \text{Global}
+\tag{40}
+\end{equation}</p>
+<p>其中 $\alpha &gt; \beta$（局部权重更大）。</p>
+<p><strong>Transformer + 预训练</strong>: 学会了局域性，同时保留全局能力</p>
+<p>\begin{equation}
+\text{Score}_{\text{TF+PT}} = \alpha' \cdot \text{Local} + \beta' \cdot \text{Global}
+\tag{41}
+\end{equation}</p>
+<p>其中 $\alpha' \approx \alpha, \beta' &gt; \beta$。</p>
+<p><strong>关键</strong>: 预训练让Transformer学会了SSM的优势，同时保持了自己的优势！</p>
+<h3 id="_11">九、理论分析与实践建议<a class="toc-link" href="#_11" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 预训练长度的选择<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p><strong>目标长度</strong> $L_{\text{target}}$，<strong>预训练长度</strong> $L_{\text{pretrain}}$ 的选择：</p>
+<p><strong>经验公式</strong>:</p>
+<p>\begin{equation}
+L_{\text{pretrain}} = \min(L_{\text{target}}, \alpha \cdot L_{\text{train}})
+\tag{42}
+\end{equation}</p>
+<p>其中 $L_{\text{train}}$ 是原训练长度，$\alpha \in [2, 4]$。</p>
+<p><strong>数值示例</strong>: 原训练2K，目标16K:
+- 直接微调: 失败
+- 预训练4K → 微调16K: 成功
+- 预训练8K → 微调16K: 更好</p>
+<h4 id="92">9.2 预训练数据量的估计<a class="toc-link" href="#92" title="Permanent link">&para;</a></h4>
+<p><strong>PAC界</strong>: 需要的样本数与序列长度相关：</p>
+<p>\begin{equation}
+n \geq \frac{c}{\epsilon^2} (d \log L + \log(1/\delta))
+\tag{43}
+\end{equation}</p>
+<p>其中 $\epsilon$ 是目标误差，$\delta$ 是失败概率。</p>
+<p><strong>关键</strong>: 数据需求随 $\log L$ 增长，而非线性增长！</p>
+<p><strong>数值示例</strong>: $L$ 从2K增加到16K ($\times 8$)，数据需求增加 $\log_2 8 = 3$ 倍。</p>
+<h4 id="93">9.3 位置编码方案的选择<a class="toc-link" href="#93" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>序列长度</th>
+<th>推荐方案</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>≤ 2K</td>
+<td>标准RoPE</td>
+<td>无需特殊处理</td>
+</tr>
+<tr>
+<td>2K-8K</td>
+<td>PI</td>
+<td>简单有效</td>
+</tr>
+<tr>
+<td>8K-32K</td>
+<td>NTK-Aware PI</td>
+<td>保留高频信息</td>
+</tr>
+<tr>
+<td>&gt; 32K</td>
+<td>ALiBi或预训练</td>
+<td>外推性更好</td>
+</tr>
+</tbody>
+</table>
+<h4 id="94">9.4 注意力模式的配置<a class="toc-link" href="#94" title="Permanent link">&para;</a></h4>
+<p><strong>推荐配置</strong>: Longformer-style</p>
+<div class="highlight"><pre><span></span><code>窗口大小 w = min(512, L/4)
+全局token数 g = ceil(log_2(L))
+膨胀率 r = 2 (偶数层) / 4 (奇数层)
+</code></pre></div>
+
+<p><strong>复杂度</strong>:</p>
+<p>\begin{equation}
+\text{Total} = \mathcal{O}((w + g + w/r) \times L \times d) \approx \mathcal{O}(wLd)
+\tag{44}
+\end{equation}</p>
+<h3 id="_12">十、总结<a class="toc-link" href="#_12" title="Permanent link">&para;</a></h3>
+<p>本节详细推导了长序列Transformer的数学原理：</p>
+<p><strong>核心发现</strong>:
+1. <strong>预训练的作用</strong>: 注入Inductive Bias，适应位置分布
+2. <strong>位置插值</strong>: 保持相对位置模式，实现长度外推
+3. <strong>稀疏注意力</strong>: 降低复杂度，保留关键依赖</p>
+<p><strong>关键公式</strong>:</p>
+<p><strong>位置插值</strong>:
+\begin{equation}
+n_{\text{scaled}} = n \cdot \frac{L_{\text{train}}}{L_{\text{test}}}
+\tag{45}
+\end{equation}</p>
+<p><strong>稀疏注意力复杂度</strong>:
+\begin{equation}
+\mathcal{O}(L^2d) \to \mathcal{O}((w + g + r) Ld)
+\tag{46}
+\end{equation}</p>
+<p><strong>预训练样本需求</strong>:
+\begin{equation}
+n \geq \mathcal{O}(d \log L)
+\tag{47}
+\end{equation}</p>
+<p><strong>实践启示</strong>:
+1. 长序列任务必须预训练（尤其是细粒度token）
+2. 位置编码选择需要考虑外推性
+3. 稀疏注意力可以有效降低复杂度
+4. Transformer的全局能力在预训练后得以充分发挥</p>
+<p>通过预训练，Transformer在长序列建模上不再逊色于线性RNN，甚至在某些任务上表现更优，这为长序列处理提供了新的范式。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -184,7 +604,7 @@ url={\url{https://spaces.ac.cn/archives/9787}},<br />
                             
                             <a href="脑洞大开非线性rnn居然也可以并行计算.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#105 脑洞大开：非线性RNN居然也可以并行计算？</div>
+                                <div class="nav-title">#251 脑洞大开：非线性RNN居然也可以并行计算？</div>
                             </a>
                             
                         </div>
@@ -192,7 +612,7 @@ url={\url{https://spaces.ac.cn/archives/9787}},<br />
                             
                             <a href="emo基于最优传输思想设计的分类损失函数.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#107 EMO：基于最优传输思想设计的分类损失函数</div>
+                                <div class="nav-title">#253 EMO：基于最优传输思想设计的分类损失函数</div>
                             </a>
                             
                         </div>
@@ -220,7 +640,19 @@ url={\url{https://spaces.ac.cn/archives/9787}},<br />
 <li><a href="#_1">旧背景</a></li>
 <li><a href="#_2">新结论</a></li>
 <li><a href="#_3">全剧终</a></li>
-<li><a href="#_4">公式推导与注释</a></li>
+<li><a href="#_4">公式推导与注释</a><ul>
+<li><a href="#transformer_1">一、Transformer长序列建模的数学基础</a></li>
+<li><a href="#_5">二、预训练对长序列的数学作用</a></li>
+<li><a href="#long-range-arena-lra">三、Long Range Arena (LRA) 基准的数学分析</a></li>
+<li><a href="#_6">四、位置插值的深入数学推导</a></li>
+<li><a href="#_7">五、注意力稀疏化的数学策略</a></li>
+<li><a href="#_8">六、预训练策略的数学设计</a></li>
+<li><a href="#_9">七、长序列的计算优化</a></li>
+<li><a href="#_10">八、实验结果的数学解释</a></li>
+<li><a href="#_11">九、理论分析与实践建议</a></li>
+<li><a href="#_12">十、总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

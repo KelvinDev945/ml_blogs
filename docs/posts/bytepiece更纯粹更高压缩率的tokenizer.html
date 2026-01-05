@@ -81,7 +81,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=最小熵">最小熵</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #101 BytePiece：更纯粹、更高压缩率的Tokenizer
+                    #247 BytePiece：更纯粹、更高压缩率的Tokenizer
                 </li>
             </ol>
         </nav>
@@ -89,7 +89,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#101</span>
+                <span class="post-number">#247</span>
                 BytePiece：更纯粹、更高压缩率的Tokenizer
             </h1>
             <div class="post-meta">
@@ -185,10 +185,10 @@
 \hline
 \end{array}<br />
 解释一下，这里SP-BPE、SP-Unigram分别指SentencePiece的model_type设为BPE和Unigram，训练代码分别是</p>
-<pre class="highlight"><code>spm.SentencePieceTrainer.train('--input=wudao.txt --model_prefix=wudao_m --vocab_size=50000 --model_type=bpe --train_extremely_large_corpus=true --normalization_rule_name=identity')
+<div class="highlight"><pre><span></span><code><span class="nx">spm</span><span class="p">.</span><span class="nx">SentencePieceTrainer</span><span class="p">.</span><span class="nx">train</span><span class="p">(</span><span class="err">&#39;</span><span class="o">--</span><span class="nx">input</span><span class="p">=</span><span class="nx">wudao</span><span class="p">.</span><span class="nx">txt</span><span class="w"> </span><span class="o">--</span><span class="nx">model_prefix</span><span class="p">=</span><span class="nx">wudao_m</span><span class="w"> </span><span class="o">--</span><span class="nx">vocab_size</span><span class="p">=</span><span class="mi">50000</span><span class="w"> </span><span class="o">--</span><span class="nx">model_type</span><span class="p">=</span><span class="nx">bpe</span><span class="w"> </span><span class="o">--</span><span class="nx">train_extremely_large_corpus</span><span class="p">=</span><span class="kc">true</span><span class="w"> </span><span class="o">--</span><span class="nx">normalization_rule_name</span><span class="p">=</span><span class="nx">identity</span><span class="err">&#39;</span><span class="p">)</span>
 
-spm.SentencePieceTrainer.train('--input=wudao.txt --model_prefix=wudao_m2 --vocab_size=50000 --model_type=unigram --train_extremely_large_corpus=true --normalization_rule_name=identity')
-</code></pre>
+<span class="nx">spm</span><span class="p">.</span><span class="nx">SentencePieceTrainer</span><span class="p">.</span><span class="nx">train</span><span class="p">(</span><span class="err">&#39;</span><span class="o">--</span><span class="nx">input</span><span class="p">=</span><span class="nx">wudao</span><span class="p">.</span><span class="nx">txt</span><span class="w"> </span><span class="o">--</span><span class="nx">model_prefix</span><span class="p">=</span><span class="nx">wudao_m2</span><span class="w"> </span><span class="o">--</span><span class="nx">vocab_size</span><span class="p">=</span><span class="mi">50000</span><span class="w"> </span><span class="o">--</span><span class="nx">model_type</span><span class="p">=</span><span class="nx">unigram</span><span class="w"> </span><span class="o">--</span><span class="nx">train_extremely_large_corpus</span><span class="p">=</span><span class="kc">true</span><span class="w"> </span><span class="o">--</span><span class="nx">normalization_rule_name</span><span class="p">=</span><span class="nx">identity</span><span class="err">&#39;</span><span class="p">)</span>
+</code></pre></div>
 
 <p>压缩率的单位是“bytes/token”，即平均每个token对应的字节数。可见，BytePiece能够在训练时间和内存都比较折中的情况下，获得最大的压缩率。</p>
 <p>接下来进行一个更大规模的测试。从中英比例大致为3:5的混合语料库中，抽取出10万条样本训练vocab_size=100k的Tokenizer。这个语料库的文本都比较长，所以这时候10万条导出来的文件已经13GB了，测试集包含两部分，一部分是同样的语料库中采样出1000条（即同源），另一部分是刚才采样出来的1000条悟道数据集（代表不同源）。结果如下：<br />
@@ -229,7 +229,290 @@ url={\url{https://spaces.ac.cn/archives/9752}},<br />
 } </p>
 <hr />
 <h2 id="_10">公式推导与注释<a class="toc-link" href="#_10" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<h3 id="_11">一、信息论基础<a class="toc-link" href="#_11" title="Permanent link">&para;</a></h3>
+<h4 id="11">1.1 熵与压缩率的关系<a class="toc-link" href="#11" title="Permanent link">&para;</a></h4>
+<p><strong>香农信息熵定义</strong>：对于离散随机变量$X$，其信息熵定义为
+\begin{equation}
+H(X) = -\sum_{i} p(x_i) \log_2 p(x_i) \tag{1}
+\end{equation}</p>
+<p><strong>数学直觉</strong>：熵度量了随机变量的不确定性。$\log_2 p(x_i)$表示事件$x_i$的自信息（单位：bit），负号使其为正值，期望即为平均信息量。</p>
+<p><strong>压缩率定义</strong>：假设词表大小为$V$，平均每个token对应$L$个bytes，则压缩率定义为
+\begin{equation}
+R = \frac{L}{\log_2 V} \tag{2}
+\end{equation}</p>
+<p><strong>推导过程</strong>：
+- 若每个token等概出现，需要$\log_2 V$ bits编码一个token
+- 该token实际对应$L$ bytes = $8L$ bits的原始数据
+- 因此压缩比为$\frac{8L}{\log_2 V}$，压缩率即为上式</p>
+<p><strong>实际考虑</strong>：token分布通常不均匀，理论最优编码长度由熵给出
+\begin{equation}
+H(T) = -\sum_{t \in V} p(t) \log_2 p(t) \tag{3}
+\end{equation}</p>
+<p><strong>香农第一定理</strong>：对于信源$T$，最优无损压缩的平均码长不小于其熵$H(T)$，即
+\begin{equation}
+\mathbb{E}[L_{code}] \geq H(T) \tag{4}
+\end{equation}</p>
+<h4 id="12-byte">1.2 Byte级别的信息熵<a class="toc-link" href="#12-byte" title="Permanent link">&para;</a></h4>
+<p><strong>Byte熵计算</strong>：设byte序列为$B = b_1, b_2, \ldots, b_n$，每个byte取值范围为$[0, 255]$，则
+\begin{equation}
+H(B) = -\sum_{i=0}^{255} p(b=i) \log_2 p(b=i) \tag{5}
+\end{equation}</p>
+<p><strong>经验观察</strong>：
+- 英文字符（1 byte/char）：熵约为$4-5$ bits
+- 中文字符（3 bytes/char in UTF-8）：熵约为$10-13$ bits
+- 因此中文平均信息熵约为英文的2-3倍</p>
+<p><strong>信息密度</strong>：定义单位byte的信息密度为
+\begin{equation}
+\rho = \frac{H(T)}{L_{avg}} \tag{6}
+\end{equation}
+其中$L_{avg}$是token的平均byte长度。</p>
+<h3 id="n-gram">二、N-gram语言模型<a class="toc-link" href="#n-gram" title="Permanent link">&para;</a></h3>
+<h4 id="21">2.1 条件概率分解<a class="toc-link" href="#21" title="Permanent link">&para;</a></h4>
+<p><strong>完整概率分解</strong>：对于byte序列$c_1, c_2, \ldots, c_l$，根据链式法则
+\begin{equation}
+p(c_1, c_2, \ldots, c_l) = \prod_{i=1}^{l} p(c_i | c_1, \ldots, c_{i-1}) \tag{7}
+\end{equation}</p>
+<p><strong>马尔可夫假设</strong>：n-gram模型假设每个byte只依赖于前$n-1$个byte
+\begin{equation}
+p(c_i | c_1, \ldots, c_{i-1}) \approx p(c_i | c_{i-n+1}, \ldots, c_{i-1}) \tag{8}
+\end{equation}</p>
+<p><strong>推导说明</strong>：
+- 当$i \leq n$时，使用所有历史：$p(c_i | c_1, \ldots, c_{i-1})$
+- 当$i &gt; n$时，截断历史：$p(c_i | c_{i-n+1}, \ldots, c_{i-1})$</p>
+<h4 id="22-n-gram">2.2 词概率的n-gram分解<a class="toc-link" href="#22-n-gram" title="Permanent link">&para;</a></h4>
+<p><strong>关键推导</strong>：设词$w = c_1 c_2 \ldots c_m$，其概率可分解为
+\begin{equation}
+p(w) = \prod_{j=1}^{m} p(c_j | c_{\max(1, j-n+1)}, \ldots, c_{j-1}) \tag{9}
+\end{equation}</p>
+<p><strong>具体示例</strong>（以$n=3$, $w=$"深度学习"为例）：
+\begin{align}
+p(\text{"深度学习"}) &amp;= p(\text{深}) \cdot p(\text{度}|\text{深}) \cdot p(\text{学}|\text{深度}) \cdot p(\text{习}|\text{度学}) \tag{10}\
+&amp;= p(c_1) \cdot p(c_2|c_1) \cdot p(c_3|c_1,c_2) \cdot p(c_4|c_2,c_3) \tag{11}
+\end{align}</p>
+<p><strong>边界处理</strong>：
+- $j=1$: $p(c_1)$ 为unigram概率
+- $j=2$: $p(c_2|c_1)$ 为bigram概率
+- $j \geq n$: $p(c_j|c_{j-n+1}, \ldots, c_{j-1})$ 为完整n-gram</p>
+<h3 id="unigram">三、Unigram分词算法<a class="toc-link" href="#unigram" title="Permanent link">&para;</a></h3>
+<h4 id="31">3.1 最大概率路径<a class="toc-link" href="#31" title="Permanent link">&para;</a></h4>
+<p><strong>问题定义</strong>：给定byte序列$B = b_1, \ldots, b_n$和词表$V$，找到最优切分$W^<em> = w_1, w_2, \ldots, w_k$使得
+\begin{equation}
+W^</em> = \argmax_{W} \prod_{i=1}^{k} p(w_i) \tag{12}
+\end{equation}</p>
+<p><strong>对数形式</strong>（避免下溢）：
+\begin{equation}
+W^* = \argmax_{W} \sum_{i=1}^{k} \log p(w_i) \tag{13}
+\end{equation}</p>
+<p><strong>组合爆炸</strong>：对于长度$n$的序列，可能的切分数为$2^{n-1}$（每个间隙可切可不切），暴力枚举不可行。</p>
+<h4 id="32-viterbi">3.2 Viterbi动态规划<a class="toc-link" href="#32-viterbi" title="Permanent link">&para;</a></h4>
+<p><strong>状态定义</strong>：令$dp[i]$表示前$i$个byte的最优切分的对数概率
+\begin{equation}
+dp[i] = \max_{1 \leq j &lt; i, b_{j+1:i} \in V} \left( dp[j] + \log p(b_{j+1:i}) \right) \tag{14}
+\end{equation}</p>
+<p><strong>初始化</strong>：
+\begin{equation}
+dp[0] = 0 \tag{15}
+\end{equation}</p>
+<p><strong>递推公式详解</strong>：
+- 枚举所有可能的最后一个词：$b_{j+1:i}$（从位置$j+1$到$i$）
+- 要求该词在词表中：$b_{j+1:i} \in V$
+- 前$j$个byte的最优解为$dp[j]$
+- 加上当前词的对数概率$\log p(b_{j+1:i})$</p>
+<p><strong>回溯路径</strong>：同时维护指针数组$ptr[i]$记录切分点
+\begin{equation}
+ptr[i] = \argmax_{j} \left( dp[j] + \log p(b_{j+1:i}) \right) \tag{16}
+\end{equation}</p>
+<p><strong>完整算法</strong>：</p>
+<div class="highlight"><pre><span></span><code><span class="n">输入</span><span class="err">：</span><span class="n">byte序列</span><span class="w"> </span><span class="n">B</span><span class="o">[</span><span class="n">1..n</span><span class="o">]</span><span class="err">，</span><span class="n">词表</span><span class="w"> </span><span class="n">V</span><span class="err">，</span><span class="n">词概率</span><span class="w"> </span><span class="n">p</span><span class="p">(</span><span class="err">·</span><span class="p">)</span>
+<span class="n">输出</span><span class="err">：</span><span class="n">最优切分</span><span class="w"> </span><span class="n">W</span><span class="o">*</span>
+
+<span class="mf">1.</span><span class="w"> </span><span class="n">初始化</span><span class="w"> </span><span class="n">dp</span><span class="o">[</span><span class="n">0</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span>
+<span class="mf">2.</span><span class="w"> </span><span class="k">For</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">to</span><span class="w"> </span><span class="nl">n</span><span class="p">:</span>
+<span class="w">     </span><span class="k">For</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">to</span><span class="w"> </span><span class="n">i</span><span class="o">-</span><span class="mi">1</span><span class="err">:</span>
+<span class="w">       </span><span class="k">if</span><span class="w"> </span><span class="n">B</span><span class="o">[</span><span class="n">j+1:i</span><span class="o">]</span><span class="w"> </span><span class="err">∈</span><span class="w"> </span><span class="nl">V</span><span class="p">:</span>
+<span class="w">         </span><span class="n">score</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dp</span><span class="o">[</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="nf">log</span><span class="w"> </span><span class="n">p</span><span class="p">(</span><span class="n">B</span><span class="o">[</span><span class="n">j+1:i</span><span class="o">]</span><span class="p">)</span>
+<span class="w">         </span><span class="k">if</span><span class="w"> </span><span class="n">score</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">dp</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="err">:</span>
+<span class="w">           </span><span class="n">dp</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">score</span>
+<span class="w">           </span><span class="n">ptr</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">j</span>
+<span class="mf">3.</span><span class="w"> </span><span class="n">回溯</span><span class="err">：</span><span class="n">从</span><span class="w"> </span><span class="n">ptr</span><span class="o">[</span><span class="n">n</span><span class="o">]</span><span class="w"> </span><span class="n">开始恢复切分路径</span>
+</code></pre></div>
+
+<p><strong>复杂度分析</strong>：
+- 时间复杂度：$O(n^2 \cdot T_{lookup})$，其中$T_{lookup}$为词表查询时间
+- 使用Trie树可优化为$O(n \cdot L_{max})$，其中$L_{max}$为最长词长度</p>
+<h3 id="bytepiece">四、BytePiece训练算法<a class="toc-link" href="#bytepiece" title="Permanent link">&para;</a></h3>
+<h4 id="41">4.1 词频统计与剪枝<a class="toc-link" href="#41" title="Permanent link">&para;</a></h4>
+<p><strong>n-gram计数</strong>：对于语料库$C$，统计所有n-gram的频次
+\begin{equation}
+count(w) = \sum_{s \in C} \sum_{i} \mathbb{I}(s[i:i+|w|] = w) \tag{17}
+\end{equation}
+其中$\mathbb{I}(\cdot)$是指示函数。</p>
+<p><strong>最大似然估计</strong>：词概率的MLE为
+\begin{equation}
+p(w) = \frac{count(w)}{\sum_{w' \in V} count(w')} \tag{18}
+\end{equation}</p>
+<p><strong>平滑处理</strong>：为避免零概率，采用Add-k平滑
+\begin{equation}
+p_{smooth}(w) = \frac{count(w) + k}{Nsum + k \cdot |V|} \tag{19}
+\end{equation}
+其中$N = \sum_{w'} count(w')$，通常取$k=1$（Laplace平滑）。</p>
+<h4 id="42">4.2 冗余词剪枝<a class="toc-link" href="#42" title="Permanent link">&para;</a></h4>
+<p><strong>冗余性判断</strong>：若词$w = w_1 \circ w_2$（拼接），且满足
+\begin{equation}
+p(w_1) \cdot p(w_2) &gt; p(w) \tag{20}
+\end{equation}
+则$w$永远不会在Unigram分词中被选中（因为分开切分概率更大），可以剪枝。</p>
+<p><strong>数学证明</strong>：假设序列包含$w$，比较两种切分：
+- 保留$w$：贡献$\log p(w)$
+- 拆分为$w_1, w_2$：贡献$\log p(w_1) + \log p(w_2)$</p>
+<p>由于
+\begin{equation}
+\log p(w_1) + \log p(w_2) = \log(p(w_1) \cdot p(w_2)) &gt; \log p(w) \tag{21}
+\end{equation}
+拆分总是更优，因此$w$冗余。</p>
+<p><strong>递归剪枝</strong>：考虑词$w = w_1 \circ w_2 \circ w_3$
+\begin{equation}
+p(w_1) \cdot p(w_2) \cdot p(w_3) &gt; p(w) \Rightarrow w\text{冗余} \tag{22}
+\end{equation}</p>
+<h3 id="_12">五、压缩率理论分析<a class="toc-link" href="#_12" title="Permanent link">&para;</a></h3>
+<h4 id="51">5.1 理论压缩上界<a class="toc-link" href="#51" title="Permanent link">&para;</a></h4>
+<p><strong>熵率</strong>：定义语言的熵率为
+\begin{equation}
+H_{\infty} = \lim_{n \to \infty} \frac{1}{n} H(B_1, B_2, \ldots, B_n) \tag{23}
+\end{equation}</p>
+<p><strong>香农源编码定理</strong>：对于平稳遍历信源，最优压缩率趋近于熵率
+\begin{equation}
+\lim_{n \to \infty} \frac{L_{compressed}}{L_{original}} = \frac{H_{\infty}}{8} \tag{24}
+\end{equation}</p>
+<p><strong>实际估计</strong>：对于中文文本，经验值为
+- 熵率$H_{\infty} \approx 5-6$ bits/byte
+- 理论压缩极限约为$\frac{5.5}{8} \approx 0.69$</p>
+<h4 id="52-tokenizer">5.2 Tokenizer压缩率<a class="toc-link" href="#52-tokenizer" title="Permanent link">&para;</a></h4>
+<p><strong>tokens数统计</strong>：对于长度$N$（bytes）的文本，分词后得到$M$个tokens
+\begin{equation}
+R_{actual} = \frac{N}{M} \tag{25}
+\end{equation}</p>
+<p><strong>与词表大小的关系</strong>：根据Zipf定律，词频分布为
+\begin{equation}
+p(w_r) \propto \frac{1}{r^{\alpha}} \tag{26}
+\end{equation}
+其中$r$是词的频率排名，$\alpha \approx 1$。</p>
+<p><strong>期望词长</strong>：在Zipf分布下，期望token长度为
+\begin{equation}
+\mathbb{E}[L] = \sum_{r=1}^{|V|} p(w_r) \cdot |w_r| \tag{27}
+\end{equation}</p>
+<p><strong>优化目标</strong>：最大化
+\begin{equation}
+\max_{V} \frac{\mathbb{E}[L]}{\log_2 |V|} \tag{28}
+\end{equation}
+在固定$|V|$下获得最长的平均token长度。</p>
+<h3 id="_13">六、数值稳定性技巧<a class="toc-link" href="#_13" title="Permanent link">&para;</a></h3>
+<h4 id="61">6.1 对数空间计算<a class="toc-link" href="#61" title="Permanent link">&para;</a></h4>
+<p><strong>问题</strong>：直接计算$\prod_i p(w_i)$会导致数值下溢（概率连乘快速趋近0）。</p>
+<p><strong>解决方案</strong>：在对数空间计算
+\begin{equation}
+\log \prod_i p(w_i) = \sum_i \log p(w_i) \tag{29}
+\end{equation}</p>
+<p><strong>LogSumExp技巧</strong>：计算$\log(\sum_i e^{x_i})$时避免溢出
+\begin{equation}
+\log \sum_i e^{x_i} = x_{max} + \log \sum_i e^{x_i - x_{max}} \tag{30}
+\end{equation}
+其中$x_{max} = \max_i x_i$。</p>
+<h4 id="62-laplace">6.2 Laplace平滑的数值考虑<a class="toc-link" href="#62-laplace" title="Permanent link">&para;</a></h4>
+<p><strong>极端情况</strong>：当$count(w) = 0$时，不加平滑会导致$p(w) = 0$，进而$\log p(w) = -\infty$。</p>
+<p><strong>平滑后的对数概率</strong>：
+\begin{equation}
+\log p_{smooth}(w) = \log(count(w) + k) - \log(N + k \cdot |V|) \tag{31}
+\end{equation}</p>
+<p><strong>下界保证</strong>：即使$count(w) = 0$，仍有
+\begin{equation}
+\log p_{smooth}(w) \geq \log k - \log(N + k \cdot |V|) \tag{32}
+\end{equation}
+避免了负无穷。</p>
+<h3 id="bytepiece-vs-bpe">七、BytePiece vs BPE比较<a class="toc-link" href="#bytepiece-vs-bpe" title="Permanent link">&para;</a></h3>
+<h4 id="71-bpe">7.1 BPE合并规则<a class="toc-link" href="#71-bpe" title="Permanent link">&para;</a></h4>
+<p><strong>BPE迭代过程</strong>：每次选择频次最高的byte pair合并
+\begin{equation}
+(b_i, b_j)^* = \argmax_{(b_i, b_j)} count(b_i, b_j) \tag{33}
+\end{equation}</p>
+<p><strong>贪心近似</strong>：BPE是贪心算法，不保证全局最优。每次合并后需重新统计：
+\begin{equation}
+count_{new}(b_i b_j) = count_{old}(b_i, b_j) \tag{34}
+\end{equation}</p>
+<h4 id="72">7.2 复杂度对比<a class="toc-link" href="#72" title="Permanent link">&para;</a></h4>
+<p><strong>BPE训练复杂度</strong>：
+- 每轮需扫描全部语料：$O(N)$
+- 需要$|V|$轮迭代
+- 总复杂度：$O(N \cdot |V|)$</p>
+<p><strong>BytePiece训练复杂度</strong>：
+- n-gram统计：$O(N \cdot n)$（单次扫描）
+- 排序与剪枝：$O(|V| \log |V|)$
+- 总复杂度：$O(N \cdot n + |V| \log |V|)$</p>
+<p><strong>空间复杂度</strong>：
+- BPE：需存储所有pair频次，约$O(|V|^2)$
+- BytePiece：存储n-gram频次，约$O(|V|)$</p>
+<h3 id="_14">八、实践建议<a class="toc-link" href="#_14" title="Permanent link">&para;</a></h3>
+<h4 id="81">8.1 超参数选择<a class="toc-link" href="#81" title="Permanent link">&para;</a></h4>
+<p><strong>n-gram阶数$n$</strong>：
+- $n=6$的理论依据：英文单词平均长度$\approx 4-5$，加上词缀，$n=6$足够覆盖
+- 更大的$n$：提升准确性，但增加统计复杂度和稀疏性
+- 建议：$n \in [5, 7]$</p>
+<p><strong>词表大小$|V|$</strong>：
+- 小词表（$&lt;10k$）：压缩率低，训练快
+- 中词表（$30-50k$）：平衡点，适合多数应用
+- 大词表（$&gt;100k$）：压缩率高，但增加模型参数</p>
+<p><strong>平滑系数$k$</strong>：
+- $k=0$：无平滑，可能出现零概率
+- $k=1$：Laplace平滑，经典选择
+- $k \in (0,1)$：Lidstone平滑，更温和</p>
+<h4 id="82">8.2 工程优化<a class="toc-link" href="#82" title="Permanent link">&para;</a></h4>
+<p><strong>Trie树加速</strong>：词表查询从$O(|V|)$优化到$O(L_{max})$
+\begin{equation}
+T_{Viterbi} = O(n \cdot L_{max} \cdot T_{Trie}) \tag{35}
+\end{equation}
+其中$T_{Trie} = O(L_{max})$。</p>
+<p><strong>并行化</strong>：n-gram统计天然支持Map-Reduce
+\begin{equation}
+count(w) = \sum_{partition} count_{partition}(w) \tag{36}
+\end{equation}</p>
+<p><strong>内存优化</strong>：使用布隆过滤器预过滤低频n-gram
+\begin{equation}
+\text{filter}(w) = \begin{cases}
+1, &amp; \text{if } count(w) \geq \theta \
+0, &amp; \text{otherwise}
+\end{cases} \tag{37}
+\end{equation}</p>
+<h3 id="_15">九、理论拓展<a class="toc-link" href="#_15" title="Permanent link">&para;</a></h3>
+<h4 id="91">9.1 信息论视角<a class="toc-link" href="#91" title="Permanent link">&para;</a></h4>
+<p><strong>互信息</strong>：词$w$的信息增益为
+\begin{equation}
+I(w) = \log \frac{p(w)}{\prod_{i} p(c_i)} \tag{38}
+\end{equation}
+高互信息的词更应该保留在词表中。</p>
+<p><strong>困惑度（Perplexity）</strong>：评估语言模型质量
+\begin{equation}
+PPL = 2^{H(T)} = \exp\left(-\frac{1}{N} \sum_{i=1}^{N} \log p(w_i)\right) \tag{39}
+\end{equation}
+越低越好。</p>
+<h4 id="92-tokenizer">9.2 与其他Tokenizer的联系<a class="toc-link" href="#92-tokenizer" title="Permanent link">&para;</a></h4>
+<p><strong>WordPiece</strong>：使用似然增益而非频次
+\begin{equation}
+score(w_i, w_j) = \frac{p(w_i w_j)}{p(w_i) p(w_j)} \tag{40}
+\end{equation}</p>
+<p><strong>Unigram LM</strong>（SentencePiece）：本质上与BytePiece相同，但使用EM算法迭代优化
+\begin{equation}
+p^{(t+1)}(w) = \frac{\sum_{s} \mathbb{E}<em w_="w'">{p^{(t)}}[count(w|s)]}{\sum</em>
+\end{equation}} \sum_{s} \mathbb{E}_{p^{(t)}}[count(w'|s)]} \tag{41</p>
+<h3 id="_16">十、总结<a class="toc-link" href="#_16" title="Permanent link">&para;</a></h3>
+<p>BytePiece通过n-gram语言模型和Viterbi算法实现了高效的Tokenizer训练：</p>
+<ol>
+<li><strong>信息论基础</strong>：压缩率$R = \frac{L}{\log_2 V}$，受熵率$H_{\infty}$限制</li>
+<li><strong>Unigram分词</strong>：动态规划求解最大概率路径，复杂度$O(n \cdot L_{max})$</li>
+<li><strong>训练算法</strong>：一次扫描统计n-gram，复杂度$O(N \cdot n)$，远快于BPE的$O(N \cdot |V|)$</li>
+<li><strong>剪枝策略</strong>：移除冗余词$p(w_1)p(w_2) &gt; p(w)$，减少词表大小</li>
+<li><strong>数值稳定</strong>：对数空间计算+Laplace平滑避免下溢</li>
+</ol>
+<p><strong>核心优势</strong>：纯Python实现、训练高效、压缩率高、无需NFKC归一化。</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -239,7 +522,7 @@ url={\url{https://spaces.ac.cn/archives/9752}},<br />
                             
                             <a href="liontiger优化器训练下的embedding异常和对策.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#100 Lion/Tiger优化器训练下的Embedding异常和对策</div>
+                                <div class="nav-title">#246 Lion/Tiger优化器训练下的Embedding异常和对策</div>
                             </a>
                             
                         </div>
@@ -247,7 +530,7 @@ url={\url{https://spaces.ac.cn/archives/9752}},<br />
                             
                             <a href="大词表语言模型在续写任务上的一个问题及对策.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#102 大词表语言模型在续写任务上的一个问题及对策</div>
+                                <div class="nav-title">#248 大词表语言模型在续写任务上的一个问题及对策</div>
                             </a>
                             
                         </div>
@@ -283,7 +566,19 @@ url={\url{https://spaces.ac.cn/archives/9752}},<br />
 <li><a href="#_7">效果测试</a></li>
 <li><a href="#_8">未完待续</a></li>
 <li><a href="#_9">文章小结</a></li>
-<li><a href="#_10">公式推导与注释</a></li>
+<li><a href="#_10">公式推导与注释</a><ul>
+<li><a href="#_11">一、信息论基础</a></li>
+<li><a href="#n-gram">二、N-gram语言模型</a></li>
+<li><a href="#unigram">三、Unigram分词算法</a></li>
+<li><a href="#bytepiece">四、BytePiece训练算法</a></li>
+<li><a href="#_12">五、压缩率理论分析</a></li>
+<li><a href="#_13">六、数值稳定性技巧</a></li>
+<li><a href="#bytepiece-vs-bpe">七、BytePiece vs BPE比较</a></li>
+<li><a href="#_14">八、实践建议</a></li>
+<li><a href="#_15">九、理论拓展</a></li>
+<li><a href="#_16">十、总结</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

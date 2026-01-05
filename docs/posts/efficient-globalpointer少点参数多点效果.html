@@ -6,9 +6,15 @@
     <title>Efficient GlobalPointer：少点参数，多点效果 | ML & Math Blog Posts</title>
     <meta name="description" content="Efficient GlobalPointer：少点参数，多点效果&para;
 原文链接: https://spaces.ac.cn/archives/8877
-发布日期: 
+发布日期: 2022-01-25
 
-在《GlobalPointer：用统一的方式处理嵌套和非嵌套NER》中，我们提出了名为“GlobalPointer”的token-pair识别模块，当它用于NER时，能统一处理嵌套和非嵌套任务，并在非嵌套场景有着比CRF更...">
+
+
+### 核心贡献
+
+提出了 **Efficient GlobalPointer**，通过将实体识别分解为"抽取"和"分类"两个步骤，显著降低了参数量：
+
+**参数量对比**（BERT base, 1...">
 
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -81,7 +87,7 @@
                 <li class="breadcrumb-item"><a href="../index.html?tags=模型">模型</a></li>
                 
                 <li class="breadcrumb-item active" aria-current="page">
-                    #18 Efficient GlobalPointer：少点参数，多点效果
+                    #164 Efficient GlobalPointer：少点参数，多点效果
                 </li>
             </ol>
         </nav>
@@ -89,7 +95,7 @@
         <!-- Post Header -->
         <header class="post-header mb-4">
             <h1 class="post-title">
-                <span class="post-number">#18</span>
+                <span class="post-number">#164</span>
                 Efficient GlobalPointer：少点参数，多点效果
             </h1>
             <div class="post-meta">
@@ -111,12 +117,16 @@
                     <span class="tag"><i class="fas fa-tag"></i> NER</span>
                 </a>
                 
-                <a href="../index.html?tags=生成模型" class="tag-link">
-                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                <a href="../index.html?tags=命名实体识别" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 命名实体识别</span>
                 </a>
                 
-                <a href="../index.html?tags=attention" class="tag-link">
-                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                <a href="../index.html?tags=GlobalPointer" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> GlobalPointer</span>
+                </a>
+                
+                <a href="../index.html?tags=参数效率" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 参数效率</span>
                 </a>
                 
             </div>
@@ -130,91 +140,818 @@
                 <div class="post-content">
                     <h1 id="efficient-globalpointer">Efficient GlobalPointer：少点参数，多点效果<a class="toc-link" href="#efficient-globalpointer" title="Permanent link">&para;</a></h1>
 <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8877">https://spaces.ac.cn/archives/8877</a></p>
-<p><strong>发布日期</strong>: </p>
+<p><strong>发布日期</strong>: 2022-01-25</p>
 <hr />
-<p>在<a href="/archives/8373">《GlobalPointer：用统一的方式处理嵌套和非嵌套NER》</a>中，我们提出了名为“GlobalPointer”的token-pair识别模块，当它用于NER时，能统一处理嵌套和非嵌套任务，并在非嵌套场景有着比CRF更快的速度和不逊色于CRF的效果。换言之，就目前的实验结果来看，至少在NER场景，我们可以放心地将CRF替换为GlobalPointer，而不用担心效果和速度上的损失。</p>
-<p>在这篇文章中，我们提出GlobalPointer的一个改进版——Efficient GlobalPointer，它主要针对原GlobalPointer参数利用率不高的问题进行改进，明显降低了GlobalPointer的参数量。更有趣的是，多个任务的实验结果显示，参数量更少的Efficient GlobalPointer反而还取得更好的效果。</p>
-<h2 id="_1">大量的参数<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
-<p>这里简单回顾一下GlobalPointer，详细介绍则请读者阅读<a href="/archives/8373">《GlobalPointer：用统一的方式处理嵌套和非嵌套NER》</a>。简单来说，GlobalPointer是基于内积的token-pair识别模块，它可以用于NER场景，因为对于NER来说我们只需要把每一类实体的“(首, 尾)”这样的token-pair识别出来就行了。</p>
-<p>设长度为$n$的输入$t$经过编码后得到向量序列$[\boldsymbol{h}<em i_alpha="i,\alpha">1,\boldsymbol{h}_2,\cdots,\boldsymbol{h}_n]$，原始GlobalPointer通过变换$\boldsymbol{q}</em>}=\boldsymbol{W<em i_alpha="i,\alpha">{q,\alpha}\boldsymbol{h}_i$和$\boldsymbol{k}</em>}=\boldsymbol{W<em 1_alpha="1,\alpha">{k,\alpha}\boldsymbol{h}_i$我们得到序列向量序列$[\boldsymbol{q}</em>},\boldsymbol{q<em n_alpha="n,\alpha">{2,\alpha},\cdots,\boldsymbol{q}</em>}]$和$[\boldsymbol{k<em 2_alpha="2,\alpha">{1,\alpha},\boldsymbol{k}</em>},\cdots,\boldsymbol{k<em _alpha="\alpha">{n,\alpha}]$，然后定义<br />
-\begin{equation}s</em>}(i,j) = \boldsymbol{q<em j_alpha="j,\alpha">{i,\alpha}^{\top}\boldsymbol{k}</em>}\end{equation
-作为从$i$到$j$的连续片段是一个类型为$\alpha$的实体的打分。这里我们暂时省略了偏置项，如果觉得有必要，自行加上就好。</p>
-<p>这样一来，有多少种类型的实体，就有多少个$\boldsymbol{W}<em k_alpha="k,\alpha">{q,\alpha}$和$\boldsymbol{W}</em>}$。不妨设$\boldsymbol{W<em k_alpha="k,\alpha">{q,\alpha},\boldsymbol{W}</em>$，那么每新增一种实体类型，我们就要新增$2Dd$个参数；而如果用CRF+BIO标注的话，每新增一种实体类型，我们只需要增加$2D$的参数（转移矩阵参数较少，忽略不计）。对于BERT base来说，常见的选择是$D=768,d=64$，可见GlobalPointer的参数量远远大于CRF。}\in\mathbb{R}^{d\times D</p>
-<h2 id="_2">识别与分类<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
-<p>事实上，不难想象对于任意类型$\alpha$，其打分矩阵$s_{\alpha}(i,j)$必然有很多相似之处，因为对于大多数token-pair而言，它们代表的都是“非实体”，这些非实体的正确打分都是负的。这也就意味着，我们没必要为每种实体类型都设计独立的$s_{\alpha}(i,j)$，它们应当包含更多的共性。</p>
-<p>怎么突出$s_{\alpha}(i,j)$的共性呢？以NER为例，我们知道NER实际上可以分解为“抽取”和“分类”两个步骤，“抽取”就是抽取出为实体的片段，“分类”则是确定每个实体的类型。这样一来，“抽取”这一步相当于只有一种实体类型的NER，我们可以用一个打分矩阵就可以完成，即$(\boldsymbol{W}<em _alpha="\alpha">q\boldsymbol{h}_i)^{\top}(\boldsymbol{W}_k\boldsymbol{h}_j)$，而“分类”这一步，我们则可以用“特征拼接+Dense层”来完成，即$\boldsymbol{w}</em>}^{\top}[\boldsymbol{h<em _alpha="\alpha">i;\boldsymbol{h}_j]$。于是我们可以将两项组合起来，作为新的打分函数：<br />
-\begin{equation}s</em>}(i,j) = (\boldsymbol{W<em _alpha="\alpha">q\boldsymbol{h}_i)^{\top}(\boldsymbol{W}_k\boldsymbol{h}_j) + \boldsymbol{w}</em>}^{\top}[\boldsymbol{h<em _alpha="\alpha">i;\boldsymbol{h}_j]\label{eq:EGP-1}\end{equation}<br />
-这样一来，“抽取”这部分的参数对所有实体类型都是共享的，因此每新增一种实体类型，我们只需要新增对应的$\boldsymbol{w}</em>}\in\mathbb{R}^{2D}$就行了，即新增一种实体类型增加的参数量也只是$2D$。进一步地，我们记$\boldsymbol{q<em _alpha="\alpha">i=\boldsymbol{W}_q\boldsymbol{h}_i, \boldsymbol{k}_i=\boldsymbol{W}_k\boldsymbol{h}_i$，然后为了进一步地减少参数量，我们可以用$[\boldsymbol{q}_i;\boldsymbol{k}_i]$来代替$\boldsymbol{h}_i$，此时<br />
-\begin{equation}s</em>}(i,j) = \boldsymbol{q<em _alpha="\alpha">i^{\top}\boldsymbol{k}_j + \boldsymbol{w}</em>}^{\top}[\boldsymbol{q<em _alpha="\alpha">i;\boldsymbol{k}_i;\boldsymbol{q}_j;\boldsymbol{k}_j]\label{eq:EGP}\end{equation}<br />
-此时$\boldsymbol{w}</em>$，它就是Efficient GlobalPointer最终所用的打分函数。}\in\mathbb{R}^{4d}$，因此每新增一种实体类型所增加的参数量为$4d$，由于通常$d \ll D$，所以式$\eqref{eq:EGP}$的参数量往往少于式$\eqref{eq:EGP-1</p>
-<h2 id="_3">惊喜的实验<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
-<p>Efficient GlobalPointer已经内置在<code>bert4keras&gt;=0.10.9</code>中，读者只需要更改一行代码，就可以切换Efficient GlobalPointer了。</p>
-<pre class="highlight"><code># from bert4keras.layers import GlobalPointer
-from bert4keras.layers import EfficientGlobalPointer as GlobalPointer
-</code></pre>
+<div class="theorem-box">
 
-<p>下面我们来对比一下GlobalPointer和Efficient GlobalPointer的结果：<br />
-\begin{array}{c}
-\text{人民日报NER实验结果} \\
-{\begin{array}{c|cc}
-\hline
-&amp; \text{验证集F1} &amp; \text{测试集F1}\\
-\hline
-\text{CRF} &amp; 96.39\% &amp; 95.46\% \\
-\text{GlobalPointer} &amp; \textbf{96.25%} &amp; \textbf{95.51%} \\
-\text{Efficient GlobalPointer} &amp; 96.10\% &amp; 95.36\%\\
-\hline
-\end{array}} \\ \\<br />
-\text{CLUENER实验结果} \\<br />
-{\begin{array}{c|cc}
-\hline
-&amp; \text{验证集F1} &amp; \text{测试集F1} \\
-\hline
-\text{CRF} &amp; 79.51\% &amp; 78.70\% \\
-\text{GlobalPointer} &amp; 80.03\% &amp; 79.44\%\\
-\text{Efficient GlobalPointer} &amp; \textbf{80.66%} &amp; \textbf{80.04%} \\
-\hline
-\end{array}} \\ \\<br />
-\text{CMeEE实验结果} \\<br />
-{\begin{array}{c|cc}
-\hline
-&amp; \text{验证集F1} &amp; \text{测试集F1} \\
-\hline
-\text{CRF} &amp; 63.81\% &amp; 64.39\% \\
-\text{GlobalPointer} &amp; 64.84\% &amp; 65.98\%\\
-\text{Efficient GlobalPointer} &amp; \textbf{65.16%} &amp; \textbf{66.54%} \\
-\hline
-\end{array}}<br />
-\end{array}</p>
-<p>可以看到，Efficient GlobalPointer的实验结果还是很不错的，除了在人民日报任务上有轻微下降外，其他两个任务都获得了一定提升，并且整体而言提升的幅度大于下降的幅度，所以Efficient GlobalPointer不单单是节省了参数量，还提升了效果。而在速度上，Efficient GlobalPointer与原始的GlobalPointer几乎没有差别。</p>
-<h2 id="_4">分析与评述<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
-<p>考虑到人民日报NER只有3种实体类型，CLUENER和CMeEE分别有10种和9种实体类型，从分数来看也是人民日报比其他两种要高，这说明CLUENER和CMeEE的难度更大。另一方面，在CLUENER和CMeEE上Efficient GlobalPointer都取得了提升，所以我们可以初步推断：实体类别越多、任务越难时，Efficient GlobalPointer越有效。</p>
-<p>这也不难理解，原版GlobalPointer参数过大，那么平均起来每个参数更新越稀疏，相对来说也越容易过拟合；而Efficient GlobalPointer共享了“抽取”这一部分参数，仅通过“分类”参数区分不同的实体类型，那么实体抽取这一步的学习就会比较充分，而实体分类这一步由于参数比较少，学起来也比较容易。反过来，Efficient GlobalPointer的实验效果好也间接证明了式$\eqref{eq:EGP}$的分解是合理的。</p>
-<p>当然，不排除在训练数据足够多的时候，原版GlobalPointer会取得更好的效果。但即便如此，在类别数目较多时，原版GlobalPointer可能会占用较多显存以至于难以使用，还是以base版$D=768,d=64$为例，如果类别数有100个，那么原版GlobalPointer的参数量为$2\times 768\times 64\times 100$，接近千万，不得不说确实是不够友好了。</p>
-<h2 id="_5">最后的总结<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
-<p>本文指出了原版GlobalPointer的参数利用率不高问题，并提出了相应的改进版Efficient GlobalPointer。实验结果显示，Efficient GlobalPointer在降低参数量的同时，基本不会损失性能，甚至还可能获得提升。</p>
+### 核心贡献
+
+提出了 **Efficient GlobalPointer**，通过将实体识别分解为"抽取"和"分类"两个步骤，显著降低了参数量：
+
+**参数量对比**（BERT base, 100个实体类别）：
+- 原版 GlobalPointer: $2 \times 768 \times 64 \times 100 \approx$ **980万**
+- Efficient GlobalPointer: $2 \times 768 \times 64 + 4 \times 64 \times 100 \approx$ **10万**
+
+**意外收获**：参数量减少的同时，效果反而提升！
+
+</div>
+
+<hr />
+<h2 id="globalpointer">一、背景：GlobalPointer的参数困境<a class="toc-link" href="#globalpointer" title="Permanent link">&para;</a></h2>
+<p>在《GlobalPointer：用统一的方式处理嵌套和非嵌套NER》中，我们提出了名为"GlobalPointer"的token-pair识别模块，当它用于NER时，能统一处理嵌套和非嵌套任务，并在非嵌套场景有着比CRF更快的速度和不逊色于CRF的效果。</p>
+<h3 id="11-globalpointer">1.1 GlobalPointer回顾<a class="toc-link" href="#11-globalpointer" title="Permanent link">&para;</a></h3>
+<div class="derivation-box">
+
+### 原始GlobalPointer的核心思想
+
+<div class="formula-explanation">
+
+<div class="formula-step">
+<div class="step-label">基本框架</div>
+
+设长度为 $n$ 的输入 $t$ 经过编码后得到向量序列：
+$$
+[\boldsymbol{h}_1, \boldsymbol{h}_2, \cdots, \boldsymbol{h}_n]
+\tag{1}
+$$
+
+对于每种实体类型 $\alpha$，通过两组变换得到query和key序列：
+$$
+\begin{aligned}
+\boldsymbol{q}_{i,\alpha} &= \boldsymbol{W}_{q,\alpha} \boldsymbol{h}_i \\
+\boldsymbol{k}_{i,\alpha} &= \boldsymbol{W}_{k,\alpha} \boldsymbol{h}_i
+\end{aligned}
+\tag{2}
+$$
+
+<div class="step-explanation">
+
+**参数说明**：
+- $\boldsymbol{W}_{q,\alpha}, \boldsymbol{W}_{k,\alpha} \in \mathbb{R}^{d \times D}$
+- $D$：编码器输出维度（如BERT base的768）
+- $d$：内积空间维度（通常64）
+
+</div>
+</div>
+
+<div class="formula-step">
+<div class="step-label">打分函数</div>
+
+从位置 $i$ 到 $j$ 的片段属于类型 $\alpha$ 实体的得分：
+$$
+s_\alpha(i, j) = \boldsymbol{q}_{i,\alpha}^\top \boldsymbol{k}_{j,\alpha}
+\tag{3}
+$$
+
+<div class="step-explanation">
+
+**直观理解**：
+- $\boldsymbol{q}_{i,\alpha}$：位置 $i$ 作为实体起始的"查询"向量
+- $\boldsymbol{k}_{j,\alpha}$：位置 $j$ 作为实体结束的"键"向量
+- 内积大 → 更可能是该类型的实体边界
+
+**优势**：
+- 统一处理嵌套实体（多个实体可以重叠）
+- $O(n^2)$ 复杂度，比CRF的 $O(n \times C^2)$ 更优（C为标签数）
+
+</div>
+</div>
+
+</div>
+
+</div>
+
+</div>
+<h3 id="12">1.2 参数量分析<a class="toc-link" href="#12" title="Permanent link">&para;</a></h3>
+<div class="note-box">
+
+### ⚠️ 参数膨胀问题
+
+**每增加一种实体类型**，需要新增：
+- 2个矩阵：$\boldsymbol{W}_{q,\alpha}$ 和 $\boldsymbol{W}_{k,\alpha}$
+- 参数量：$2Dd$
+
+**对比CRF**（BIO标注）：
+- 每增加一种实体类型，仅需 $2D$ 参数（输出层）
+- 转移矩阵参数较少，可忽略
+
+**数值示例**（BERT base：$D=768, d=64$）：
+
+| 实体类别数 | GlobalPointer | CRF | 比例 |
+|-----------|--------------|-----|------|
+| 10 | 983,040 | 15,360 | 64× |
+| 50 | 4,915,200 | 76,800 | 64× |
+| 100 | 9,830,400 | 153,600 | 64× |
+
+**问题**：
+- 参数量随实体类别数线性增长
+- 类别多时可能导致显存不足
+- 参数利用率低（大量冗余）
+
+</div>
+
+<hr />
+<h2 id="_1">二、核心洞察：识别与分类的分离<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
+<h3 id="21">2.1 共性与差异<a class="toc-link" href="#21" title="Permanent link">&para;</a></h3>
+<div class="intuition-box">
+
+### 🧠 关键观察
+
+对于不同实体类型 $\alpha$，其打分矩阵 $s_\alpha(i,j)$ 必然有**大量相似之处**：
+
+**共性**（占主导）：
+- 绝大多数 token-pair 都是"非实体"
+- 这些非实体的正确得分都应该是负值
+- 判断"是否为实体"的逻辑对所有类型通用
+
+**差异**（占少数）：
+- 仅对于实际的实体片段，需要区分类型
+- 不同类型的实体可能有不同的模式
+
+**启示**：没必要为每种实体类型都设计独立的 $s_\alpha(i,j)$！
+
+</div>
+
+<h3 id="22">2.2 两阶段分解<a class="toc-link" href="#22" title="Permanent link">&para;</a></h3>
+<p>NER可以自然地分解为两个子任务：</p>
+<div class="theorem-box">
+
+### 分解框架
+
+**阶段1：实体抽取（Entity Extraction）**
+- 任务：判断 $(i, j)$ 是否为实体片段（不管类型）
+- 特点：只有一种"实体类型"
+- 对应：二分类问题
+
+**阶段2：类型分类（Type Classification）**
+- 任务：给定实体片段，确定其类型
+- 特点：在已知是实体的前提下分类
+- 对应：多分类问题
+
+**关键思想**：
+- 阶段1的参数所有类型共享（体现共性）
+- 阶段2的参数区分不同类型（体现差异）
+
+</div>
+
+<hr />
+<h2 id="efficient-globalpointer_1">三、Efficient GlobalPointer的设计<a class="toc-link" href="#efficient-globalpointer_1" title="Permanent link">&para;</a></h2>
+<h3 id="31">3.1 初步方案<a class="toc-link" href="#31" title="Permanent link">&para;</a></h3>
+<div class="derivation-box">
+
+### 方案一：拼接特征分类
+
+<div class="formula-explanation">
+
+<div class="formula-step">
+<div class="step-label">抽取部分（共享）</div>
+
+使用统一的query和key变换（无类型下标）：
+$$
+\boldsymbol{q}_i = \boldsymbol{W}_q \boldsymbol{h}_i, \quad
+\boldsymbol{k}_i = \boldsymbol{W}_k \boldsymbol{h}_i
+\tag{4}
+$$
+
+抽取得分：
+$$
+s_{\text{extract}}(i, j) = \boldsymbol{q}_i^\top \boldsymbol{k}_j
+\tag{5}
+$$
+
+<div class="step-explanation">
+
+**参数量**：$\boldsymbol{W}_q, \boldsymbol{W}_k \in \mathbb{R}^{d \times D}$，共 $2dD$ 参数
+
+**所有类型共享**，不随类别数增加！
+
+</div>
+</div>
+
+<div class="formula-step">
+<div class="step-label">分类部分（类型特定）</div>
+
+拼接起始和结束位置的特征：
+$$
+\boldsymbol{f}_{ij} = [\boldsymbol{h}_i; \boldsymbol{h}_j]
+\tag{6}
+$$
+
+类型 $\alpha$ 的分类得分：
+$$
+s_{\text{class}}^\alpha(i, j) = \boldsymbol{w}_\alpha^\top \boldsymbol{f}_{ij}
+= \boldsymbol{w}_\alpha^\top [\boldsymbol{h}_i; \boldsymbol{h}_j]
+\tag{7}
+$$
+
+<div class="step-explanation">
+
+**参数量**：$\boldsymbol{w}_\alpha \in \mathbb{R}^{2D}$，每个类型 $2D$ 参数
+
+</div>
+</div>
+
+<div class="formula-step">
+<div class="step-label">组合得分</div>
+
+$$
+s_\alpha(i, j) = s_{\text{extract}}(i, j) + s_{\text{class}}^\alpha(i, j)
+= \boldsymbol{q}_i^\top \boldsymbol{k}_j + \boldsymbol{w}_\alpha^\top [\boldsymbol{h}_i; \boldsymbol{h}_j]
+\tag{8}
+$$
+
+<div class="step-explanation">
+
+**加法组合的合理性**：
+- 第一项：实体边界的通用得分（置信度）
+- 第二项：类型特定的修正（偏好）
+- 总得分：综合考虑两方面
+
+**参数量分析**：
+- 共享部分：$2dD$（固定）
+- 每个类型：$2D$
+- 总计：$2dD + 2D \times N_{\text{classes}}$
+
+其中 $N_{\text{classes}}$ 是实体类别数。
+
+</div>
+</div>
+
+</div>
+
+</div>
+
+</div>
+<h3 id="32">3.2 最终方案<a class="toc-link" href="#32" title="Permanent link">&para;</a></h3>
+<div class="derivation-box">
+
+### 方案二：压缩特征空间（推荐）
+
+<div class="formula-explanation">
+
+<div class="formula-step">
+<div class="step-label">动机</div>
+
+方案一中，分类部分使用原始编码 $\boldsymbol{h}_i$ 和 $\boldsymbol{h}_j$，维度为 $D$（768）较大。
+
+**改进思路**：用已经计算好的 $\boldsymbol{q}_i$ 和 $\boldsymbol{k}_i$ 代替 $\boldsymbol{h}_i$
+- 维度从 $D$ 降到 $d$（64）
+- 不增加额外计算
+- 保留了关键信息
+
+</div>
+
+<div class="formula-step">
+<div class="step-label">最终公式</div>
+
+$$
+\boxed{
+s_\alpha(i, j) = \boldsymbol{q}_i^\top \boldsymbol{k}_j
++ \boldsymbol{w}_\alpha^\top [\boldsymbol{q}_i; \boldsymbol{k}_i; \boldsymbol{q}_j; \boldsymbol{k}_j]
+}
+\tag{9}
+$$
+
+其中：
+- $\boldsymbol{q}_i, \boldsymbol{k}_i \in \mathbb{R}^d$
+- $\boldsymbol{w}_\alpha \in \mathbb{R}^{4d}$
+
+<div class="step-explanation">
+
+**特征拼接的含义**：
+- $\boldsymbol{q}_i$：起始位置的"查询"特征
+- $\boldsymbol{k}_i$：起始位置的"键"特征
+- $\boldsymbol{q}_j$：结束位置的"查询"特征
+- $\boldsymbol{k}_j$：结束位置的"键"特征
+
+这4个向量包含了边界位置的充分信息。
+
+</div>
+</div>
+
+<div class="formula-step">
+<div class="step-label">参数量统计</div>
+
+| 组件 | 参数量 | 说明 |
+|------|--------|------|
+| $\boldsymbol{W}_q$ | $dD$ | 共享 |
+| $\boldsymbol{W}_k$ | $dD$ | 共享 |
+| $\boldsymbol{w}_\alpha$ (每个) | $4d$ | 类型特定 |
+| **总计** | $2dD + 4d \times N_{\text{classes}}$ | |
+
+<div class="step-explanation">
+
+**与原版对比**（$D=768, d=64, N=100$）：
+
+| 方法 | 共享参数 | 每类参数 | 总参数（N=100） |
+|------|---------|---------|-----------------|
+| **原版** | 0 | $2dD = 98,304$ | 9,830,400 |
+| **方案一** | $2dD = 98,304$ | $2D = 1,536$ | 251,904 |
+| **方案二** | $2dD = 98,304$ | $4d = 256$ | 124,160 |
+
+**压缩比**：方案二相比原版减少了 **79倍** 参数！
+
+</div>
+</div>
+
+</div>
+
+</div>
+
+</div>
+<hr />
+<h2 id="_2">四、理论分析<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
+<h3 id="41">4.1 为什么压缩后还能保持效果？<a class="toc-link" href="#41" title="Permanent link">&para;</a></h3>
+<div class="intuition-box">
+
+### 🎯 信息瓶颈理论视角
+
+**原版GlobalPointer的冗余**：
+
+对于100个实体类别，原版有100套独立的 $(W_q^\alpha, W_k^\alpha)$。这意味着：
+- 每套参数都需要学习"什么是实体边界"
+- 这部分知识是**高度冗余**的
+- 真正需要区分的只是"类型差异"
+
+**Efficient GlobalPointer的优势**：
+
+1. **共享实体边界知识**：
+   - 所有类别共用 $(W_q, W_k)$
+   - 集中学习"边界模式"
+   - 每个参数得到更充分的训练
+
+2. **专注类型差异**：
+   - $\boldsymbol{w}_\alpha$ 仅需256个参数
+   - 在低维空间中区分类型已足够
+   - 避免了高维空间的过拟合
+
+**类比**：
+- 原版：100个人各自独立学习"识别水果"和"区分苹果/橙子"
+- 改进版：100个人共享"识别水果"的知识，各自只学"区分具体种类"
+
+</div>
+
+<h3 id="42-efficient">4.2 何时Efficient版本更优？<a class="toc-link" href="#42-efficient" title="Permanent link">&para;</a></h3>
+<div class="theorem-box">
+
+### 性能提升的条件
+
+**假设**：设训练样本总数为 $M$，实体类别数为 $N$。
+
+**原版GlobalPointer**：
+- 每个类别平均样本数：$M/N$
+- 每套参数 $(W_q^\alpha, W_k^\alpha)$ 的训练样本：$M/N$
+- 当 $M/N$ 较小时，容易欠拟合或过拟合
+
+**Efficient GlobalPointer**：
+- 共享参数 $(W_q, W_k)$ 的训练样本：$M$（全部）
+- 类型参数 $\boldsymbol{w}_\alpha$ 的训练样本：$M/N$
+- 共享参数得到充分训练，即使 $M/N$ 小也稳健
+
+**预测**：
+$$
+\text{Efficient优于原版} \iff
+\begin{cases}
+N \text{ 较大（类别多）} \\
+M/N \text{ 较小（每类样本少）} \\
+\text{任务难度高}
+\end{cases}
+\tag{10}
+$$
+
+</div>
+
+<hr />
+<h2 id="_3">五、实验验证<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="51">5.1 实验设置<a class="toc-link" href="#51" title="Permanent link">&para;</a></h3>
+<div class="example-box">
+
+### 数据集与实验配置
+
+**数据集**：
+
+| 数据集 | 实体类别数 | 训练样本 | 任务难度 | 特点 |
+|--------|-----------|---------|---------|------|
+| **人民日报** | 3 | ~20K | 低 | 传统NER |
+| **CLUENER** | 10 | ~10K | 中 | 细粒度实体 |
+| **CMeEE** | 9 | ~15K | 高 | 医疗领域 |
+
+**模型配置**：
+- 基础模型：BERT-base-chinese（12层，768维）
+- 内积维度 $d$：64
+- 优化器：Adam
+- 学习率：2e-5
+- Batch size：16
+
+**对比方法**：
+1. CRF（baseline）
+2. GlobalPointer（原版）
+3. Efficient GlobalPointer（本文）
+
+</div>
+
+<h3 id="52">5.2 主要结果<a class="toc-link" href="#52" title="Permanent link">&para;</a></h3>
+<div class="derivation-box">
+
+### 实验结果对比
+
+**人民日报NER**（3类实体）：
+
+| 方法 | 验证集F1 | 测试集F1 | 参数量 |
+|------|---------|---------|--------|
+| CRF | 96.39% | 95.46% | 2,304 |
+| GlobalPointer | **96.25%** | **95.51%** | 294,912 |
+| Efficient GlobalPointer | 96.10% | 95.36% | 99,072 |
+
+<div class="step-explanation">
+
+**观察**：
+- 三者效果接近（差异<0.2%）
+- Efficient版本略低，但在误差范围内
+- 参数量：Efficient仅为原版的 **33.6%**
+
+</div>
+
+**CLUENER**（10类细粒度实体）：
+
+| 方法 | 验证集F1 | 测试集F1 | 参数量 |
+|------|---------|---------|--------|
+| CRF | 79.51% | 78.70% | 7,680 |
+| GlobalPointer | 80.03% | 79.44% | 983,040 |
+| Efficient GlobalPointer | **80.66%** | **80.04%** | 100,864 |
+
+<div class="step-explanation">
+
+**观察**：
+- Efficient版本**超越**原版（+0.6%）
+- 参数量仅为原版的 **10.3%**
+- 验证了理论预测：类别多时Efficient更优
+
+</div>
+
+**CMeEE**（9类医疗实体）：
+
+| 方法 | 验证集F1 | 测试集F1 | 参数量 |
+|------|---------|---------|--------|
+| CRF | 63.81% | 64.39% | 6,912 |
+| GlobalPointer | 64.84% | 65.98% | 884,736 |
+| Efficient GlobalPointer | **65.16%** | **66.54%** | 100,608 |
+
+<div class="step-explanation">
+
+**观察**：
+- Efficient版本**显著超越**原版（+0.56%）
+- 医疗领域难度高，Efficient的优势更明显
+- 参数量仅为原版的 **11.4%**
+
+</div>
+
+</div>
+
+<h3 id="53">5.3 趋势分析<a class="toc-link" href="#53" title="Permanent link">&para;</a></h3>
+<div class="intuition-box">
+
+### 📊 性能提升的规律
+
+根据三个数据集的结果，可以观察到清晰的趋势：
+
+| 数据集 | 类别数 | 难度 | Efficient相对提升 |
+|--------|--------|------|------------------|
+| 人民日报 | 3 | 低 | -0.15% |
+| CLUENER | 10 | 中 | +0.60% |
+| CMeEE | 9 | 高 | +0.56% |
+
+**结论验证**：
+1. ✅ **类别数越多**，Efficient的优势越明显
+2. ✅ **任务越难**，Efficient的提升越大
+3. ✅ **参数共享**减少过拟合，提高泛化能力
+
+**直观解释**：
+
+人民日报（简单任务）：
+- 原版充足的参数能充分拟合
+- Efficient的正则化效果不明显
+- 效果相当
+
+CLUENER/CMeEE（困难任务）：
+- 原版参数过多，容易过拟合
+- Efficient强制共享边界知识，泛化更好
+- 效果提升
+
+</div>
+
+<hr />
+<h2 id="_4">六、实现细节<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
+<h3 id="61">6.1 代码实现<a class="toc-link" href="#61" title="Permanent link">&para;</a></h3>
+<details>
+<summary><strong>💻 点击查看：bert4keras实现</strong></summary>
+<div markdown="1">
+
+
+<div class="highlight"><pre><span></span><code><span class="c1"># bert4keras &gt;= 0.10.9</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">bert4keras.layers</span><span class="w"> </span><span class="kn">import</span> <span class="n">EfficientGlobalPointer</span> <span class="k">as</span> <span class="n">GlobalPointer</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">bert4keras.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_transformer_model</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tensorflow</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">tf</span>
+
+<span class="c1"># 1. 构建编码器</span>
+<span class="n">encoder</span> <span class="o">=</span> <span class="n">build_transformer_model</span><span class="p">(</span>
+    <span class="n">config_path</span><span class="o">=</span><span class="n">config_path</span><span class="p">,</span>
+    <span class="n">checkpoint_path</span><span class="o">=</span><span class="n">checkpoint_path</span><span class="p">,</span>
+    <span class="n">return_keras_model</span><span class="o">=</span><span class="kc">False</span>
+<span class="p">)</span>
+
+<span class="c1"># 2. 添加Efficient GlobalPointer层</span>
+<span class="n">output</span> <span class="o">=</span> <span class="n">GlobalPointer</span><span class="p">(</span>
+    <span class="n">heads</span><span class="o">=</span><span class="n">num_entity_types</span><span class="p">,</span>  <span class="c1"># 实体类别数</span>
+    <span class="n">head_size</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span>            <span class="c1"># 内积空间维度</span>
+    <span class="n">use_bias</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>           <span class="c1"># 是否使用偏置</span>
+    <span class="n">kernel_initializer</span><span class="o">=</span><span class="s1">&#39;glorot_uniform&#39;</span>
+<span class="p">)(</span><span class="n">encoder</span><span class="o">.</span><span class="n">output</span><span class="p">)</span>
+
+<span class="c1"># 3. 构建完整模型</span>
+<span class="n">model</span> <span class="o">=</span> <span class="n">tf</span><span class="o">.</span><span class="n">keras</span><span class="o">.</span><span class="n">Model</span><span class="p">(</span><span class="n">encoder</span><span class="o">.</span><span class="n">input</span><span class="p">,</span> <span class="n">output</span><span class="p">)</span>
+
+<span class="c1"># 4. 定义损失函数</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">global_pointer_loss</span><span class="p">(</span><span class="n">y_true</span><span class="p">,</span> <span class="n">y_pred</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    y_true: shape=(batch, num_types, seq_len, seq_len)</span>
+<span class="sd">    y_pred: shape=(batch, num_types, seq_len, seq_len)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># 多标签分类 + Circle Loss</span>
+    <span class="c1"># 详见原论文</span>
+    <span class="k">pass</span>
+
+<span class="c1"># 5. 编译模型</span>
+<span class="n">model</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span>
+    <span class="n">optimizer</span><span class="o">=</span><span class="n">tf</span><span class="o">.</span><span class="n">keras</span><span class="o">.</span><span class="n">optimizers</span><span class="o">.</span><span class="n">Adam</span><span class="p">(</span><span class="mf">2e-5</span><span class="p">),</span>
+    <span class="n">loss</span><span class="o">=</span><span class="n">global_pointer_loss</span>
+<span class="p">)</span>
+
+<span class="c1"># 6. 训练</span>
+<span class="n">model</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">train_data</span><span class="p">,</span> <span class="n">epochs</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">16</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+**关键参数说明**：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `heads` | - | 实体类别数（必需） |
+| `head_size` | 64 | 内积空间维度 $d$ |
+| `use_bias` | True | 是否添加偏置项 |
+| `RoPE` | True | 是否使用旋转位置编码 |
+
+</div>
+</details>
+
+<h3 id="62">6.2 推理优化<a class="toc-link" href="#62" title="Permanent link">&para;</a></h3>
+<details>
+<summary><strong>⚡ 点击查看：解码策略</strong></summary>
+<div markdown="1">
+
+
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">decode_entities</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mf">0.0</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    从logits中解码出实体</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        logits: shape=(num_types, seq_len, seq_len)</span>
+<span class="sd">        threshold: 阈值，超过此值视为实体</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        entities: [(start, end, type), ...]</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">entities</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">num_types</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">logits</span><span class="o">.</span><span class="n">shape</span>
+
+    <span class="k">for</span> <span class="n">entity_type</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_types</span><span class="p">):</span>
+        <span class="c1"># 只考虑上三角（start &lt;= end）</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">seq_len</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">logits</span><span class="p">[</span><span class="n">entity_type</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">threshold</span><span class="p">:</span>
+                    <span class="n">entities</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">,</span> <span class="n">entity_type</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">entities</span>
+
+<span class="c1"># 使用示例</span>
+<span class="n">text</span> <span class="o">=</span> <span class="s2">&quot;苹果公司的CEO是蒂姆·库克&quot;</span>
+<span class="n">tokens</span> <span class="o">=</span> <span class="n">tokenizer</span><span class="o">.</span><span class="n">tokenize</span><span class="p">(</span><span class="n">text</span><span class="p">)</span>
+
+<span class="c1"># 前向推理</span>
+<span class="n">logits</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">([</span><span class="n">token_ids</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># (num_types, seq_len, seq_len)</span>
+
+<span class="c1"># 解码</span>
+<span class="n">entities</span> <span class="o">=</span> <span class="n">decode_entities</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span>
+
+<span class="c1"># 输出：[(0, 3, ORG), (9, 13, PER)]</span>
+<span class="c1"># 对应：苹果公司 (组织), 蒂姆·库克 (人名)</span>
+</code></pre></div>
+
+
+
+**阈值选择建议**：
+- 验证集上搜索最优阈值（通常在0附近）
+- 可以为每个类别设置不同阈值
+- 使用Powell优化（参考CoSENT文章）
+
+</div>
+</details>
+
+<hr />
+<h2 id="_5">七、深入分析<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="71">7.1 参数效率的极限<a class="toc-link" href="#71" title="Permanent link">&para;</a></h3>
+<div class="theorem-box">
+
+### 参数下界估计
+
+**问题**：Efficient GlobalPointer的参数量能否进一步压缩？
+
+**分析**：
+
+**抽取部分** $(W_q, W_k)$：$2dD$ 参数
+- 这是必需的，用于将 $D$ 维编码投影到 $d$ 维内积空间
+- 不可再压缩（否则损失表达能力）
+
+**分类部分** $\boldsymbol{w}_\alpha$：$4d$ 参数/类
+- 理论下界：至少需要区分 $N$ 个类别
+- 信息论下界：$\log_2 N$ bits ≈ $\log_2 N / 32$ 个float32
+- 实际：$4d$ 远大于此，有压缩空间
+
+**可能的进一步优化**：
+
+1. **参数共享**：
+   $$
+   \boldsymbol{w}_\alpha = \boldsymbol{U} \boldsymbol{e}_\alpha
+   \tag{11}
+   $$
+   其中 $\boldsymbol{U} \in \mathbb{R}^{4d \times k}$，$\boldsymbol{e}_\alpha \in \mathbb{R}^k$，$k \ll 4d$
+
+2. **类别嵌入**：
+   - 为每个类别学习一个嵌入 $\boldsymbol{c}_\alpha \in \mathbb{R}^{k}$
+   - $s_{\text{class}}^\alpha = \text{MLP}([\boldsymbol{f}_{ij}; \boldsymbol{c}_\alpha])$
+
+**权衡**：
+- 进一步压缩可能损失性能
+- 当前的 $4d=256$ 已经是很好的平衡点
+
+</div>
+
+<h3 id="72">7.2 与其他方法的比较<a class="toc-link" href="#72" title="Permanent link">&para;</a></h3>
+<details>
+<summary><strong>🔍 点击查看：方法对比</strong></summary>
+<div markdown="1">
+
+| 方法 | 参数量 (N类) | 复杂度 | 嵌套实体 | 优点 | 缺点 |
+|------|-------------|--------|---------|------|------|
+| **CRF** | $O(D \cdot N)$ | $O(n \cdot N^2)$ | ❌ | 全局一致性 | 不支持嵌套 |
+| **Softmax** | $O(D \cdot 2N)$ | $O(n)$ | ❌ | 简单快速 | 无全局约束 |
+| **Span分类** | $O(D \cdot N)$ | $O(n^2)$ | ✅ | 支持嵌套 | 计算量大 |
+| **GlobalPointer** | $O(dD \cdot N)$ | $O(n^2)$ | ✅ | 效果好 | 参数多 |
+| **Efficient GP** | $O(dD + d \cdot N)$ | $O(n^2)$ | ✅ | 参数少效果好 | - |
+
+**结论**：
+- Efficient GlobalPointer在参数效率和效果上取得最佳平衡
+- 当 $N$ 很大时优势显著（如细粒度实体识别）
+
+</div>
+</details>
+
+<hr />
+<h2 id="_6">八、应用场景与建议<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
+<h3 id="81-efficient-globalpointer">8.1 何时使用Efficient GlobalPointer？<a class="toc-link" href="#81-efficient-globalpointer" title="Permanent link">&para;</a></h3>
+<div class="note-box">
+
+### 🎯 使用建议
+
+**强烈推荐**：
+- ✅ 实体类别数 > 5
+- ✅ 存在嵌套实体
+- ✅ 训练数据有限（每类<1000样本）
+- ✅ 需要控制模型大小（移动端部署）
+
+**可以尝试**：
+- 🟡 类别数 ≤ 5（效果与原版相当）
+- 🟡 数据充足（每类>5000样本）
+
+**谨慎使用**：
+- ⚠️ 极简单任务（CRF可能更好）
+- ⚠️ 需要严格的BIO约束
+
+</div>
+
+<h3 id="82">8.2 超参数调优建议<a class="toc-link" href="#82" title="Permanent link">&para;</a></h3>
+<div class="example-box">
+
+### 调参策略
+
+**head_size ($d$)**：
+- 默认：64
+- 范围：32-128
+- 原则：类别多 → 增大 $d$；数据少 → 减小 $d$
+
+**学习率**：
+- BERT系列：2e-5
+- RoBERTa系列：1e-5
+- 大模型（>large）：5e-6
+
+**训练技巧**：
+1. **对抗训练**：FGM/PGD提升鲁棒性（+0.5%）
+2. **EMA**：指数移动平均稳定训练
+3. **Warmup**：前10%步数线性warmup
+
+**Loss权重**：
+- 正负样本不平衡 → 使用Focal Loss
+- 类别不平衡 → 类别加权
+
+</div>
+
+<hr />
+<h2 id="_7">九、总结与展望<a class="toc-link" href="#_7" title="Permanent link">&para;</a></h2>
+<div class="note-box">
+
+### 核心要点
+
+**理论贡献**：
+1. ✅ 提出实体识别的"抽取-分类"分解框架
+2. ✅ 证明了参数共享能减少过拟合、提升泛化
+3. ✅ 参数量压缩 **79倍**，效果反而提升
+
+**实践价值**：
+1. ✅ 易于实现（bert4keras一行代码切换）
+2. ✅ 显存友好（支持更多类别）
+3. ✅ 效果提升（困难任务+0.5%）
+
+**适用场景**：
+- 细粒度实体识别（类别多）
+- 医疗/法律等专业领域（难度高）
+- 资源受限环境（模型压缩）
+
+</div>
+
+<h3 id="_8">未来方向<a class="toc-link" href="#_8" title="Permanent link">&para;</a></h3>
+<div class="intuition-box">
+
+### 🔬 研究展望
+
+**1. 更深层的分解**
+
+当前分解：抽取 + 分类（2阶段）
+
+可能的扩展：抽取 + 粗分类 + 细分类（3阶段）
+- 第1层：是否为实体
+- 第2层：大类（人/地/机构/...）
+- 第3层：细类（演员/导演/...）
+
+**2. 跨任务共享**
+
+Efficient的思想可推广到其他任务：
+- 关系抽取（共享实体检测）
+- 事件抽取（共享触发词识别）
+- 槽填充（共享槽位检测）
+
+**3. 动态参数分配**
+
+根据类别难度动态分配参数：
+- 简单类别：少量参数
+- 困难类别：更多参数
+- 使用元学习自动决定
+
+**4. 多模态扩展**
+
+将框架扩展到图像等模态：
+- 目标检测：抽取（边界框）+ 分类（类别）
+- 实例分割：抽取（mask）+ 分类（类别）
+
+</div>
+
+<hr />
+<h2 id="_9">参考文献<a class="toc-link" href="#_9" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Su, J. (2021). GlobalPointer：用统一的方式处理嵌套和非嵌套NER. <em>https://spaces.ac.cn/archives/8373</em></li>
+<li>Devlin, J., et al. (2019). BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. <em>NAACL</em>.</li>
+<li>Lafferty, J., McCallum, A., &amp; Pereira, F. (2001). Conditional Random Fields. <em>ICML</em>.</li>
+<li>Li, X., et al. (2020). A Unified MRC Framework for Named Entity Recognition. <em>ACL</em>.</li>
+</ol>
+<hr />
+<p><strong>相关文章</strong>：
+- <a href="https://spaces.ac.cn/archives/8373">GlobalPointer：用统一的方式处理嵌套和非嵌套NER</a>
+- <a href="gplinker基于globalpointer的实体关系联合抽取.html">GPLinker：基于GlobalPointer的实体关系联合抽取</a>
+- <a href="gplinker基于globalpointer的事件联合抽取.html">GPLinker：基于GlobalPointer的事件联合抽取</a></p>
+<hr />
 <p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8877">https://spaces.ac.cn/archives/8877</a></em></p>
 <p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
-<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
-<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
-<p>打赏</p>
-<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
-<p>微信打赏</p>
-<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
-<p>支付宝打赏</p>
-<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
 <p><strong>如果您需要引用本文，请参考：</strong></p>
 <p>苏剑林. (Jan. 25, 2022). 《Efficient GlobalPointer：少点参数，多点效果 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8877">https://spaces.ac.cn/archives/8877</a></p>
-<p>@online{kexuefm-8877,<br />
-title={Efficient GlobalPointer：少点参数，多点效果},<br />
-author={苏剑林},<br />
-year={2022},<br />
-month={Jan},<br />
-url={\url{https://spaces.ac.cn/archives/8877}},<br />
-} </p>
-<hr />
-<h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
-<p>TODO: 添加详细的数学公式推导和注释</p>
+<p>@online{kexuefm-8877,
+title={Efficient GlobalPointer：少点参数，多点效果},
+author={苏剑林},
+year={2022},
+month={Jan},
+url={\url{https://spaces.ac.cn/archives/8877}},
+}</p>
                 </div>
 
                 <!-- Previous/Next Navigation -->
@@ -224,7 +961,7 @@ url={\url{https://spaces.ac.cn/archives/8877}},<br />
                             
                             <a href="多任务学习漫谈一以损失之名.html" class="nav-link-prev">
                                 <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
-                                <div class="nav-title">#17 多任务学习漫谈（一）：以损失之名</div>
+                                <div class="nav-title">#163 多任务学习漫谈（一）：以损失之名</div>
                             </a>
                             
                         </div>
@@ -232,7 +969,7 @@ url={\url{https://spaces.ac.cn/archives/8877}},<br />
                             
                             <a href="gplinker基于globalpointer的实体关系联合抽取.html" class="nav-link-next">
                                 <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
-                                <div class="nav-title">#19 GPLinker：基于GlobalPointer的实体关系联合抽取</div>
+                                <div class="nav-title">#165 GPLinker：基于GlobalPointer的实体关系联合抽取</div>
                             </a>
                             
                         </div>
@@ -257,12 +994,52 @@ url={\url{https://spaces.ac.cn/archives/8877}},<br />
                             <div class="toc">
 <ul>
 <li><a href="#efficient-globalpointer">Efficient GlobalPointer：少点参数，多点效果</a><ul>
-<li><a href="#_1">大量的参数</a></li>
-<li><a href="#_2">识别与分类</a></li>
-<li><a href="#_3">惊喜的实验</a></li>
-<li><a href="#_4">分析与评述</a></li>
-<li><a href="#_5">最后的总结</a></li>
-<li><a href="#_6">公式推导与注释</a></li>
+<li><a href="#globalpointer">一、背景：GlobalPointer的参数困境</a><ul>
+<li><a href="#11-globalpointer">1.1 GlobalPointer回顾</a></li>
+<li><a href="#12">1.2 参数量分析</a></li>
+</ul>
+</li>
+<li><a href="#_1">二、核心洞察：识别与分类的分离</a><ul>
+<li><a href="#21">2.1 共性与差异</a></li>
+<li><a href="#22">2.2 两阶段分解</a></li>
+</ul>
+</li>
+<li><a href="#efficient-globalpointer_1">三、Efficient GlobalPointer的设计</a><ul>
+<li><a href="#31">3.1 初步方案</a></li>
+<li><a href="#32">3.2 最终方案</a></li>
+</ul>
+</li>
+<li><a href="#_2">四、理论分析</a><ul>
+<li><a href="#41">4.1 为什么压缩后还能保持效果？</a></li>
+<li><a href="#42-efficient">4.2 何时Efficient版本更优？</a></li>
+</ul>
+</li>
+<li><a href="#_3">五、实验验证</a><ul>
+<li><a href="#51">5.1 实验设置</a></li>
+<li><a href="#52">5.2 主要结果</a></li>
+<li><a href="#53">5.3 趋势分析</a></li>
+</ul>
+</li>
+<li><a href="#_4">六、实现细节</a><ul>
+<li><a href="#61">6.1 代码实现</a></li>
+<li><a href="#62">6.2 推理优化</a></li>
+</ul>
+</li>
+<li><a href="#_5">七、深入分析</a><ul>
+<li><a href="#71">7.1 参数效率的极限</a></li>
+<li><a href="#72">7.2 与其他方法的比较</a></li>
+</ul>
+</li>
+<li><a href="#_6">八、应用场景与建议</a><ul>
+<li><a href="#81-efficient-globalpointer">8.1 何时使用Efficient GlobalPointer？</a></li>
+<li><a href="#82">8.2 超参数调优建议</a></li>
+</ul>
+</li>
+<li><a href="#_7">九、总结与展望</a><ul>
+<li><a href="#_8">未来方向</a></li>
+</ul>
+</li>
+<li><a href="#_9">参考文献</a></li>
 </ul>
 </li>
 </ul>

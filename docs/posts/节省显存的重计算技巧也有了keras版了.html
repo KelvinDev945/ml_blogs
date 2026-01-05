@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>节省显存的重计算技巧也有了Keras版了 | ML & Math Blog Posts</title>
+    <meta name="description" content="节省显存的重计算技巧也有了Keras版了&para;
+原文链接: https://spaces.ac.cn/archives/7367
+发布日期: 
+
+不少读者最近可能留意到了公众号文章《BERT重计算：用22.5%的训练时间节省5倍的显存开销（附代码）》，里边介绍了一个叫做“重计算”的技巧，简单来说就是用来省显存的方法，让平均训练速度慢一点，但batch_size可以增大好几倍。该技巧首先发布于...">
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@5.15.4/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700">
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="../assets/css/main.css">
+    <link rel="stylesheet" href="../assets/css/post.css">
+
+    <!-- Custom JS -->
+    <script src="../assets/js/collapsible.js" defer></script>
+
+    <!-- MathJax for math rendering with equation numbering -->
+    <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true,
+        tags: 'ams',  // Enable equation numbering with AMS style
+        tagSide: 'right',  // Place equation numbers on the right
+        tagIndent: '0.8em',  // Indentation for equation numbers
+        multlineWidth: '85%'
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+    </script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- Syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/highlight.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+        <div class="container">
+            <a class="navbar-brand" href="../index.html">
+                <i class="fas fa-brain"></i> ML & Math Blog
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="../index.html"><i class="fas fa-home"></i> 首页</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Post Content -->
+    <article class="container post-container my-5">
+        <!-- Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="../index.html"><i class="fas fa-home"></i> 首页</a></li>
+                
+                <li class="breadcrumb-item"><a href="../index.html?tags=模型">模型</a></li>
+                
+                <li class="breadcrumb-item active" aria-current="page">
+                    #54 节省显存的重计算技巧也有了Keras版了
+                </li>
+            </ol>
+        </nav>
+
+        <!-- Post Header -->
+        <header class="post-header mb-4">
+            <h1 class="post-title">
+                <span class="post-number">#54</span>
+                节省显存的重计算技巧也有了Keras版了
+            </h1>
+            <div class="post-meta">
+                <span><i class="far fa-calendar"></i> </span>
+                
+                <span class="ms-3">
+                    <i class="fas fa-link"></i>
+                    <a href="https://spaces.ac.cn/archives/7367" target="_blank" rel="noopener">原文链接</a>
+                </span>
+                
+            </div>
+            
+            <div class="post-tags mt-3">
+                
+                <a href="../index.html?tags=模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 模型</span>
+                </a>
+                
+                <a href="../index.html?tags=深度学习" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 深度学习</span>
+                </a>
+                
+                <a href="../index.html?tags=keras" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> keras</span>
+                </a>
+                
+                <a href="../index.html?tags=生成模型" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> 生成模型</span>
+                </a>
+                
+                <a href="../index.html?tags=attention" class="tag-link">
+                    <span class="tag"><i class="fas fa-tag"></i> attention</span>
+                </a>
+                
+            </div>
+            
+        </header>
+
+        <div class="row">
+            <!-- Main Content -->
+            <div class="col-lg-9">
+                <!-- Post Body -->
+                <div class="post-content">
+                    <h1 id="keras">节省显存的重计算技巧也有了Keras版了<a class="toc-link" href="#keras" title="Permanent link">&para;</a></h1>
+<p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7367">https://spaces.ac.cn/archives/7367</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>不少读者最近可能留意到了公众号文章<a href="https://mp.weixin.qq.com/s/CmIVwGFqrSD0wcSN_hgH1A">《BERT重计算：用22.5%的训练时间节省5倍的显存开销（附代码）》</a>，里边介绍了一个叫做“重计算”的技巧，简单来说就是用来省显存的方法，让平均训练速度慢一点，但batch_size可以增大好几倍。该技巧首先发布于论文<a href="https://papers.cool/arxiv/1604.06174">《Training Deep Nets with Sublinear Memory Cost》</a>，其实在2016年就已经提出了，只不过似乎还没有特别流行起来。</p>
+<h2 id="_1">探索<a class="toc-link" href="#_1" title="Permanent link">&para;</a></h2>
+<p>公众号文章提到该技巧在pytorch和paddlepaddle都有原生实现了，但tensorflow还没有。但事实上从tensorflow 1.8开始，tensorflow就已经自带了该功能了，当时被列入了<code>tf.contrib</code>这个子库中，而从tensorflow 1.15开始，它就被内置为tensorflow的主函数之一，那就是<code>tf.recompute_grad</code>。</p>
+<p>找到<code>tf.recompute_grad</code>之后，笔者就琢磨了一下它的用法，经过一番折腾，最终居然真的成功地用起来了，居然成功地让<code>batch_size</code>从48增加到了144！然而，在继续整理测试的过程中，发现这玩意居然在tensorflow 2.x是失效的...于是再折腾了两天，查找了各种资料并反复调试，最终算是成功地补充了这一缺陷。</p>
+<p>最后是笔者自己的开源实现：</p>
+<blockquote>
+<p><strong>Github地址：<a href="https://github.com/bojone/keras_recompute">https://github.com/bojone/keras_recompute</a></strong></p>
+</blockquote>
+<p>该实现已经内置在<a href="https://github.com/bojone/bert4keras">bert4keras</a>中，使用bert4keras的读者可以升级到最新版本（0.7.5+）来测试该功能。</p>
+<h2 id="_2">使用<a class="toc-link" href="#_2" title="Permanent link">&para;</a></h2>
+<p>笔者的实现也命名为<code>recompute_grad</code>，它是一个装饰器，用于自定义Keras层的<code>call</code>函数，比如</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">recompute</span><span class="w"> </span><span class="kn">import</span> <span class="n">recompute_grad</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MyLayer</span><span class="p">(</span><span class="n">Layer</span><span class="p">):</span>
+    <span class="nd">@recompute_grad</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">inputs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">inputs</span> <span class="o">*</span> <span class="mi">2</span>
+</code></pre></div>
+
+<p>对于已经存在的层，可以通过继承的方式来装饰：</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">recompute</span><span class="w"> </span><span class="kn">import</span> <span class="n">recompute_grad</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MyDense</span><span class="p">(</span><span class="n">Dense</span><span class="p">):</span>
+    <span class="nd">@recompute_grad</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">inputs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">MyDense</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+</code></pre></div>
+
+<p>自定义好层之后，在代码中嵌入自定义层，然后在执行代码之前，加入环境变量<code>RECOMPUTE=1</code>来启用重计算。</p>
+<p>注意：不是在总模型里插入了<code>@recompute_grad</code>，就能达到省内存的目的，而是要在每个层都插入<code>@recompute_grad</code>才能更好地省显存。简单来说，就是插入的<code>@recompute_grad</code>越多，就省显存。具体原因请仔细理解重计算的原理。</p>
+<h2 id="_3">效果<a class="toc-link" href="#_3" title="Permanent link">&para;</a></h2>
+<p>bert4keras 0.7.5+已经内置了重计算，直接传入环境变量<code>RECOMPUTE=1</code>就会启用重计算，读者可以自行尝试，大概的效果是：</p>
+<blockquote>
+<p>1、在BERT Base版本下，batch_size可以增大为原来的3倍左右；</p>
+<p>2、在BERT Large版本下，batch_size可以增大为原来的4倍左右；</p>
+<p>3、平均每个样本的训练时间大约增加25%；</p>
+<p>4、理论上，层数越多，batch_size可以增大的倍数越大。</p>
+</blockquote>
+<h2 id="_4">环境<a class="toc-link" href="#_4" title="Permanent link">&para;</a></h2>
+<p>在下面的环境下测试通过：</p>
+<blockquote>
+<p>tensorflow 1.14 + keras 2.3.1</p>
+<p>tensorflow 1.15 + keras 2.3.1</p>
+<p>tensorflow 2.0 + keras 2.3.1</p>
+<p>tensorflow 2.1 + keras 2.3.1</p>
+<p>tensorflow 2.0 + 自带tf.keras</p>
+<p>tensorflow 2.1 + 自带tf.keras</p>
+</blockquote>
+<p>确认不支持的环境：</p>
+<blockquote>
+<p>tensorflow 1.x + 自带tf.keras</p>
+</blockquote>
+<p>欢迎报告更多的测试结果。</p>
+<p>顺便说一下，<strong>强烈建议用keras 2.3.1配合tensorflow 1.x/2.x来跑，强烈不建议使用tensorflow 2.x自带的tf.keras来跑</strong> 。</p>
+<h2 id="_5">参考<a class="toc-link" href="#_5" title="Permanent link">&para;</a></h2>
+<p>最后，笔者的实现主要参考自如下两个源码，在此表示感谢。</p>
+<blockquote>
+<p><a href="https://github.com/davisyoshida/tf2-gradient-checkpointing">https://github.com/davisyoshida/tf2-gradient-checkpointing</a></p>
+<p><a href="https://github.com/tensorflow/tensorflow/blob/v2.1.0/tensorflow/python/ops/custom_gradient.py#L454-L499">https://github.com/tensorflow/tensorflow/blob/v2.1.0/tensorflow/python/ops/custom_gradient.py#L454-L499</a></p>
+</blockquote>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7367">https://spaces.ac.cn/archives/7367</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Apr. 29, 2020). 《节省显存的重计算技巧也有了Keras版了 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7367">https://spaces.ac.cn/archives/7367</a></p>
+<p>@online{kexuefm-7367,<br />
+title={节省显存的重计算技巧也有了Keras版了},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={Apr},<br />
+url={\url{https://spaces.ac.cn/archives/7367}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释<a class="toc-link" href="#_6" title="Permanent link">&para;</a></h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+                </div>
+
+                <!-- Previous/Next Navigation -->
+                <nav class="post-navigation" aria-label="文章导航">
+                    <div class="row g-3">
+                        <div class="col-6">
+                            
+                            <a href="transformer升级之路19第二类旋转位置编码.html" class="nav-link-prev">
+                                <div class="nav-direction"><i class="fas fa-chevron-left"></i> 上一篇</div>
+                                <div class="nav-title">#53 Transformer升级之路：19、第二类旋转位置编码</div>
+                            </a>
+                            
+                        </div>
+                        <div class="col-6">
+                            
+                            <a href="让炼丹更科学一些四新恒等式.html" class="nav-link-next">
+                                <div class="nav-direction">下一篇 <i class="fas fa-chevron-right"></i></div>
+                                <div class="nav-title">#55 让炼丹更科学一些（四）：新恒等式，新学习率</div>
+                            </a>
+                            
+                        </div>
+                    </div>
+                </nav>
+
+                <!-- Back to Home -->
+                <div class="text-center mt-4 mb-4">
+                    <a href="../index.html" class="btn btn-outline-primary">
+                        <i class="fas fa-arrow-left"></i> 返回首页
+                    </a>
+                </div>
+            </div>
+
+            <!-- Sidebar (TOC) -->
+            <div class="col-lg-3">
+                <aside class="sidebar">
+                    
+                    <div class="toc-sidebar">
+                        <h5 class="toc-title"><i class="fas fa-list"></i> 目录</h5>
+                        <div class="toc-content">
+                            <div class="toc">
+<ul>
+<li><a href="#keras">节省显存的重计算技巧也有了Keras版了</a><ul>
+<li><a href="#_1">探索</a></li>
+<li><a href="#_2">使用</a></li>
+<li><a href="#_3">效果</a></li>
+<li><a href="#_4">环境</a></li>
+<li><a href="#_5">参考</a></li>
+<li><a href="#_6">公式推导与注释</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+                        </div>
+                        <div class="toc-actions">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="expandAll()">
+                                <i class="fas fa-expand"></i> 全部展开
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="collapseAll()">
+                                <i class="fas fa-compress"></i> 全部折叠
+                            </button>
+                        </div>
+                    </div>
+                    
+
+                    <!-- Back to Top Button -->
+                    <button id="backToTop" class="back-to-top" title="回到顶部">
+                        <i class="fas fa-arrow-up"></i>
+                    </button>
+                </aside>
+            </div>
+        </div>
+    </article>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>
+                博客来源: <a href="https://spaces.ac.cn" target="_blank">科学空间</a> |
+                内容经过整理并添加详细数学推导
+            </p>
+            <p>
+                Powered by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>
+            </p>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Syntax highlighting -->
+    <script>hljs.highlightAll();</script>
+
+    <!-- Back to top functionality -->
+    <script>
+        // Show/hide back to top button based on scroll position
+        window.addEventListener('scroll', function() {
+            const backToTop = document.getElementById('backToTop');
+            if (window.pageYOffset > 300) {
+                backToTop.classList.add('show');
+            } else {
+                backToTop.classList.remove('show');
+            }
+        });
+
+        // Smooth scroll to top
+        document.getElementById('backToTop').addEventListener('click', function() {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        // Sticky TOC sidebar
+        window.addEventListener('scroll', function() {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) return;
+
+            const sidebarTop = sidebar.offsetTop;
+            const scrollTop = window.pageYOffset;
+
+            if (scrollTop > sidebarTop - 20) {
+                sidebar.classList.add('sticky');
+            } else {
+                sidebar.classList.remove('sticky');
+            }
+        });
+    </script>
+</body>
+</html>
