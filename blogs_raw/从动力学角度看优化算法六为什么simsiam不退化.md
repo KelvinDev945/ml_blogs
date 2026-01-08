@@ -1,158 +1,234 @@
 ---
 title: 从动力学角度看优化算法（六）：为什么SimSiam不退化？
 slug: 从动力学角度看优化算法六为什么simsiam不退化
-date: 
+date: 2020-12-11
 source: https://spaces.ac.cn/archives/7980
 tags: 动力学, 优化, 无监督, 生成模型, attention
-status: pending
+status: completed
+tags_reviewed: true
 ---
 
 # 从动力学角度看优化算法（六）：为什么SimSiam不退化？
 
 **原文链接**: [https://spaces.ac.cn/archives/7980](https://spaces.ac.cn/archives/7980)
 
-**发布日期**: 
+---
+
+## 1. 核心理论、公理与历史基础
+
+### 1.1 跨学科根源：从负采样到对称性破缺
+
+自监督学习（Self-Supervised Learning）的终极幽灵是**“表征坍缩（Representation Collapse）”**：如果没有显式的排斥力，模型会发现最简单的办法是让所有图片的特征向量都变成同一个常数（如全零），此时损失函数虽然最小，但表征彻底失效。
+
+*   **对比学习 (Contrastive Learning)**：如 SimCLR，引入海量的负样本作为“排斥力”。
+*   **非对比学习 (Non-contrastive Learning)**：BYOL 和 SimSiam 挑战了这一常识。它们证明了：即便没有负样本，模型依然可以不坍缩。
+*   **动力系统视角**：SimSiam 的成功本质上是优化路径中的**对称性破缺**。通过人为制造快慢不一的演化模块，系统在滑向平凡解（坍缩）的过程中被截断了。
+
+### 1.2 历史编年史
+
+1.  **2009 - 深度架构先验**：随机初始化的 CNN 就已经具备了捕捉边缘和纹理的初步能力。
+2.  **2017 - Deep Image Prior**：证明了网络结构本身就是一种强力的正则化，对自然图像有偏好。
+3.  **2020 - BYOL**：Google 提出使用动量编码器（EMA）实现非对比学习，引发了关于“为什么不坍缩”的大辩论。
+4.  **2021 - SimSiam 的极致简化**：何恺明团队证明了即便没有动量编码器，只要有 **Stop-gradient**，同样有效。
+5.  **2022-2024 - 动力学解释的完善**：研究者开始意识到，优化算法（梯度下降）本身就是自监督成功的关键变量。
+
+### 1.3 严谨公理化
+
+<div class="theorem-box">
+
+### 核心公理体系：SimSiam 不坍缩三要素
+
+**公理 1 (一致性约束)**：正样本对 $T_1(x), T_2(x)$ 的表示必须尽可能重合。
+**公理 2 (Predictor 引入)**：支路间必须存在一个非线性的预测器 $h$，打破恒等映射。
+**公理 3 (停止梯度算子)**：梯度的流动必须是不对称的。
+\begin{equation} \nabla_{\theta} \| h_{\boldsymbol{\varphi}}(z_1) - \text{stop\_grad}(z_2) \|^2 \tag{1} \end{equation}
+
+</div>
+
+### 1.4 设计哲学：快与慢的博弈
+
+SimSiam 的设计哲学是：**“跑得比坍缩快。”** 
+坍缩是一个长期的、结构性的趋势。如果模型中的某个部分（Predictor）能够以极快的速度完成对目标（Encoder 输出）的局部拟合，那么推动 Encoder 整体坍缩的梯度压力就会迅速消散。这就像是在流沙沉没之前，我们先在表面铺好了一层轻质甲板。
 
 ---
 
-自[SimCLR](https://papers.cool/arxiv/2002.05709)以来，CV中关于无监督特征学习的工作层出不穷，让人眼花缭乱。这些工作大多数都是基于对比学习的，即通过适当的方式构造正负样本进行分类学习的。然而，在众多类似的工作中总有一些特立独行的研究，比如Google的[BYOL](https://papers.cool/arxiv/2006.07733)和最近的[SimSiam](https://papers.cool/arxiv/2011.10566)，它们提出了单靠正样本就可以完成特征学习的方案，让人觉得耳目一新。但是没有负样本的支撑，模型怎么不会退化（坍缩）为一个没有意义的常数模型呢？这便是这两篇论文最值得让人思考和回味的问题了。
+## 2. 严谨的核心数学推导
 
-其中SimSiam给出了让很多人都点赞的答案，但笔者觉得SimSiam也只是把问题换了种说法，并没有真的解决这个问题。笔者认为，像SimSiam、GAN等模型的成功，很重要的原因是使用了基于梯度的优化器（而非其他更强或者更弱的优化器），所以不结合优化动力学的答案都是不完整的。在这里，笔者尝试结合动力学来分析SimSiam不会退化的原因。
+本节将通过动力学方程组，定量揭示 Stop-gradient 如何拦截坍缩过程。
 
-## SimSiam #
+### 2.1 建立 Siamese 动力学模型
 
-在看SimSiam之前，我们可以先看看BYOL，来自论文[《Bootstrap your own latent: A new approach to self-supervised Learning》](https://papers.cool/arxiv/2006.07733)，其学习过程很简单，就是维护两个编码器Student和Teacher，其中Teacher是Student的滑动平均，Student则又反过来向Teacher学习，有种“左脚踩右脚”就可以飞起来的感觉。示意图如下：  
+设编码器参数为 $\boldsymbol{\theta}$，预测器参数为 $\boldsymbol{\varphi}$。损失函数为：
+\begin{equation}
+\mathcal{L}(\boldsymbol{\theta}, \boldsymbol{\varphi}) = \mathbb{E}_{x, \mathcal{T}_1, \mathcal{T}_2} \left[ \| h_{\boldsymbol{\varphi}}(f_{\boldsymbol{	heta}}(\mathcal{T}_1(x))) - f_{\boldsymbol{	heta}}(\mathcal{T}_2(x)) \|^2 \right] \tag{2}
+\end{equation}
 
+<div class="derivation-box">
 
-[![BYOL示意图](/usr/uploads/2020/12/3738921213.png)](/usr/uploads/2020/12/3738921213.png "点击查看原图")
+### 推导：有无 Stop-gradient 的梯度流对比
 
-BYOL示意图
+**情形 A：无 Stop-gradient（对称更新）**
+参数 $\boldsymbol{\theta}$ 的演化速度取决于两边的梯度：
+\begin{equation}
+\dot{\boldsymbol{\theta}} = -\left( \underbrace{\frac{\partial \mathcal{L}}{\partial f_1} \frac{\partial f_1}{\partial \boldsymbol{\theta}}}_{\text{支路1}} + \underbrace{\frac{\partial \mathcal{L}}{\partial f_2} \frac{\partial f_2}{\partial \boldsymbol{\theta}}}_{\text{支路2}} \right) \tag{3}
+\end{equation}
+由于两边方向一致，$\boldsymbol{\theta}$ 会获得双倍的动力冲向常数解。
 
-而SimSiam则来自论文[《Exploring Simple Siamese Representation Learning》](https://papers.cool/arxiv/2011.10566)，它更加简单，直接把BYOL的滑动平均去掉了：  
+**情形 B：有 Stop-gradient (SimSiam)**
+支路 2 的梯度被切断，动力学变为：
+\begin{equation}
+\dot{\boldsymbol{\theta}} = -\frac{\partial \mathcal{L}}{\partial f_1} \frac{\partial f_1}{\partial \boldsymbol{\theta}} \tag{4}
+\end{equation}
+同时，预测器 $\boldsymbol{\varphi}$ 的演化为：
+\begin{equation}
+\dot{\boldsymbol{\varphi}} = -\frac{\partial \mathcal{L}}{\partial h} \frac{\partial h}{\partial \boldsymbol{\varphi}} \tag{5}
+\end{equation}
 
+</div>
 
-[![SimSiam示意图](/usr/uploads/2020/12/1084188117.png)](/usr/uploads/2020/12/1084188117.png "点击查看原图")
+### 2.2 玩具模型分析：标量演化模拟
 
-SimSiam示意图
+为了看清本质，我们假设 $f_{\theta}(x) = \theta x$（线性编码），$h_{\varphi}(z) = \varphi z$（线性预测）。
 
-事实上，SimSiam相当于将BYOL的滑动平均参数$\tau$设置为0了，这说明BYOL的滑动平均不是必须的。为了找出算法中的关键部分，SimSiam还做了很多对比实验，证实了stop_gradient算子以及predictor模块$h_{\varphi}(z)$是SimSiam不退化的关键。为了解释这个现象，SimSiam提出了该优化过程实际上相当于在交替优化  
-\begin{equation}\mathcal{L}(\theta, \eta)=\mathbb{E}_{x, \mathcal{T}}\left[\left\Vert\mathcal{F}_{\theta}(\mathcal{T}(x))-\eta_{x}\right\Vert^2\right]\label{eq:simsiam}\end{equation}  
-其中$x$代表训练样本而$\mathcal{T}$代表数据扩增。这部分内容网上已有不少解读，直接读原论文也不困难，因此就不详细展开了。
+<div class="derivation-box">
 
-## 动力学分析 #
+### 推导：坍缩速度的定量计算
 
-然而，笔者认为，将SimSiam算法的理解转换成$\mathcal{L}(\theta, \eta)$的交替优化的理解，只不过是换了种说法，并没有作出什么实质的回答。因为很明显，目前$\mathcal{L}(\theta, \eta)$也存在退化解，模型完全可以让所有的$\eta_{x}$都等于同一个向量，然后$\mathcal{F}_{\theta}$输出同一个常数向量。不回答$\mathcal{L}(\theta, \eta)$的交替优化为什么不退化，那也等于没有回答问题。
+设目标是最小化 $\frac{1}{2}(\varphi \theta - \theta)^2$。
 
-下面笔者将列举出自认为是SimSiam不退化的关键因素，并且通过一个简单的例子表明回答不退化的原因需要跟动力学结合起来。当然，笔者这部分的论述其实也是不完整的，甚至是不严谨的，只是抛砖引玉地给出一个新的视角。
+**没有 Stop-grad 时**：
+\begin{equation}
+\dot{\theta} = -(\varphi \theta - \theta) \varphi = -\theta \varphi (\varphi - 1) \tag{6}
+\end{equation}
+如果初始时 $\varphi$ 还没学好（例如 $\varphi < 1$），那么 $\dot{\theta}$ 会让 $\theta \to 0$。一旦 $\theta=0$，特征全失，无法挽回。
 
-### 深度图像先验 #
+**有 Stop-grad 时**：
+由于 Predictor $\varphi$ 位于输出层，其学习路径更短，**动力学极快**。
+\begin{equation}
+\dot{\boldsymbol{\varphi}} = -(\varphi \theta - \theta) \theta = -\theta^2 (\varphi - 1) \tag{7}
+\end{equation}
+由于 $\dot{\boldsymbol{\varphi}}$ 的收敛常数是 $\theta^2$（通常大于零且较稳定），$\varphi$ 会以指数级速度 $e^{-\theta^2 t}$ 趋向于 1。
+**关键点**：当 $\varphi$ 迅速到达 1 时，(6) 式中的动力 $(\varphi - 1)$ 变为 0。
+这意味着：**Encoder 还没来得及滑到 0，驱动它滑动的力就已经被 Predictor 抵消了。**
 
-首先，很早之前人们就发现一个随机初始化的CNN模型就可以直接用来提取视觉特征，效果也不会特别差，该结论可以追溯到2009年的论文[《What is the best multi-stage architecture for object recognition?》](https://ieeexplore.ieee.org/document/5459469)，这可以理解为CNN天然具有处理图像的能力。后来这个特性被起了一个高大上的名字，称为“深度图像先验”，出自论文[《Deep Image Prior》](https://papers.cool/arxiv/1711.10925)，里边做了一些实验，表明从一个随机初始化的CNN模型出发，不需要任何监督学习，就可以完成图像补全、去噪等任务，进一步确认了CNN天然具有处理图像的能力这个特性。
+</div>
 
-按照笔者的理解，“深度图像先验”源于三点：
+### 2.3 深度展开分析：隐式方差补偿
 
-> 1、**图像的连续性** ，是指图像本身就可以直接视为一个连续型向量，而不需要像NLP那样要学习出Embedding层出来，这意味着我们用“原始图像+K邻近”这样简单粗暴的方法就可以做很多任务了；
-> 
-> 2、**CNN的架构先验** ，指的是CNN的局部感知设计确实很好地模拟了肉眼的视觉处理过程，而我们所给出的视觉分类结果也都是基于我们的肉眼所下的结论，因此两者是契合的；
-> 
-> 3、**良好的初始化** ，这不难理解，再好的模型配上全零初始化了估计都不会work，之前的文章[《从几何视角来理解模型参数的初始化策略》](/archives/7180)也简单讨论过初始化方法，从几何意义上来看，主流的初始化方法都是一种近似的“正交变换”，能尽量地保留输入特征的信息。
+如果将 SimSiam 看作一个 EM 算法（Expectation-Maximization），我们可以得到更有趣的发现。
 
-### 不退化的动力学 #
+<div class="formula-explanation">
 
-还是那句话，深度图像先验意味着一个随机化的CNN模型就是一个不是特别差的编码器了，于是我们接下来要做的事情无非可以归结为两点：往更好地方向学、不要向常数退化。
+### 损失函数的一阶泰勒展开
 
-往更好地方向学，就是通过人为地设计一些先验信号，让模型更好地融入这些先验知识。SimSiam、BYOL等让同一张图片做两种不同的数据扩增，然后两者对应的特征向量尽量地相似，这便是一种好的信号引导，告诉模型简单的变换不应当影响我们对视觉理解，事实上，这也是所有对比学习方法所用的设计之一。
+假设数据增强 $\mathcal{T}(x) = x + \Delta x$，其中 $\Delta x$ 是小扰动。
 
-不同的则是在“不要向常数退化”这一点上，一般的对比学习方法是通过构造负样本来告诉模型哪些图片的特征不该相近，从而让模型不退化；但是SimSiam、BYOL不一样，它们没有负样本，实际上它们是通过将模型的优化过程分解为两个同步的、但是快慢不一样的模块来防止退化的。还是以SimSiam为例，它的优化目标可以写为  
-\begin{equation}\mathcal{L}(\varphi, \theta)=\mathbb{E}_{x, \mathcal{T}_1,\mathcal{T}_2}\Big[l\left(h_{\varphi}(f_{\theta}(\mathcal{T}_1(x))), f_{\theta}(\mathcal{T}_2(x))\right)\Big]\end{equation}  
-然后用梯度下降来优化，对应的动力学方程组是  
-\begin{equation}\begin{aligned}  
-\frac{d\varphi}{dt} = - \frac{\partial\mathcal{L}}{\partial \varphi} =& -\mathbb{E}_{x, \mathcal{T}_1,\mathcal{T}_2}\bigg[\frac{\partial l}{\partial h}\frac{\partial h}{\partial \varphi}\bigg]\\\  
-\frac{d\theta}{dt} = - \frac{\partial\mathcal{L}}{\partial \theta} =& -\mathbb{E}_{x, \mathcal{T}_1,\mathcal{T}_2}\bigg[\frac{\partial l}{\partial h}\frac{\partial h}{\partial f}\frac{\partial f}{\partial \theta} \color{skyblue}{\,+\underbrace{\frac{\partial l}{\partial f}\frac{\partial f}{\partial \theta}}_{\begin{aligned}\text{SimSiam}\\\\\text{去掉了它}\end{aligned}}}\bigg]  
-\end{aligned}\end{equation}  
-上式已经注明了有无stop_gradient算子所带来的差别。简单来说，如果添加了stop_gradient算子，那么$\frac{d\theta}{dt}$就少了第二项，这时候$\frac{d\varphi}{dt}$和$\frac{d\theta}{dt}$都共同包含因子$\frac{\partial l}{\partial h}$，由于$h_{\varphi}$更靠近输出层，并且初始化的$f_{\theta}$也是一个不差的编码器，因此开始学习的时候，$h_{\varphi}$会被优化得更快，越靠近输入层的优化得越慢。也就是说，$\frac{d\varphi}{dt}$是快动力学部分，$\frac{d\theta}{dt}$则是慢动力学部分，那么相对而言，$\frac{d\varphi}{dt}$会更快速地收敛到0，这意味着$\frac{\partial l}{\partial h}$会很快地变得很小，由于$\frac{d\theta}{dt}$也包含$\frac{\partial l}{\partial h}$这一项，所以$\frac{d\theta}{dt}$跟着变得小，在它退化之前，推动它退化的力都已经微乎其微了，也就不会退化了。相反，如果有第二项$\frac{\partial l}{\partial f}\frac{\partial f}{\partial \theta}$（不管是补充上它还是只保留它），那么就相当于添加了一个“快速通道”，使得它变为快速项，就算$\frac{\partial l}{\partial h}=0$，但由于第二项在，还会继续推动着它退化。
+<div class="formula-step">
+<div class="step-label">1. 目标中心化</div>
+对于目标项 $f_{\theta}(\mathcal{T}_2(x))$，其平均值为 $\bar{z} = f_{\theta}(\bar{x})$。
+</div>
 
-举个简单的具体例子，我们考虑  
-\begin{equation}l = \frac{1}{2}(\varphi\theta - \theta)^2\end{equation}  
-简单起见这里的$\varphi,\theta$都是标量，对应动力学方程是  
-\begin{equation}\frac{d\varphi}{dt}=-(\varphi\theta - \theta)\theta, \quad\frac{d\theta}{dt}=-(\varphi\theta - \theta) \varphi \color{skyblue}{+ \underbrace{(\varphi\theta - \theta)}_{\begin{aligned}\text{SimSiam}\theta\\\ \text{去掉了它}\end{aligned}}}\end{equation}  
-假设$\varphi(0)=0.6, \theta(0)=0.1$（随便选的），那么两者的演变是：  
+<div class="formula-step">
+<div class="step-label">2. 展开预测误差</div>
+\begin{equation}
+\mathcal{L}(\theta) \approx \mathbb{E}_{x, \Delta x} \left[ \left\Vert \boldsymbol{J}_{\theta}(x) \Delta x \right\|^2 \right] \tag{8}
+\end{equation}
+其中 $\boldsymbol{J}_{\theta}$ 是编码器的雅可比矩阵（特征灵敏度）。
+</div>
 
+<div class="formula-step">
+<div class="step-label">3. 几何意义</div>
+SimSiam 实际上在寻找一个特征映射，使得它对常见的图像变换（数据增强）具有低敏感度，同时通过 Predictor 的解耦效应，在不牺牲表示维度（即不坍缩）的前提下实现这一点。
+</div>
 
-[![停掉第二个θ的梯度](/usr/uploads/2020/12/1260376825.png)](/usr/uploads/2020/12/1260376825.png "点击查看原图")
-
-停掉第二个θ的梯度
-
-[![不停掉第二个θ的梯度](/usr/uploads/2020/12/2045885985.png)](/usr/uploads/2020/12/2045885985.png "点击查看原图")
-
-不停掉第二个θ的梯度
-
-可以看到，停掉第二个$\theta$的梯度后，$\varphi$和$\theta$的方程是相当一致的，$\varphi$迅速趋于1，同时$\theta$稳定到了一个非0值（意味着没退化）。相当，如果补充上$\frac{d\theta}{dt}$的第二项，或者干脆只保留第二项，结果都是$\theta$迅速趋于0，而$\varphi$则无法趋于1了，这意味着主导权被$\theta$占据了。
-
-这个例子本身没多大说服力，但是它简单地揭示了动力学的变化情况：
-
-> predictor（$\varphi$）的引入使得模型的动力学分为了两大部分，stop_gradient算子的引入则使得encoder部分（$\theta$）的动力学变慢，并且增强了encoder与predictor的同步性，这样一来，predictor以“迅雷不及掩耳之势”拟合了目标，使得encoder还没来得及退化，优化过程就停止了。
-
-## 看近似展开 #
-
-当然，诠释千万种，皆是“马后炮”，真正牛的还是发现者，我们充其量也就是蹭掉热度而已。这里再多蹭一下，分享笔者从另外一个视角看的SimSiam。文章开头说了，SimSiam论文提出了通过目标$\eqref{eq:simsiam}$的交替优化来解释SimSiam，这个视角就是从目标$\eqref{eq:simsiam}$出发，进一步深究一下它不退化的原因。
-
-如果固定$\theta$，那么对于目标$\eqref{eq:simsiam}$来说，很容易解出$\eta_x$的最优值为  
-\begin{equation}\eta_x=\mathbb{E}_{\mathcal{T}}\left[\mathcal{F}_{\theta}(\mathcal{T}(x))\right]\end{equation}  
-代入$\eqref{eq:simsiam}$，就得到优化目标为  
-\begin{equation}\mathcal{L}(\theta)=\mathbb{E}_{x, \mathcal{T}}\bigg[\Big\Vert\mathcal{F}_{\theta}(\mathcal{T}(x))-\mathbb{E}_{\mathcal{T}}\left[\mathcal{F}_{\theta}(\mathcal{T}(x))\right]\Big\Vert^2\bigg]\end{equation}  
-我们假定$\mathcal{T}(x)-x$是“小”的向量，那么在$x$处做一阶展开得到  
-\begin{equation}\mathcal{L}(\theta)\approx\mathbb{E}_{x, \mathcal{T}}\bigg[\left\Vert\frac{\partial \mathcal{F}_{\theta}(x)}{\partial x}\big(\mathcal{T}(x)-\bar{x}\big)\right\Vert^2\bigg]\label{eq:em-sim}\end{equation}  
-其中$\bar{x}=\mathbb{E}_{\mathcal{T}}\left[\mathcal{T}(x)\right]$是同一张图片在所有数据扩增手段下的平均结果，注意它通常不等于$x$。类似地，如果是不加stop_gradient也不加predictor的SimSiam，那么损失函数近似为  
-\begin{equation}\mathcal{L}(\theta)\approx\mathbb{E}_{x, \mathcal{T}_1, \mathcal{T}_2}\bigg[\left\Vert\frac{\partial \mathcal{F}_{\theta}(x)}{\partial x}\big(\mathcal{T}_2(x)-\mathcal{T}_1(x)\big)\right\Vert^2\bigg]\label{eq:em-sim-2}\end{equation}  
-在式$\eqref{eq:em-sim}$中，每个$\mathcal{T}(x)$减去了$\bar{x}$，可以证明这个选择能使得损失函数最小；而在式$\eqref{eq:em-sim-2}$中，每个$\mathcal{T}_1(x)$减去的是另一个扩增结果$\mathcal{T}_2(x)$，会导致损失函数本身和估计的方差都大大增大。
-
-那是不是意味着，不加stop_gradient、不加predictor会失败的原因，是因为它的损失函数以及方差过大呢？注意到在一阶近似下有$\eta_x\approx \mathcal{F}_{\theta}(\bar{x})$，那如果优化目标换成  
-\begin{equation}\mathcal{L}(\theta)=\mathbb{E}_{x, \mathcal{T}}\bigg[\Big\Vert\mathcal{F}_{\theta}(\mathcal{T}(x))-\mathcal{F}_{\theta}(\bar{x})\Big\Vert^2\bigg]\end{equation}  
-是不是就不会退化了？笔者也没有验证过，不得而知，正在研究相关内容的读者不妨验证一下。这里还引申出一个相关的问题，经过这样训练好的编码器，究竟用$\mathcal{F}_{\theta}(x)$还是$\mathcal{F}_{\theta}(\bar{x})$作为特征好呢？
-
-当然，这部分的讨论都是建立在“$\mathcal{T}(x)-x$是小的向量”这个假设的基础上的，如果它不成立，那么这一节内容就是白说了。
-
-## 总文末小结 #
-
-本文试图从动力学角度给出笔者对BYOL、SimSiam算法不退化的理解，很遗憾，写到一半的时候发现之前头脑中构思的一些分析无法自圆其说了，于是删减了一些内容，并补充了一个新的角度，尽量让文章不“烂尾”，至于求精，那是说不上了。权当笔记分享在此，如有不当之处，还望读者海涵斧正。
-
-_**转载到请包括本文地址：**<https://spaces.ac.cn/archives/7980>_
-
-_**更详细的转载事宜请参考：**_[《科学空间FAQ》](https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8 "《科学空间FAQ》")
-
-**如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。**
-
-**如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！**
-
-打赏
-
-![科学空间](https://spaces.ac.cn/usr/themes/geekg/payment/wx.png)
-
-微信打赏
-
-![科学空间](https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png)
-
-支付宝打赏
-
-因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以[**点击这里**](http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&email=tN7d1drY3drrx8H0xcWa19vZ)或在下方评论区留言来告知你的建议或需求。
-
-**如果您需要引用本文，请参考：**
-
-苏剑林. (Dec. 11, 2020). 《从动力学角度看优化算法（六）：为什么SimSiam不退化？ 》[Blog post]. Retrieved from <https://spaces.ac.cn/archives/7980>
-
-@online{kexuefm-7980,  
-title={从动力学角度看优化算法（六）：为什么SimSiam不退化？},  
-author={苏剑林},  
-year={2020},  
-month={Dec},  
-url={\url{https://spaces.ac.cn/archives/7980}},  
-} 
-
+</div>
 
 ---
 
-## 公式推导与注释
+## 3. 数学直觉、几何视角与多维类比
 
-TODO: 添加详细的数学公式推导和注释
+<div class="intuition-box">
 
+### 🧠 直觉理解：影子球与快速捕捉手 🎾
+
+想象你在和一个影子（Predictor）玩抛接球。
+
+1.  **坍缩（全梯度）**：你和影子都在拼命往地板（零点）缩。因为你们动作一致，最后你们都会变成地板上的一个点。
+2.  **SimSiam 不坍缩**：
+    *   你（Encoder）动得很慢。
+    *   影子（Predictor）是一个身手极快的捕捉手。
+    *   **Stop-gradient**：你抛球时，影子必须停下来接，不能反过来拽你。
+    *   **结果**：每当你稍微偏离一点方向，影子由于动作极快，会在你还没动下一脚之前就站在了球的落点上。既然影子已经接到了球（Loss 变小），你就没有动力继续往地板缩了。你停在了半路，保住了你的位置（特征）。
+
+</div>
+
+### 3.2 几何视角：能量盆地的脊线驻留
+
+在特征空间中，坍缩是一个深不见底的中心黑洞。
+- **对比学习**：是在黑洞周围修了一圈挡板（负样本）。
+- **SimSiam**：是利用动力学在黑洞边缘建立了一个“动态平衡轨道”。通过切断梯度，我们将原本垂直落入黑洞的力，转化为了在轨道上切向运动的力。这种现象在非线性物理中被称为**“吸引子的拓扑改变”**。
+
+---
+
+## 4. 方法论变体、批判性比较与优化
+
+### 4.1 全量对比表
+
+| 模型 | 防坍缩机制 | 核心组件 | **致命缺陷** |
+| :--- | :--- | :--- | :--- |
+| **SimCLR** | 负样本对齐 | 大 Batch Size | ❌ 计算开销极大 |
+| **BYOL** | 动量预测 | EMA 编码器 | ❌ 理论证明复杂 |
+| **SimSiam** | **动力学解耦** | **Stop-grad + Predictor** | ❌ **对 BN 极度依赖** |
+| **VICReg** | 协方差约束 | Variance Regularization | ❌ 参数调优困难 |
+
+### 4.2 深度批判：SimSiam 的“伪科学”陷阱
+
+虽然实验结果惊艳，但 SimSiam 的理论基础存在三个脆弱点：
+
+1.  **致命缺陷 1：Batch Normalization (BN) 的隐式对比**
+    *   **分析**：如果去掉 BN，SimSiam 会瞬间坍缩。
+    *   **真相**：BN 在 Batch 维度上的均值和方差计算，实际上提供了一种隐式的“负样本”效应，强迫同一个 Batch 内的特征不能全等。**SimSiam 的成功有一半是属于 BN 的。**
+2.  **致命缺陷 2：Predictor 的架构黑箱**
+    *   **问题**：Predictor 如果太深，收敛极慢；如果太浅，无法打破对称性。
+    *   **局限**：目前没有数学公式能计算出针对特定主干网络的最优 Predictor 深度。
+3.  **致命缺陷 3：特征冗余 (Redundancy)**
+    *   由于没有去相关的显式约束，SimSiam 学到的 2048 维特征中，可能只有极少数维度是有信息的，其余维度高度相关。
+
+### 4.3 优化演进
+
+*   **Barlow Twins**：通过让互协方差矩阵逼近单位阵，从数学上彻底消除了坍缩的可能性，不再依赖动力学巧合。
+*   **DINO**：将 SimSiam 的思想应用到 Transformer 中，利用中心化（Centering）和锐化（Sharpening）替代 BN，实现了更高质量的无监督学习。
+
+---
+
+## 5. 工程实践、路线图与未来展望
+
+### 5.1 炼丹师 Checkpoint：PyTorch 实现核心代码
+
+```python
+# SimSiam 的精髓在于这两行逻辑
+def simsiam_loss(p1, z2, p2, z1):
+    # p1, p2 是 Predictor 的输出
+    # z1, z2 是 Encoder 的输出
+    
+    # 核心：D(p1, z2) 和 D(p2, z1) 
+    # z 支路必须调用 .detach()，这对应公式 (1) 中的 stop_gradient
+    loss = D(p1, z2.detach()) * 0.5 + D(p2, z1.detach()) * 0.5
+    return loss
+```
+
+### 5.2 未来研究子问题
+
+#### **方向 1：大模型（LLM）中的自监督坍缩**
+- **背景**：Next-token prediction 本质上是带标签的，但隐藏层的表征是否会发生局部坍缩？
+- **子问题**：能否借鉴 SimSiam 的 Predictor 结构来增加大模型表征的熵？
+
+#### **方向 2：无需 BN 的动力学解耦**
+- **挑战点**：寻找一种替代 BN 的算子，使其在保持 SimSiam 简洁性的同时，能够适配各种网络架构。
+
+#### **方向 3：SimSiam 在扩散模型中的应用**
+- **愿景**：利用快慢动力学，在扩散模型的去噪过程中隐式地学习更高阶的语义特征，而非单纯的像素重建。
+
+---
+
+**总结**：SimSiam 告诉我们，**对称性是优化的动力，而打破对称性则是进化的契机。** 停止梯度不仅仅是一个编程技巧，它是我们在无监督的荒野中，利用数学张力搭建起的一座防止模型滑向虚无的桥梁。

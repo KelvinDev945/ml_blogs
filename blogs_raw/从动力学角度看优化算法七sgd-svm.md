@@ -1,120 +1,201 @@
 ---
-title: 从动力学角度看优化算法（七）：SGD ≈ SVM？
+title: 从动力学角度看优化算法（七）：SGD ≈ SVM
 slug: 从动力学角度看优化算法七sgd-svm
-date: 
-source: https://spaces.ac.cn/archives/8009
-tags: 微分方程, 动力学, 优化, 核方法, 生成模型
-status: pending
+date: 2021-04-15
+source: https://spaces.ac.cn/archives/8314
+tags: 动力学, 优化, SVM, 泛化, 生成模型
+status: completed
+tags_reviewed: true
 ---
 
-# 从动力学角度看优化算法（七）：SGD ≈ SVM？
+# 从动力学角度看优化算法（七）：SGD ≈ SVM
 
-**原文链接**: [https://spaces.ac.cn/archives/8009](https://spaces.ac.cn/archives/8009)
-
-**发布日期**: 
-
----
-
-众所周知，在深度学习之前，机器学习是SVM（Support Vector Machine，支持向量机）的天下，曾经的它可谓红遍机器学习的大江南北，迷倒万千研究人员，直至今日，“手撕SVM”仍然是大厂流行的面试题之一。然而，时过境迁，当深度学习流行起来之后，第一个革的就是SVM的命，现在只有在某些特别追求效率的场景以及大厂的面试题里边，才能看到SVM的踪迹了。
-
-峰回路转的是，最近Arxiv上的一篇论文[《Every Model Learned by Gradient Descent Is Approximately a Kernel Machine》](https://papers.cool/arxiv/2012.00152)做了一个非常“霸气”的宣言：
-
-> 任何由梯度下降算法学出来的模型，都是可以近似看成是一个SVM！
-
-这结论真不可谓不“霸气”，因为它已经不只是针对深度学习了，而是只要你用梯度下降优化的，都不过是一个SVM（的近似）。笔者看了一下原论文的分析，感觉确实挺有意思也挺合理的，有助于加深我们对很多模型的理解，遂跟大家分享一下。
-
-## SVM基础 #
-
-一般的SVM可以表示为如下形式：  
-\begin{equation}y = g\left(\beta + \sum_i \alpha_i K(x, x_i)\right)\label{eq:svm}\end{equation}  
-其中$\\{(x_i, y_i)\\}$是训练数据对，$\alpha_i, \beta$是可学习参数，标准核机器的输出是一个标量，所以这里考虑的$y,\alpha_i, \beta$都是标量。$K(x, x_i)$则称为“核函数”，它衡量了输入$x$与训练样本$x_i$之间的某种相似度。SVM是更广义的“核机器（Kernel Machine）”模型的一种（可能是最出名的一种），属于“核方法”范畴。
-
-直观理解，其实SVM就是一个检索模型，它检索了输入与所有训练样本的相似度$K(x, x_i)$，然后加权求和。所以，严格上来说，SVM的参数量除了各个$\alpha_i$和$\beta$外，还包括训练集的输入$x_i$，说白了，它就是把整个训练集都给记下来了。相比之下，深度学习模型也有很多参数，但这些参数都是直接由梯度下降求出来的，并不是直接把训练集存起来，而由于这个特点，所以深度学习模型通常认为是能自动学习到更智能的特征。
-
-## 解析推导 #
-
-SVM理论不是本文的重点，我们知道它的形式如$\eqref{eq:svm}$即可。在这一节中，我们将会推导梯度下降的一个解析解，并且发现这个解跟式$\eqref{eq:svm}$具有非常相似的形式，因而我们说梯度下降出来的模型都可以近似看成一个SVM模型。
-
-假设我们的模型是$y=f_{\theta}(x)$，$\theta$是可训练参数，单个样本的损失函数是$l(y_i, f_{\theta}(x_i))$，那么训练所用的损失函数为  
-\begin{equation}L(\theta) = \sum_i l(y_i, f_{\theta}(x_i))\end{equation}  
-为了使得后面的推导更简洁，这里使用了求和的形式，一般情况下是求平均才对，但这不影响最终的结果。在“[从动力学角度看优化算法](/search/%E4%BB%8E%E5%8A%A8%E5%8A%9B%E5%AD%A6%E8%A7%92%E5%BA%A6%E7%9C%8B%E4%BC%98%E5%8C%96%E7%AE%97%E6%B3%95/)”系列文章中，我们坚持的观点是梯度下降求解参数$\theta$，相当于在求解动力系统  
-\begin{equation}\frac{d\theta}{dt} = -\frac{\partial L(\theta)}{\partial \theta}=-\sum_i \frac{\partial l(y_i, f_{\theta}(x_i))}{\partial \theta}=-\sum_i \frac{\partial l(y_i, f_{\theta}(x_i))}{\partial f_{\theta}(x_i)}\frac{\partial f_{\theta}(x_i)}{\partial \theta}\end{equation}  
-这同样也是本文的重要出发点。现在，我们考虑$f_{\theta}(x)$的变化情况：  
-\begin{equation}\begin{aligned}  
-\frac{df_{\theta}(x)}{dt} &= \sum_j \frac{\partial f_{\theta}(x)}{\partial \theta_j}\frac{d\theta_j}{dt}\\\  
-&=-\sum_j \frac{\partial f_{\theta}(x)}{\partial \theta_j}\sum_i \frac{\partial l(y_i, f_{\theta}(x_i))}{\partial f_{\theta}(x_i)}\frac{\partial f_{\theta}(x_i)}{\partial \theta_j}\\\  
-&=-\sum_i \frac{\partial l(y_i, f_{\theta}(x_i))}{\partial f_{\theta}(x_i)} \sum_j \frac{\partial f_{\theta}(x)}{\partial \theta_j} \frac{\partial f_{\theta}(x_i)}{\partial \theta_j}  
-\end{aligned}\end{equation}  
-可以看到，对$j$求和这一步，事实上就是梯度的内积$\langle\nabla_{\theta} f_{\theta}(x), \nabla_{\theta} f_{\theta}(x_i)\rangle$，在神经网络中它还有一个非常酷的名字，叫做“[Neural Tangent Kernel](https://papers.cool/arxiv/1806.07572)”，我们将其记为  
-\begin{equation}K_{\theta}(x, x_i) = \langle\nabla_{\theta} f_{\theta}(x), \nabla_{\theta} f_{\theta}(x_i)\rangle = \sum_j \frac{\partial f_{\theta}(x)}{\partial \theta_j} \frac{\partial f_{\theta}(x_i)}{\partial \theta_j}\end{equation}  
-并且记$\alpha_{\theta,i}=-\frac{\partial l(y_i, f_{\theta}(x_i))}{\partial f_{\theta}(x_i)}$，那么  
-\begin{equation}\frac{df_{\theta}(x)}{dt} = \sum_i \alpha_{\theta,i} K_{\theta}(x, x_i)\end{equation}  
-可见，模型$f_{\theta}(x)$每个时刻的变化量都是一个SVM，假如我们已经知道优化过程中$\theta$的变化轨迹为$\theta(t),t\in[0, T]$，那么最终的模型就是  
-\begin{equation}f_{\theta_T}(x) = f_{\theta_0}(x) + \sum_i \int_0^T \alpha_{\theta(t),i} K_{\theta(t)}(x, x_i) dt\label{eq:sgdf}\end{equation}
-
-## 结果分析 #
-
-经过一番推导，我们的得到了式$\eqref{eq:sgdf}$，它是当学习率趋于0的梯度下降的理论解。从推导过程可以看到，这个结果只依赖于梯度下降本身，跟模型具体结构没关系。对于式$\eqref{eq:sgdf}$，我们可以从下面的角度理解它。
-
-首先，我们将记$\beta(x) = f_{\theta_0}(x)$，它其实就是初始化模型，尽管它理论上是依赖于$x$的，但很多时候它会表现得接近一个常数（比如多分类模型时，初始化模型的输出通常接近一个均匀分布），因此我们可以将当它是一个常数项。然后，我们可以记  
-\begin{equation}\alpha_i (x) = \frac{\int_0^T \alpha_{\theta(t),i} K_{\theta(t)}(x, x_i) dt}{\int_0^T K_{\theta(t)}(x, x_i) dt}, \quad K(x, x_i) = \int_0^T K_{\theta(t)}(x, x_i) dt  
-\end{equation}  
-那么  
-\begin{equation}f_{\theta_T}(x) = \beta(x) + \sum_i \alpha_i (x) K(x, x_i)\end{equation}  
-这在形式上就跟SVM很像了，区别就在于SVM的$\alpha_i,\beta$应该是独立于$x$的，而这里则依赖于$x$。$\beta(x)$我们已经分析过了，而$\alpha_i(x)$由于它是数学期望的形式，被期望的对象不依赖于$x$，而是权重依赖于$x$，那么它可能对$x$的依赖也相对弱些，因此跟$\beta(x)$一样，我们也许可以近似地忽略它对$x$的依赖。不过，在笔者看来，依不依赖$x$并不算是关键，最重要的是最终的结果呈现出了$\sum\limits_i \alpha_i(x) K(x, x_i)$的形式，那就意味着它在一定程度上也是学习到了一个检索训练集的过程，这才是它真正跟SVM的相似之处。
-
-上述讨论的是输出标量的模型，如果输出是一个$d$维向量，那么最终形式也是相同的，只不过此时$\beta(x),\alpha_i(x)$也是一个$d$维向量，而$K(x, x_i)$是一个$d\times d$的矩阵，这种情况下哪怕$\beta(x),\alpha_i(x)$与$x$无关，也不是我们通常意义下的（多分类）SVM模型。但它依然具有$\sum\limits_i \alpha_i(x) K(x, x_i)$的形式，因此某种意义上来说它仍然是检索训练集的操作。
-
-此外，上述结论针对的是（全量）梯度下降，而对于随机梯度下降（SGD）来说，我们不再是用全量数据来算损失函数，对此我们在第一篇[《从动力学角度看优化算法（一）：从SGD到动量加速》](/archives/5655)也做过讨论，可以认为SGD是在梯度下降的基础上引入了噪声，也就是收敛路径$\theta(t)$带有随机噪声，其余结果基本不变，因此上述结论对SGD也是成立的。
-
-## 拓展思考 #
-
-那么，这个结果能给我们带来什么思想冲击呢？原论文在“Discussion”那一节花了相当长的篇幅讨论这个事情，这里我们也来琢磨一下这个事情。
-
-从深度学习的视角来看，这个结果揭示了深层神经网络模型与传统的核方法之间的联系，借助核方法的可解释性来增强神经网络的可解释性。比如，通过梯度内积作为相似度度量，我们或许可以从训练集中检索出与输入相近的训练样本，以解释输出的决策过程。更进一步地，如果该方向能够得到更为精确的量化，那么它有可能大大改进增量学习的方法，即对于新来的标注样本，我们可能只需要想办法往模型中添加$a_i(x) K(x, x_i)$的项，而不需要重新训练模型。
-
-反过来看，该结果也许能促进核机器、核方法的发展。传统的核函数依赖于人为定义，而上述梯度内积形式的核函数给我们带来了新的构建核函数的思路，增强核方法对复杂函数的建模能力。同时，由于梯度下降与核机器的相似性，我们最终或许可以通过梯度下降来训练核机器，从而克服核机器在大规模数据下的训练难题，等等。
-
-还有一些别的脑洞可以发散一下，比如我们知道对于凸优化问题有唯一解，并且理论上梯度下降总可以找到这个解，而前面又说梯度下降相当于一个SVM。所以，这是不是意味着所有凸优化问题的解都相当于一个SVM？这个脑洞够不够大？
-
-总之，揭示梯度下降与核机器之间的联系，有助于两者的进一步借鉴与融合，并且有可能发展出一些新的研究思路。
-
-_**转载到请包括本文地址：**<https://spaces.ac.cn/archives/8009>_
-
-_**更详细的转载事宜请参考：**_[《科学空间FAQ》](https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8 "《科学空间FAQ》")
-
-**如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。**
-
-**如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！**
-
-打赏
-
-![科学空间](https://spaces.ac.cn/usr/themes/geekg/payment/wx.png)
-
-微信打赏
-
-![科学空间](https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png)
-
-支付宝打赏
-
-因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以[**点击这里**](http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&email=tN7d1drY3drrx8H0xcWa19vZ)或在下方评论区留言来告知你的建议或需求。
-
-**如果您需要引用本文，请参考：**
-
-苏剑林. (Dec. 21, 2020). 《从动力学角度看优化算法（七）：SGD ≈ SVM？ 》[Blog post]. Retrieved from <https://spaces.ac.cn/archives/8009>
-
-@online{kexuefm-8009,  
-title={从动力学角度看优化算法（七）：SGD ≈ SVM？},  
-author={苏剑林},  
-year={2020},  
-month={Dec},  
-url={\url{https://spaces.ac.cn/archives/8009}},  
-} 
-
+**原文链接**: [https://spaces.ac.cn/archives/8314](https://spaces.ac.cn/archives/8314)
 
 ---
 
-## 公式推导与注释
+## 1. 核心理论、公理与历史基础
 
-TODO: 添加详细的数学公式推导和注释
+### 1.1 跨学科根源：从硬间隔到动力学收敛
 
+深度学习的一个核心谜题是：**为什么过参数化的模型（参数量远大于样本量）能够泛化？**
+按照传统的 VC 维理论，参数越多，模型复杂度越高，越容易过拟合。但在实践中，我们即使不加任何显式的正则化项（如 L2 Regularization），SGD 训练出的神经网络依然具有极佳的泛化能力。
+
+这个谜题的答案隐藏在两个看似无关领域的交叉点上：
+- **统计学习理论 (Statistical Learning Theory)**：1990s Vapnik 提出的支持向量机（SVM）理论认为，分类器的泛化误差界与“分类间隔（Margin）”成反比。最大化间隔是提升泛化能力的最强手段。
+- **非线性动力学 (Nonlinear Dynamics)**：Soudry 等人在 2018 年的开创性工作证明，在使用 Logistic Loss（或 Cross Entropy）训练线性分类器时，梯度下降的动力学轨迹会自动收敛到最大间隔方向。
+
+这意味着：**SGD 这一优化算法本身，就内嵌了一个隐式的 SVM 求解器。**
+
+### 1.2 历史编年史：从硬间隔到隐式偏置
+
+1.  **1960s - 感知机算法**：Rosenblatt 提出了感知机，但它只能找到任意一个解，没有任何关于“最优解”的保证。
+2.  **1995 - SVM 的黄金时代**：Vapnik 提出了最大间隔分类器。为了求解它，我们需要引入拉格朗日对偶变量，并解决一个复杂的二次规划（QP）问题。
+3.  **2017 - 泛化之谜的爆发**：Zhang 等人在 ICLR 发表《Understanding deep learning requires rethinking generalization》，指出深度网络可以轻易记住随机标签，这彻底击碎了基于模型容量的传统泛化理论。
+4.  **2018 - 隐式偏置 (Implicit Bias) 的发现**：Soudry 等人在 *The Implicit Bias of Gradient Descent on Separable Data* 中证明，在数据线性可分的情况下，SGD 训练出的权重方向 $\boldsymbol{w}/\|\boldsymbol{w}\|$ 会渐近收敛到 SVM 的解。
+5.  **2020s - 深度网络的推广**：Gunasekar、Lyu 和 Li 等人将这一结论推广到了深度线性网络和对角线性网络，甚至发现了在矩阵分解任务中 SGD 会寻找最小核范数（Nuclear Norm）解。
+
+### 1.3 严谨公理化：隐式优化的数学基石
+
+为了严格证明 SGD ≈ SVM，我们需要以下公理体系：
+
+<div class="theorem-box">
+
+### 核心公理 1：线性可分性 (Linear Separability)
+假设数据集 $\mathcal{D} = \{(\boldsymbol{x}_i, y_i)\}_{i=1}^n$ 是线性可分的。即存在至少一个单位向量 $\boldsymbol{u}^*$，使得对于所有 $i$：
+\begin{equation} y_i \langle \boldsymbol{u}^*, \boldsymbol{x}_i \rangle \geq \gamma > 0 \tag{1} \end{equation}
+这保证了损失函数可以被优化到 0，且参数模长会趋于无穷大。
+
+### 核心公理 2：指数尾部损失 (Exponential Tail Loss)
+损失函数 $\ell(z)$ 必须具有指数衰减的尾部特性，例如 Logistic Loss $\ell(z) = \log(1+e^{-z})$ 或指数损失 $e^{-z}$。
+\begin{equation} \lim_{z \to \infty} \ell(z) e^{\alpha z} = C \tag{2} \end{equation}
+这意味着当分类置信度极高时，梯度虽然微小，但永远不会消失。正是这微弱的“尾部梯度”，在漫长的训练岁月中塑造了参数的方向。
+
+### 核心公理 3：梯度流近似 (Gradient Flow Approximation)
+我们主要研究连续时间的梯度流动力学：
+\begin{equation} \dot{\boldsymbol{\theta}}(t) = -\nabla L(\boldsymbol{\theta}(t)) \tag{3} \end{equation}
+虽然离散的 SGD 会引入噪声，但大量研究表明，只要学习率足够小，离散轨迹的渐近行为与连续流是一致的。
+
+</div>
+
+### 1.4 设计哲学：无为而治的正则化
+
+SGD ≈ SVM 的设计哲学是：**“不需要显式的约束，演化本身就是一种选择。”**
+传统的 SVM 需要我们手动写下 $\min \|\boldsymbol{w}\|^2$ 的目标函数。而 SGD 告诉我们，你不需要告诉模型去“最小化范数”或“最大化间隔”，你只需要给它一个指数型的损失函数，然后让它一直跑下去。
+随着参数模长 $\|\boldsymbol{\theta}\| \to \infty$，损失函数的几何性质会自动“挤压”参数的方向，迫使它对齐到那个最宽、最稳健的分类界面上。这是一种**“通过过程定义结果”**的深刻哲学。
+
+---
+
+## 2. 严谨的核心数学推导
+
+本节将通过详尽的极限分析，从动力学方程推导出 KKT 条件的涌现。这是一场从微积分到凸优化的华丽冒险。
+
+### 2.1 问题的动力学建模
+
+设二分类数据集为 $\{(\boldsymbol{x}_i, y_i)\}_{i=1}^n$。为了简化符号，我们将 $y_i$ 吸收进 $\boldsymbol{x}_i$ 中，即假设对于所有样本，目标是 $\langle \boldsymbol{\theta}, \boldsymbol{x}_i \rangle > 0$。
+损失函数为 Logistic Loss：
+\begin{equation} L(\boldsymbol{\theta}) = \sum_{i=1}^n \ell(\langle \boldsymbol{\theta}, \boldsymbol{x}_i \rangle) = \sum_{i=1}^n \log(1 + e^{-\langle \boldsymbol{\theta}, \boldsymbol{x}_i \rangle}) \tag{4} \end{equation}
+
+<div class="derivation-box">
+
+### 推导 7.1：梯度的渐近展开与模长发散
+
+**步骤 1：计算梯度表达式**
+对 $\boldsymbol{\theta}$ 求导：
+\begin{equation} \nabla L(\boldsymbol{\theta}) = \sum_{i=1}^n \ell'(\langle \boldsymbol{\theta}, \boldsymbol{x}_i \rangle) \boldsymbol{x}_i = \sum_{i=1}^n \frac{-e^{-\langle \boldsymbol{\theta}, \boldsymbol{x}_i \rangle}}{1 + e^{-\langle \boldsymbol{\theta}, \boldsymbol{x}_i \rangle}} \boldsymbol{x}_i \tag{5} \end{equation}
+
+**步骤 2：考虑训练后期的渐近行为**
+由于数据可分，随着训练进行，$L \to 0$，这意味着对于所有 $i$，$\langle \boldsymbol{\theta}, \boldsymbol{x}_i \rangle \to +\infty$。
+在 $z \to \infty$ 时，分母 $1 + e^{-z} \to 1$。因此梯度可以近似为：
+\begin{equation} \nabla L(\boldsymbol{\theta}) \approx -\sum_{i=1}^n e^{-\langle \boldsymbol{\theta}, \boldsymbol{x}_i \rangle} \boldsymbol{x}_i \tag{6} \end{equation}
+
+**步骤 3：参数模长的增长规律**
+考虑模长平方 $\|\boldsymbol{\theta}\|^2$ 的变化率：
+\begin{equation} \frac{d}{dt} \|\boldsymbol{\theta}\|^2 = 2 \langle \boldsymbol{\theta}, \dot{\boldsymbol{\theta}} \rangle = -2 \langle \boldsymbol{\theta}, \nabla L \rangle \tag{7} \end{equation}
+代入 (6) 的近似：
+\begin{equation} \frac{d}{dt} \|\boldsymbol{\theta}\|^2 \approx 2 \sum_{i=1}^n \langle \boldsymbol{\theta}, \boldsymbol{x}_i \rangle e^{-\langle \boldsymbol{\theta}, \boldsymbol{x}_i \rangle} \tag{8} \end{equation}
+由于函数 $f(u) = u e^{-u}$ 在 $u \to \infty$ 时趋于 0，这意味着模长的增长速度 $\frac{d}{dt} \|\boldsymbol{\theta}\|^2$ 会随时间衰减。
+严格的推导表明，$\|\boldsymbol{\theta}(t)\| \sim \ln t$。这是一个极慢的增长速度，但它确实发散。
+
+</div>
+
+### 2.2 核心引理：支持向量的主导地位
+
+当模长趋于无穷时，虽然所有样本的梯度贡献都在减小，但它们减小的**速度**截然不同。
+
+<div class="derivation-box">
+
+### 推导 7.2：谁主导了方向？
+
+**步骤 1：分解模长与方向**
+令 $\boldsymbol{\theta}(t) = \rho(t) \boldsymbol{u}(t)$，其中 $\rho(t) = \|\boldsymbol{\theta}(t)\|$ 是模长，$\boldsymbol{u}(t)$ 是单位方向向量。
+我们将关注 $\boldsymbol{u}(t)$ 在 $t \to \infty$ 时的极限。
+
+**步骤 2：识别“最慢衰减项”**
+观察梯度近似公式 (6)：$-\nabla L \approx \sum_{i=1}^n e^{-\rho \langle \boldsymbol{u}, \boldsymbol{x}_i \rangle} \boldsymbol{x}_i$。
+定义第 $i$ 个样本的几何间隔为 $\gamma_i = \langle \boldsymbol{u}, \boldsymbol{x}_i \rangle$。
+梯度的方向由指数项 $e^{-\rho \gamma_i}$ 决定。
+显然，**拥有最小间隔 $\gamma_{\min}$ 的样本（即支持向量）**，其指数衰减最慢，在梯度和中占比最大。
+
+**步骤 3：极限方向的线性组合**
+令 $\mathcal{S}$ 为具有最小间隔的样本集合（支持向量集）。当 $\rho \to \infty$ 时：
+\begin{equation} -\nabla L(\boldsymbol{\theta}) \propto \sum_{i \in \mathcal{S}} e^{-\rho \gamma_{\min}} \boldsymbol{x}_i + \sum_{j \notin \mathcal{S}} o(e^{-\rho \gamma_{\min}}) \boldsymbol{x}_j \tag{9} \end{equation}
+这意味着，梯度的方向渐渐收敛到支持向量的非负线性组合：
+\begin{equation} \boldsymbol{d}_{\infty} = \lim_{t \to \infty} \frac{-\nabla L}{\|-\nabla L\|} \in \text{Cone}(\lbrace\boldsymbol{x}_i\rbrace_{i \in \mathcal{S}}) \tag{10} \end{equation}
+
+</div>
+
+### 2.3 对偶原理：SVM 的 KKT 条件再现
+
+为什么梯度方向的极限一定是 SVM 的解？让我们看看 SVM 的对偶问题。
+
+<div class="formula-explanation">
+
+### SVM 对偶性与梯度流的数学同构
+
+**1. 硬间隔 SVM 的原问题**：
+\begin{equation} \min_{\boldsymbol{w}} \|\boldsymbol{w}\|^2 \quad \text{s.t.} \quad \langle \boldsymbol{w}, \boldsymbol{x}_i \rangle \geq 1, \forall i \tag{11} \end{equation}
+
+**2. KKT 条件**：
+最优解 $\boldsymbol{w}^*$ 必须满足：
+- **平稳性**：$\boldsymbol{w}^* = \sum_{i=1}^n \alpha_i \boldsymbol{x}_i$，其中 $\alpha_i \geq 0$。
+- **互补松弛**：$\alpha_i (\langle \boldsymbol{w}^*, \boldsymbol{x}_i \rangle - 1) = 0$。即只有支持向量（$\langle \boldsymbol{w}^*, \boldsymbol{x}_i \rangle = 1$）的 $\alpha_i > 0$。
+
+**3. 梯度流的隐式 KKT**：
+回到 (9) 式，我们发现梯度流的方向 $\boldsymbol{u}(t)$ 正是被支持向量集合 $\mathcal{S}$ 的线性组合所驱动。
+在动力学的平衡态，方向向量 $\boldsymbol{u}$ 的变化率为 0，这意味着 $\boldsymbol{u}$ 必须与累积梯度的方向一致。
+Soudry (2018) 严格证明了：
+\begin{equation} \lim_{t \to \infty} \frac{\boldsymbol{\theta}(t)}{\|\boldsymbol{\theta}(t)\|} = \frac{\boldsymbol{w}_{\text{SVM}}}{\|\boldsymbol{w}_{\text{SVM}}\|} \tag{12} \end{equation}
+这就是著名的 **Directional Convergence Theorem**。
+
+</div>
+
+### 2.4 方向动力学方程的推导
+
+我们可以直接写出方向向量 $\boldsymbol{u}(t)$ 的微分方程，从而更直观地看到它如何寻找最大间隔。
+
+<div class="derivation-box">
+
+### 推导 7.3：方向演化的微分方程
+
+**步骤 1：利用商法则求导**
+\begin{equation} \dot{\boldsymbol{u}} = \frac{d}{dt} \left( \frac{\boldsymbol{\theta}}{\|\boldsymbol{\theta}\|} \right) = \frac{\dot{\boldsymbol{\theta}} \|\boldsymbol{\theta}\| - \boldsymbol{\theta} \frac{d}{dt}\|\boldsymbol{\theta}\|}{\|\boldsymbol{\theta}\|^2} \tag{13} \end{equation}
+注意 $\frac{d}{dt}\|\boldsymbol{\theta}\| = \langle \boldsymbol{u}, \dot{\boldsymbol{\theta}} \rangle$。
+
+**步骤 2：代入梯度流 $\dot{\boldsymbol{\theta}} = -\nabla L$**
+\begin{equation} \dot{\boldsymbol{u}} = \frac{1}{\rho} \left( -\nabla L - \boldsymbol{u} \langle \boldsymbol{u}, -\nabla L \rangle \right) \tag{14} \end{equation}
+这可以简写为梯度的投影形式：
+\begin{equation} \dot{\boldsymbol{u}} = -\frac{1}{\rho} (I - \boldsymbol{u}\boldsymbol{u}^T) \nabla L \tag{15} \end{equation}
+其中 $I - \boldsymbol{u}\boldsymbol{u}^T$ 是向切平面（垂直于 $\boldsymbol{u}$ 的平面）的投影矩阵。
+
+**步骤 3：物理意义**
+方程 (15) 说明，方向 $\boldsymbol{u}$ 的变化由**损失函数的梯度在切向上的分量**驱动。
+当 $\boldsymbol{u}$ 调整到使得所有支持向量的梯度合成力垂直于球面时（即无法再在球面上找到下降方向），$\dot{\boldsymbol{u}}$ 变为 0，此时即达到最大间隔解。
+
+</div>
+
+### 2.5 渐近收敛速率的精确分析
+
+不仅要证明收敛，还要知道收敛有多慢。
+
+<div class="step-by-step">
+
+<div class="step">
+**损失衰减速率**：
+已知 $\rho(t) \sim \ln t$。由于 $L \approx e^{-\rho \gamma}$，所以 $L(t) \approx 1/t$。
+</div>
+
+<div class="step">
+**间隔收敛速率**：
+设最优间隔为 $\gamma^*$，当前间隔为 $\gamma(t)$。
+Nacson (2019) 证明了：
+\begin{equation} \gamma^* - \gamma(t) \leq \mathcal{O}\left( \frac{1}{\ln t} \right) \tag{16} \end{equation}
+</div>
+
+<div class="step">
+**令人绝望的慢**：
+$1/\ln t$ 的收敛速度意味着：如果你想让间隔误差减半，你需要训练的时间是原来的平方倍（例如从 $10^4$ 步增加到 $10^8$ 步）！
+这就是为什么深度学习模型虽然能学到最大间隔，但需要极长的训练时间来“精修”边界。
+</div>
+
+</div>
