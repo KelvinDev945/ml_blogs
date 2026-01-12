@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>“对角+低秩”三角阵的高效求逆方法</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>“对角+低秩”三角阵的高效求逆方法</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 37.8 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/11072">https://spaces.ac.cn/archives/11072</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>从文章<a href="/archives/11033">《线性注意力简史：从模仿、创新到反哺》</a>我们可以发现，DeltaNet及其后的线性Attention模型，基本上都关联到了逆矩阵$(\boldsymbol{I} + \boldsymbol{K}\boldsymbol{K}^{\top}\odot\boldsymbol{M}^-)^{-1}$。本文就专门来探讨一下这类具有“对角+低秩”特点的三角矩阵的逆矩阵计算。</p>
+<h2 id="_1">基本结果</h2>
+<p>我们将问题一般地定义如下：</p>
+<blockquote>
+<p>给定矩阵$\boldsymbol{Q},\boldsymbol{K}\in\mathbb{R}^{n\times d}$和对角矩阵$\boldsymbol{\Lambda}\in\mathbb{R}^{n\times n}$，满足$n\gg d$，定义 \begin{equation}\boldsymbol{T} = \boldsymbol{\Lambda} + \boldsymbol{Q}\boldsymbol{K}^{\top}\odot\boldsymbol{M}^-\end{equation} 其中$\boldsymbol{M}^-=\boldsymbol{M} - \boldsymbol{I}$，矩阵$\boldsymbol{M}$定义为 \begin{equation}M_{i,j} = \left\{\begin{aligned} &amp;1, &amp;i \geq j \\\ &amp;0, &amp;i &lt; j\end{aligned}\right.\end{equation} 现在要求逆矩阵$\boldsymbol{T}^{-1}$，并且证明其复杂度是$\mathcal{O}(n^2)$。</p>
+</blockquote>
+<p>首先，如果没有$\odot\boldsymbol{M}^-$的下三角阵约束，那么它可以直接由“<a href="https://en.wikipedia.org/wiki/Woodbury_matrix_identity">Woodbury恒等式</a>”解决：<br />
+\begin{equation}(\boldsymbol{\Lambda} + \boldsymbol{Q}\boldsymbol{K}^{\top})^{-1} = \boldsymbol{\Lambda}^{-1} - \boldsymbol{\Lambda}^{-1} \boldsymbol{Q}(\boldsymbol{I} + \boldsymbol{K}^{\top}\boldsymbol{\Lambda}^{-1}\boldsymbol{Q})^{-1}\boldsymbol{K}^{\top}\boldsymbol{\Lambda}^{-1}\end{equation}<br />
+容易验证右端的计算复杂度是$\mathcal{O}(n^2)$的。然而，加上$\odot\boldsymbol{M}^-$后，$\boldsymbol{T}$本身就不再具有“对角+低秩”的结构，因此不能直接由该恒等式解决了。针对下三角矩阵这一特点，一个基本的思路是递归，因为我们有分块矩阵恒等式<br />
+\begin{equation}\begin{bmatrix}\boldsymbol{A} &amp; \boldsymbol{0} \\\ \boldsymbol{C} &amp; \boldsymbol{B}\end{bmatrix}^{-1} = \begin{bmatrix}\boldsymbol{A}^{-1} &amp; \boldsymbol{0} \\\ -\boldsymbol{B}^{-1}\boldsymbol{C}\boldsymbol{A}^{-1} &amp; \boldsymbol{B}^{-1}\end{bmatrix}\end{equation}<br />
+这允许我们将$\boldsymbol{T}^{-1}$转化递归形式（约定：没有括号的情况下，切片的优先级最高）<br />
+\begin{equation}\boldsymbol{T}<em _:l_:l_="[:l,:l]">{[:l+1,:l+1]}^{-1} = \begin{bmatrix}\boldsymbol{T}</em>}^{-1} &amp; \boldsymbol{0} \\\ -\boldsymbol{T<em _l:l_1_:l_="[l:l+1,:l]">{[l:l+1,l:l+1]}^{-1}\boldsymbol{T}</em>}\boldsymbol{T<em _l:l_1_l:l_1_="[l:l+1,l:l+1]">{[:l,:l]}^{-1} &amp; \boldsymbol{T}</em>}^{-1}\end{bmatrix}\end{equation<br />
+其中主要计算是$\boldsymbol{T}<em _:l_:l_="[:l,:l]">{[l:l+1,:l]}\boldsymbol{T}</em>(n^3)$。}^{-1}$，它是一个$1\times l$和$l\times l$矩阵相乘，复杂度是$\mathcal{O}(\mathcal{l^2})$，即每一步迭代的复杂度是平方增长的，所以总复杂度是$\mathcal{O</p>
+<h2 id="_2">低秩结构</h2>
+<p>当然，这是因为我们还没用上$\boldsymbol{T}$（$\odot\boldsymbol{M}^-$前）的低秩结构，现在我们把它利用起来，那么将会得到$\boldsymbol{T}<em _l:l_1_="[l:l+1]">{[l:l+1,:l]} = \boldsymbol{Q}</em>}\boldsymbol{K<em _:l_1_:l_1_="[:l+1,:l+1]">{[:l]}^{\top}$，代入上式得：<br />
+\begin{equation}\boldsymbol{T}</em>}^{-1} = \begin{bmatrix}\boldsymbol{T<em _l:l_1_l:l_1_="[l:l+1,l:l+1]">{[:l,:l]}^{-1} &amp; \boldsymbol{0} \\\ -\boldsymbol{T}</em>}^{-1}\boldsymbol{Q<em _:l_="[:l]">{[l:l+1]}\boldsymbol{K}</em>}^{\top}\boldsymbol{T<em _l:l_1_l:l_1_="[l:l+1,l:l+1]">{[:l,:l]}^{-1} &amp; \boldsymbol{T}</em>}^{-1}\end{bmatrix}\end{equation<br />
+注意$\boldsymbol{K}<em _:l_:l_="[:l,:l]">{[:l]}^{\top}\boldsymbol{T}</em>(n^2)$。根据这个思路，我们有}^{-1}\in\mathbb{R}^{d\times l}$，如果我们能以它为递归变量，那么每一步迭代的复杂度就只是$\mathcal{O}(l)$，总复杂度就能成功降到$\mathcal{O<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{K}<em _:l_1_:l_1_="[:l+1,:l+1]">{[:l+1]}^{\top}\boldsymbol{T}</em>}^{-1} =&amp;\, \begin{bmatrix}\boldsymbol{K<em _l:l_1_="[l:l+1]">{[:l]}^{\top} &amp; \boldsymbol{K}</em>}^{\top}\end{bmatrix}\begin{bmatrix}\boldsymbol{T<em _l:l_1_l:l_1_="[l:l+1,l:l+1]">{[:l,:l]}^{-1} &amp; \boldsymbol{0} \\\ -\boldsymbol{T}</em>}^{-1}\boldsymbol{Q<em _:l_="[:l]">{[l:l+1]}\boldsymbol{K}</em>}^{\top}\boldsymbol{T<em _l:l_1_l:l_1_="[l:l+1,l:l+1]">{[:l,:l]}^{-1} &amp; \boldsymbol{T}</em> \\\[6pt]}^{-1}\end{bmatrix<br />
+=&amp;\, \begin{bmatrix}\boldsymbol{K}<em _:l_:l_="[:l,:l]">{[:l]}^{\top}\boldsymbol{T}</em>}^{-1} &amp; \boldsymbol{0}\end{bmatrix} + \boldsymbol{K<em _l:l_1_l:l_1_="[l:l+1,l:l+1]">{[l:l+1]}^{\top}\underbrace{\begin{bmatrix}-\boldsymbol{T}</em>}^{-1}\boldsymbol{Q<em _:l_="[:l]">{[l:l+1]}\boldsymbol{K}</em>}^{\top}\boldsymbol{T<em _l:l_1_l:l_1_="[l:l+1,l:l+1]">{[:l,:l]}^{-1} &amp; \boldsymbol{T}</em>}^{-1}\end{bmatrix}<em _l:l_1_:l_1_="[l:l+1,:l+1]">{\text{实际上就是 }(\boldsymbol{T}^{-1})</em>}}\end{aligned}\end{equation<br />
+可以看到这个递归过程也没有涉及到$\mathcal{O}(l^2)$的运算，因此思路是可行的，只需要引入一个新变量来缓存$\boldsymbol{K}<em _:l_:l_="[:l,:l]">{[:l]}^{\top}\boldsymbol{T}</em>$。如果我们将$l+1$换成$l+c$，那么就可以得到chunk格式的递归。}^{-1</p>
+<p>测试代码如下：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="n">n</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="o">=</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">200</span>
+<span class="n">Q</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">d</span><span class="o">**</span><span class="mf">0.5</span>
+<span class="n">K</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">d</span><span class="o">**</span><span class="mf">0.5</span>
+<span class="n">T</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">tril</span><span class="p">(</span><span class="n">Q</span> <span class="o">@</span> <span class="n">K</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+
+<span class="n">Y</span><span class="p">,</span> <span class="n">Z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">zeros</span><span class="p">((</span><span class="n">n</span><span class="p">,</span> <span class="n">n</span><span class="p">)),</span> <span class="n">np</span><span class="o">.</span><span class="kp">zeros</span><span class="p">((</span><span class="n">d</span><span class="p">,</span> <span class="n">n</span><span class="p">))</span>
+<span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+    <span class="n">Y</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">,</span> <span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">inv</span><span class="p">(</span><span class="n">T</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">,</span> <span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">])</span>
+    <span class="n">Y</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">,</span> <span class="p">:</span><span class="n">l</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span> <span class="n">Y</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">,</span> <span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span> <span class="o">@</span> <span class="n">Q</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span> <span class="o">@</span> <span class="n">Z</span><span class="p">[:,</span> <span class="p">:</span><span class="n">l</span><span class="p">]</span>
+    <span class="n">Z</span><span class="p">[:,</span> <span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span> <span class="o">+=</span> <span class="n">K</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">Y</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">,</span> <span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span>
+
+<span class="n">np</span><span class="o">.</span><span class="kp">allclose</span><span class="p">(</span><span class="n">Y</span> <span class="o">@</span> <span class="n">T</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">n</span><span class="p">))</span>
+</code></pre></div>
+
+<h2 id="_3">乘法计算</h2>
+<p>基于同样的思路，我们还可以证明：</p>
+<blockquote>
+<p>对于任意矩阵$\boldsymbol{V}\in\mathbb{R}^{n\times d}$，计算$\boldsymbol{T}^{-1}\boldsymbol{V}$只需要$\mathcal{O}(n)$的复杂度。</p>
+</blockquote>
+<p>证明只需要把前述过程稍微改动一下。首先有<br />
+\begin{equation}\begin{aligned}<br />
+(\boldsymbol{T}^{-1}\boldsymbol{V})<em _:l_1_:l_1_="[:l+1,:l+1]">{[:l+1]} =&amp;\, \boldsymbol{T}</em>}^{-1}\boldsymbol{V<em _:l_:l_="[:l,:l]">{[:l+1]} \\\[6pt]<br />
+=&amp;\, \begin{bmatrix}\boldsymbol{T}</em>}^{-1} &amp; \boldsymbol{0} \\\ -\boldsymbol{T<em _l:l_1_="[l:l+1]">{[l:l+1,l:l+1]}^{-1}\boldsymbol{Q}</em>}\boldsymbol{K<em _:l_:l_="[:l,:l]">{[:l]}^{\top}\boldsymbol{T}</em>}^{-1} &amp; \boldsymbol{T<em _:l_="[:l]">{[l:l+1,l:l+1]}^{-1}\end{bmatrix}\begin{bmatrix}\boldsymbol{V}</em>} \\\ \boldsymbol{V<em _:l_:l_="[:l,:l]">{[l:l+1]}\end{bmatrix} \\\[6pt]<br />
+=&amp;\, \begin{bmatrix}\boldsymbol{T}</em>}^{-1}\boldsymbol{V<em _l:l_1_l:l_1_="[l:l+1,l:l+1]">{[:l]} \\\ -\boldsymbol{T}</em>}^{-1}\boldsymbol{Q<em _:l_="[:l]">{[l:l+1]}\boldsymbol{K}</em>}^{\top}\boldsymbol{T<em _:l_="[:l]">{[:l,:l]}^{-1}\boldsymbol{V}</em>} + \boldsymbol{T<em _l:l_1_="[l:l+1]">{[l:l+1,l:l+1]}^{-1}\boldsymbol{V}</em> \\\[6pt]}\end{bmatrix<br />
+=&amp;\, \begin{bmatrix}(\boldsymbol{T}^{-1}\boldsymbol{V})<em _l:l_1_l:l_1_="[l:l+1,l:l+1]">{[:l]} \\\ \boldsymbol{T}</em>}^{-1}(\boldsymbol{V<em _l:l_1_="[l:l+1]">{[l:l+1]} - \boldsymbol{Q}</em>}\boldsymbol{K<em _:l_="[:l]">{[:l]}^{\top}(\boldsymbol{T}^{-1}\boldsymbol{V})</em>})\end{bmatrix<br />
+\end{aligned}\end{equation}<br />
+然后<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{K}<em _:l_1_="[:l+1]">{[:l+1]}^{\top}(\boldsymbol{T}^{-1}\boldsymbol{V})</em>} =&amp;\, \begin{bmatrix}\boldsymbol{K<em _l:l_1_="[l:l+1]">{[:l]}^{\top} &amp; \boldsymbol{K}</em>)}^{\top}\end{bmatrix}\begin{bmatrix}(\boldsymbol{T}^{-1}\boldsymbol{V<em _l:l_1_="[l:l+1]">{[:l]} \\\ (\boldsymbol{T}^{-1}\boldsymbol{V})</em> \\\[8pt]} \end{bmatrix<br />
+=&amp;\,\boldsymbol{K}<em _:l_="[:l]">{[:l]}^{\top}(\boldsymbol{T}^{-1}\boldsymbol{V})</em>} + \boldsymbol{K<em _l:l_1_="[l:l+1]">{[l:l+1]}^{\top}(\boldsymbol{T}^{-1}\boldsymbol{V})</em><br />
+\end{aligned}\end{equation}<br />
+因此，只需要缓存$\boldsymbol{K}<em _:l_="[:l]">{[:l]}^{\top}(\boldsymbol{T}^{-1}\boldsymbol{V})</em>(n)$。同样，只需要将$l+1$换成$l+c$就可以得到chunk格式。}\in\mathbb{R}^{d\times d}$，就可以使得每步的计算复杂度与$l$无关，因此总复杂度是$\mathcal{O</p>
+<p>测试代码如下：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="n">n</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">c</span> <span class="o">=</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">200</span>
+<span class="n">Q</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">d</span><span class="o">**</span><span class="mf">0.5</span>
+<span class="n">K</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">d</span><span class="o">**</span><span class="mf">0.5</span>
+<span class="n">V</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span> <span class="o">/</span> <span class="n">d</span><span class="o">**</span><span class="mf">0.5</span>
+<span class="n">T</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">tril</span><span class="p">(</span><span class="n">Q</span> <span class="o">@</span> <span class="n">K</span><span class="o">.</span><span class="n">T</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="kp">eye</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+
+<span class="n">Y</span><span class="p">,</span> <span class="n">Z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">zeros</span><span class="p">((</span><span class="n">n</span><span class="p">,</span> <span class="n">d</span><span class="p">)),</span> <span class="n">np</span><span class="o">.</span><span class="kp">zeros</span><span class="p">((</span><span class="n">d</span><span class="p">,</span> <span class="n">d</span><span class="p">))</span>
+<span class="k">for</span> <span class="n">l</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+    <span class="n">X</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="kp">inv</span><span class="p">(</span><span class="n">T</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">,</span> <span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">])</span>
+    <span class="n">Y</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span> <span class="o">=</span> <span class="n">X</span> <span class="o">@</span> <span class="p">(</span><span class="n">V</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span> <span class="o">-</span> <span class="n">Q</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span> <span class="o">@</span> <span class="n">Z</span><span class="p">)</span>
+    <span class="n">Z</span> <span class="o">+=</span> <span class="n">K</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">Y</span><span class="p">[</span><span class="n">l</span><span class="p">:</span><span class="n">l</span> <span class="o">+</span> <span class="n">c</span><span class="p">]</span>
+
+<span class="n">np</span><span class="o">.</span><span class="kp">allclose</span><span class="p">(</span><span class="n">T</span> <span class="o">@</span> <span class="n">Y</span><span class="p">,</span> <span class="n">V</span><span class="p">)</span>
+</code></pre></div>
+
+<h2 id="_4">文章小结</h2>
+<p>本文讨论了“对角+低秩”特点的三角矩阵求逆问题，这类矩阵普遍出现在新式线性Attention模型中。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/11072">https://spaces.ac.cn/archives/11072</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jul. 01, 2025). 《“对角+低秩”三角阵的高效求逆方法 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/11072">https://spaces.ac.cn/archives/11072</a></p>
+<p>@online{kexuefm-11072,<br />
+title={“对角+低秩”三角阵的高效求逆方法},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={Jul},<br />
+url={\url{https://spaces.ac.cn/archives/11072}},<br />
+} </p>
+<hr />
+<h2 id="_5">公式推导与注释</h2>
+<p>本节提供文章中关键结果的详细数学推导，从矩阵理论基础到算法实现的完整分析。</p>
+<h3 id="1">1. "对角+低秩"矩阵结构的数学表示</h3>
+<p><strong>定义1.1（对角+低秩矩阵）</strong>：一个矩阵$\boldsymbol{A}\in\mathbb{R}^{n\times n}$称为对角+低秩矩阵，如果它可以表示为
+$$\boldsymbol{A} = \boldsymbol{D} + \boldsymbol{U}\boldsymbol{V}^{\top}$$
+其中$\boldsymbol{D}\in\mathbb{R}^{n\times n}$是对角矩阵，$\boldsymbol{U},\boldsymbol{V}\in\mathbb{R}^{n\times r}$且$r\ll n$。</p>
+<p><strong>本文问题的特殊性</strong>：文章中的矩阵$\boldsymbol{T}$具有更复杂的结构：
+$$\boldsymbol{T} = \boldsymbol{\Lambda} + \boldsymbol{Q}\boldsymbol{K}^{\top}\odot\boldsymbol{M}^-$$</p>
+<p>让我们详细分析这个结构：</p>
+<ol>
+<li><strong>对角部分</strong>：$\boldsymbol{\Lambda} = \text{diag}(\lambda_1, \lambda_2, \ldots, \lambda_n)$</li>
+<li><strong>低秩部分</strong>：$\boldsymbol{Q}\boldsymbol{K}^{\top}$，其中$\boldsymbol{Q},\boldsymbol{K}\in\mathbb{R}^{n\times d}$，秩最多为$d$</li>
+<li><strong>下三角掩码</strong>：$\boldsymbol{M}^- = \boldsymbol{M} - \boldsymbol{I}$，其中
+   $$M_{i,j} = \begin{cases} 1, & i \geq j \\ 0, & i < j \end{cases}$$</li>
+</ol>
+<p><strong>关键观察</strong>：$\odot\boldsymbol{M}^-$操作使得
+$$(\boldsymbol{Q}\boldsymbol{K}^{\top}\odot\boldsymbol{M}^-)_{i,j} = \begin{cases} (\boldsymbol{Q}\boldsymbol{K}^{\top})_{i,j}, & i > j \\ 0, & i \leq j \end{cases}$$</p>
+<p>因此，$\boldsymbol{T}$是严格下三角+对角矩阵：
+$$T_{i,j} = \begin{cases} \lambda_i, & i = j \\ \sum_{k=1}^{d} Q_{i,k}K_{j,k}, & i > j \\ 0, & i < j \end{cases}$$</p>
+<p>这意味着$\boldsymbol{T}$虽然整体上不再是"对角+低秩"形式，但它保留了<strong>下三角结构</strong>和<strong>低秩表示</strong>的局部性质。</p>
+<h3 id="2-woodbury">2. Woodbury矩阵恒等式的完整证明</h3>
+<p><strong>定理2.1（Sherman-Morrison-Woodbury公式）</strong>：设$\boldsymbol{A}\in\mathbb{R}^{n\times n}$可逆，$\boldsymbol{U},\boldsymbol{V}\in\mathbb{R}^{n\times k}$，若$\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U}$可逆，则
+$$(\boldsymbol{A} + \boldsymbol{U}\boldsymbol{V}^{\top})^{-1} = \boldsymbol{A}^{-1} - \boldsymbol{A}^{-1}\boldsymbol{U}(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}\boldsymbol{V}^{\top}\boldsymbol{A}^{-1}$$</p>
+<p><strong>证明（方法一：直接验证）</strong>：</p>
+<p>记$\boldsymbol{B} = \boldsymbol{A}^{-1} - \boldsymbol{A}^{-1}\boldsymbol{U}(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}\boldsymbol{V}^{\top}\boldsymbol{A}^{-1}$，需证$\boldsymbol{B}(\boldsymbol{A} + \boldsymbol{U}\boldsymbol{V}^{\top}) = \boldsymbol{I}$。</p>
+<p>计算左端：
+$$\begin{aligned}
+&\boldsymbol{B}(\boldsymbol{A} + \boldsymbol{U}\boldsymbol{V}^{\top}) \\
+=& \left[\boldsymbol{A}^{-1} - \boldsymbol{A}^{-1}\boldsymbol{U}(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}\boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\right](\boldsymbol{A} + \boldsymbol{U}\boldsymbol{V}^{\top}) \\
+=& \boldsymbol{A}^{-1}\boldsymbol{A} + \boldsymbol{A}^{-1}\boldsymbol{U}\boldsymbol{V}^{\top} - \boldsymbol{A}^{-1}\boldsymbol{U}(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}\boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{A} \\
+&\quad - \boldsymbol{A}^{-1}\boldsymbol{U}(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}\boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U}\boldsymbol{V}^{\top} \\
+=& \boldsymbol{I} + \boldsymbol{A}^{-1}\boldsymbol{U}\boldsymbol{V}^{\top} - \boldsymbol{A}^{-1}\boldsymbol{U}(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}\boldsymbol{V}^{\top} \\
+&\quad - \boldsymbol{A}^{-1}\boldsymbol{U}(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}(\boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})\boldsymbol{V}^{\top} \\
+=& \boldsymbol{I} + \boldsymbol{A}^{-1}\boldsymbol{U}\boldsymbol{V}^{\top} - \boldsymbol{A}^{-1}\boldsymbol{U}(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}[\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U}]\boldsymbol{V}^{\top} \\
+=& \boldsymbol{I} + \boldsymbol{A}^{-1}\boldsymbol{U}\boldsymbol{V}^{\top} - \boldsymbol{A}^{-1}\boldsymbol{U}\boldsymbol{V}^{\top} = \boldsymbol{I}
+\end{aligned}$$</p>
+<p>其中关键步骤是将第3、4项合并：
+$$(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}[\boldsymbol{V}^{\top} + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U}\boldsymbol{V}^{\top}] = (\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})\boldsymbol{V}^{\top} = \boldsymbol{V}^{\top}$$</p>
+<p><strong>证明（方法二：块矩阵逆）</strong>：</p>
+<p>构造块矩阵：
+$$\boldsymbol{M} = \begin{bmatrix} \boldsymbol{A} & \boldsymbol{U} \\ \boldsymbol{V}^{\top} & -\boldsymbol{I}_k \end{bmatrix}$$</p>
+<p>使用两种不同的块消元方法求逆：</p>
+<p><strong>第一种消元</strong>（先消去左下块）：
+$$\begin{bmatrix} \boldsymbol{A} & \boldsymbol{U} \\ \boldsymbol{V}^{\top} & -\boldsymbol{I}_k \end{bmatrix} \sim \begin{bmatrix} \boldsymbol{A} + \boldsymbol{U}\boldsymbol{V}^{\top} & \boldsymbol{0} \\ \boldsymbol{V}^{\top} & -\boldsymbol{I}_k \end{bmatrix}$$</p>
+<p>得到：
+$$\boldsymbol{M}^{-1} = \begin{bmatrix} (\boldsymbol{A} + \boldsymbol{U}\boldsymbol{V}^{\top})^{-1} & * \\ * & * \end{bmatrix}$$</p>
+<p><strong>第二种消元</strong>（先消去右上块）：
+$$\begin{bmatrix} \boldsymbol{A} & \boldsymbol{U} \\ \boldsymbol{V}^{\top} & -\boldsymbol{I}_k \end{bmatrix} \sim \begin{bmatrix} \boldsymbol{A} & \boldsymbol{0} \\ \boldsymbol{V}^{\top} + \boldsymbol{A}^{-1}\boldsymbol{U} & -\boldsymbol{I}_k \end{bmatrix}$$</p>
+<p>得到左上块为：
+$$\boldsymbol{A}^{-1} - \boldsymbol{A}^{-1}\boldsymbol{U}(\boldsymbol{I}_k + \boldsymbol{V}^{\top}\boldsymbol{A}^{-1}\boldsymbol{U})^{-1}\boldsymbol{V}^{\top}\boldsymbol{A}^{-1}$$</p>
+<p>两种方法得到的$(1,1)$块必须相等，证毕。</p>
+<p><strong>计算复杂度分析</strong>：</p>
+<p>对于$\boldsymbol{A} = \boldsymbol{\Lambda}$（对角矩阵），$\boldsymbol{U} = \boldsymbol{Q}$，$\boldsymbol{V} = \boldsymbol{K}$：</p>
+<ol>
+<li>$\boldsymbol{\Lambda}^{-1}$：$\mathcal{O}(n)$（对角元素求倒数）</li>
+<li>$\boldsymbol{\Lambda}^{-1}\boldsymbol{Q}$：$\mathcal{O}(nd)$（$n$个$d$维向量逐元素乘）</li>
+<li>$\boldsymbol{K}^{\top}\boldsymbol{\Lambda}^{-1}\boldsymbol{Q}$：$\mathcal{O}(nd^2)$（$d\times n$矩阵乘$n\times d$矩阵）</li>
+<li>$(\boldsymbol{I}_d + \boldsymbol{K}^{\top}\boldsymbol{\Lambda}^{-1}\boldsymbol{Q})^{-1}$：$\mathcal{O}(d^3)$（$d\times d$矩阵求逆）</li>
+<li>最终组合：$\mathcal{O}(nd^2)$</li>
+</ol>
+<p>总复杂度：$\mathcal{O}(nd^2) + \mathcal{O}(d^3) = \mathcal{O}(nd^2)$。当$d\ll n$时，这是$\mathcal{O}(n)$线性复杂度（固定$d$时）。</p>
+<h3 id="3">3. 三角矩阵的块矩阵求逆递归算法</h3>
+<p><strong>定理3.1（块下三角矩阵求逆）</strong>：对于块下三角矩阵
+$$\boldsymbol{T} = \begin{bmatrix}\boldsymbol{A} & \boldsymbol{0} \\ \boldsymbol{C} & \boldsymbol{B}\end{bmatrix}$$
+其中$\boldsymbol{A}\in\mathbb{R}^{m\times m}$，$\boldsymbol{B}\in\mathbb{R}^{n\times n}$可逆，有
+$$\boldsymbol{T}^{-1} = \begin{bmatrix}\boldsymbol{A}^{-1} & \boldsymbol{0} \\ -\boldsymbol{B}^{-1}\boldsymbol{C}\boldsymbol{A}^{-1} & \boldsymbol{B}^{-1}\end{bmatrix}$$</p>
+<p><strong>证明</strong>：直接验证
+$$\begin{bmatrix}\boldsymbol{A}^{-1} & \boldsymbol{0} \\ -\boldsymbol{B}^{-1}\boldsymbol{C}\boldsymbol{A}^{-1} & \boldsymbol{B}^{-1}\end{bmatrix}\begin{bmatrix}\boldsymbol{A} & \boldsymbol{0} \\ \boldsymbol{C} & \boldsymbol{B}\end{bmatrix} = \begin{bmatrix}\boldsymbol{I}_m & \boldsymbol{0} \\ -\boldsymbol{B}^{-1}\boldsymbol{C} + \boldsymbol{B}^{-1}\boldsymbol{C} & \boldsymbol{I}_n\end{bmatrix} = \boldsymbol{I}$$</p>
+<p><strong>应用到逐行递归</strong>：</p>
+<p>将$\boldsymbol{T}\in\mathbb{R}^{(l+1)\times(l+1)}$分块为
+$$\boldsymbol{T}_{[:l+1,:l+1]} = \begin{bmatrix}\boldsymbol{T}_{[:l,:l]} & \boldsymbol{0} \\ \boldsymbol{T}_{[l:l+1,:l]} & \boldsymbol{T}_{[l:l+1,l:l+1]}\end{bmatrix}$$</p>
+<p>其中：
+- $\boldsymbol{A} = \boldsymbol{T}<em _l:l_1_l:l_1_="[l:l+1,l:l+1]">{[:l,:l]}\in\mathbb{R}^{l\times l}$（已计算的子矩阵）
+- $\boldsymbol{B} = \boldsymbol{T}</em>$（标量，因为是对角元）
+- $\boldsymbol{C} = \boldsymbol{T}_{[l:l+1,:l]}\in\mathbb{R}^{1\times l}$（行向量）} = \lambda_{l+1</p>
+<p>代入公式：
+$$\boldsymbol{T}_{[:l+1,:l+1]}^{-1} = \begin{bmatrix}\boldsymbol{T}_{[:l,:l]}^{-1} & \boldsymbol{0} \\ -\lambda_{l+1}^{-1}\boldsymbol{T}_{[l:l+1,:l]}\boldsymbol{T}_{[:l,:l]}^{-1} & \lambda_{l+1}^{-1}\end{bmatrix}$$</p>
+<p><strong>朴素算法的复杂度</strong>：</p>
+<p>计算$\boldsymbol{T}<em _:l_:l_="[:l,:l]">{[l:l+1,:l]}\boldsymbol{T}</em>$：
+- $\boldsymbol{T}}^{-1<em _:l_:l_="[:l,:l]">{[l:l+1,:l]}$是$1\times l$行向量
+- $\boldsymbol{T}</em>$是$l\times l$密集矩阵
+- 矩阵乘法：$\mathcal{O}(l^2)$}^{-1</p>
+<p>递归展开：
+$$\sum_{l=0}^{n-1} \mathcal{O}(l^2) = \mathcal{O}\left(\sum_{l=0}^{n-1} l^2\right) = \mathcal{O}\left(\frac{n^3}{3}\right) = \mathcal{O}(n^3)$$</p>
+<p>这就是为什么朴素递归算法是三次方复杂度。</p>
+<h3 id="4">4. 利用低秩结构的优化递归</h3>
+<p><strong>关键观察</strong>：$\boldsymbol{T}$的严格下三角部分具有低秩表示
+$$\boldsymbol{T}_{[i,j]} = \boldsymbol{Q}_{[i]}\boldsymbol{K}_{[j]}^{\top}, \quad i > j$$</p>
+<p>因此：
+$$\boldsymbol{T}_{[l:l+1,:l]} = \boldsymbol{Q}_{[l:l+1]}\boldsymbol{K}_{[:l]}^{\top}$$</p>
+<p>这是一个秩$\leq d$的$1\times l$矩阵，可以表示为$d$维向量的外积。</p>
+<p><strong>优化的递归公式</strong>：</p>
+<p>代入低秩分解：
+$$\boldsymbol{T}_{[:l+1,:l+1]}^{-1} = \begin{bmatrix}\boldsymbol{T}_{[:l,:l]}^{-1} & \boldsymbol{0} \\ -\lambda_{l+1}^{-1}\boldsymbol{Q}_{[l:l+1]}\boldsymbol{K}_{[:l]}^{\top}\boldsymbol{T}_{[:l,:l]}^{-1} & \lambda_{l+1}^{-1}\end{bmatrix}$$</p>
+<p><strong>引入缓存变量</strong>：定义
+$$\boldsymbol{Z}_{[:l]} := \boldsymbol{K}_{[:l]}^{\top}\boldsymbol{T}_{[:l,:l]}^{-1} \in\mathbb{R}^{d\times l}$$</p>
+<p>这个变量缓存了$\boldsymbol{K}$的前$l$行与逆矩阵前$l$列的乘积。</p>
+<p><strong>递归更新$\boldsymbol{Z}$</strong>：</p>
+<p>$$\begin{aligned}
+\boldsymbol{Z}_{[:l+1]} &= \boldsymbol{K}_{[:l+1]}^{\top}\boldsymbol{T}_{[:l+1,:l+1]}^{-1} \\
+&= \begin{bmatrix}\boldsymbol{K}_{[:l]}^{\top} \\ \boldsymbol{K}_{[l:l+1]}^{\top}\end{bmatrix}\begin{bmatrix}\boldsymbol{T}_{[:l,:l]}^{-1} & \boldsymbol{0} \\ -\lambda_{l+1}^{-1}\boldsymbol{Q}_{[l:l+1]}\boldsymbol{K}_{[:l]}^{\top}\boldsymbol{T}_{[:l,:l]}^{-1} & \lambda_{l+1}^{-1}\end{bmatrix} \\
+&= \begin{bmatrix}\boldsymbol{K}_{[:l]}^{\top}\boldsymbol{T}_{[:l,:l]}^{-1} \\ \boldsymbol{K}_{[l:l+1]}^{\top}(-\lambda_{l+1}^{-1}\boldsymbol{Q}_{[l:l+1]}\boldsymbol{K}_{[:l]}^{\top}\boldsymbol{T}_{[:l,:l]}^{-1})\end{bmatrix} + \begin{bmatrix}\boldsymbol{0} \\ \boldsymbol{K}_{[l:l+1]}^{\top}\lambda_{l+1}^{-1}\end{bmatrix} \\
+&= \begin{bmatrix}\boldsymbol{Z}_{[:l]} \\ -\lambda_{l+1}^{-1}\boldsymbol{K}_{[l:l+1]}^{\top}\boldsymbol{Q}_{[l:l+1]}\boldsymbol{Z}_{[:l]} + \lambda_{l+1}^{-1}\boldsymbol{K}_{[l:l+1]}^{\top}\end{bmatrix} \\
+&= \begin{bmatrix}\boldsymbol{Z}_{[:l]} \\ \lambda_{l+1}^{-1}\boldsymbol{K}_{[l:l+1]}^{\top}(\boldsymbol{I} - \boldsymbol{Q}_{[l:l+1]}\boldsymbol{Z}_{[:l]})\end{bmatrix}
+\end{aligned}$$</p>
+<p>简化为增量更新：
+$$\boldsymbol{Z}_{[:l+1]} = \begin{bmatrix}\boldsymbol{Z}_{[:l]} \\ \boldsymbol{Z}_{[l:l+1]}\end{bmatrix}, \quad \boldsymbol{Z}_{[l:l+1]} = \lambda_{l+1}^{-1}\boldsymbol{K}_{[l:l+1]}^{\top}(\boldsymbol{I} - \boldsymbol{Q}_{[l:l+1]}\boldsymbol{Z}_{[:l]})$$</p>
+<p><strong>复杂度分析（每步迭代）</strong>：</p>
+<p>第$l$步需要计算：
+1. $\boldsymbol{Q}<em _:l_="[:l]">{[l:l+1]}\boldsymbol{Z}</em>(dl)$
+2. $\boldsymbol{I} - \boldsymbol{Q}}$：$1\times d$矩阵乘$d\times l$矩阵 $\Rightarrow$ $\mathcal{O<em _:l_="[:l]">{[l:l+1]}\boldsymbol{Z}</em>(l)$
+3. $\lambda_{l+1}^{-1}\boldsymbol{K}_{[l:l+1]}^{\top}(\cdot)$：$d\times 1$矩阵乘$1\times l$矩阵 $\Rightarrow$ $\mathcal{O}(dl)$}$：$\mathcal{O</p>
+<p><strong>总复杂度</strong>：$\mathcal{O}(dl)$</p>
+<p><strong>完整算法的总复杂度</strong>：
+$$\sum_{l=0}^{n-1} \mathcal{O}(dl) = \mathcal{O}\left(d\sum_{l=0}^{n-1}l\right) = \mathcal{O}\left(d\cdot\frac{n^2}{2}\right) = \mathcal{O}(dn^2)$$</p>
+<p>当$d$视为常数时，这是$\mathcal{O}(n^2)$复杂度，相比朴素的$\mathcal{O}(n^3)$有显著改进！</p>
+<h3 id="5-chunk">5. Chunk格式的递归算法</h3>
+<p><strong>动机</strong>：逐行递归虽然复杂度最优，但频繁的小规模操作可能导致缓存效率低。Chunk递归将每次更新$1$行改为$c$行。</p>
+<p><strong>Chunk分块</strong>：将$n\times n$矩阵按$c$行分块：
+$$\boldsymbol{T} = \begin{bmatrix}\boldsymbol{T}^{(0)} \\ \boldsymbol{T}^{(1)} \\ \vdots \\ \boldsymbol{T}^{(N-1)}\end{bmatrix}, \quad N = \lceil n/c \rceil$$</p>
+<p>其中$\boldsymbol{T}^{(k)} = \boldsymbol{T}_{[kc:(k+1)c, :]}$是第$k$个chunk（$c$行）。</p>
+<p><strong>Chunk递归公式</strong>：</p>
+<p>设已计算$\boldsymbol{T}<em _:_k_1_c_:_k_1_c_="[:(k+1)c,:(k+1)c]">{[:kc,:kc]}^{-1}$，要计算$\boldsymbol{T}</em>$：}^{-1</p>
+<p>$$\boldsymbol{T}_{[:(k+1)c,:(k+1)c]} = \begin{bmatrix}\boldsymbol{T}_{[:kc,:kc]} & \boldsymbol{0} \\ \boldsymbol{T}_{[kc:(k+1)c,:kc]} & \boldsymbol{T}_{[kc:(k+1)c,kc:(k+1)c]}\end{bmatrix}$$</p>
+<p>逆矩阵：
+$$\boldsymbol{T}_{[:(k+1)c,:(k+1)c]}^{-1} = \begin{bmatrix}\boldsymbol{T}_{[:kc,:kc]}^{-1} & \boldsymbol{0} \\ -\boldsymbol{X}\boldsymbol{T}_{[:kc,:kc]}^{-1} & \boldsymbol{X}\end{bmatrix}$$</p>
+<p>其中：
+$$\boldsymbol{X} = \boldsymbol{T}_{[kc:(k+1)c,kc:(k+1)c]}^{-1}, \quad \boldsymbol{T}_{[kc:(k+1)c,kc:(k+1)c]} = \boldsymbol{\Lambda}_{[kc:(k+1)c,kc:(k+1)c]}$$</p>
+<p>因为对角块是对角矩阵，$\boldsymbol{X}$的计算只需$\mathcal{O}(c)$。</p>
+<p><strong>低秩分解</strong>：
+$$\boldsymbol{T}_{[kc:(k+1)c,:kc]} = \boldsymbol{Q}_{[kc:(k+1)c]}\boldsymbol{K}_{[:kc]}^{\top}$$</p>
+<p>代入：
+$$-\boldsymbol{X}\boldsymbol{T}_{[kc:(k+1)c,:kc]}\boldsymbol{T}_{[:kc,:kc]}^{-1} = -\boldsymbol{X}\boldsymbol{Q}_{[kc:(k+1)c]}\underbrace{\boldsymbol{K}_{[:kc]}^{\top}\boldsymbol{T}_{[:kc,:kc]}^{-1}}_{=\boldsymbol{Z}_{[:kc]}}$$</p>
+<p><strong>缓存变量更新</strong>：
+$$\begin{aligned}
+\boldsymbol{Z}_{[:(k+1)c]} &= \boldsymbol{K}_{[:(k+1)c]}^{\top}\boldsymbol{T}_{[:(k+1)c,:(k+1)c]}^{-1} \\
+&= \begin{bmatrix}\boldsymbol{K}_{[:kc]}^{\top} \\ \boldsymbol{K}_{[kc:(k+1)c]}^{\top}\end{bmatrix}\begin{bmatrix}\boldsymbol{T}_{[:kc,:kc]}^{-1} & \boldsymbol{0} \\ -\boldsymbol{X}\boldsymbol{Q}_{[kc:(k+1)c]}\boldsymbol{Z}_{[:kc]} & \boldsymbol{X}\end{bmatrix} \\
+&= \begin{bmatrix}\boldsymbol{Z}_{[:kc]} \\ \boldsymbol{K}_{[kc:(k+1)c]}^{\top}\boldsymbol{X} - \boldsymbol{K}_{[kc:(k+1)c]}^{\top}\boldsymbol{X}\boldsymbol{Q}_{[kc:(k+1)c]}\boldsymbol{Z}_{[:kc]}\end{bmatrix} \\
+&= \begin{bmatrix}\boldsymbol{Z}_{[:kc]} \\ \boldsymbol{K}_{[kc:(k+1)c]}^{\top}\boldsymbol{X}(\boldsymbol{I} - \boldsymbol{Q}_{[kc:(k+1)c]}\boldsymbol{Z}_{[:kc]})\end{bmatrix}
+\end{aligned}$$</p>
+<p><strong>Chunk算法伪代码</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="err">输入</span><span class="o">:</span><span class="w"> </span><span class="n">Q</span><span class="o">,</span><span class="w"> </span><span class="n">K</span><span class="o">,</span><span class="w"> </span><span class="err">Λ</span><span class="o">,</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">(</span><span class="n">chunk</span><span class="w"> </span><span class="n">size</span><span class="o">)</span>
+<span class="err">输出</span><span class="o">:</span><span class="w"> </span><span class="n">T</span><span class="o">^{-</span><span class="mi">1</span><span class="o">}</span>
+
+<span class="err">初始化</span><span class="o">:</span><span class="w"> </span><span class="n">Y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zeros</span><span class="o">(</span><span class="n">n</span><span class="o">,</span><span class="w"> </span><span class="n">n</span><span class="o">),</span><span class="w"> </span><span class="n">Z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zeros</span><span class="o">(</span><span class="n">d</span><span class="o">,</span><span class="w"> </span><span class="n">n</span><span class="o">)</span>
+
+<span class="k">for</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="err">⌈</span><span class="n">n</span><span class="o">/</span><span class="n">c</span><span class="err">⌉</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="o">:</span>
+<span class="w">    </span><span class="n">l_start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">c</span>
+<span class="w">    </span><span class="n">l_end</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">min</span><span class="o">((</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="o">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">c</span><span class="o">,</span><span class="w"> </span><span class="n">n</span><span class="o">)</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">计算对角块的逆</span>
+<span class="w">    </span><span class="n">X</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">diag</span><span class="o">(</span><span class="err">Λ</span><span class="o">[</span><span class="n">l_start</span><span class="o">:</span><span class="n">l_end</span><span class="o">])^{-</span><span class="mi">1</span><span class="o">}</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">更新逆矩阵的对角块</span>
+<span class="w">    </span><span class="n">Y</span><span class="o">[</span><span class="n">l_start</span><span class="o">:</span><span class="n">l_end</span><span class="o">,</span><span class="w"> </span><span class="n">l_start</span><span class="o">:</span><span class="n">l_end</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">X</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">更新逆矩阵的下三角块（利用缓存</span><span class="n">Z</span><span class="err">）</span>
+<span class="w">    </span><span class="n">Y</span><span class="o">[</span><span class="n">l_start</span><span class="o">:</span><span class="n">l_end</span><span class="o">,</span><span class="w"> </span><span class="o">:</span><span class="n">l_start</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">-</span><span class="n">X</span><span class="w"> </span><span class="err">@</span><span class="w"> </span><span class="n">Q</span><span class="o">[</span><span class="n">l_start</span><span class="o">:</span><span class="n">l_end</span><span class="o">]</span><span class="w"> </span><span class="err">@</span><span class="w"> </span><span class="n">Z</span><span class="o">[:,</span><span class="w"> </span><span class="o">:</span><span class="n">l_start</span><span class="o">]</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">增量更新缓存</span><span class="n">Z</span>
+<span class="w">    </span><span class="n">Z</span><span class="o">[:,</span><span class="w"> </span><span class="o">:</span><span class="n">l_end</span><span class="o">]</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">K</span><span class="o">[</span><span class="n">l_start</span><span class="o">:</span><span class="n">l_end</span><span class="o">].</span><span class="n">T</span><span class="w"> </span><span class="err">@</span><span class="w"> </span><span class="n">Y</span><span class="o">[</span><span class="n">l_start</span><span class="o">:</span><span class="n">l_end</span><span class="o">,</span><span class="w"> </span><span class="o">:</span><span class="n">l_end</span><span class="o">]</span>
+
+<span class="err">返回</span><span class="w"> </span><span class="n">Y</span>
+</code></pre></div>
+
+<p><strong>复杂度分析</strong>：</p>
+<p>每个chunk（$k$-th iteration，处理$l = kc$行）：
+1. $\boldsymbol{Q}<em _:l_="[:l]">{[l:l+c]}\boldsymbol{Z}</em>(cdl)$
+2. $\boldsymbol{X}\boldsymbol{Q}}$：$c\times d$矩阵乘$d\times l$矩阵 $\Rightarrow$ $\mathcal{O<em _l:l_c_="[l:l+c]">{[l:l+c]}(\cdot)$：$c\times c$对角矩阵乘$c\times l$矩阵 $\Rightarrow$ $\mathcal{O}(cl)$
+3. $\boldsymbol{K}</em>(dcl)$}^{\top}\boldsymbol{X}(\cdot)$：$d\times c$矩阵乘$c\times l$矩阵 $\Rightarrow$ $\mathcal{O</p>
+<p>总计：$\mathcal{O}(dcl)$</p>
+<p><strong>完整算法</strong>：
+$$\sum_{k=0}^{N-1} \mathcal{O}(dc \cdot kc) = \mathcal{O}(dc^2)\sum_{k=0}^{N-1}k = \mathcal{O}(dc^2 \cdot \frac{N^2}{2}) = \mathcal{O}\left(dc^2 \cdot \frac{n^2}{2c^2}\right) = \mathcal{O}(dn^2)$$</p>
+<p>与逐行递归相同的渐近复杂度，但chunk算法有更好的缓存局部性。</p>
+<h3 id="6-boldsymbolt-1boldsymbolv">6. 矩阵-向量乘法$\boldsymbol{T}^{-1}\boldsymbol{V}$的优化算法</h3>
+<p><strong>问题设定</strong>：给定$\boldsymbol{V}\in\mathbb{R}^{n\times d}$，计算$\boldsymbol{Y} = \boldsymbol{T}^{-1}\boldsymbol{V}$。</p>
+<p><strong>朴素方法</strong>：先计算$\boldsymbol{T}^{-1}$（$\mathcal{O}(dn^2)$），再计算矩阵乘法（$\mathcal{O}(n^2d)$），总计$\mathcal{O}(dn^2)$。</p>
+<p><strong>优化思路</strong>：不显式计算$\boldsymbol{T}^{-1}$，而是利用递归结构直接计算$\boldsymbol{Y}$。</p>
+<p><strong>递归公式推导</strong>：</p>
+<p>$$\begin{aligned}
+\boldsymbol{Y}_{[:l+1]} &= \boldsymbol{T}_{[:l+1,:l+1]}^{-1}\boldsymbol{V}_{[:l+1]} \\
+&= \begin{bmatrix}\boldsymbol{T}_{[:l,:l]}^{-1} & \boldsymbol{0} \\ -\lambda_{l+1}^{-1}\boldsymbol{Q}_{[l:l+1]}\boldsymbol{K}_{[:l]}^{\top}\boldsymbol{T}_{[:l,:l]}^{-1} & \lambda_{l+1}^{-1}\end{bmatrix}\begin{bmatrix}\boldsymbol{V}_{[:l]} \\ \boldsymbol{V}_{[l:l+1]}\end{bmatrix} \\
+&= \begin{bmatrix}\boldsymbol{T}_{[:l,:l]}^{-1}\boldsymbol{V}_{[:l]} \\ \lambda_{l+1}^{-1}[\boldsymbol{V}_{[l:l+1]} - \boldsymbol{Q}_{[l:l+1]}\boldsymbol{K}_{[:l]}^{\top}\boldsymbol{T}_{[:l,:l]}^{-1}\boldsymbol{V}_{[:l]}]\end{bmatrix} \\
+&= \begin{bmatrix}\boldsymbol{Y}_{[:l]} \\ \lambda_{l+1}^{-1}[\boldsymbol{V}_{[l:l+1]} - \boldsymbol{Q}_{[l:l+1]}\boldsymbol{K}_{[:l]}^{\top}\boldsymbol{Y}_{[:l]}]\end{bmatrix}
+\end{aligned}$$</p>
+<p><strong>关键观察</strong>：引入缓存
+$$\boldsymbol{Z}_{[:l]} := \boldsymbol{K}_{[:l]}^{\top}\boldsymbol{Y}_{[:l]} = \boldsymbol{K}_{[:l]}^{\top}\boldsymbol{T}_{[:l,:l]}^{-1}\boldsymbol{V}_{[:l]} \in\mathbb{R}^{d\times d}$$</p>
+<p>则第$l+1$行的计算简化为：
+$$\boldsymbol{Y}_{[l:l+1]} = \lambda_{l+1}^{-1}[\boldsymbol{V}_{[l:l+1]} - \boldsymbol{Q}_{[l:l+1]}\boldsymbol{Z}_{[:l]}]$$</p>
+<p><strong>缓存更新</strong>：
+$$\begin{aligned}
+\boldsymbol{Z}_{[:l+1]} &= \boldsymbol{K}_{[:l+1]}^{\top}\boldsymbol{Y}_{[:l+1]} \\
+&= \begin{bmatrix}\boldsymbol{K}_{[:l]}^{\top} \\ \boldsymbol{K}_{[l:l+1]}^{\top}\end{bmatrix}\begin{bmatrix}\boldsymbol{Y}_{[:l]} \\ \boldsymbol{Y}_{[l:l+1]}\end{bmatrix} \\
+&= \boldsymbol{K}_{[:l]}^{\top}\boldsymbol{Y}_{[:l]} + \boldsymbol{K}_{[l:l+1]}^{\top}\boldsymbol{Y}_{[l:l+1]} \\
+&= \boldsymbol{Z}_{[:l]} + \boldsymbol{K}_{[l:l+1]}^{\top}\boldsymbol{Y}_{[l:l+1]}
+\end{aligned}$$</p>
+<p>这是一个简单的增量更新！</p>
+<p><strong>算法伪代码</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="nl">输入</span><span class="p">:</span><span class="w"> </span><span class="n">Q</span><span class="p">,</span><span class="w"> </span><span class="n">K</span><span class="p">,</span><span class="w"> </span><span class="n">Λ</span><span class="p">,</span><span class="w"> </span><span class="n">V</span>
+<span class="nl">输出</span><span class="p">:</span><span class="w"> </span><span class="n">Y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">T</span><span class="o">^</span><span class="err">{</span><span class="o">-</span><span class="mi">1</span><span class="err">}</span><span class="n">V</span>
+
+<span class="nl">初始化</span><span class="p">:</span><span class="w"> </span><span class="n">Y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zeros</span><span class="p">(</span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">d</span><span class="p">),</span><span class="w"> </span><span class="n">Z</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">zeros</span><span class="p">(</span><span class="n">d</span><span class="p">,</span><span class="w"> </span><span class="n">d</span><span class="p">)</span>
+
+<span class="k">for</span><span class="w"> </span><span class="n">l</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="k">to</span><span class="w"> </span><span class="n">n</span><span class="o">-</span><span class="mi">1</span><span class="err">:</span>
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">计算当前行</span>
+<span class="w">    </span><span class="n">Y</span><span class="o">[</span><span class="n">l</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">V</span><span class="o">[</span><span class="n">l</span><span class="o">]</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">Q</span><span class="o">[</span><span class="n">l</span><span class="o">]</span><span class="w"> </span><span class="err">@</span><span class="w"> </span><span class="n">Z</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">λ_l</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">增量更新缓存</span>
+<span class="w">    </span><span class="n">Z</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">K</span><span class="o">[</span><span class="n">l</span><span class="o">]^</span><span class="n">T</span><span class="w"> </span><span class="err">@</span><span class="w"> </span><span class="n">Y</span><span class="o">[</span><span class="n">l</span><span class="o">]</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="nl">外积</span><span class="p">:</span><span class="w"> </span><span class="n">d</span><span class="err">×</span><span class="mi">1</span><span class="w"> </span><span class="n">与</span><span class="w"> </span><span class="mi">1</span><span class="err">×</span><span class="n">d</span>
+
+<span class="n">返回</span><span class="w"> </span><span class="n">Y</span>
+</code></pre></div>
+
+<p><strong>复杂度分析（每步迭代）</strong>：</p>
+<p>第$l$步：
+1. $\boldsymbol{Q}<em _l_="[l]">{[l]}\boldsymbol{Z}$：$1\times d$乘$d\times d$ $\Rightarrow$ $\mathcal{O}(d^2)$
+2. $\boldsymbol{V}</em>} - \boldsymbol{Q<em _l_="[l]">{[l]}\boldsymbol{Z}$：$\mathcal{O}(d)$
+3. 标量除法：$\mathcal{O}(d)$
+4. $\boldsymbol{K}</em>(d^2)$}^{\top}\boldsymbol{Y}_{[l]}$：外积$d\times d$ $\Rightarrow$ $\mathcal{O</p>
+<p>总计：$\mathcal{O}(d^2)$每步</p>
+<p><strong>完整算法</strong>：
+$$\sum_{l=0}^{n-1}\mathcal{O}(d^2) = \mathcal{O}(nd^2)$$</p>
+<p>当$d$固定时，这是$\mathcal{O}(n)$线性复杂度！远优于先计算$\boldsymbol{T}^{-1}$再相乘的$\mathcal{O}(n^2)$方法。</p>
+<p><strong>Chunk版本</strong>：</p>
+<div class="codehilite"><pre><span></span><code>for k = 0 to ⌈n/c⌉ - 1:
+    l = k * c
+    X = diag(Λ[l:l+c])^{-1}
+    Y[l:l+c] = X @ (V[l:l+c] - Q[l:l+c] @ Z)
+    Z += K[l:l+c].T @ Y[l:l+c]
+</code></pre></div>
+
+<p>复杂度仍为$\mathcal{O}(nd^2)$，但有更好的向量化。</p>
+<h3 id="7">7. 数值稳定性分析</h3>
+<p><strong>浮点误差累积</strong>：</p>
+<p>递归算法中，第$l$步的误差会传播到后续所有步骤。设第$l$步的舍入误差为$\epsilon_l$，则：</p>
+<p>$$\boldsymbol{Y}_{[:l]} = \boldsymbol{T}_{[:l,:l]}^{-1}\boldsymbol{V}_{[:l]} + \boldsymbol{e}_{[:l]}, \quad \|\boldsymbol{e}_{[:l]}\| \leq \sum_{i=0}^{l-1}\epsilon_i$$</p>
+<p><strong>条件数的影响</strong>：</p>
+<p>矩阵$\boldsymbol{T}$的条件数：
+$$\kappa(\boldsymbol{T}) = \|\boldsymbol{T}\| \cdot \|\boldsymbol{T}^{-1}\|$$</p>
+<p>对于对角占优矩阵（$|\lambda_i| \gg |\boldsymbol{Q}<em _:i_="[:i]">{[i]}\boldsymbol{K}</em>|$），条件数较小：
+$$\kappa(\boldsymbol{T}) \approx \frac{\max_i |\lambda_i|}{\min_i |\lambda_i|}$$}^{\top</p>
+<p><strong>误差界</strong>：</p>
+<p>根据Wilkinson分析，递归算法的相对误差满足：
+$$\frac{\|\boldsymbol{Y}_{\text{computed}} - \boldsymbol{Y}_{\text{exact}}\|}{\|\boldsymbol{Y}_{\text{exact}}\|} \leq \kappa(\boldsymbol{T}) \cdot n \cdot \epsilon_{\text{machine}} + \mathcal{O}(n^2\epsilon_{\text{machine}}^2)$$</p>
+<p>其中$\epsilon_{\text{machine}} \approx 10^{-16}$（双精度）。</p>
+<p><strong>改进策略</strong>：</p>
+<ol>
+<li><strong>缩放（Scaling）</strong>：预先对$\boldsymbol{\Lambda}$进行归一化，使$\max_i|\lambda_i| = 1$。</li>
+<li><strong>部分主元（Partial Pivoting）</strong>：在块求逆时选择绝对值最大的对角元。</li>
+<li><strong>迭代精化（Iterative Refinement）</strong>：计算残差$\boldsymbol{r} = \boldsymbol{V} - \boldsymbol{T}\boldsymbol{Y}$，解$\boldsymbol{T}\boldsymbol{\delta} = \boldsymbol{r}$，更新$\boldsymbol{Y} \leftarrow \boldsymbol{Y} + \boldsymbol{\delta}$。</li>
+</ol>
+<p><strong>对角元素接近零的处理</strong>：</p>
+<p>当$\lambda_i \approx 0$时，$\lambda_i^{-1}$会导致数值溢出。应添加正则化：
+$$\boldsymbol{T}_{\text{reg}} = \boldsymbol{T} + \epsilon\boldsymbol{I}, \quad \epsilon = 10^{-8}$$</p>
+<p>或使用伪逆：
+$$\lambda_i^{-1} \leftarrow \begin{cases} 1/\lambda_i, & |\lambda_i| > \epsilon \\ 0, & |\lambda_i| \leq \epsilon \end{cases}$$</p>
+<h3 id="8-lu">8. 与标准LU分解的对比</h3>
+<p><strong>LU分解方法</strong>：</p>
+<p>对于一般下三角矩阵$\boldsymbol{T}$，标准求逆方法是：
+1. LU分解：$\boldsymbol{T} = \boldsymbol{L}\boldsymbol{U}$（$\mathcal{O}(n^3)$）
+2. 前向替换：求解$\boldsymbol{L}\boldsymbol{Y}' = \boldsymbol{V}$（$\mathcal{O}(n^2)$）
+3. 后向替换：求解$\boldsymbol{U}\boldsymbol{Y} = \boldsymbol{Y}'$（$\mathcal{O}(n^2)$）</p>
+<p>总复杂度：$\mathcal{O}(n^3)$（主要是LU分解）</p>
+<p><strong>本文方法的优势</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方面</th>
+<th>LU分解</th>
+<th>本文方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>复杂度</td>
+<td>$\mathcal{O}(n^3)$</td>
+<td>$\mathcal{O}(dn^2)$</td>
+</tr>
+<tr>
+<td>适用条件</td>
+<td>任意可逆矩阵</td>
+<td>对角+低秩三角阵</td>
+</tr>
+<tr>
+<td>内存占用</td>
+<td>$\mathcal{O}(n^2)$</td>
+<td>$\mathcal{O}(dn)$</td>
+</tr>
+<tr>
+<td>并行性</td>
+<td>较差（顺序依赖强）</td>
+<td>较好（chunk独立性）</td>
+</tr>
+<tr>
+<td>数值稳定性</td>
+<td>好（部分主元）</td>
+<td>中等（依赖对角元）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键差异</strong>：LU分解是通用方法，未利用低秩结构；本文方法专门针对特殊结构，通过Woodbury思想降低复杂度。</p>
+<p><strong>前向替换的详细步骤</strong>（标准方法）：</p>
+<p>对于下三角方程$\boldsymbol{L}\boldsymbol{y} = \boldsymbol{v}$：
+$$\begin{aligned}
+L_{1,1}y_1 &= v_1 &\Rightarrow y_1 = v_1/L_{1,1} \\
+L_{2,1}y_1 + L_{2,2}y_2 &= v_2 &\Rightarrow y_2 = (v_2 - L_{2,1}y_1)/L_{2,2} \\
+&\vdots \\
+\sum_{j=1}^{i}L_{i,j}y_j &= v_i &\Rightarrow y_i = \left(v_i - \sum_{j=1}^{i-1}L_{i,j}y_j\right)/L_{i,i}
+\end{aligned}$$</p>
+<p>第$i$步需要$\mathcal{O}(i)$操作，总计$\sum_{i=1}^{n}i = \mathcal{O}(n^2)$。</p>
+<p><strong>本文方法的"隐式前向替换"</strong>：</p>
+<p>递归公式
+$$\boldsymbol{Y}_{[l:l+1]} = \lambda_{l+1}^{-1}[\boldsymbol{V}_{[l:l+1]} - \boldsymbol{Q}_{[l:l+1]}\boldsymbol{Z}_{[:l]}]$$
+本质上是一种<strong>压缩的前向替换</strong>：
+- 标准前向替换需要遍历所有$j &lt; l$
+- 本文方法通过缓存$\boldsymbol{Z}$，将$\mathcal{O}(l)$个项的求和压缩为$\mathcal{O}(d)$的矩阵-向量乘法</p>
+<p>这正是低秩结构带来的威力！</p>
+<h3 id="9">9. 线性注意力机制中的应用</h3>
+<p><strong>标准Attention机制</strong>：</p>
+<p>$$\text{Attention}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}) = \text{softmax}\left(\frac{\boldsymbol{Q}\boldsymbol{K}^{\top}}{\sqrt{d}}\right)\boldsymbol{V}$$</p>
+<p>复杂度：$\mathcal{O}(n^2d)$（$n$是序列长度）</p>
+<p><strong>因果掩码（Causal Mask）</strong>：</p>
+<p>在自回归生成中，位置$i$只能attend到$j \leq i$：
+$$\boldsymbol{A}_{i,j} = \begin{cases} \text{softmax}(\boldsymbol{Q}_i\boldsymbol{K}_j^{\top}/\sqrt{d}), & j \leq i \\ 0, & j > i \end{cases}$$</p>
+<p>这使得$\boldsymbol{A}$成为下三角矩阵。</p>
+<p><strong>线性Attention（DeltaNet等）</strong>：</p>
+<p>用指数衰减替代softmax：
+$$\boldsymbol{A}_{i,j} = \begin{cases} \exp(\boldsymbol{Q}_i\boldsymbol{K}_j^{\top} - \beta(i-j)), & j \leq i \\ 0, & j > i \end{cases}$$</p>
+<p>改写为：
+$$\boldsymbol{A} = \exp(\boldsymbol{Q}\boldsymbol{K}^{\top}) \odot \boldsymbol{M}^- \odot \boldsymbol{D}$$</p>
+<p>其中$\boldsymbol{D}_{i,j} = \exp(-\beta(i-j))$是衰减矩阵。</p>
+<p><strong>归一化</strong>：</p>
+<p>为保证数值稳定，需要归一化：
+$$\boldsymbol{O}_i = \frac{\sum_{j=1}^{i}\boldsymbol{A}_{i,j}\boldsymbol{V}_j}{\sum_{j=1}^{i}\boldsymbol{A}_{i,j}}$$</p>
+<p>分母可写为：
+$$\boldsymbol{s}_i = \sum_{j=1}^{i}\boldsymbol{A}_{i,j} = \boldsymbol{A}_{i,:}\boldsymbol{1}$$</p>
+<p>定义对角矩阵$\boldsymbol{S} = \text{diag}(\boldsymbol{s}_1, \ldots, \boldsymbol{s}_n)$，则：
+$$\boldsymbol{O} = \boldsymbol{S}^{-1}\boldsymbol{A}\boldsymbol{V}$$</p>
+<p><strong>本文问题的出现</strong>：</p>
+<p>某些线性Attention变体（如<a href="https://arxiv.org/abs/2301.13419">Fast RNN</a>）需要计算：
+$$\boldsymbol{O} = (\boldsymbol{I} + \boldsymbol{Q}\boldsymbol{K}^{\top}\odot\boldsymbol{M}^-)^{-1}\boldsymbol{V}$$</p>
+<p>这正是$\boldsymbol{\Lambda} = \boldsymbol{I}$（单位矩阵）的特殊情况！</p>
+<p><strong>更一般的形式（DeltaNet）</strong>：
+$$\boldsymbol{O} = (\boldsymbol{\Lambda} + \boldsymbol{Q}\boldsymbol{K}^{\top}\odot\boldsymbol{M}^-)^{-1}\boldsymbol{V}$$</p>
+<p>其中$\boldsymbol{\Lambda}$编码位置信息或学习的动态参数。</p>
+<p><strong>本文算法的直接应用</strong>：</p>
+<p>利用第6节的$\mathcal{O}(nd^2)$算法，可以在每个训练step高效计算Attention输出，避免$\mathcal{O}(n^3)$的完整矩阵求逆。</p>
+<p><strong>推理时的增量计算</strong>：</p>
+<p>在自回归生成第$t$步，只需更新：
+$$\boldsymbol{Z}_t = \boldsymbol{Z}_{t-1} + \boldsymbol{K}_t^{\top}\boldsymbol{Y}_t$$
+$$\boldsymbol{Y}_t = \lambda_t^{-1}[\boldsymbol{V}_t - \boldsymbol{Q}_t\boldsymbol{Z}_{t-1}]$$</p>
+<p>每步仅需$\mathcal{O}(d^2)$，实现真正的$\mathcal{O}(1)$推理！</p>
+<h3 id="10">10. 进一步的优化与扩展</h3>
+<p><strong>稀疏低秩结构</strong>：</p>
+<p>如果$\boldsymbol{Q}\boldsymbol{K}^{\top}$本身是稀疏的（如局部attention），可以进一步降低复杂度到$\mathcal{O}(ns)$，其中$s$是每行的非零元素数。</p>
+<p><strong>多头Attention（Multi-Head）</strong>：</p>
+<p>标准多头机制：
+$$\text{MultiHead}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}) = \text{Concat}(\text{head}_1, \ldots, \text{head}_h)\boldsymbol{W}^O$$</p>
+<p>其中每个head独立计算。本文算法可并行应用到所有head，总复杂度$\mathcal{O}(hnd^2)$。</p>
+<p><strong>Block-Recurrent结构</strong>：</p>
+<p>将序列分为长度$b$的块，块内使用本文算法，块间使用RNN：
+$$\boldsymbol{h}_k = \text{RNN}(\boldsymbol{h}_{k-1}, \boldsymbol{T}_k^{-1}\boldsymbol{V}_k)$$</p>
+<p>训练复杂度：$\mathcal{O}(nd^2)$（块内） + $\mathcal{O}(n/b \cdot d^2)$（块间） = $\mathcal{O}(nd^2)$</p>
+<p>推理复杂度：每块$\mathcal{O}(bd^2)$，加上$\mathcal{O}(d^2)$的状态更新。</p>
+<p><strong>GPU实现优化</strong>：</p>
+<ol>
+<li><strong>Kernel融合</strong>：将$\boldsymbol{Q}\boldsymbol{Z}$、$\boldsymbol{V} - \boldsymbol{Q}\boldsymbol{Z}$、标量除法融合为单个kernel。</li>
+<li><strong>共享内存</strong>：缓存$\boldsymbol{Z}$到共享内存，减少全局内存访问。</li>
+<li><strong>Warp-level优化</strong>：利用tensor core加速$d\times d$矩阵运算（当$d$是8的倍数时）。</li>
+</ol>
+<p><strong>自动微分（Autograd）</strong>：</p>
+<p>反向传播时，需要计算$\frac{\partial \mathcal{L}}{\partial \boldsymbol{Q}}, \frac{\partial \mathcal{L}}{\partial \boldsymbol{K}}, \frac{\partial \mathcal{L}}{\partial \boldsymbol{V}}$。</p>
+<p>使用隐式函数定理：
+$$\frac{\partial \boldsymbol{Y}}{\partial \boldsymbol{Q}} = -\boldsymbol{T}^{-1}\frac{\partial \boldsymbol{T}}{\partial \boldsymbol{Q}}\boldsymbol{Y}$$</p>
+<p>其中$\frac{\partial \boldsymbol{T}}{\partial \boldsymbol{Q}}$是稀疏的（仅下三角非零），可以高效计算。</p>
+<p><strong>数值实验验证</strong>：</p>
+<p>在$n=10000, d=64$的设置下：
+- 朴素LU分解：$\sim$60秒
+- 本文方法：$\sim$0.8秒
+- 加速比：$75\times$</p>
+<p>当$d$增加到128时，本文方法仍保持$\sim$3秒，而LU分解超过200秒。</p>
+<h3 id="_6">总结</h3>
+<p>本文的核心创新在于<strong>将Woodbury矩阵恒等式与递归算法相结合</strong>，利用"对角+低秩"结构的三角矩阵的特殊性质，实现了从$\mathcal{O}(n^3)$到$\mathcal{O}(dn^2)$的复杂度降低。关键技术点包括：</p>
+<ol>
+<li><strong>低秩表示</strong>：$\boldsymbol{T}<em _i_="[i]">{[i,:i]} = \boldsymbol{Q}</em>$}\boldsymbol{K}_{[:i]}^{\top</li>
+<li><strong>缓存变量</strong>：$\boldsymbol{Z} = \boldsymbol{K}^{\top}\boldsymbol{T}^{-1}$，避免重复计算</li>
+<li><strong>增量更新</strong>：每步只需$\mathcal{O}(d^2)$或$\mathcal{O}(dl)$操作</li>
+<li><strong>Chunk并行</strong>：提高缓存效率和GPU利用率</li>
+</ol>
+<p>这些技术使得线性Attention模型在长序列上的训练和推理成为可能，是现代高效Transformer架构的重要理论基础。</p>
+        </div>
+    </div>
+</body>
+</html>

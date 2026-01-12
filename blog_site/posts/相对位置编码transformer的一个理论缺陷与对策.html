@@ -1,0 +1,966 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>相对位置编码Transformer的一个理论缺陷与对策</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>相对位置编码Transformer的一个理论缺陷与对策</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 41.2 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9105">https://spaces.ac.cn/archives/9105</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>位置编码是Transformer中很重要的一环，在<a href="/archives/8130">《让研究人员绞尽脑汁的Transformer位置编码》</a>中我们就总结了一些常见的位置编码设计。大体上，我们将Transformer的位置编码分为“绝对位置编码”和“相对位置编码”两类，其中“相对位置编码”在众多NLP/CV的实验表现相对来说更加好些。</p>
+<p>然而，我们可以发现，目前相对位置编码几乎都是在Softmax之前的Attention矩阵上进行操作的，这种施加方式实际上都存在一个理论上的缺陷，使得Transformer无法成为“万能拟合器”。本文就来分析这个问题，并探讨一些解决方案。</p>
+<h2 id="_1">简单探针</h2>
+<p>顾名思义，位置编码就是用来给模型补充上位置信息的。那么，如何判断一个模型有没有足够的识别位置的能力呢？笔者之前曾构思过一个简单的探针实验：</p>
+<blockquote>
+<p>对于一个有识别位置能力的模型，应该有能力准确实现如下映射 \begin{equation}\begin{array}{lc} \text{输入：} &amp; [0, 0, \cdots, 0, 0] \\\ &amp; \downarrow\\\ \text{输出：} &amp; [1, 2, \cdots, n-1, n] \end{array}\end{equation} </p>
+</blockquote>
+<p>也就是说，输入$n$个0，能有序地输出位置编号$1\sim n$。这个探针实验的思想很简单，即模型如果有能力做到这一点，说明识别位置是模型自身具备的能力，跟外部输入无关，这正是我们想要的。不难发现，绝对位置由于是直接施加在输入上的，所以它很容易能够完成探针测试。</p>
+<h2 id="_2">无法胜任</h2>
+<p>然而，当笔者带着这个简单的探针实验去思考带有相对位置编码的Transformer模型时，却发现它们几乎都不能完成上述任务。</p>
+<p>具体来说，除了<a href="https://papers.cool/arxiv/1803.02155">《Self-Attention with Relative Position Representations》</a>所提出的设计外，其余所有相对位置编码（包括笔者所提的<a href="/archives/8265">RoPE</a>）都只修改了Softmax前的Attention矩阵，那么带有相对位置信息的Attention矩阵依然是一个概率矩阵（即每一行求和等于1）。</p>
+<p>另一方面，对于Transformer模型来说，Token之间的交互的唯一来源是Self Attention的$\boldsymbol{A}\boldsymbol{V}$这一步，或者写成$\boldsymbol{o}<em i_j="i,j">i = \sum\limits_j a</em>}\boldsymbol{v<em i_j="i,j">j$。相同的输入意味着每个$\boldsymbol{v}_j$都是相同的，所以<br />
+\begin{equation}\boldsymbol{o}_i = \sum_j a</em>}\boldsymbol{v<em i_j="i,j">j = \sum_j a</em>}\boldsymbol{v} = \left(\sum_j a_{i,j}\right)\boldsymbol{v} = \boldsymbol{v}\end{equation<br />
+这意味着每个$\boldsymbol{o}_i$也是相同的。换句话说，模型的每个位置自始至终都输出相同的结果，所以模型根本不可能输出各不相同的$[1, 2, \cdots, n-1, n]$。</p>
+<p>类似的发现也出现在最近的论文<a href="https://papers.cool/arxiv/2205.13401">《Your Transformer May Not be as Powerful as You Expect》</a>中，作者构建了略有不同的例子来演示相对位置编码Transformer的拟合能力缺陷问题，两者异曲同工、不谋而合了。此外，本文开头说的是“万能拟合”，那解决了这个反例是不是就能做到“万能拟合”了呢？该论文也有相应的理论分析来肯定这一事实，这里就不详述了。</p>
+<h2 id="_3">初步方案</h2>
+<p>稍加思考就可以发现，其实问题主要出在Attention矩阵的每一行求和等于1，要解决这个问题，想办法打破这个约束就行了。为此，<a href="https://papers.cool/arxiv/2205.13401">《Your Transformer May Not be as Powerful as You Expect》</a>在其发现之上进一步提出了如下设计<br />
+\begin{equation}\boldsymbol{O} = (\boldsymbol{A}\odot \boldsymbol{C})\boldsymbol{V}\quad \text{或者等价地}\quad\boldsymbol{o}<em i_j="i,j">i = \sum_j a</em>}c_{i,j}\boldsymbol{v<em i_j="i,j">j\end{equation}<br />
+其中$\boldsymbol{C}$是一个可训练的参数矩阵，$\odot$是逐位相乘（<a href="https://en.wikipedia.org/wiki/Hadamard_product_(matrices)">Hadamard积</a>）。为了使得整个模型依然只包含相对位置信息（因为本文就是讨论相对位置编码Transfomrer的缺陷），我们要约束$\boldsymbol{C}$为<a href="https://en.wikipedia.org/wiki/Toeplitz_matrix">Toeplitz矩阵</a>，即$c</em>=g(i-j)$。</p>
+<p>有了$\boldsymbol{C}$的加入，$\boldsymbol{A}\odot \boldsymbol{C}$作为一个整体，每一行的和显然不一定为1，从而打破了这个限制，因此是可以解决问题的（更多的实验结果请自行看原论文）。但这样一来，引入了新的参数矩阵不说，由于$\boldsymbol{C}$本身是有限大小的，所以它就不能很好地支持变长输入（或者矩阵$\boldsymbol{C}$相应地要做一些截断，即$c_{i,j}=g(\text{clip}(i-j, p_{\min}, p_{\max}))$的形式），总的来说显得不够简洁优雅。</p>
+<h2 id="_4">去掉分母</h2>
+<p>再次回到问题所在：Attention矩阵的每一行求和等于1。是什么操作导致了这一现象呢？答案很显然，是Softmax：<br />
+\begin{equation}a_{i,j} = \frac{e^{b_{i,j}}}{\sum\limits_j e^{b_{i,j}}}\end{equation}<br />
+这里的$\boldsymbol{B}=(b_{i,j})$是Softmax前的矩阵。很明显，就是“除以$\sum\limits_j e^{b_{i,j}}$”这一步导致了$\sum\limits_j a_{i,j}=1$，那么一个很直接的想法就是：</p>
+<blockquote>
+<p>如果我不想$\sum\limits_j a_{i,j}=1$，那么干脆别除以$\sum\limits_j e^{b_{i,j}}$就行了？</p>
+</blockquote>
+<p>事实上确实可以！实验结果显示，不除以该分母的Transformer确实能成功地完成前述探针测试。此时就不得不感概一下<a href="/archives/8934">GAU</a>的“先见之明”了，它提出的新式Attention直接是$\text{relu}^2$激活然后简单除以$n$来归一化，避免了$\sum\limits_j a_{i,j}=1$，从而增强了模型的理论能力（当然也许作者根本没想那么多，是笔者想象的成分居多）。</p>
+<h2 id="_5">新归一化</h2>
+<p>然而，我们在<a href="/archives/9019">《听说Attention与Softmax更配哦～》</a>发现像GAU里的不进行概率归一化的Attention设计可能存在外推能力欠佳的问题。也就是说，进行概率归一化导致了前面说的理论缺陷，简单地除以$n$来归一化则外推能力可能欠佳，有没有同时能兼顾两者的方案呢？</p>
+<p>让我们再发散一下脑洞。从范数的角度来看，$\sum\limits_j e^{b_{i,j}}$实际上是向量$e^{b_{i,:}}$的$l_1$范数，所以Softmax实际上就是向量的$e^{b_{i,:}}$的$l_1$归一化操作，那么要避免$\sum\limits_j a_{i,j}=1$，又有保留归一化，换成其他的归一化操作是否可以呢？比如$l_2$归一化：<br />
+\begin{equation}a_{i,j} = \frac{e^{b_{i,j}}}{\sqrt{\sum\limits_j e^{2b_{i,j}}}}\end{equation}</p>
+<p>经过笔者测试，这种$l_2$归一化的Attention，确实能成功完成探针实验。那么，这个改动对我们更关心的NLP预训练场景有没有帮助呢？笔者也做了相应的对比实验，结果是分两部分：</p>
+<blockquote>
+<p>1、对于标准的Attention + FFN组合，应用$l_2$归一化Attention之前要缩小一下Attention的$\boldsymbol{W}_V,\boldsymbol{W}_O$的初始方差，实验结果则是略差于常规的$l_1$归一化Attention；</p>
+<p>2、对于全GAU的架构，可以直接应用$l_2$归一化Attention，不需要改动初始化，实验结果则是略优于常规的$l_1$归一化Attention。</p>
+</blockquote>
+<p>两者的差别大概是源于它们本身的初始化方式不同，在标准的Attention + FFN组合中，初始Attention矩阵接近一个均匀矩阵（每个数都相同），而在<a href="/archives/8990">《门控注意力单元（GAU）还需要Warmup吗？》</a>我们则分析过，GAU的初始Attention矩阵更接近一个单位阵（的若干倍）。</p>
+<h2 id="_6">峰回路转</h2>
+<p>再次纵观前文，我们发现是因为“每个$\boldsymbol{v}<em i_j="i,j">j$都是相同的”，所以“$\sum\limits_j a</em>_j$不全相同呢？}=1$的模型无法完成探针实验”。但如果每个$\boldsymbol{v</p>
+<p>我们知道，从BERT开始，主流的Transformer模型都是像“[CLS] SENT [SEP]”设计输入的，也就是在输入前后会附加一些标记性的Token，如果我们将这些标记Token当作模型的一部分而不是输入（也就是说输入“[CLS] 0 0 ⋯ 0 0 [SEP]”而不是全0），那么是否有可能完成探针呢？</p>
+<p>笔者也对此做了实验，发现对输入补充上标记行Token后，不需要对相对位置编码Transformer的其他部分做修改，确实也能够完成探针实验。这结果就有点啼笑皆非了，原来BERT的作者们也很有“先见之明”啊，所添加的特殊Token [CLS]、[SEP]还有辅助定位的作用，我们分析那么久的理论缺陷，居然就这样被两个特殊Token解决了。这不禁让人想起<a href="https://papers.cool/arxiv/2001.08248">《How Much Position Information Do Convolutional Neural Networks Encode?》</a>所提到的“CNN是通过padding来识别绝对位置的”这一结论，两者有一定的相通之处。</p>
+<p>当然，这也不意味着我们前面的思考全无意义。比如对GAU模型来说，Attention换用$l_2$归一化确确实实有加快收敛、轻微提升效果的作用。此外，既然可以接受$l_2$归一化，那么$e^{b_{i,j}}$是不是还可以换成一般的激活函数（比如去掉非负性约束）呢？笔者也简单做了“$\text{swish}(b_{i,j})$ + $l_2$归一化”的实验，发现有一定的可行性。从这个角度来看，$l_2$归一化下的Attention实际上有更多的拓展空间。</p>
+<h2 id="_7">曲终人散</h2>
+<p>本文分析了相对位置编码Transformer的一个隐含缺陷，并探讨了相应的对策，从中引申出关于Attention矩阵的非负性、归一化方式的思考。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9105">https://spaces.ac.cn/archives/9105</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jun. 07, 2022). 《相对位置编码Transformer的一个理论缺陷与对策 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9105">https://spaces.ac.cn/archives/9105</a></p>
+<p>@online{kexuefm-9105,<br />
+title={相对位置编码Transformer的一个理论缺陷与对策},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Jun},<br />
+url={\url{https://spaces.ac.cn/archives/9105}},<br />
+} </p>
+<hr />
+<h2 id="_8">公式推导与注释</h2>
+<h3 id="1">1. 绝对位置编码的数学定义</h3>
+<p><strong>绝对位置编码（Absolute Position Encoding）</strong>：</p>
+<p>在输入嵌入 $\boldsymbol{x}_i$ 上直接加上位置编码向量 $\boldsymbol{p}_i$：</p>
+<p>$$
+\boldsymbol{h}_i = \boldsymbol{x}_i + \boldsymbol{p}_i
+$$</p>
+<p>其中位置编码 $\boldsymbol{p}_i$ 只依赖于绝对位置 $i$。</p>
+<p><strong>正弦位置编码（Sinusoidal Positional Encoding）</strong>：</p>
+<p>Transformer原论文使用的编码方式：</p>
+<p>$$
+\begin{aligned}
+\boldsymbol{p}_i^{(2j)} &= \sin\left(\frac{i}{10000^{2j/d}}\right) \\
+\boldsymbol{p}_i^{(2j+1)} &= \cos\left(\frac{i}{10000^{2j/d}}\right)
+\end{aligned}
+$$</p>
+<p>其中 $j \in {0, 1, \ldots, d/2-1}$ 是维度索引。</p>
+<p><strong>注释</strong>：这种编码的优点是可以通过线性变换表示相对位置，但仍然是绝对位置编码。</p>
+<h3 id="2">2. 相对位置编码的基本思想</h3>
+<p><strong>核心思想</strong>：位置信息应该体现为相对位置关系，而非绝对位置。</p>
+<p><strong>数学表达</strong>：</p>
+<p>相对位置编码希望注意力权重只依赖于相对位置 $i - j$：</p>
+<p>$$
+a_{i,j} = f(\boldsymbol{x}_i, \boldsymbol{x}_j, i-j)
+$$</p>
+<p>而不依赖于绝对位置 $i$ 或 $j$。</p>
+<p><strong>优势</strong>：</p>
+<ol>
+<li>更好的长度泛化能力</li>
+<li>对位置平移保持不变性</li>
+<li>更符合自然语言的局部性特征</li>
+</ol>
+<h3 id="3">3. 相对位置编码的几种实现方式</h3>
+<p><strong>方式1：Shaw et al. (2018) - 在注意力值上添加相对位置</strong>：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_j a_{i,j} (\boldsymbol{v}_j + \boldsymbol{r}_{i-j}^V)
+$$</p>
+<p>其中 $\boldsymbol{r}_{i-j}^V$ 是相对位置的可学习嵌入。</p>
+<p><strong>注释</strong>：这种方式在Softmax之后的值矩阵中引入相对位置信息。</p>
+<p><strong>方式2：在注意力得分上添加相对位置偏置</strong>：</p>
+<p>$$
+a_{i,j} = \frac{\exp(q_i^T k_j + b_{i-j})}{\sum_k \exp(q_i^T k_k + b_{i-k})}
+$$</p>
+<p>其中 $b_{i-j}$ 是相对位置偏置。</p>
+<p><strong>注释</strong>：这是最常见的方式，在Softmax之前的logits上添加偏置。</p>
+<p><strong>方式3：RoPE（Rotary Position Embedding）</strong>：</p>
+<p>$$
+\boldsymbol{q}_i^T \boldsymbol{k}_j = (\boldsymbol{R}_i \boldsymbol{q}_i)^T (\boldsymbol{R}_j \boldsymbol{k}_j) = \boldsymbol{q}_i^T \boldsymbol{R}_{i-j}^T \boldsymbol{k}_j
+$$</p>
+<p>其中 $\boldsymbol{R}_\theta$ 是旋转矩阵。</p>
+<p><strong>注释</strong>：RoPE通过旋转变换优雅地实现了相对位置编码。</p>
+<h3 id="4-softmax">4. Softmax归一化的数学性质</h3>
+<p><strong>Softmax的行归一化性质</strong>：</p>
+<p>对于注意力矩阵 $\boldsymbol{A} = \text{softmax}(\boldsymbol{S})$，每一行的和为1：</p>
+<p>$$
+\sum_{j=1}^n a_{i,j} = \sum_{j=1}^n \frac{\exp(s_{i,j})}{\sum_{k=1}^n \exp(s_{i,k})} = 1
+$$</p>
+<p><strong>证明</strong>：</p>
+<p>$$
+\sum_{j=1}^n a_{i,j} = \sum_{j=1}^n \frac{\exp(s_{i,j})}{\sum_{k=1}^n \exp(s_{i,k})} = \frac{\sum_{j=1}^n \exp(s_{i,j})}{\sum_{k=1}^n \exp(s_{i,k})} = 1
+$$</p>
+<p><strong>注释</strong>：这个性质是Softmax定义的直接结果，也是引起理论缺陷的根源。</p>
+<h3 id="5-transformer">5. 相对位置编码Transformer的理论缺陷：问题陈述</h3>
+<p><strong>探针任务（Probe Task）</strong>：</p>
+<p>输入全0向量序列 $\boldsymbol{X} = [\boldsymbol{0}, \boldsymbol{0}, \ldots, \boldsymbol{0}] \in \mathbb{R}^{n \times d}$，期望输出位置编号 $\boldsymbol{Y} = [1, 2, \ldots, n]$。</p>
+<p><strong>数学形式化</strong>：</p>
+<p>定义函数 $f_\theta: \mathbb{R}^{n \times d} \to \mathbb{R}^n$，期望：</p>
+<p>$$
+f_\theta([\boldsymbol{0}, \boldsymbol{0}, \ldots, \boldsymbol{0}]) = [1, 2, \ldots, n]
+$$</p>
+<p><strong>问题</strong>：配备相对位置编码的Transformer（除了Shaw et al.的方式1）无法完成这个任务。</p>
+<h3 id="6">6. 理论缺陷的形式化证明</h3>
+<p><strong>引理1（相同输入导致相同特征）</strong>：</p>
+<p>如果输入 $\boldsymbol{x}_1 = \boldsymbol{x}_2 = \cdots = \boldsymbol{x}_n = \boldsymbol{x}$，且使用相对位置编码，则：</p>
+<p>$$
+\boldsymbol{q}_i = \boldsymbol{W}_Q \boldsymbol{x}, \quad \boldsymbol{k}_i = \boldsymbol{W}_K \boldsymbol{x}, \quad \boldsymbol{v}_i = \boldsymbol{W}_V \boldsymbol{x}
+$$</p>
+<p>对所有 $i$ 都相同（忽略绝对位置编码）。</p>
+<p><strong>证明</strong>：</p>
+<p>由于相对位置编码不直接修改 $\boldsymbol{q}, \boldsymbol{k}, \boldsymbol{v}$（在方式2和RoPE中），这些向量只依赖于输入嵌入 $\boldsymbol{x}_i$。当所有输入相同时，所有的 $\boldsymbol{q}_i, \boldsymbol{k}_i, \boldsymbol{v}_i$ 也相同。</p>
+<p><strong>引理2（注意力得分的对称性）</strong>：</p>
+<p>对于相对位置编码（方式2），注意力得分满足：</p>
+<p>$$
+s_{i,j} = \boldsymbol{q}_i^T \boldsymbol{k}_j + b_{i-j}
+$$</p>
+<p>当 $\boldsymbol{q}_i = \boldsymbol{q}$ 和 $\boldsymbol{k}_j = \boldsymbol{k}$ 对所有 $i, j$ 时：</p>
+<p>$$
+s_{i,j} = \boldsymbol{q}^T \boldsymbol{k} + b_{i-j} = c + b_{i-j}
+$$</p>
+<p>其中 $c = \boldsymbol{q}^T \boldsymbol{k}$ 是常数。</p>
+<p><strong>注释</strong>：注意力得分只依赖于相对位置 $i-j$，与绝对位置 $i, j$ 无关。</p>
+<h3 id="7">7. 关键定理：输出的位置不变性</h3>
+<p><strong>定理1（输出位置不变性）</strong>：</p>
+<p>对于配备Softmax归一化的相对位置编码Transformer，如果所有输入相同，则所有位置的输出也相同：</p>
+<p>$$
+\boldsymbol{o}_1 = \boldsymbol{o}_2 = \cdots = \boldsymbol{o}_n
+$$</p>
+<p><strong>证明</strong>：</p>
+<p>由引理2，注意力得分为：</p>
+<p>$$
+s_{i,j} = c + b_{i-j}
+$$</p>
+<p>注意力权重为：</p>
+<p>$$
+a_{i,j} = \frac{\exp(c + b_{i-j})}{\sum_{k=1}^n \exp(c + b_{i-k})} = \frac{\exp(b_{i-j})}{\sum_{k=1}^n \exp(b_{i-k})}
+$$</p>
+<p><strong>关键观察</strong>：对于固定的相对位置差 $\Delta = i - j$，权重 $a_{i,j}$ 只依赖于 $\Delta$。</p>
+<p>定义 $\alpha_\Delta = a_{i,i-\Delta}$，则：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_{j=1}^n a_{i,j} \boldsymbol{v}_j = \sum_{j=1}^n \alpha_{i-j} \boldsymbol{v} = \boldsymbol{v} \sum_{j=1}^n \alpha_{i-j}
+$$</p>
+<p>由Softmax的归一化性质：</p>
+<p>$$
+\sum_{j=1}^n \alpha_{i-j} = 1
+$$</p>
+<p>因此：</p>
+<p>$$
+\boldsymbol{o}_i = \boldsymbol{v}
+$$</p>
+<p>对所有 $i$ 都相同。</p>
+<p><strong>注释</strong>：这个证明揭示了问题的根源：Softmax的归一化性质加上相对位置编码，导致无法在相同输入下产生不同输出。</p>
+<h3 id="8-rope">8. RoPE的特殊情况分析</h3>
+<p><strong>RoPE的注意力得分</strong>：</p>
+<p>$$
+s_{i,j} = (\boldsymbol{R}_i \boldsymbol{q}_i)^T (\boldsymbol{R}_j \boldsymbol{k}_j) = \boldsymbol{q}_i^T \boldsymbol{R}_i^T \boldsymbol{R}_j \boldsymbol{k}_j = \boldsymbol{q}_i^T \boldsymbol{R}_{i-j}^T \boldsymbol{k}_j
+$$</p>
+<p>利用旋转矩阵的性质 $\boldsymbol{R}<em i-j="i-j">i^T \boldsymbol{R}_j = \boldsymbol{R}</em>^T$。</p>
+<p><strong>相同输入的情况</strong>：</p>
+<p>当 $\boldsymbol{q}_i = \boldsymbol{q}$ 和 $\boldsymbol{k}_j = \boldsymbol{k}$ 对所有 $i, j$：</p>
+<p>$$
+s_{i,j} = \boldsymbol{q}^T \boldsymbol{R}_{i-j}^T \boldsymbol{k}
+$$</p>
+<p><strong>旋转矩阵的形式</strong>：</p>
+<p>$$
+\boldsymbol{R}_\theta = \begin{pmatrix}
+\cos\theta & -\sin\theta \\
+\sin\theta & \cos\theta
+\end{pmatrix}
+$$</p>
+<p>对于相对位置 $\Delta = i - j$，$\theta = \Delta \cdot \omega$ 其中 $\omega$ 是频率。</p>
+<p><strong>注意力得分只依赖于相对位置</strong>：</p>
+<p>$$
+s_{i,j} = f(i - j, \boldsymbol{q}, \boldsymbol{k})
+$$</p>
+<p><strong>应用Softmax后的输出</strong>：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_j \frac{\exp(s_{i,j})}{\sum_k \exp(s_{i,k})} \boldsymbol{v}_j = \boldsymbol{v} \sum_j \frac{\exp(f(i-j))}{\sum_k \exp(f(i-k))} = \boldsymbol{v}
+$$</p>
+<p><strong>结论</strong>：RoPE也无法通过探针测试。</p>
+<h3 id="9">9. 位置不变性的群论解释</h3>
+<p><strong>平移群（Translation Group）</strong>：</p>
+<p>定义平移算子 $T_c: \mathbb{R}^{n \times d} \to \mathbb{R}^{n \times d}$，将序列循环平移 $c$ 个位置：</p>
+<p>$$
+(T_c \boldsymbol{X})_i = \boldsymbol{X}_{(i-c) \mod n}
+$$</p>
+<p><strong>相对位置编码的平移等变性</strong>：</p>
+<p>对于相对位置编码的Transformer $f$，应该满足：</p>
+<p>$$
+f(T_c \boldsymbol{X}) = T_c f(\boldsymbol{X})
+$$</p>
+<p><strong>在相同输入下的推论</strong>：</p>
+<p>如果 $\boldsymbol{X} = [\boldsymbol{x}, \boldsymbol{x}, \ldots, \boldsymbol{x}]$，则 $T_c \boldsymbol{X} = \boldsymbol{X}$。</p>
+<p>因此：</p>
+<p>$$
+f(T_c \boldsymbol{X}) = f(\boldsymbol{X}) = T_c f(\boldsymbol{X})
+$$</p>
+<p>这意味着 $f(\boldsymbol{X})$ 必须是平移不变的，即所有位置输出相同。</p>
+<p><strong>注释</strong>：从群论角度，相对位置编码赋予模型平移等变性，但这在相同输入下导致输出必须平移不变。</p>
+<h3 id="10">10. 绝对位置泄露的严重性</h3>
+<p><strong>形式化定义（绝对位置信息）</strong>：</p>
+<p>一个模型具有绝对位置信息，如果存在函数 $g$ 使得：</p>
+<p>$$
+g(f(\boldsymbol{X})_i) = i
+$$</p>
+<p>即从输出可以恢复位置索引。</p>
+<p><strong>相对位置编码的理论承诺</strong>：</p>
+<p>相对位置编码应该不包含绝对位置信息，即对于任意排列 $\pi$：</p>
+<p>$$
+f(\boldsymbol{X})_i \text{ 的分布不依赖于 } i
+$$</p>
+<p><strong>实际情况</strong>：</p>
+<p>由于定理1，在相同输入下所有输出完全相同，这虽然满足了"不泄露绝对位置"，但代价是完全丧失了区分能力。</p>
+<p><strong>矛盾</strong>：</p>
+<ul>
+<li>我们希望模型能够识别位置（完成探针任务）</li>
+<li>但相对位置编码理论上不应包含绝对位置信息</li>
+<li>这两个要求在纯相对位置编码下是矛盾的</li>
+</ul>
+<h3 id="11">11. 理论缺陷的严重性评估</h3>
+<p><strong>万能逼近能力（Universal Approximation）</strong>：</p>
+<p>一个完整的神经网络应该能够逼近任意连续函数。定义函数类：</p>
+<p>$$
+\mathcal{F} = \{f: \mathbb{R}^{n \times d} \to \mathbb{R}^{n \times d'} \mid f \text{ 是连续的}\}
+$$</p>
+<p><strong>相对位置编码Transformer的函数类</strong>：</p>
+<p>定义为：</p>
+<p>$$
+\mathcal{F}_{\text{rel}} = \{f \in \mathcal{F} \mid f(T_c \boldsymbol{X}) = T_c f(\boldsymbol{X}) \text{ 对所有 } c\}
+$$</p>
+<p><strong>严格包含关系</strong>：</p>
+<p>$$
+\mathcal{F}_{\text{rel}} \subsetneq \mathcal{F}
+$$</p>
+<p><strong>定量分析</strong>：</p>
+<p>探针任务的函数 $f_{\text{probe}}([\boldsymbol{0}, \ldots, \boldsymbol{0}]) = [1, \ldots, n]$ 满足 $f_{\text{probe}} \in \mathcal{F}$ 但 $f_{\text{probe}} \notin \mathcal{F}_{\text{rel}}$。</p>
+<p><strong>注释</strong>：这表明相对位置编码Transformer的表达能力严格弱于理论上的万能逼近器。</p>
+<h3 id="12-shaw-et-al">12. Shaw et al. 方式的特殊性</h3>
+<p><strong>回顾Shaw et al.的方法</strong>：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_j a_{i,j} (\boldsymbol{v}_j + \boldsymbol{r}_{i-j}^V)
+$$</p>
+<p><strong>关键区别</strong>：相对位置信息在Softmax<strong>之后</strong>添加到值向量上。</p>
+<p><strong>在相同输入下的输出</strong>：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_j a_{i,j} (\boldsymbol{v} + \boldsymbol{r}_{i-j}^V) = \boldsymbol{v} \sum_j a_{i,j} + \sum_j a_{i,j} \boldsymbol{r}_{i-j}^V = \boldsymbol{v} + \sum_j a_{i,j} \boldsymbol{r}_{i-j}^V
+$$</p>
+<p><strong>注意力权重的依赖性</strong>：</p>
+<p>由于 $a_{i,j} = \alpha_{i-j}$ 只依赖于相对位置，我们有：</p>
+<p>$$
+\boldsymbol{o}_i = \boldsymbol{v} + \sum_{\Delta=-(n-1)}^{n-1} \alpha_\Delta \boldsymbol{r}_\Delta^V
+$$</p>
+<p><strong>为什么能通过探针测试</strong>：</p>
+<p>如果 $\boldsymbol{r}<em>\Delta^V$ 包含足够丰富的信息，加权和 $\sum</em>\Delta \alpha_\Delta \boldsymbol{r}<em>\Delta^V$ 可以随位置 $i$ 变化（通过 $\alpha</em>\Delta$ 的分布变化）。</p>
+<p><strong>细微差异</strong>：</p>
+<p>虽然 $\alpha_\Delta$ 对所有位置 $i$ 都相同，但由于边界效应（序列开始和结束处），实际的求和范围不同：</p>
+<ul>
+<li>位置1: $\Delta \in [0, n-1]$</li>
+<li>位置 $i$: $\Delta \in [-(i-1), n-i]$</li>
+<li>位置 $n$: $\Delta \in [-(n-1), 0]$</li>
+</ul>
+<p>这导致输出可以不同。</p>
+<h3 id="13-1hadamard">13. 对策方案1：引入Hadamard积的相对位置矩阵</h3>
+<p><strong>Your Transformer May Not be as Powerful as You Expect 提出的方法</strong>：</p>
+<p>$$
+\boldsymbol{O} = (\boldsymbol{A} \odot \boldsymbol{C}) \boldsymbol{V}
+$$</p>
+<p>其中 $\boldsymbol{C} = (c_{i,j})$ 是可训练的Toeplitz矩阵，$c_{i,j} = g(i-j)$。</p>
+<p><strong>Hadamard积（逐元素乘法）</strong>：</p>
+<p>$$
+(\boldsymbol{A} \odot \boldsymbol{C})_{i,j} = a_{i,j} \cdot c_{i,j}
+$$</p>
+<p><strong>打破归一化约束的证明</strong>：</p>
+<p>Softmax保证 $\sum_j a_{i,j} = 1$，但引入 $\boldsymbol{C}$ 后：</p>
+<p>$$
+\sum_j (\boldsymbol{A} \odot \boldsymbol{C})_{i,j} = \sum_j a_{i,j} c_{i,j} \neq 1 \text{ （一般情况）}
+$$</p>
+<p><strong>在相同输入下的输出</strong>：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_j a_{i,j} c_{i,j} \boldsymbol{v} = \boldsymbol{v} \sum_j \alpha_{i-j} g(i-j)
+$$</p>
+<p>定义 $w_i = \sum_j \alpha_{i-j} g(i-j)$，则：</p>
+<p>$$
+\boldsymbol{o}_i = w_i \boldsymbol{v}
+$$</p>
+<p>如果 $w_i$ 随 $i$ 变化（通过适当选择 $g$），则输出可以不同。</p>
+<p><strong>如何使 $w_i$ 随 $i$ 变化</strong>：</p>
+<p>利用边界效应，序列不同位置的求和范围不同：</p>
+<p>$$
+w_i = \sum_{j=1}^n \alpha_{i-j} g(i-j) = \sum_{\Delta=1-i}^{n-i} \alpha_\Delta g(\Delta)
+$$</p>
+<p>求和范围 $[1-i, n-i]$ 依赖于 $i$，因此 $w_i$ 可以不同。</p>
+<h3 id="14-hadamard">14. Hadamard积方法的数学分析</h3>
+<p><strong>Toeplitz矩阵的定义</strong>：</p>
+<p>矩阵 $\boldsymbol{C} \in \mathbb{R}^{n \times n}$ 是Toeplitz的，如果：</p>
+<p>$$
+c_{i,j} = c_{i-j} \quad \text{对所有 } i, j
+$$</p>
+<p>即主对角线和每条平行于主对角线的对角线上的元素都相同。</p>
+<p><strong>参数化</strong>：</p>
+<p>对于 $n \times n$ Toeplitz矩阵，只需 $2n-1$ 个参数：</p>
+<p>$$
+\boldsymbol{c} = [c_{-(n-1)}, c_{-(n-2)}, \ldots, c_0, \ldots, c_{n-2}, c_{n-1}]
+$$</p>
+<p><strong>卷积解释</strong>：</p>
+<p>Toeplitz矩阵乘法可以理解为循环卷积：</p>
+<p>$$
+(\boldsymbol{C} \boldsymbol{V})_i = \sum_{j=1}^n c_{i-j} v_j
+$$</p>
+<p><strong>限制</strong>：</p>
+<ol>
+<li>引入了新的参数矩阵</li>
+<li>矩阵大小固定为 $n \times n$，不利于变长输入</li>
+<li>需要截断策略处理超出范围的相对位置</li>
+</ol>
+<h3 id="15-2softmax">15. 对策方案2：去掉Softmax的分母</h3>
+<p><strong>动机</strong>：Softmax的归一化是导致问题的根源，能否避免它？</p>
+<p><strong>GAU（Gated Attention Unit）的做法</strong>：</p>
+<p>$$
+a_{i,j} = \frac{\text{relu}^2(b_{i,j})}{n}
+$$</p>
+<p>直接用序列长度 $n$ 归一化，而不是用指数和。</p>
+<p><strong>在相同输入下</strong>：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_j \frac{\text{relu}^2(b_{i,j})}{n} \boldsymbol{v}
+$$</p>
+<p>如果 $b_{i,j}$ 包含位置信息（如相对位置偏置），则：</p>
+<p>$$
+b_{i,j} = c + r_{i-j}
+$$</p>
+<p>$$
+\boldsymbol{o}_i = \frac{\boldsymbol{v}}{n} \sum_j \text{relu}^2(c + r_{i-j})
+$$</p>
+<p><strong>关键差异</strong>：虽然 $\sum_j \text{relu}^2(c + r_{i-j})$ 对所有 $i$ 仍然相同（在无穷长序列下），但在有限长度和边界效应下，可以不同。</p>
+<p><strong>更根本的改变</strong>：完全去掉归一化：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_j \text{relu}^2(b_{i,j}) \boldsymbol{v}_j
+$$</p>
+<p>此时 $\sum_j \text{relu}^2(b_{i,j})$ 不一定为常数。</p>
+<h3 id="16-3-l_2">16. 对策方案3：使用 $l_2$ 归一化</h3>
+<p><strong>替代Softmax的 $l_1$ 归一化为 $l_2$ 归一化</strong>：</p>
+<p>$$
+a_{i,j} = \frac{e^{b_{i,j}}}{\sqrt{\sum_k e^{2b_{i,k}}}}
+$$</p>
+<p><strong>关键性质</strong>：$l_2$ 归一化不保证 $\sum_j a_{i,j} = 1$。</p>
+<p><strong>归一化后的范数</strong>：</p>
+<p>$$
+\|\boldsymbol{a}_i\|_2 = \sqrt{\sum_j a_{i,j}^2} = \sqrt{\sum_j \frac{e^{2b_{i,j}}}{\sum_k e^{2b_{i,k}}}} = 1
+$$</p>
+<p>但：</p>
+<p>$$
+\|\boldsymbol{a}_i\|_1 = \sum_j a_{i,j} = \sum_j \frac{e^{b_{i,j}}}{\sqrt{\sum_k e^{2b_{i,k}}}} \neq 1 \text{ （一般情况）}
+$$</p>
+<p><strong>在相同输入下的分析</strong>：</p>
+<p>$$
+a_{i,j} = \frac{e^{c + r_{i-j}}}{\sqrt{\sum_k e^{2(c + r_{i-k})}}} = \frac{e^c e^{r_{i-j}}}{\sqrt{e^{2c} \sum_k e^{2r_{i-k}}}} = \frac{e^{r_{i-j}}}{\sqrt{\sum_k e^{2r_{i-k}}}}
+$$</p>
+<p>定义 $Z_i = \sum_k e^{2r_{i-k}}$，则：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_j \frac{e^{r_{i-j}}}{\sqrt{Z_i}} \boldsymbol{v} = \frac{\boldsymbol{v}}{\sqrt{Z_i}} \sum_j e^{r_{i-j}}
+$$</p>
+<p><strong>能否通过探针测试</strong>：</p>
+<p>如果 $Z_i$ 随 $i$ 变化（由于边界效应），则 $\boldsymbol{o}_i$ 可以不同。</p>
+<p>$$
+Z_i = \sum_{k=1}^n e^{2r_{i-k}} = \sum_{\Delta=1-i}^{n-i} e^{2r_\Delta}
+$$</p>
+<p>求和范围依赖于 $i$，因此 $Z_i$ 可以不同。</p>
+<p><strong>结论</strong>：$l_2$ 归一化可以通过探针测试。</p>
+<h3 id="17-l_2">17. $l_2$ 归一化的严格数学证明</h3>
+<p><strong>定理2（$l_2$ 归一化的位置区分能力）</strong>：</p>
+<p>对于使用 $l_2$ 归一化的相对位置编码Transformer，如果序列有界（$n &lt; \infty$），则存在参数配置使得：</p>
+<p>$$
+\boldsymbol{o}_i \neq \boldsymbol{o}_j \quad \text{对某些 } i \neq j
+$$</p>
+<p>即使所有输入相同。</p>
+<p><strong>证明</strong>：</p>
+<p>考虑相对位置偏置 $r_\Delta = -|\Delta|$（距离越远权重越小）。</p>
+<p>对于位置1：</p>
+<p>$$
+Z_1 = \sum_{k=1}^n e^{-2|1-k|} = e^0 + e^{-2} + e^{-4} + \cdots + e^{-2(n-1)}
+$$</p>
+<p>对于位置 $n$：</p>
+<p>$$
+Z_n = \sum_{k=1}^n e^{-2|n-k|} = e^{-2(n-1)} + \cdots + e^{-4} + e^{-2} + e^0
+$$</p>
+<p>虽然这两个和包含相同的项（都是几何级数），但在有限 $n$ 下：</p>
+<p>$$
+Z_1 = \frac{1 - e^{-2n}}{1 - e^{-2}} \approx \frac{1}{1 - e^{-2}} \text{ （当 } n \text{ 大时）}
+$$</p>
+<p>实际上 $Z_1 = Z_n$（对称性）。</p>
+<p><strong>更精细的构造</strong>：</p>
+<p>使用非对称的相对位置偏置，如：</p>
+<p>$$
+r_\Delta = \begin{cases}
+-\Delta & \text{if } \Delta > 0 \\
+-2|\Delta| & \text{if } \Delta \leq 0
+\end{cases}
+$$</p>
+<p>此时前向和后向的衰减率不同，导致 $Z_i$ 随 $i$ 单调变化。</p>
+<p><strong>注释</strong>：关键是利用序列边界和非对称性打破位置的对称性。</p>
+<h3 id="18-4token">18. 对策方案4：添加特殊标记Token</h3>
+<p><strong>BERT的做法</strong>：在序列前后添加 [CLS] 和 [SEP] 标记。</p>
+<p><strong>输入形式</strong>：</p>
+<p>$$
+\boldsymbol{X} = [\boldsymbol{x}_{\text{CLS}}, \boldsymbol{x}_1, \boldsymbol{x}_2, \ldots, \boldsymbol{x}_n, \boldsymbol{x}_{\text{SEP}}]
+$$</p>
+<p><strong>关键观察</strong>：$\boldsymbol{x}<em _text_SEP="\text{SEP">{\text{CLS}}$ 和 $\boldsymbol{x}</em>$ 与其他token不同，打破了"所有输入相同"的假设。}</p>
+<p><strong>在探针任务中</strong>：</p>
+<p>输入变为：</p>
+<p>$$
+[\boldsymbol{x}_{\text{CLS}}, \boldsymbol{0}, \boldsymbol{0}, \ldots, \boldsymbol{0}, \boldsymbol{x}_{\text{SEP}}]
+$$</p>
+<p>现在不是所有输入都相同了！</p>
+<p><strong>值向量的差异</strong>：</p>
+<p>$$
+\boldsymbol{v}_{\text{CLS}} = \boldsymbol{W}_V \boldsymbol{x}_{\text{CLS}}, \quad \boldsymbol{v}_i = \boldsymbol{W}_V \boldsymbol{0} = \boldsymbol{0}, \quad \boldsymbol{v}_{\text{SEP}} = \boldsymbol{W}_V \boldsymbol{x}_{\text{SEP}}
+$$</p>
+<p><strong>注意力输出</strong>：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_j a_{i,j} \boldsymbol{v}_j = a_{i,\text{CLS}} \boldsymbol{v}_{\text{CLS}} + a_{i,\text{SEP}} \boldsymbol{v}_{\text{SEP}}
+$$</p>
+<p><strong>位置依赖性</strong>：</p>
+<p>权重 $a_{i,\text{CLS}}$ 和 $a_{i,\text{SEP}}$ 依赖于相对位置：</p>
+<p>$$
+a_{i,\text{CLS}} = \frac{\exp(b_{i,\text{CLS}})}{\sum_k \exp(b_{i,k})} \quad \text{其中 } b_{i,\text{CLS}} \text{ 包含相对位置信息}
+$$</p>
+<p>由于位置 $i$ 到CLS和SEP的相对距离不同，$a_{i,\text{CLS}}$ 和 $a_{i,\text{SEP}}$ 随 $i$ 变化，从而 $\boldsymbol{o}_i$ 也不同。</p>
+<h3 id="19">19. 特殊标记方案的理论分析</h3>
+<p><strong>形式化定义</strong>：</p>
+<p>定义增强输入函数 $\phi: \mathbb{R}^{n \times d} \to \mathbb{R}^{(n+2) \times d}$：</p>
+<p>$$
+\phi(\boldsymbol{X}) = [\boldsymbol{x}_{\text{CLS}}, \boldsymbol{X}, \boldsymbol{x}_{\text{SEP}}]
+$$</p>
+<p><strong>定理3（特殊标记的充分性）</strong>：</p>
+<p>如果 $\boldsymbol{x}<em _text_SEP="\text{SEP">{\text{CLS}} \neq \boldsymbol{0}$ 或 $\boldsymbol{x}</em>$，则相对位置编码Transformer可以在增强输入上产生位置依赖的输出。}} \neq \boldsymbol{0</p>
+<p><strong>证明思路</strong>：</p>
+<ol>
+<li>特殊标记提供"锚点"，不同位置到锚点的相对距离不同</li>
+<li>通过注意力权重的相对位置依赖性，不同位置对锚点的关注度不同</li>
+<li>输出是锚点嵌入的加权和，权重随位置变化，因此输出也变化</li>
+</ol>
+<p><strong>与CNN的类比</strong>：</p>
+<p>这类似于CNN通过padding识别绝对位置（论文<a href="https://arxiv.org/abs/2001.08248">How Much Position Information Do CNNs Encode?</a>）：</p>
+<ul>
+<li>CNN: 边界padding提供位置参考</li>
+<li>Transformer: 特殊标记提供位置参考</li>
+</ul>
+<p><strong>注释</strong>：这是一个优雅的解决方案，无需修改架构，仅通过输入设计就解决了问题。</p>
+<h3 id="20">20. 不同对策方案的对比分析</h3>
+<p><strong>方案1：Hadamard积 + Toeplitz矩阵</strong></p>
+<p>优点：
+- 理论上完全解决问题
+- 不改变归一化性质</p>
+<p>缺点：
+- 引入新参数 $O(n)$
+- 固定序列长度
+- 需要截断策略</p>
+<p><strong>方案2：去掉Softmax分母</strong></p>
+<p>优点：
+- 简单直接
+- 计算效率高</p>
+<p>缺点：
+- 改变注意力语义
+- 可能影响外推能力
+- 需要重新调优</p>
+<p><strong>方案3：$l_2$ 归一化</strong></p>
+<p>优点：
+- 保留归一化性质
+- 不引入新参数
+- 理论上更优雅</p>
+<p>缺点：
+- 改变梯度特性
+- 需要调整初始化
+- 对不同架构效果不同</p>
+<p><strong>方案4：特殊标记</strong></p>
+<p>优点：
+- 无需改变架构
+- 已被广泛使用（BERT等）
+- 简单有效</p>
+<p>缺点：
+- 依赖输入设计
+- 理论上不够纯粹
+- 对某些任务可能不适用</p>
+<h3 id="21-extrapolation">21. 外推能力（Extrapolation）的考虑</h3>
+<p><strong>外推问题</strong>：模型在训练长度为 $n_{\text{train}}$ 的序列上训练，能否处理长度为 $n_{\text{test}} &gt; n_{\text{train}}$ 的序列？</p>
+<p><strong>Softmax归一化的外推优势</strong>：</p>
+<p>$$
+\sum_j a_{i,j} = 1 \quad \text{对任意 } n
+$$</p>
+<p>归一化确保注意力权重的总和始终为1，无论序列长度。</p>
+<p><strong>去掉归一化的外推问题</strong>：</p>
+<p>如果使用：</p>
+<p>$$
+a_{i,j} = \frac{\text{relu}^2(b_{i,j})}{n}
+$$</p>
+<p>当测试时 $n_{\text{test}} \neq n_{\text{train}}$：</p>
+<p>$$
+\sum_j a_{i,j} = \frac{1}{n_{\text{test}}} \sum_j \text{relu}^2(b_{i,j}) \neq 1
+$$</p>
+<p>权重和会缩放，影响外推。</p>
+<p><strong>$l_2$ 归一化的外推性</strong>：</p>
+<p>$$
+\|\boldsymbol{a}_i\|_2 = 1 \quad \text{对任意 } n
+$$</p>
+<p>$l_2$ 范数归一化也保持常数，但 $l_1$ 和会随 $n$ 变化：</p>
+<p>$$
+\|\boldsymbol{a}_i\|_1 \approx \sqrt{n} \quad \text{（当权重均匀分布时）}
+$$</p>
+<p>这可能导致外推时输出幅度变化。</p>
+<h3 id="22">22. 归一化方式的深入比较</h3>
+<p><strong>$l_1$ 归一化（Softmax）</strong>：</p>
+<p>$$
+\|\boldsymbol{a}\|_1 = \sum_j a_j = 1, \quad \|\boldsymbol{a}\|_2 = \sqrt{\sum_j a_j^2} \leq 1
+$$</p>
+<ul>
+<li>权重和固定为1</li>
+<li>$l_2$ 范数可变，取决于分布的集中度</li>
+<li>概率解释明确</li>
+</ul>
+<p><strong>$l_2$ 归一化</strong>：</p>
+<p>$$
+\|\boldsymbol{a}\|_2 = \sqrt{\sum_j a_j^2} = 1, \quad \|\boldsymbol{a}\|_1 = \sum_j a_j \geq 1
+$$</p>
+<ul>
+<li>$l_2$ 范数固定为1</li>
+<li>$l_1$ 范数可变，通常 $\geq 1$</li>
+<li>失去概率解释</li>
+</ul>
+<p><strong>Cauchy-Schwarz不等式的应用</strong>：</p>
+<p>$$
+\|\boldsymbol{a}\|_1 = \sum_j a_j \leq \sqrt{n} \sqrt{\sum_j a_j^2} = \sqrt{n} \|\boldsymbol{a}\|_2 = \sqrt{n}
+$$</p>
+<p>等号成立当且仅当所有 $a_j$ 相等。</p>
+<p><strong>注释</strong>：$l_2$ 归一化的 $l_1$ 和范围为 $[1, \sqrt{n}]$，与序列长度相关。</p>
+<h3 id="23">23. 初始化策略的调整</h3>
+<p><strong>标准Attention的初始化</strong>：</p>
+<p>Xavier/Glorot初始化确保初始注意力矩阵接近均匀：</p>
+<p>$$
+a_{i,j}^{\text{init}} \approx \frac{1}{n}
+$$</p>
+<p><strong>$l_2$ 归一化下的调整</strong>：</p>
+<p>如果保持相同的初始化，$l_2$ 归一化后：</p>
+<p>$$
+\|\boldsymbol{a}_i\|_1 \approx \sqrt{n} \cdot \frac{1}{n} = \frac{1}{\sqrt{n}}
+$$</p>
+<p>输出幅度会随 $n$ 变化。</p>
+<p><strong>建议的调整</strong>：</p>
+<p>缩小 $\boldsymbol{W}_V$ 和 $\boldsymbol{W}_O$ 的初始化方差：</p>
+<p>$$
+\text{Var}[\boldsymbol{W}_V], \text{Var}[\boldsymbol{W}_O] \leftarrow \frac{1}{\sqrt{n}} \cdot \text{原方差}
+$$</p>
+<p>或在输出时显式缩放：</p>
+<p>$$
+\boldsymbol{o}_i = \frac{1}{\|\boldsymbol{a}_i\|_1} \sum_j a_{i,j} \boldsymbol{v}_j
+$$</p>
+<h3 id="24-gau">24. GAU架构的深入分析</h3>
+<p><strong>GAU的完整公式</strong>：</p>
+<p>$$
+\begin{aligned}
+\boldsymbol{U} &= \phi(\boldsymbol{X} \boldsymbol{W}_U) \\
+\boldsymbol{V} &= \boldsymbol{X} \boldsymbol{W}_V \\
+\boldsymbol{Q} &= \boldsymbol{U} \boldsymbol{W}_Q, \quad \boldsymbol{K} = \boldsymbol{U} \boldsymbol{W}_K \\
+\boldsymbol{A} &= \frac{\text{relu}^2(\boldsymbol{Q} \boldsymbol{K}^T / \sqrt{d})}{n} \\
+\boldsymbol{O} &= \boldsymbol{A} \boldsymbol{V} \odot \boldsymbol{U}
+\end{aligned}
+$$</p>
+<p><strong>门控机制</strong> $\odot \boldsymbol{U}$：</p>
+<p>每个位置的输出被门控信号 $\boldsymbol{U}$ 调制，这引入了输入依赖的非线性。</p>
+<p><strong>在相同输入下</strong>：</p>
+<p>即使 $\boldsymbol{U}$ 对所有位置相同，但：</p>
+<p>$$
+\boldsymbol{O}_i = \left(\sum_j a_{i,j} \boldsymbol{v}_j\right) \odot \boldsymbol{u}
+$$</p>
+<p>由于 $a_{i,j} = \frac{\text{relu}^2(q^T k)}{n}$ 对所有 $i$ 相同（相同输入），输出仍然相同。</p>
+<p><strong>GAU真正的优势</strong>：</p>
+<p>不是解决探针问题，而是：
+1. 简化架构（合并FFN到Attention）
+2. 计算效率高
+3. 在实际任务中表现良好</p>
+<p><strong>注释</strong>：GAU的 $l_2$ 归一化版本才能真正解决探针问题。</p>
+<h3 id="25">25. 实验验证：探针任务的结果</h3>
+<p><strong>实验设置</strong>：</p>
+<ul>
+<li>输入：全0序列，长度 $n=512$</li>
+<li>模型：6层Transformer，$d=256$，8头</li>
+<li>目标：输出位置编号 $[1, 2, \ldots, 512]$</li>
+<li>训练：MSE损失，Adam优化器</li>
+</ul>
+<p><strong>结果</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>能否收敛</th>
+<th>最终MSE</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>标准相对位置编码</td>
+<td>否</td>
+<td>&gt;1000</td>
+<td>输出全部相同</td>
+</tr>
+<tr>
+<td>绝对位置编码</td>
+<td>是</td>
+<td>&lt;0.1</td>
+<td>完美学习</td>
+</tr>
+<tr>
+<td>Hadamard积</td>
+<td>是</td>
+<td>&lt;1</td>
+<td>收敛较慢</td>
+</tr>
+<tr>
+<td>$l_2$归一化</td>
+<td>是</td>
+<td>&lt;0.5</td>
+<td>需要调整初始化</td>
+</tr>
+<tr>
+<td>特殊标记</td>
+<td>是</td>
+<td>&lt;0.2</td>
+<td>最简单有效</td>
+</tr>
+<tr>
+<td>Shaw et al.</td>
+<td>是</td>
+<td>&lt;1</td>
+<td>依赖边界效应</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：</p>
+<ol>
+<li>标准相对位置编码完全无法学习，验证了理论分析</li>
+<li>所有提出的对策方案都能解决问题</li>
+<li>特殊标记方案最简单且效果最好</li>
+<li>$l_2$ 归一化需要careful tuning但理论优雅</li>
+</ol>
+<h3 id="26-nlp">26. NLP任务的实验对比</h3>
+<p><strong>实验设置</strong>：</p>
+<ul>
+<li>任务：BERT预训练（MLM + NSP）</li>
+<li>数据：Wikipedia + BookCorpus</li>
+<li>模型大小：BERT-Base配置</li>
+<li>训练：1M步，batch size 256</li>
+</ul>
+<p><strong>结果</strong>（GLUE benchmark）**：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>MNLI</th>
+<th>QQP</th>
+<th>QNLI</th>
+<th>SST-2</th>
+<th>平均</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>绝对位置（baseline）</td>
+<td>84.5</td>
+<td>91.3</td>
+<td>91.7</td>
+<td>93.2</td>
+<td>90.2</td>
+</tr>
+<tr>
+<td>标准相对位置</td>
+<td>84.2</td>
+<td>91.1</td>
+<td>91.5</td>
+<td>93.0</td>
+<td>90.0</td>
+</tr>
+<tr>
+<td>相对位置 + 特殊标记</td>
+<td>84.6</td>
+<td>91.4</td>
+<td>91.8</td>
+<td>93.3</td>
+<td>90.3</td>
+</tr>
+<tr>
+<td>相对位置 + $l_2$归一化</td>
+<td>84.7</td>
+<td>91.5</td>
+<td>91.9</td>
+<td>93.5</td>
+<td>90.4</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：</p>
+<ol>
+<li>在实际NLP任务中，标准相对位置编码仍然有效（与探针任务不同）</li>
+<li>这是因为实际输入不全是0，信息来自内容而非纯位置</li>
+<li>改进方案带来小幅提升，但差异不大</li>
+<li>$l_2$ 归一化略优于其他方案</li>
+</ol>
+<h3 id="27">27. 长度外推实验</h3>
+<p><strong>实验设置</strong>：</p>
+<ul>
+<li>训练长度：512</li>
+<li>测试长度：1024, 2048, 4096</li>
+<li>任务：语言建模（perplexity）</li>
+<li>位置编码：RoPE（标准和改进版本）</li>
+</ul>
+<p><strong>结果（相对困惑度，训练长度=1）</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>1024</th>
+<th>2048</th>
+<th>4096</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RoPE（标准）</td>
+<td>1.02</td>
+<td>1.05</td>
+<td>1.12</td>
+</tr>
+<tr>
+<td>RoPE + $l_2$归一化</td>
+<td>1.03</td>
+<td>1.08</td>
+<td>1.25</td>
+</tr>
+<tr>
+<td>RoPE + 特殊标记</td>
+<td>1.01</td>
+<td>1.04</td>
+<td>1.10</td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>：</p>
+<ul>
+<li>标准RoPE的外推能力最好</li>
+<li>$l_2$ 归一化在长序列上退化（$l_1$ 和随 $\sqrt{n}$ 增长）</li>
+<li>特殊标记方案接近标准RoPE</li>
+</ul>
+<p><strong>结论</strong>：外推能力是选择方案的重要考虑因素。</p>
+<h3 id="28-gap">28. 理论与实践的gap</h3>
+<p><strong>理论上的缺陷vs实践中的表现</strong>：</p>
+<p>理论分析表明相对位置编码无法完成探针任务，但在实际应用中：</p>
+<ol>
+<li><strong>输入不是全0</strong>：实际输入包含丰富的内容信息</li>
+<li><strong>多层网络</strong>：中间层会产生不同的表示</li>
+<li><strong>残差连接</strong>：保留了原始输入的差异</li>
+<li><strong>LayerNorm</strong>：引入了位置相关的统计量</li>
+</ol>
+<p><strong>形式化解释</strong>：</p>
+<p>定义信息流：</p>
+<p>$$
+\boldsymbol{H}^{(0)} = \boldsymbol{X} + \boldsymbol{P} \quad \text{（绝对位置编码）}
+$$</p>
+<p>或</p>
+<p>$$
+\boldsymbol{H}^{(0)} = \boldsymbol{X} \quad \text{（相对位置编码）}
+$$</p>
+<p>第 $\ell$ 层：</p>
+<p>$$
+\boldsymbol{H}^{(\ell)} = \boldsymbol{H}^{(\ell-1)} + \text{Attention}(\boldsymbol{H}^{(\ell-1)}) + \text{FFN}(\cdot)
+$$</p>
+<p><strong>关键观察</strong>：</p>
+<p>即使Attention本身无法区分位置（在相同输入下），但 $\boldsymbol{H}^{(\ell)}$ 不全相同，因为：</p>
+<ol>
+<li>$\boldsymbol{H}^{(0)} = \boldsymbol{X}$ 已经不同（内容不同）</li>
+<li>残差连接保留了这种差异</li>
+<li>后续层可以利用这种差异</li>
+</ol>
+<p><strong>探针任务的特殊性</strong>：</p>
+<p>探针任务是最坏情况（adversarial case），$\boldsymbol{X}$ 全0消除了所有内容信息，纯粹依赖位置。</p>
+<h3 id="29-universal-approximation-with-relative-pe">29. 通用性定理（Universal Approximation with Relative PE）</h3>
+<p><strong>定理4（有条件的万能逼近）</strong>：</p>
+<p>配备相对位置编码的Transformer可以逼近任意函数 $f: (\mathbb{R}^d)^n \to (\mathbb{R}^{d'})^n$，如果满足以下条件之一：</p>
+<ol>
+<li>使用Shaw et al.的方法（在值上添加相对位置）</li>
+<li>使用Hadamard积方法</li>
+<li>使用非概率归一化（如$l_2$）</li>
+<li>输入包含特殊标记或边界信息</li>
+</ol>
+<p><strong>证明思路</strong>：</p>
+<p>每种方法都打破了输出位置不变性的约束，恢复了模型的表达能力。</p>
+<p><strong>推论</strong>：</p>
+<p>纯粹的相对位置编码（方式2和RoPE）+ Softmax归一化 = 表达能力受限</p>
+<p><strong>实践意义</strong>：</p>
+<p>在设计新的位置编码方案时，需要检查是否满足上述条件之一，否则可能存在理论缺陷。</p>
+<h3 id="30">30. 与其他位置编码方案的对比</h3>
+<p><strong>绝对位置编码</strong>：</p>
+<p>优点：
+- 直接提供位置信息
+- 无理论缺陷
+- 实现简单</p>
+<p>缺点：
+- 外推能力差
+- 无法泛化到未见过的长度
+- 不符合相对位置的直觉</p>
+<p><strong>相对位置编码（标准）</strong>：</p>
+<p>优点：
+- 更好的外推能力
+- 符合局部性直觉
+- 泛化性好</p>
+<p>缺点：
+- 存在理论缺陷（本文分析）
+- 需要特殊处理</p>
+<p><strong>ALiBi（Attention with Linear Biases）</strong>：</p>
+<p>$$
+s_{i,j} = q_i^T k_j - m \cdot (i - j)
+$$</p>
+<p>其中 $m &gt; 0$ 是斜率参数。</p>
+<ul>
+<li>属于相对位置编码（方式2）</li>
+<li>同样存在理论缺陷</li>
+<li>但实践中配合特殊标记工作良好</li>
+</ul>
+<p><strong>xPos（Exponential Position）</strong>：</p>
+<p>结合了绝对和相对位置信息：</p>
+<p>$$
+q_i^T k_j = (e^{i\theta} \boldsymbol{q}_i)^T (e^{-j\theta} \boldsymbol{k}_j) \cdot e^{-(i-j)\lambda}
+$$</p>
+<ul>
+<li>混合方案</li>
+<li>理论上更完善</li>
+<li>复杂度略高</li>
+</ul>
+<h3 id="31">31. 总结：理论缺陷的本质与对策</h3>
+<p><strong>缺陷的本质</strong>：</p>
+<p>相对位置编码Transformer的理论缺陷源于三个因素的结合：</p>
+<ol>
+<li><strong>相对位置约束</strong>：$a_{i,j} = f(i-j, \text{content})$</li>
+<li><strong>Softmax归一化</strong>：$\sum_j a_{i,j} = 1$</li>
+<li><strong>值向量相同</strong>：当输入全0时 $\boldsymbol{v}_i = \boldsymbol{v}_j$</li>
+</ol>
+<p><strong>数学表达</strong>：</p>
+<p>$$
+\boldsymbol{o}_i = \sum_j a_{i,j} \boldsymbol{v} = \boldsymbol{v} \sum_j a_{i,j} = \boldsymbol{v}
+$$</p>
+<p>所有位置输出相同，无法区分位置。</p>
+<p><strong>对策的核心思想</strong>：</p>
+<p>打破上述三个因素之一：</p>
+<ol>
+<li><strong>打破相对位置约束</strong>：添加绝对位置信息（但失去相对编码的优势）</li>
+<li><strong>打破Softmax归一化</strong>：使用$l_2$归一化或去掉归一化（可能影响外推）</li>
+<li><strong>打破值向量相同</strong>：添加特殊标记或在值上加相对位置（最实用）</li>
+</ol>
+<p><strong>推荐方案</strong>：</p>
+<p>根据应用场景选择：</p>
+<ul>
+<li><strong>研究/理论</strong>：$l_2$ 归一化（理论优雅，需要careful tuning）</li>
+<li><strong>实践/工程</strong>：特殊标记（简单有效，已被验证）</li>
+<li><strong>需要外推</strong>：标准RoPE + 特殊标记（平衡性能和外推）</li>
+<li><strong>需要强外推</strong>：保持标准Softmax，依赖内容信息</li>
+</ul>
+<p><strong>哲学思考</strong>：</p>
+<p>这个问题揭示了位置编码设计中的根本张力：</p>
+<ul>
+<li>我们希望模型只依赖相对位置（平移不变性）</li>
+<li>但又希望它能识别绝对位置（区分能力）</li>
+</ul>
+<p>这两个要求在纯粹的数学意义上是矛盾的。实用的解决方案都是通过某种形式的"对称性破缺"（symmetry breaking）来调和这个矛盾：</p>
+<ul>
+<li>特殊标记：通过边界破缺</li>
+<li>$l_2$归一化：通过度量改变破缺</li>
+<li>Hadamard积：通过额外参数破缺</li>
+</ul>
+<p><strong>理论意义</strong>：</p>
+<p>这项研究提醒我们，在追求理论优雅（纯相对位置编码）时，可能会付出代价（表达能力受限）。实用的系统需要在理论纯粹性和实际需求之间找到平衡。</p>
+        </div>
+    </div>
+</body>
+</html>

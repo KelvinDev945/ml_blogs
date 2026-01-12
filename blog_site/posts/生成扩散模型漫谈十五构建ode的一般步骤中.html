@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成扩散模型漫谈（十五）：构建ODE的一般步骤（中）</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>生成扩散模型漫谈（十五）：构建ODE的一般步骤（中）</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 45.3 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9379">https://spaces.ac.cn/archives/9379</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>上周笔者写了<a href="/archives/9370">《生成扩散模型漫谈（十四）：构建ODE的一般步骤（上）》</a>（当时还没有“上”这个后缀），本以为已经窥见了构建ODE扩散模型的一般规律，结果不久后评论区大神 <a href="/archives/9370#comment-20572">@gaohuazuo</a> 就给出了一个构建格林函数更高效、更直观的方案，让笔者自愧不如。再联想起之前大神之前在<a href="/archives/9280#comment-19951">《生成扩散模型漫谈（十二）：“硬刚”扩散ODE》</a>同样也给出了一个关于扩散ODE的精彩描述（间接启发了上一篇博客的结果），大神的洞察力不得不让人叹服。</p>
+<p>经过讨论和思考，笔者发现大神的思路本质上就是一阶偏微分方程的特征线法，通过构造特定的向量场保证初值条件，然后通过求解微分方程保证终值条件，同时保证了初值和终值条件，真的非常巧妙！最后，笔者将自己的收获总结成此文，作为上一篇的后续。</p>
+<h2 id="_1">前情回顾</h2>
+<p>简单回顾一下上一篇文章的结果。假设随机变量$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">0\in\mathbb{R}^d$连续地变换成$\boldsymbol{x}_T$，其变化规律服从ODE<br />
+\begin{equation}\frac{d\boldsymbol{x}_t}{dt}=\boldsymbol{f}_t(\boldsymbol{x}_t)\label{eq-ode}\end{equation}<br />
+那么对应的$t$时刻的分布$p_t(\boldsymbol{x}_t)$服从“连续性方程”：<br />
+\begin{equation}\frac{\partial}{\partial t} p_t(\boldsymbol{x}_t) = - \nabla</em><em _boldsymbol_x="\boldsymbol{x" _t_="(t,\,">t}\cdot\Big(\boldsymbol{f}_t(\boldsymbol{x}_t) p_t(\boldsymbol{x}_t)\Big)\label{eq:ode-f-eq-fp}\end{equation}<br />
+记$\boldsymbol{u}(t, \boldsymbol{x}_t)=(p_t( \boldsymbol{x}_t), \boldsymbol{f}_t(\boldsymbol{x}_t) p_t(\boldsymbol{x}_t))\in\mathbb{R}^{d+1}$，那么连续性方程可以简写成<br />
+\begin{equation}\left\{\begin{aligned}<br />
+&amp;\nabla</em><em _boldsymbol_x="\boldsymbol{x" _t_="(t,\,">t)}\cdot\boldsymbol{u}(t, \boldsymbol{x}_t)=0 \\\<br />
+&amp;\boldsymbol{u}_1(0, \boldsymbol{x}_0) = p_0(\boldsymbol{x}_0),\int \boldsymbol{u}_1(t, \boldsymbol{x}_t) d\boldsymbol{x}_t = 1<br />
+\end{aligned}\right.\label{eq:div-eq}\end{equation}<br />
+为了求解这个方程，可以用格林函数的思想，即先求解<br />
+\begin{equation}\left\{\begin{aligned}<br />
+&amp;\nabla</em><em _boldsymbol_x="\boldsymbol{x">t)}\cdot\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)=0\\\<br />
+&amp;\boldsymbol{G}_1(0, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = \delta(\boldsymbol{x}_t - \boldsymbol{x}_0),\int \boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) d\boldsymbol{x}_t = 1<br />
+\end{aligned}\right.\label{eq:div-green}\end{equation}<br />
+那么<br />
+\begin{equation}\boldsymbol{u}(t, \boldsymbol{x}_t) = \int \boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 = \mathbb{E}</em>}_0\sim p_0(\boldsymbol{x}_0)}[\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)]\label{eq:div-green-int}\end{equation<br />
+就是满足约束条件的解之一。</p>
+<h2 id="_2">几何直观</h2>
+<p>所谓格林函数，其实思想很简单，它就是说我们先不要着急解决复杂数据生成，我们先假设要生成的数据只有一个点$\boldsymbol{x}_0$，先解决单个数据点的生成。有的读者想这不是很简单吗？直接$\boldsymbol{x}_T\times 0 + \boldsymbol{x}_0$就完事了？当然不是这么简单，我们需要的是连续的、渐变的生成，如下图所示，就是$t=T$上的任意一点$\boldsymbol{x}_T$，都沿着一条光滑轨迹运行到$t=0$的$\boldsymbol{x}_0$上：  </p>
+<p><a href="/usr/uploads/2022/12/3260358826.svg" title="点击查看原图"><img alt="格林函数示意图。图中T=1，在t=1处的每个点，都沿着特定的轨迹运行到t=0处的一个点，除了公共点外，轨迹之间无重叠，这些轨迹就是格林函数的场线" src="/usr/uploads/2022/12/3260358826.svg" /></a></p>
+<p>格林函数示意图。图中T=1，在t=1处的每个点，都沿着特定的轨迹运行到t=0处的一个点，除了公共点外，轨迹之间无重叠，这些轨迹就是格林函数的场线</p>
+<p>而我们的目的，只是构造一个生成模型出来，所以我们原则上并不在乎轨迹的形状如何，只要它们都穿过$\boldsymbol{x}_0$，那么，我们可以人为地选择我们喜欢的、经过$\boldsymbol{x}_0$的一个轨迹簇，记为<br />
+\begin{equation}\boldsymbol{\varphi}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \boldsymbol{x}_T\label{eq:track}\end{equation}<br />
+再次强调，这代表着以$\boldsymbol{x}_0$为起点、以$\boldsymbol{x}_T$为终点的一个轨迹簇，轨迹自变量、因变量分别为$t,\boldsymbol{x}_t$，起点$\boldsymbol{x}_0$是固定不变的，终点$\boldsymbol{x}_T$是可以任意变化的，轨迹的形状是无所谓的，我们可以选择直线、抛物线等等。</p>
+<p>现在我们对式$\eqref{eq:track}$两边求导，由于$\boldsymbol{x}_T$是可以随意变化的，它相当于微分方程的积分常数，对它求导就等于$\boldsymbol{0}$，于是我们有<br />
+\begin{equation}\frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)}{\partial \boldsymbol{x}_t}\frac{d\boldsymbol{x}_t}{dt} + \frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)}{\partial t} = \boldsymbol{0} \\\<br />
+\Downarrow \\\<br />
+\frac{d\boldsymbol{x}_t}{dt} = - \left(\frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)}{\partial \boldsymbol{x}_t}\right)^{-1} \frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)}{\partial t}\end{equation}<br />
+对比式$\eqref{eq-ode}$，我们就得到<br />
+\begin{equation}\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = - \left(\frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)}{\partial \boldsymbol{x}_t}\right)^{-1} \frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)}{\partial t}\label{eq:f-xt-x0}\end{equation}<br />
+这里将原本的记号$\boldsymbol{f}_t(\boldsymbol{x}_t)$替换为了$\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$，以标记轨线具有公共点$\boldsymbol{x}_0$。也就是说，这样构造出来的力场$\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$所对应的ODE轨迹，必然是经过$\boldsymbol{x}_0$的，这就保证了格林函数的初值条件。</p>
+<h2 id="_3">特征线法</h2>
+<p>既然初值条件有保证了，那么我们不妨要求更多一点：再保证一下终值条件。终值条件也就是希望$t=T$时$\boldsymbol{x}_T$的分布是跟$\boldsymbol{x}_0$无关的简单分布。上一篇文章的求解框架的主要缺点，就是无法直接保证终值分布的简单性，只能通过事后分析来研究。这篇文章的思路则是直接通过设计特定的$\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$来保证初值条件，然后就有剩余空间来保证终值条件了。而且，同时保证了初、终值后，在满足连续性方程$\eqref{eq:ode-f-eq-fp}$的前提下，积分条件是自然满足的。</p>
+<p>用数学的方式说，我们就是要在给定$\boldsymbol{f}<em _boldsymbol_x="\boldsymbol{x">t(\boldsymbol{x}_t|\boldsymbol{x}_0)$和$p_T(\boldsymbol{x}_T)$的前提下，去求解方程$\eqref{eq:ode-f-eq-fp}$，这是一个一阶偏微分方程，可以通过“特征线法”求解，其理论介绍可以参考笔者之前写的<a href="/archives/4718">《一阶偏微分方程的特征线法》</a>。首先，我们将方程$\eqref{eq:ode-f-eq-fp}$等价地改写成<br />
+\begin{equation}\frac{\partial}{\partial t} p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) + \nabla</em><em _boldsymbol_x="\boldsymbol{x">t}p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) \cdot \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = - p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) \nabla</em>}_t}\cdot \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)\end{equation<br />
+同前面类似，由于接下来是在给定起点$\boldsymbol{x}_0$进行求解，所以上式将$p_t(\boldsymbol{x}_t)$替换为$p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$，以标记这是起点为$\boldsymbol{x}_0$的解。</p>
+<p>特征线法的思路，是先在某条特定的轨迹上考虑偏微分方程的解，这可以将偏微分转化为常微分，降低求解难度。具体来说，我们假设$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t$是$t$的函数，在方程$\eqref{eq-ode}$的轨线上求解。此时由于成立方程$\eqref{eq-ode}$，将上式左端的$\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$替换为$\frac{d\boldsymbol{x}_t}{dt}$后，左端正好是$p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$的全微分，所以此时有<br />
+\begin{equation}\frac{d}{dt}p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = - p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) \nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\cdot \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)\end{equation}<br />
+注意，此时所有的$\boldsymbol{x}_t$应当被替换为对应的$t$的函数，这理论上可以从轨迹方程$\eqref{eq:track}$解出。替换后，上式的$p$、$\boldsymbol{f}$都是纯粹$t$的函数，所以上式只是关于$p$的一个线性常微分方程，可以解得<br />
+\begin{equation}p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = C \exp\left(\int_t^T \nabla</em><em _boldsymbol_x="\boldsymbol{x">s}\cdot \boldsymbol{f}_s(\boldsymbol{x}_s|\boldsymbol{x}_0) ds\right)\end{equation}<br />
+代入终值条件$p_T(\boldsymbol{x}_T)$，得到$C=p_T(\boldsymbol{x}_T)$，即<br />
+\begin{equation}p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = p_T(\boldsymbol{x}_T) \exp\left(\int_t^T \nabla</em><em 1="1" _="&gt;">s}\cdot \boldsymbol{f}_s(\boldsymbol{x}_s|\boldsymbol{x}_0) ds\right)\label{eq:pt-xt-x0}\end{equation}<br />
+把轨迹方程$\eqref{eq:track}$的$\boldsymbol{x}_T$代入，就得到一个只含有$t,\boldsymbol{x}_t,\boldsymbol{x}_0$的函数，便是最终要求解的格林函数$\boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$了，相应地有$\boldsymbol{G}</em>_0)$。}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)=p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x</p>
+<h2 id="_4">训练目标</h2>
+<p>有了格林函数，我们就可以得到<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{u}<em 1="1" _="&gt;">1(t, \boldsymbol{x}_t) =&amp;\, \int p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 = p_t(\boldsymbol{x}_t)\\\<br />
+\boldsymbol{u}</em>}(t, \boldsymbol{x<em 1="1" _="&gt;">t) =&amp;\, \int \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0<br />
+\end{aligned}\end{equation}<br />
+于是<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{f}_t(\boldsymbol{x}_t)=&amp;\,\frac{\boldsymbol{u}</em>}(t, \boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)}{\boldsymbol{u}_1(t, \boldsymbol{x}_t)} \\\<br />
+=&amp;\,\int \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) \frac{p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) p_0(\boldsymbol{x}_0)}{p_t(\boldsymbol{x}_t)} d\boldsymbol{x}_0 \\\<br />
+=&amp;\,\int \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) p_t(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0 \\\<br />
+=&amp;\,\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim p_t(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)\right]<br />
+\end{aligned}\end{equation}<br />
+根据<a href="/archives/9209#%E5%BE%97%E5%88%86%E5%8C%B9%E9%85%8D">《生成扩散模型漫谈（五）：一般框架之SDE篇》</a>中构建得分匹配目标的方法，可以构建训练目标<br />
+\begin{equation}\begin{aligned}&amp;\,\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t\sim p<br />
+_t(\boldsymbol{x}_t)}\Big[\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p<br />
+_t(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left\Vert \boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) - \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)\right\Vert^2\right]\Big] d\boldsymbol{x}_t \\\<br />
+=&amp;\, \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0,\boldsymbol{x}_t \sim p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)p<br />
+_0(\boldsymbol{x}_0)}\left[\left\Vert \boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)\right\Vert^2\right]<br />
+\end{aligned}\label{eq:score-match}\end{equation}<br />
+它跟<a href="https://papers.cool/arxiv/2210.02747">《Flow Matching for Generative Modeling》</a>所给出的“Conditional Flow Matching”形式上是一致的，后面我们还会看到，该论文的结果都可以从本文的方法推出。训练完成后，就可以通过求解方程$\frac{d\boldsymbol{x}_t}{dt}=\boldsymbol{v}</em>_0)$的要求是易于采样就行了。}}(\boldsymbol{x}_t, t)$来生成样本了。从这个训练目标也可以看出，我们对$p_t(\boldsymbol{x}_t|\boldsymbol{x</p>
+<h2 id="_5">一些例子</h2>
+<p>可能前面的抽象结果对大家来说还是不大好理解，接下来我们来给出一些具体例子，以便加深大家对这个框架的直观理解。至于特征线法本身，笔者在<a href="/archives/4718">《一阶偏微分方程的特征线法》</a>也说过，一开始笔者也觉得特征线法像是“变魔术”一样难以捉摸，按照步骤操作似乎不困难，但总把握不住关键之处，理解它需要一个反复斟酌的思考过程，无法进一步代劳了。</p>
+<h3 id="_6">直线轨迹</h3>
+<p>作为最简单的例子，我们假设$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">T$是沿着直线轨迹变为$\boldsymbol{x}_0$，简单起见我们还可以将$T$设为1，这不会损失一般性，那么$\boldsymbol{x}_t$的方程可以写为<br />
+\begin{equation}\boldsymbol{x}_t = (\boldsymbol{x}_1 - \boldsymbol{x}_0)t + \boldsymbol{x}_0\quad\Rightarrow\quad \frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{t} + \boldsymbol{x}_0 = \boldsymbol{x}_1\label{eq:simplest-x1}\end{equation}<br />
+根据式$\eqref{eq:f-xt-x0}$，有<br />
+\begin{equation}\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{t}\end{equation}<br />
+此时$\nabla</em>$就有}_t}\cdot \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)=\frac{d}{t}$，根据式$\eqref{eq:pt-xt-x0<br />
+\begin{equation}p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{p_1(\boldsymbol{x}_1)}{t^d}\end{equation}<br />
+代入式$\eqref{eq:simplest-x1}$中的$\boldsymbol{x}_1$，得到<br />
+\begin{equation}p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{p_1\left(\frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{t} + \boldsymbol{x}_0\right)}{t^d}\end{equation}<br />
+特别地，如果$p_1(\boldsymbol{x}_1)$是标准正态分布，那么上式实则意味着$p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)=\mathcal{N}(\boldsymbol{x}_t;(1-t)\boldsymbol{x}_0,t^2\boldsymbol{I})$，这正好是常见的高斯扩散模型之一。这个框架的新结果，是允许我们选择更一般的先验分布$p_1(\boldsymbol{x}_1)$，比如均匀分布。另外在介绍得分匹配$\eqref{eq:score-match}$时也已经说了，对$p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$我们只需要知道它的采样方式就行了，而上式告诉我们只需要先验分布易于采样就行，因为：<br />
+\begin{equation}\boldsymbol{x}_t\sim p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)\quad\Leftrightarrow\quad \boldsymbol{x}_t=(1-t)\boldsymbol{x}_0 + t\boldsymbol{\varepsilon},\,\boldsymbol{\varepsilon}\sim p_1(\boldsymbol{\varepsilon})\end{equation}</p>
+<h3 id="_7">效果演示</h3>
+<p>注意，我们假设从$\boldsymbol{x}_0$到$\boldsymbol{x}_1$的轨迹是一条直线，这仅仅是对于单点生成的，也就是格林函数解。当通过格林函数叠加出一般分布对应的的力场$\boldsymbol{f}_t(\boldsymbol{x}_t)$时，其生成轨迹就不再是直线了。</p>
+<p>下图演示了先验分布为均匀分布时多点生成的轨线图：  </p>
+<p><a href="/usr/uploads/2022/12/4276426527.svg" title="点击查看原图"><img alt="单点生成" src="/usr/uploads/2022/12/4276426527.svg" /></a></p>
+<p>单点生成</p>
+<p><a href="/usr/uploads/2022/12/2845102935.svg" title="点击查看原图"><img alt="两点生成" src="/usr/uploads/2022/12/2845102935.svg" /></a></p>
+<p>两点生成</p>
+<p><a href="/usr/uploads/2022/12/2249423194.svg" title="点击查看原图"><img alt="三点生成" src="/usr/uploads/2022/12/2249423194.svg" /></a></p>
+<p>三点生成</p>
+<p>参考作图代码：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.integrate</span><span class="w"> </span><span class="kn">import</span> <span class="n">odeint</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="n">matplotlib</span><span class="o">.</span><span class="n">rc</span><span class="p">(</span><span class="s1">&#39;text&#39;</span><span class="p">,</span> <span class="n">usetex</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">matplotlib</span><span class="o">.</span><span class="n">rcParams</span><span class="p">[</span><span class="s1">&#39;text.latex.preamble&#39;</span><span class="p">]</span><span class="o">=</span><span class="p">[</span><span class="sa">r</span><span class="s2">&quot;\usepackage</span><span class="si">{amsmath}</span><span class="s2">&quot;</span><span class="p">]</span>
+
+<span class="n">prior</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="mf">0.5</span> <span class="k">if</span> <span class="mi">2</span> <span class="o">&gt;=</span> <span class="n">x</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+<span class="n">p</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">xt</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">t</span><span class="p">:</span> <span class="n">prior</span><span class="p">((</span><span class="n">xt</span> <span class="o">-</span> <span class="n">x0</span><span class="p">)</span> <span class="o">/</span> <span class="n">t</span> <span class="o">+</span> <span class="n">x0</span><span class="p">)</span> <span class="o">/</span> <span class="n">t</span>
+<span class="n">f</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">xt</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">t</span><span class="p">:</span> <span class="p">(</span><span class="n">xt</span> <span class="o">-</span> <span class="n">x0</span><span class="p">)</span> <span class="o">/</span> <span class="n">t</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">f_full</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span> <span class="n">t</span><span class="p">):</span>
+    <span class="n">x0s</span> <span class="o">=</span> <span class="p">[</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">,</span> <span class="mf">1.2</span><span class="p">,</span> <span class="mf">1.7</span><span class="p">]</span>  <span class="c1"># 0.5出现两次，代表其频率是其余的两倍</span>
+    <span class="n">fs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">array</span><span class="p">([</span><span class="n">f</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">x0</span> <span class="ow">in</span> <span class="n">x0s</span><span class="p">])</span><span class="o">.</span><span class="kp">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">ps</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">array</span><span class="p">([</span><span class="n">p</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span> <span class="n">x0</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span> <span class="k">for</span> <span class="n">x0</span> <span class="ow">in</span> <span class="n">x0s</span><span class="p">])</span><span class="o">.</span><span class="kp">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">fs</span> <span class="o">*</span> <span class="n">ps</span><span class="p">)</span><span class="o">.</span><span class="kp">sum</span><span class="p">()</span> <span class="o">/</span> <span class="p">(</span><span class="n">ps</span><span class="o">.</span><span class="kp">sum</span><span class="p">()</span> <span class="o">+</span> <span class="mf">1e-8</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="n">x1</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="kp">arange</span><span class="p">(</span><span class="mf">0.01</span><span class="p">,</span> <span class="mf">1.99</span><span class="p">,</span> <span class="mf">0.10999</span><span class="o">/</span><span class="mi">2</span><span class="p">):</span>
+    <span class="n">ts</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="kp">arange</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="mf">0.001</span><span class="p">)</span>
+    <span class="n">xs</span> <span class="o">=</span> <span class="n">odeint</span><span class="p">(</span><span class="n">f_full</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">ts</span><span class="p">)</span><span class="o">.</span><span class="kp">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="n">ts</span> <span class="o">=</span> <span class="n">ts</span><span class="p">[::</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">xs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="mf">0.5</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">0.1</span><span class="p">:</span>
+        <span class="n">_</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">ts</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;skyblue&#39;</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="nb">abs</span><span class="p">(</span><span class="n">xs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="mf">1.2</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">0.1</span><span class="p">:</span>
+        <span class="n">_</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">ts</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;orange&#39;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">_</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">ts</span><span class="p">,</span> <span class="n">xs</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;limegreen&#39;</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;$t$&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="sa">r</span><span class="s1">&#39;$\boldsymbol</span><span class="si">{x}</span><span class="s1">$&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+
+<h3 id="_8">一般推广</h3>
+<p>其实上面的结果还可以一般地推广到<br />
+\begin{equation}\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t = \boldsymbol{\mu}_t(\boldsymbol{x}_0) + \sigma_t \boldsymbol{x}_1\quad\Rightarrow\quad \frac{\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0)}{\sigma_t }= \boldsymbol{x}_1\end{equation}<br />
+这里的$\boldsymbol{\mu}_t(\boldsymbol{x}_0)$是任意满足$\boldsymbol{\mu}_0(\boldsymbol{x}_0)=\boldsymbol{x}_0, \boldsymbol{\mu}_1(\boldsymbol{x}_0)=\boldsymbol{0}$的$\mathbb{R}^d\mapsto\mathbb{R}^d$函数，$\sigma_t$是任意满足$\sigma_0=0,\sigma_1=1$的单调递增函数。根据式$\eqref{eq:f-xt-x0}$，有<br />
+\begin{equation}\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \dot{\boldsymbol{\mu}}_t(\boldsymbol{x}_0) + \frac{\dot{\sigma}_t}{\sigma_t}(\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0))\end{equation}<br />
+这也等价于<a href="https://papers.cool/arxiv/2210.02747">《Flow Matching for Generative Modeling》</a>中的式$(15)$，此时$\nabla</em>$就有}_t}\cdot \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)=\frac{d\dot{\sigma}_t}{\sigma_t}$，根据式$\eqref{eq:pt-xt-x0<br />
+\begin{equation}p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{p_1(\boldsymbol{x}_1)}{\sigma_t^d}\end{equation}<br />
+代入$\boldsymbol{x}_1$，最终结果是<br />
+\begin{equation}p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{p_1\left(\frac{\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0)}{\sigma_t }\right)}{\sigma_t^d}\end{equation}<br />
+这是关于线性ODE扩散的一般结果，包含高斯扩散，也允许使用非高斯的先验分布。</p>
+<h3 id="_9">再复杂些？</h3>
+<p>前面的例子，都是通过$\boldsymbol{x}_0$（的某个变换）与$\boldsymbol{x}_1$的简单线性插值（插值权重纯粹是$t$的函数）来构建$\boldsymbol{x}_t$的变化轨迹。那么一个很自然的问题就是：可不可以考虑更复杂的轨迹呢？理论上可以，但是更高的复杂度意味着隐含了更多的假设，而我们通常很难检验目标数据是否支持这些假设，因此通常都不考虑更复杂的轨迹了。此外，对于更复杂的轨迹，解析求解的难度通常也更高，不管是理论还是实验，都难以操作下去。</p>
+<p>更重要的一点的，我们目前所假设的轨迹，仅仅是单点生成的轨迹而已，前面已经演示了，即便假设为直线，多点生成依然会导致复杂的曲线。所以，如果单点生成的轨迹都假设得不必要的复杂，那么可以想像多点生成的轨迹复杂度将会奇高，模型可能会极度不稳定。</p>
+<h2 id="_10">文章小结</h2>
+<p>接着上一篇文章的内容，本文再次讨论了ODE式扩散模型的构建思路。这一次我们从几何直观出发，通过构造特定的向量场保证结果满足初值分布条件，然后通过求解微分方程保证终值分布条件，得到一个同时满足初值和终值条件的格林函数。特别地，该方法允许我们使用任意简单分布作为先验分布，摆脱以往对高斯分布的依赖来构建扩散模型。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9379">https://spaces.ac.cn/archives/9379</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Dec. 22, 2022). 《生成扩散模型漫谈（十五）：构建ODE的一般步骤（中） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9379">https://spaces.ac.cn/archives/9379</a></p>
+<p>@online{kexuefm-9379,<br />
+title={生成扩散模型漫谈（十五）：构建ODE的一般步骤（中）},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Dec},<br />
+url={\url{https://spaces.ac.cn/archives/9379}},<br />
+} </p>
+<hr />
+<h2 id="_11">公式推导与注释</h2>
+<p>本节将从多个角度深入探讨格林函数的数学理论，特别是在扩散过程中的应用。我们将涵盖泛函分析、偏微分方程理论以及扩散过程的概率论视角。</p>
+<h3 id="1">1. 格林函数的基本性质</h3>
+<h4 id="11">1.1 对称性与正定性</h4>
+<p>格林函数作为线性算子的逆核，具有重要的代数性质。对于自伴算子$L$，其格林函数满足对称性：</p>
+<p>$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = G(t, s; \boldsymbol{y}, \boldsymbol{x})
+$$</p>
+<p><strong>证明</strong>：考虑自伴算子$L = L^*$，其格林函数定义满足：</p>
+<p>$$
+L_{\boldsymbol{x}} G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \delta(\boldsymbol{x} - \boldsymbol{y})\delta(t - s)
+$$</p>
+<p>对任意测试函数$\phi(\boldsymbol{x}), \psi(\boldsymbol{y})$，有：</p>
+<p>$$
+\begin{aligned}
+\int\int \phi(\boldsymbol{x}) L_{\boldsymbol{x}} G(t, s; \boldsymbol{x}, \boldsymbol{y}) \psi(\boldsymbol{y}) d\boldsymbol{x} d\boldsymbol{y} &= \int \phi(\boldsymbol{y}) \psi(\boldsymbol{y}) d\boldsymbol{y} \\
+\int\int (L_{\boldsymbol{x}} \phi(\boldsymbol{x})) G(t, s; \boldsymbol{x}, \boldsymbol{y}) \psi(\boldsymbol{y}) d\boldsymbol{x} d\boldsymbol{y} &= \int \phi(\boldsymbol{y}) \psi(\boldsymbol{y}) d\boldsymbol{y}
+\end{aligned}
+$$</p>
+<p>由自伴性和分部积分，交换$\phi, \psi$的角色，得到对称性。</p>
+<p>对于扩散型算子，格林函数还满足<strong>正定性</strong>。设$L = -\nabla \cdot (D\nabla) + V(\boldsymbol{x})$，其中$D &gt; 0$是扩散系数，$V \geq 0$是势函数，则：</p>
+<p>$$
+\int\int f(\boldsymbol{x}) G(t, t; \boldsymbol{x}, \boldsymbol{y}) f(\boldsymbol{y}) d\boldsymbol{x} d\boldsymbol{y} \geq 0
+$$</p>
+<p>这来自于算子的正定性：</p>
+<p>$$
+\langle f, Lf \rangle = \int D|\nabla f|^2 + V|f|^2 \geq 0
+$$</p>
+<h4 id="12">1.2 归一化条件与概率解释</h4>
+<p>对于时间依赖的格林函数$G(t, s; \boldsymbol{x}, \boldsymbol{y})$，当它表示扩散过程的转移概率密度时，必须满足归一化条件：</p>
+<p>$$
+\int G(t, s; \boldsymbol{x}, \boldsymbol{y}) d\boldsymbol{y} = 1, \quad \forall t > s, \boldsymbol{x}
+$$</p>
+<p><strong>推导</strong>：从连续性方程出发，</p>
+<p>$$
+\frac{\partial}{\partial t} p(t, \boldsymbol{x}) = -\nabla \cdot (p\boldsymbol{f})
+$$</p>
+<p>两边对$\boldsymbol{x}$积分，利用散度定理和边界条件（假设$p\boldsymbol{f} \to 0$当$|\boldsymbol{x}| \to \infty$）：</p>
+<p>$$
+\frac{d}{dt} \int p(t, \boldsymbol{x}) d\boldsymbol{x} = -\int \nabla \cdot (p\boldsymbol{f}) d\boldsymbol{x} = 0
+$$</p>
+<p>因此总概率守恒。对于格林函数解$p(t, \boldsymbol{x}) = \int G(t, 0; \boldsymbol{x}, \boldsymbol{y}) p_0(\boldsymbol{y}) d\boldsymbol{y}$，要求：</p>
+<p>$$
+\int p(t, \boldsymbol{x}) d\boldsymbol{x} = \int p_0(\boldsymbol{y}) d\boldsymbol{y} = 1
+$$</p>
+<p>这要求格林函数满足归一化条件。</p>
+<h3 id="2">2. 谱表示理论</h3>
+<h4 id="21">2.1 特征值展开</h4>
+<p>对于紧域上的自伴算子$L$，可以利用谱分解理论展开格林函数。设$L$的特征值问题为：</p>
+<p>$$
+L \phi_n(\boldsymbol{x}) = \lambda_n \phi_n(\boldsymbol{x})
+$$</p>
+<p>其中${\phi_n}$构成完备正交系：$\langle \phi_m, \phi_n \rangle = \delta_{mn}$。则格林函数可展开为：</p>
+<p>$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \sum_{n=0}^{\infty} \frac{e^{-\lambda_n(t-s)}}{\lambda_n} \phi_n(\boldsymbol{x}) \phi_n^*(\boldsymbol{y})
+$$</p>
+<p><strong>推导</strong>：利用$\delta$函数的展开：</p>
+<p>$$
+\delta(\boldsymbol{x} - \boldsymbol{y}) = \sum_{n=0}^{\infty} \phi_n(\boldsymbol{x}) \phi_n^*(\boldsymbol{y})
+$$</p>
+<p>对于时间演化算子$\partial_t - L$，其格林函数$G$满足：</p>
+<p>$$
+(\partial_t - L) G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \delta(t-s)\delta(\boldsymbol{x} - \boldsymbol{y})
+$$</p>
+<p>设$G = \sum_{n} g_n(t, s) \phi_n(\boldsymbol{x}) \phi_n^*(\boldsymbol{y})$，代入得：</p>
+<p>$$
+\sum_n \left[\frac{dg_n}{dt} - \lambda_n g_n\right] \phi_n(\boldsymbol{x}) \phi_n^*(\boldsymbol{y}) = \delta(t-s) \sum_n \phi_n(\boldsymbol{x}) \phi_n^*(\boldsymbol{y})
+$$</p>
+<p>比较系数：</p>
+<p>$$
+\frac{dg_n}{dt} - \lambda_n g_n = \delta(t-s)
+$$</p>
+<p>对于$t &gt; s$，解为：</p>
+<p>$$
+g_n(t, s) = \frac{e^{\lambda_n(t-s)}}{\lambda_n}
+$$</p>
+<p>（这里假设$\lambda_n &lt; 0$以保证收敛，或者理解为$L$是负定的）。</p>
+<h4 id="22">2.2 谱表示的收敛性</h4>
+<p>谱展开的收敛性依赖于特征值的增长速率。对于$d$维欧氏空间上的拉普拉斯算子$\Delta$，Weyl渐近公式给出：</p>
+<p>$$
+N(\lambda) \sim \frac{\omega_d}{(2\pi)^d} \text{Vol}(\Omega) \lambda^{d/2}, \quad \lambda \to \infty
+$$</p>
+<p>其中$N(\lambda)$是小于$\lambda$的特征值个数，$\omega_d$是单位球的体积。这意味着特征值增长如：</p>
+<p>$$
+\lambda_n \sim C n^{2/d}
+$$</p>
+<p>因此谱展开中的项衰减如：</p>
+<p>$$
+\left|\frac{e^{-\lambda_n t}}{\lambda_n} \phi_n(\boldsymbol{x}) \phi_n(\boldsymbol{y})\right| \lesssim \frac{e^{-C n^{2/d} t}}{n^{2/d}}
+$$</p>
+<p>对于$t &gt; 0$，这个级数快速收敛。</p>
+<h3 id="3">3. 半群理论</h3>
+<h4 id="31">3.1 演化算子的半群性质</h4>
+<p>时间演化算子$U(t, s): f \mapsto \int G(t, s; \cdot, \boldsymbol{y}) f(\boldsymbol{y}) d\boldsymbol{y}$构成一个算子半群。半群的基本性质是：</p>
+<p>$$
+U(t, r) = U(t, s) \circ U(s, r), \quad t \geq s \geq r
+$$</p>
+<p>用格林函数表示，这就是<strong>Chapman-Kolmogorov方程</strong>：</p>
+<p>$$
+G(t, r; \boldsymbol{x}, \boldsymbol{z}) = \int G(t, s; \boldsymbol{x}, \boldsymbol{y}) G(s, r; \boldsymbol{y}, \boldsymbol{z}) d\boldsymbol{y}
+$$</p>
+<p><strong>证明</strong>：设$p(r, \boldsymbol{z})$是初始分布，则：</p>
+<p>$$
+\begin{aligned}
+p(t, \boldsymbol{x}) &= \int G(t, r; \boldsymbol{x}, \boldsymbol{z}) p(r, \boldsymbol{z}) d\boldsymbol{z} \\
+&= \int G(t, s; \boldsymbol{x}, \boldsymbol{y}) p(s, \boldsymbol{y}) d\boldsymbol{y} \\
+&= \int G(t, s; \boldsymbol{x}, \boldsymbol{y}) \left[\int G(s, r; \boldsymbol{y}, \boldsymbol{z}) p(r, \boldsymbol{z}) d\boldsymbol{z}\right] d\boldsymbol{y} \\
+&= \int \left[\int G(t, s; \boldsymbol{x}, \boldsymbol{y}) G(s, r; \boldsymbol{y}, \boldsymbol{z}) d\boldsymbol{y}\right] p(r, \boldsymbol{z}) d\boldsymbol{z}
+\end{aligned}
+$$</p>
+<p>由初始分布的任意性，得到C-K方程。</p>
+<h4 id="32">3.2 无穷小生成元</h4>
+<p>半群的生成元定义为：</p>
+<p>$$
+\mathcal{L} f = \lim_{t \to 0^+} \frac{U(t, 0)f - f}{t}
+$$</p>
+<p>对于扩散过程，生成元具有形式：</p>
+<p>$$
+\mathcal{L} = \boldsymbol{f}(\boldsymbol{x}) \cdot \nabla + \frac{1}{2} \text{tr}(D(\boldsymbol{x}) \nabla^2)
+$$</p>
+<p>其中$\boldsymbol{f}$是漂移系数，$D$是扩散矩阵。这对应于随机微分方程：</p>
+<p>$$
+d\boldsymbol{X}_t = \boldsymbol{f}(\boldsymbol{X}_t) dt + \sqrt{D(\boldsymbol{X}_t)} d\boldsymbol{W}_t
+$$</p>
+<p>对于本文的ODE情况（无扩散项），生成元简化为：</p>
+<p>$$
+\mathcal{L} = \boldsymbol{f}(\boldsymbol{x}, t) \cdot \nabla
+$$</p>
+<p>这是一个一阶偏微分算子，对应于无噪声的确定性流。</p>
+<h4 id="33-hille-yosida">3.3 Hille-Yosida定理</h4>
+<p>半群理论的核心结果是Hille-Yosida定理，它刻画了什么样的算子可以作为半群的生成元。</p>
+<p><strong>定理（Hille-Yosida）</strong>：线性算子$\mathcal{L}$是压缩半群的生成元当且仅当：
+1. $\mathcal{L}$稠密定义且闭
+2. 对所有$\lambda &gt; 0$，$(\lambda I - \mathcal{L})^{-1}$存在且满足$|(\lambda I - \mathcal{L})^{-1}| \leq 1/\lambda$</p>
+<p>对于扩散过程，可以验证生成元$\mathcal{L} = \frac{1}{2}\Delta + \boldsymbol{b} \cdot \nabla$满足这些条件（在适当的Sobolev空间中）。</p>
+<h3 id="4">4. 热核理论</h3>
+<h4 id="41">4.1 热核的定义与性质</h4>
+<p>热核是热方程$\partial_t u = \Delta u$的基本解。在全空间$\mathbb{R}^d$上，热核为：</p>
+<p>$$
+K(t, \boldsymbol{x}, \boldsymbol{y}) = \frac{1}{(4\pi t)^{d/2}} \exp\left(-\frac{|\boldsymbol{x} - \boldsymbol{y}|^2}{4t}\right)
+$$</p>
+<p>这是一个高斯函数，具有以下性质：</p>
+<p><strong>性质1（归一化）</strong>：
+$$
+\int K(t, \boldsymbol{x}, \boldsymbol{y}) d\boldsymbol{y} = 1
+$$</p>
+<p><strong>性质2（半群性）</strong>：
+$$
+\int K(t, \boldsymbol{x}, \boldsymbol{z}) K(s, \boldsymbol{z}, \boldsymbol{y}) d\boldsymbol{z} = K(t+s, \boldsymbol{x}, \boldsymbol{y})
+$$</p>
+<p><strong>性质3（初值条件）</strong>：
+$$
+\lim_{t \to 0^+} K(t, \boldsymbol{x}, \boldsymbol{y}) = \delta(\boldsymbol{x} - \boldsymbol{y})
+$$</p>
+<p>这里的极限理解为弱收敛，即对任意连续有界函数$f$：</p>
+<p>$$
+\lim_{t \to 0^+} \int K(t, \boldsymbol{x}, \boldsymbol{y}) f(\boldsymbol{y}) d\boldsymbol{y} = f(\boldsymbol{x})
+$$</p>
+<h4 id="42">4.2 热核的推导</h4>
+<p>我们从Fourier变换推导热核。设$u(t, \boldsymbol{x})$满足热方程$\partial_t u = \Delta u$，取Fourier变换：</p>
+<p>$$
+\hat{u}(t, \boldsymbol{k}) = \int e^{-i\boldsymbol{k} \cdot \boldsymbol{x}} u(t, \boldsymbol{x}) d\boldsymbol{x}
+$$</p>
+<p>则：</p>
+<p>$$
+\frac{\partial \hat{u}}{\partial t} = -|\boldsymbol{k}|^2 \hat{u}
+$$</p>
+<p>解得：</p>
+<p>$$
+\hat{u}(t, \boldsymbol{k}) = e^{-t|\boldsymbol{k}|^2} \hat{u}(0, \boldsymbol{k})
+$$</p>
+<p>对于初值$u(0, \boldsymbol{x}) = \delta(\boldsymbol{x} - \boldsymbol{y})$，有$\hat{u}(0, \boldsymbol{k}) = e^{-i\boldsymbol{k} \cdot \boldsymbol{y}}$，因此：</p>
+<p>$$
+\hat{K}(t, \boldsymbol{k}, \boldsymbol{y}) = e^{-t|\boldsymbol{k}|^2 - i\boldsymbol{k} \cdot \boldsymbol{y}}
+$$</p>
+<p>逆Fourier变换：</p>
+<p>$$
+\begin{aligned}
+K(t, \boldsymbol{x}, \boldsymbol{y}) &= \frac{1}{(2\pi)^d} \int e^{i\boldsymbol{k} \cdot \boldsymbol{x} - t|\boldsymbol{k}|^2 - i\boldsymbol{k} \cdot \boldsymbol{y}} d\boldsymbol{k} \\
+&= \frac{1}{(2\pi)^d} \int e^{i\boldsymbol{k} \cdot (\boldsymbol{x} - \boldsymbol{y}) - t|\boldsymbol{k}|^2} d\boldsymbol{k}
+\end{aligned}
+$$</p>
+<p>完成平方：</p>
+<p>$$
+i\boldsymbol{k} \cdot (\boldsymbol{x} - \boldsymbol{y}) - t|\boldsymbol{k}|^2 = -t\left|\boldsymbol{k} - \frac{i(\boldsymbol{x} - \boldsymbol{y})}{2t}\right|^2 - \frac{|\boldsymbol{x} - \boldsymbol{y}|^2}{4t}
+$$</p>
+<p>利用高斯积分公式$\int e^{-a|z|^2} dz = (\pi/a)^{d/2}$：</p>
+<p>$$
+K(t, \boldsymbol{x}, \boldsymbol{y}) = \frac{1}{(2\pi)^d} \left(\frac{\pi}{t}\right)^{d/2} e^{-\frac{|\boldsymbol{x} - \boldsymbol{y}|^2}{4t}} = \frac{1}{(4\pi t)^{d/2}} e^{-\frac{|\boldsymbol{x} - \boldsymbol{y}|^2}{4t}}
+$$</p>
+<h4 id="43">4.3 带漂移的热核</h4>
+<p>对于带漂移项的扩散方程：</p>
+<p>$$
+\partial_t u = \Delta u + \boldsymbol{b}(\boldsymbol{x}) \cdot \nabla u
+$$</p>
+<p>可以通过Girsanov变换或者Feynman-Kac公式得到格林函数的表达式。在常漂移$\boldsymbol{b}$的情况下，热核为：</p>
+<p>$$
+K(t, \boldsymbol{x}, \boldsymbol{y}) = \frac{1}{(4\pi t)^{d/2}} \exp\left(-\frac{|\boldsymbol{x} - \boldsymbol{y} - \boldsymbol{b}t|^2}{4t}\right)
+$$</p>
+<p>这对应于均值为$\boldsymbol{y} + \boldsymbol{b}t$、方差为$2t\boldsymbol{I}$的高斯分布。</p>
+<h3 id="5">5. 扩散过程的格林函数</h3>
+<h4 id="51-fokker-planck">5.1 Fokker-Planck方程</h4>
+<p>扩散过程由随机微分方程描述：</p>
+<p>$$
+d\boldsymbol{X}_t = \boldsymbol{f}(\boldsymbol{X}_t, t) dt + \boldsymbol{\sigma}(\boldsymbol{X}_t, t) d\boldsymbol{W}_t
+$$</p>
+<p>其概率密度演化遵循Fokker-Planck方程（也称Kolmogorov前向方程）：</p>
+<p>$$
+\frac{\partial p}{\partial t} = -\nabla \cdot (p\boldsymbol{f}) + \frac{1}{2}\sum_{i,j} \frac{\partial^2}{\partial x_i \partial x_j}(D_{ij} p)
+$$</p>
+<p>其中扩散矩阵$D = \boldsymbol{\sigma} \boldsymbol{\sigma}^T$。格林函数$G(t, s; \boldsymbol{x}, \boldsymbol{y})$满足：</p>
+<p>$$
+\frac{\partial G}{\partial t} = -\nabla_{\boldsymbol{x}} \cdot (G\boldsymbol{f}) + \frac{1}{2}\sum_{i,j} \frac{\partial^2}{\partial x_i \partial x_j}(D_{ij} G)
+$$</p>
+<p>配以初始条件$G(s, s; \boldsymbol{x}, \boldsymbol{y}) = \delta(\boldsymbol{x} - \boldsymbol{y})$。</p>
+<h4 id="52-kolmogorov">5.2 后向Kolmogorov方程</h4>
+<p>除了前向方程，格林函数还满足后向方程（关于初始变量$\boldsymbol{y}$和初始时间$s$）：</p>
+<p>$$
+-\frac{\partial G}{\partial s} = \boldsymbol{f}(\boldsymbol{y}, s) \cdot \nabla_{\boldsymbol{y}} G + \frac{1}{2}\sum_{i,j} D_{ij}(\boldsymbol{y}, s) \frac{\partial^2 G}{\partial y_i \partial y_j}
+$$</p>
+<p>这两个方程是对偶的，反映了扩散过程的时间可逆性（在适当的测度变换下）。</p>
+<h4 id="53">5.3 路径积分表示</h4>
+<p>格林函数可以通过路径积分（Feynman-Kac公式）表示。对于扩散过程：</p>
+<p>$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \mathbb{E}\left[\delta(\boldsymbol{X}_t - \boldsymbol{x}) \Big| \boldsymbol{X}_s = \boldsymbol{y}\right]
+$$</p>
+<p>形式上可以写为路径积分：</p>
+<p>$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \int_{\gamma: \boldsymbol{y} \to \boldsymbol{x}} \mathcal{D}\gamma \exp\left(-\frac{1}{2}\int_s^t |\dot{\gamma}_r - \boldsymbol{f}(\gamma_r, r)|^2 dr\right)
+$$</p>
+<p>这里$\mathcal{D}\gamma$是路径测度。虽然路径积分在数学上需要严格定义，但它提供了有用的直观理解和计算方法（如弱噪声极限、鞍点近似等）。</p>
+<h3 id="6">6. 时间依赖的格林函数</h3>
+<h4 id="61">6.1 非齐次情况</h4>
+<p>当系统参数依赖于时间时，格林函数不再满足平移不变性$G(t, s) \neq G(t-s, 0)$。此时需要完整保留两个时间参数。</p>
+<p>对于时变ODE $\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}_t(\boldsymbol{x})$，连续性方程为：</p>
+<p>$$
+\frac{\partial p_t}{\partial t} + \nabla \cdot (p_t \boldsymbol{f}_t) = 0
+$$</p>
+<p>格林函数满足：</p>
+<p>$$
+\frac{\partial G}{\partial t} + \nabla_{\boldsymbol{x}} \cdot (G \boldsymbol{f}_t(\boldsymbol{x})) = 0
+$$</p>
+<h4 id="62-dyson">6.2 Dyson级数</h4>
+<p>对于时变系统，演化算子可以展开为Dyson级数（时间有序指数）：</p>
+<p>$$
+U(t, s) = \mathcal{T}\exp\left(\int_s^t \mathcal{L}_r dr\right) = \sum_{n=0}^{\infty} \int_s^t dr_1 \int_s^{r_1} dr_2 \cdots \int_s^{r_{n-1}} dr_n \mathcal{L}_{r_1} \mathcal{L}_{r_2} \cdots \mathcal{L}_{r_n}
+$$</p>
+<p>其中$\mathcal{T}$表示时间排序算符。对于弱时间依赖，可以用微扰展开：</p>
+<p>$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = G_0(t-s; \boldsymbol{x}, \boldsymbol{y}) + \int_s^t dr \int G_0(t-r; \boldsymbol{x}, \boldsymbol{z}) V_r(\boldsymbol{z}) G_0(r-s; \boldsymbol{z}, \boldsymbol{y}) d\boldsymbol{z} + \cdots
+$$</p>
+<p>其中$G_0$是时间齐次的参考格林函数，$V_r$是时变微扰。</p>
+<h3 id="7">7. 初值响应分析</h3>
+<h4 id="71">7.1 线性响应理论</h4>
+<p>考虑初值的微小扰动$\boldsymbol{x}_0 \to \boldsymbol{x}_0 + \delta\boldsymbol{x}_0$，其对终值的影响由Jacobi矩阵刻画：</p>
+<p>$$
+\frac{\partial \boldsymbol{x}_t}{\partial \boldsymbol{x}_0} = J_t
+$$</p>
+<p>其演化方程为：</p>
+<p>$$
+\frac{dJ_t}{dt} = \frac{\partial \boldsymbol{f}_t}{\partial \boldsymbol{x}}(\boldsymbol{x}_t) J_t, \quad J_0 = I
+$$</p>
+<p>这是一个矩阵微分方程，形式解为：</p>
+<p>$$
+J_t = \mathcal{T}\exp\left(\int_0^t \frac{\partial \boldsymbol{f}_s}{\partial \boldsymbol{x}}(\boldsymbol{x}_s) ds\right)
+$$</p>
+<p>对于本文的格林函数，特征线$\boldsymbol{x}_t(\boldsymbol{x}_0)$的Jacobian正是概率密度变换的关键：</p>
+<p>$$
+p_t(\boldsymbol{x}_t | \boldsymbol{x}_0) = \delta(\boldsymbol{x}_t - \boldsymbol{\phi}_t(\boldsymbol{x}_0)) |\det J_t|^{-1}
+$$</p>
+<p>但由于我们采用了连续密度表示，这个关系蕴含在式$\eqref{eq:pt-xt-x0}$中。</p>
+<h4 id="72-liouville">7.2 Liouville方程的观点</h4>
+<p>从辛几何的观点，相空间密度演化遵循Liouville方程：</p>
+<p>$$
+\frac{dp}{dt} + \{H, p\} = 0
+$$</p>
+<p>其中${,}$是泊松括号。对于正则哈密顿系统，相空间体积守恒（Liouville定理）：</p>
+<p>$$
+\frac{d}{dt}\det J_t = \det J_t \cdot \text{tr}\frac{\partial \boldsymbol{f}}{\partial \boldsymbol{x}} = \det J_t \cdot \nabla \cdot \boldsymbol{f}
+$$</p>
+<p>因此：</p>
+<p>$$
+\det J_t = \exp\left(\int_0^t \nabla \cdot \boldsymbol{f}_s(\boldsymbol{x}_s) ds\right)
+$$</p>
+<p>这正好出现在式$\eqref{eq:pt-xt-x0}$中的指数因子里，体现了相空间体积变化对密度的影响。</p>
+<h3 id="8">8. 格林函数的渐近行为</h3>
+<h4 id="81">8.1 短时渐近</h4>
+<p>当$t \to s^+$时，格林函数趋向于$\delta$函数：</p>
+<p>$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) \approx \frac{1}{(t-s)^{d/2}} \exp\left(-\frac{|\boldsymbol{x} - \boldsymbol{y}|^2}{4(t-s)}\right)
+$$</p>
+<p>这是热核的主导行为。更精确的展开包含梯度修正：</p>
+<p>$$
+G(t, s; \boldsymbol{x}, \boldsymbol{y}) = \frac{1}{(4\pi(t-s))^{d/2}} e^{-\frac{|\boldsymbol{x}-\boldsymbol{y}|^2}{4(t-s)}} \left[1 + O(t-s)\right]
+$$</p>
+<h4 id="82">8.2 长时渐近</h4>
+<p>对于$t \to \infty$，格林函数的行为依赖于系统是否有不变分布。如果存在唯一稳态$p_{\infty}(\boldsymbol{x})$，则：</p>
+<p>$$
+\lim_{t \to \infty} G(t, 0; \boldsymbol{x}, \boldsymbol{y}) = p_{\infty}(\boldsymbol{x})
+$$</p>
+<p>收敛速率由谱隙（spectral gap）$\lambda_1 - \lambda_0$决定：</p>
+<p>$$
+|G(t, 0; \boldsymbol{x}, \boldsymbol{y}) - p_{\infty}(\boldsymbol{x})| \lesssim e^{-(\lambda_1 - \lambda_0)t}
+$$</p>
+<p>对于扩散模型，$p_{\infty}$就是先验分布$p_T(\boldsymbol{x}_T)$。</p>
+<h4 id="83">8.3 中间标度行为</h4>
+<p>在中间时间尺度，格林函数可能展现自相似行为或标度律。例如，对于幂律势场，可能有：</p>
+<p>$$
+G(t, 0; \boldsymbol{x}, \boldsymbol{y}) \sim t^{-\alpha} F\left(\frac{\boldsymbol{x}}{t^{\beta}}, \frac{\boldsymbol{y}}{t^{\beta}}\right)
+$$</p>
+<p>其中$\alpha, \beta$是标度指数，$F$是标度函数。</p>
+<h3 id="9">9. 与基本解的关系</h3>
+<h4 id="91">9.1 基本解的定义</h4>
+<p>偏微分方程$Lu = f$的基本解$E(\boldsymbol{x}, \boldsymbol{y})$满足：</p>
+<p>$$
+L_{\boldsymbol{x}} E(\boldsymbol{x}, \boldsymbol{y}) = \delta(\boldsymbol{x} - \boldsymbol{y})
+$$</p>
+<p>方程的解可表示为：</p>
+<p>$$
+u(\boldsymbol{x}) = \int E(\boldsymbol{x}, \boldsymbol{y}) f(\boldsymbol{y}) d\boldsymbol{y}
+$$</p>
+<h4 id="92">9.2 时间依赖方程的基本解</h4>
+<p>对于演化方程$(\partial_t - L)u = f$，基本解$E(t, s; \boldsymbol{x}, \boldsymbol{y})$满足：</p>
+<p>$$
+(\partial_t - L_{\boldsymbol{x}}) E(t, s; \boldsymbol{x}, \boldsymbol{y}) = \delta(t-s)\delta(\boldsymbol{x} - \boldsymbol{y})
+$$</p>
+<p>这正是格林函数$G(t, s; \boldsymbol{x}, \boldsymbol{y})$的定义方程。因此，格林函数就是时间依赖偏微分方程的基本解。</p>
+<h4 id="93-green">9.3 Green公式与表示定理</h4>
+<p>利用Green第二恒等式，可以得到解的积分表示。对于热方程，有：</p>
+<p>$$
+u(t, \boldsymbol{x}) = \int G(t, 0; \boldsymbol{x}, \boldsymbol{y}) u(0, \boldsymbol{y}) d\boldsymbol{y} + \int_0^t \int G(t, s; \boldsymbol{x}, \boldsymbol{y}) f(s, \boldsymbol{y}) d\boldsymbol{y} ds
+$$</p>
+<p>第一项是初值的贡献，第二项是源项的贡献。对于齐次方程（$f=0$），只有初值项。</p>
+<h3 id="10">10. 实际计算方法</h3>
+<h4 id="101">10.1 直接数值积分</h4>
+<p>对于简单的格林函数（如高斯核），可以直接进行蒙特卡洛采样或数值积分。例如：</p>
+<p>$$
+p_t(\boldsymbol{x}_t) = \int G(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 \approx \frac{1}{N}\sum_{i=1}^N G(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0^{(i)})
+$$</p>
+<p>其中$\boldsymbol{x}_0^{(i)} \sim p_0$。</p>
+<h4 id="102">10.2 特征线方法的数值实现</h4>
+<p>对于式$\eqref{eq:pt-xt-x0}$的计算，需要：
+1. 从轨迹方程$\eqref{eq:track}$解出$\boldsymbol{x}_T(\boldsymbol{x}_t, \boldsymbol{x}_0)$
+2. 计算$\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$沿轨迹的散度积分
+3. 代入先验分布$p_T$</p>
+<p><strong>算法步骤</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="err">输入</span><span class="o">:</span><span class="w"> </span><span class="n">t</span><span class="o">,</span><span class="w"> </span><span class="n">x_t</span><span class="o">,</span><span class="w"> </span><span class="n">x_0</span>
+<span class="mi">1</span><span class="o">.</span><span class="w"> </span><span class="err">求解</span><span class="w"> </span><span class="err">φ</span><span class="n">_t</span><span class="o">(</span><span class="n">x_t</span><span class="o">|</span><span class="n">x_0</span><span class="o">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x_T</span><span class="w"> </span><span class="o">(</span><span class="err">代数或数值求解</span><span class="o">)</span>
+<span class="mi">2</span><span class="o">.</span><span class="w"> </span><span class="err">计算</span><span class="w"> </span><span class="n">f_s</span><span class="o">(</span><span class="n">x_s</span><span class="o">|</span><span class="n">x_0</span><span class="o">)</span><span class="w"> </span><span class="err">对</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="err">∈</span><span class="w"> </span><span class="o">[</span><span class="n">t</span><span class="o">,</span><span class="w"> </span><span class="n">T</span><span class="o">]</span>
+<span class="mi">3</span><span class="o">.</span><span class="w"> </span><span class="err">数值积分</span><span class="w"> </span><span class="n">I</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">∫</span><span class="n">_t</span><span class="o">^</span><span class="n">T</span><span class="w"> </span><span class="err">∇·</span><span class="n">f_s</span><span class="o">(</span><span class="n">x_s</span><span class="o">|</span><span class="n">x_0</span><span class="o">)</span><span class="w"> </span><span class="n">ds</span>
+<span class="mi">4</span><span class="o">.</span><span class="w"> </span><span class="err">计算</span><span class="w"> </span><span class="n">p_T</span><span class="o">(</span><span class="n">x_T</span><span class="o">)</span>
+<span class="mi">5</span><span class="o">.</span><span class="w"> </span><span class="err">返回</span><span class="w"> </span><span class="n">p_t</span><span class="o">(</span><span class="n">x_t</span><span class="o">|</span><span class="n">x_0</span><span class="o">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">p_T</span><span class="o">(</span><span class="n">x_T</span><span class="o">)</span><span class="w"> </span><span class="n">exp</span><span class="o">(</span><span class="n">I</span><span class="o">)</span>
+</code></pre></div>
+
+<h4 id="103">10.3 谱方法</h4>
+<p>对于周期边界条件或紧支撑域，可以使用谱方法：
+1. 展开$p_t = \sum_n c_n(t) \phi_n$
+2. 将PDE转化为ODE系统：$\dot{c}<em nm="nm">n = \sum_m M</em> c_m$
+3. 求解ODE得到系数演化
+4. 重构$p_t$</p>
+<h4 id="104">10.4 有限元/有限差分</h4>
+<p>对于复杂几何或边界条件，使用空间离散化方法：
+- 有限差分：将$\nabla, \Delta$离散化为差分算子
+- 有限元：将解展开为分片多项式基函数
+- 有限体积：保证守恒律的离散化</p>
+<p>这些方法将PDE转化为大型稀疏线性系统，可用迭代法求解。</p>
+<h4 id="105">10.5 神经网络参数化</h4>
+<p>现代扩散模型采用神经网络直接学习$\boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$或其期望$\boldsymbol{f}_t(\boldsymbol{x}_t)$。训练目标式$\eqref{eq:score-match}$可以通过随机梯度下降优化：</p>
+<div class="codehilite"><pre><span></span><code>for epoch in epochs:
+    采样 x_0 ~ p_0
+    采样 t ~ Uniform[0, T]
+    计算 x_t ~ p_t(·|x_0)
+    计算损失 L = ||v_θ(x_t, t) - f_t(x_t|x_0)||²
+    反向传播更新 θ
+</code></pre></div>
+
+<p>这避免了显式求解格林函数，而是通过数据驱动的方式学习速度场。</p>
+<h3 id="11_1">11. 特殊情况：线性轨迹的完整推导</h3>
+<h4 id="111">11.1 一般线性形式</h4>
+<p>回到式中的线性轨迹$\boldsymbol{x}_t = \boldsymbol{\mu}_t(\boldsymbol{x}_0) + \sigma_t \boldsymbol{x}_1$，我们详细推导所有中间步骤。</p>
+<p><strong>步骤1</strong>：计算速度场。轨迹方程为：</p>
+<p>$$
+\boldsymbol{\varphi}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0)}{\sigma_t}
+$$</p>
+<p>这应该等于$\boldsymbol{x}_1$（常数）。对$t$求全导数：</p>
+<p>$$
+\frac{\partial \boldsymbol{\varphi}_t}{\partial t} + \frac{\partial \boldsymbol{\varphi}_t}{\partial \boldsymbol{x}_t} \frac{d\boldsymbol{x}_t}{dt} = 0
+$$</p>
+<p>计算偏导：</p>
+<p>$$
+\frac{\partial \boldsymbol{\varphi}_t}{\partial t} = \frac{-\dot{\boldsymbol{\mu}}_t(\boldsymbol{x}_0)}{\sigma_t} - \frac{\dot{\sigma}_t}{\sigma_t^2}(\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0))
+$$</p>
+<p>$$
+\frac{\partial \boldsymbol{\varphi}_t}{\partial \boldsymbol{x}_t} = \frac{1}{\sigma_t} I
+$$</p>
+<p>代入得：</p>
+<p>$$
+\frac{d\boldsymbol{x}_t}{dt} = -\sigma_t \frac{\partial \boldsymbol{\varphi}_t}{\partial t} = \dot{\boldsymbol{\mu}}_t(\boldsymbol{x}_0) + \frac{\dot{\sigma}_t}{\sigma_t}(\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0))
+$$</p>
+<p><strong>步骤2</strong>：计算散度。</p>
+<p>$$
+\nabla_{\boldsymbol{x}_t} \cdot \boldsymbol{f}_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \nabla_{\boldsymbol{x}_t} \cdot \left[\frac{\dot{\sigma}_t}{\sigma_t}(\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0))\right] = \frac{d\dot{\sigma}_t}{\sigma_t}
+$$</p>
+<p><strong>步骤3</strong>：求解密度演化。根据式$\eqref{eq:pt-xt-x0}$：</p>
+<p>$$
+p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = p_T(\boldsymbol{x}_T) \exp\left(\int_t^T \frac{d\dot{\sigma}_s}{\sigma_s} ds\right) = p_T(\boldsymbol{x}_T) \exp\left(d\log\frac{\sigma_T}{\sigma_t}\right) = \frac{\sigma_T^d}{\sigma_t^d} p_T(\boldsymbol{x}_T)
+$$</p>
+<p>由于$\sigma_T = 1$：</p>
+<p>$$
+p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{p_T(\boldsymbol{x}_T)}{\sigma_t^d}
+$$</p>
+<p><strong>步骤4</strong>：代入轨迹关系。从$\boldsymbol{x}_t = \boldsymbol{\mu}_t(\boldsymbol{x}_0) + \sigma_t \boldsymbol{x}_T$，得：</p>
+<p>$$
+\boldsymbol{x}_T = \frac{\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0)}{\sigma_t}
+$$</p>
+<p>代入上式：</p>
+<p>$$
+p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{1}{\sigma_t^d} p_T\left(\frac{\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0)}{\sigma_t}\right)
+$$</p>
+<p>这正是文中的结果。特别地，当$p_T = \mathcal{N}(0, I)$时：</p>
+<p>$$
+p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{1}{\sigma_t^d (2\pi)^{d/2}} \exp\left(-\frac{|\boldsymbol{x}_t - \boldsymbol{\mu}_t(\boldsymbol{x}_0)|^2}{2\sigma_t^2}\right) = \mathcal{N}(\boldsymbol{x}_t; \boldsymbol{\mu}_t(\boldsymbol{x}_0), \sigma_t^2 I)
+$$</p>
+<h4 id="112-chapman-kolmogorov">11.2 验证Chapman-Kolmogorov方程</h4>
+<p>作为完整性检查，我们验证格林函数满足C-K方程。对于线性情况：</p>
+<p>$$
+\begin{aligned}
+&\int G(t, s; \boldsymbol{x}_t, \boldsymbol{x}_s) G(s, 0; \boldsymbol{x}_s, \boldsymbol{x}_0) d\boldsymbol{x}_s \\
+=&\, \int \frac{1}{\sigma_{t|s}^d} p_T\left(\frac{\boldsymbol{x}_t - \boldsymbol{\mu}_{t|s}(\boldsymbol{x}_s)}{\sigma_{t|s}}\right) \frac{1}{\sigma_s^d} p_T\left(\frac{\boldsymbol{x}_s - \boldsymbol{\mu}_s(\boldsymbol{x}_0)}{\sigma_s}\right) d\boldsymbol{x}_s
+\end{aligned}
+$$</p>
+<p>这里$\boldsymbol{\mu}<em t_s="t|s">{t|s}, \sigma</em>_0)$（两个高斯卷积仍是高斯）。}$表示从$s$到$t$的参数。对于线性轨迹，可以验证这等于$G(t, 0; \boldsymbol{x}_t, \boldsymbol{x</p>
+<h3 id="12_1">12. 总结与展望</h3>
+<p>通过以上详细推导，我们从多个角度理解了格林函数在扩散模型中的作用：</p>
+<ol>
+<li>
+<p><strong>泛函分析角度</strong>：格林函数是线性微分算子的逆，具有对称性、正定性等代数性质，可以通过谱分解表示。</p>
+</li>
+<li>
+<p><strong>偏微分方程角度</strong>：格林函数是Fokker-Planck方程或连续性方程的基本解，满足Chapman-Kolmogorov方程，通过特征线法可以构造显式解。</p>
+</li>
+<li>
+<p><strong>概率论角度</strong>：格林函数表示扩散过程的转移概率密度，通过路径积分或Feynman-Kac公式可以得到其随机过程表示。</p>
+</li>
+<li>
+<p><strong>半群理论角度</strong>：格林函数定义了演化算子半群，其无穷小生成元刻画了系统的动力学。</p>
+</li>
+<li>
+<p><strong>数值计算角度</strong>：格林函数可以通过谱方法、有限元方法或神经网络学习等多种方式计算和近似。</p>
+</li>
+</ol>
+<p>这些不同的视角相互补充，为我们设计和分析扩散模型提供了坚实的数学基础。特别是本文的特征线法，通过巧妙地构造满足初值条件的轨迹族，再利用特征线法保证终值条件，得到了一个统一而优雅的框架，这对理解和推广扩散模型具有重要意义。</p>
+        </div>
+    </div>
+</body>
+</html>

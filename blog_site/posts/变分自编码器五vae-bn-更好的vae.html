@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>变分自编码器（五）：VAE + BN = 更好的VAE</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>变分自编码器（五）：VAE + BN = 更好的VAE</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 12.6 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7381">https://spaces.ac.cn/archives/7381</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>本文我们继续之前的<a href="/search/%E5%8F%98%E5%88%86%E8%87%AA%E7%BC%96%E7%A0%81%E5%99%A8/">变分自编码器系列</a>，分析一下如何防止NLP中的VAE模型出现“KL散度消失（KL Vanishing）”现象。本文受到参考文献是ACL 2020的论文<a href="https://papers.cool/arxiv/2004.12585">《A Batch Normalized Inference Network Keeps the KL Vanishing Away》</a>的启发，并自行做了进一步的完善。</p>
+<p>值得一提的是，本文最后得到的方案还是颇为简洁的——<strong>只需往编码输出加入BN（Batch Normalization），然后加个简单的scale</strong> ——但确实很有效，因此值得正在研究相关问题的读者一试。同时，相关结论也适用于一般的VAE模型（包括CV的），如果按照笔者的看法，它甚至可以作为VAE模型的“标配”。</p>
+<p>最后，要提醒读者这算是一篇VAE的进阶论文，所以请读者对VAE有一定了解后再来阅读本文。</p>
+<h2 id="vae">VAE简单回顾</h2>
+<p>这里我们简单回顾一下VAE模型，并且讨论一下VAE在NLP中所遇到的困难。关于VAE的更详细介绍，请读者参考笔者的旧作<a href="/archives/5253">《变分自编码器（一）：原来是这么一回事》</a>、<a href="/archives/5343">《变分自编码器（二）：从贝叶斯观点出发》</a>等。</p>
+<h3 id="vae_1">VAE的训练流程</h3>
+<p>VAE的训练流程大概可以图示为  </p>
+<p><a href="/usr/uploads/2020/05/1557384471.png" title="点击查看原图"><img alt="VAE训练流程图示" src="/usr/uploads/2020/05/1557384471.png" /></a></p>
+<p>VAE训练流程图示</p>
+<p>写成公式就是<br />
+$$\begin{equation}\mathcal{L} = \mathbb{E}_{x\sim \tilde{p}(x)} \Big[\mathbb{E}_{z\sim p(z|x)}\big[-\log q(x|z)\big]+KL\big(p(z|x)\big\Vert q(z)\big)\Big]  
+\end{equation}$$<br />
+其中第一项就是重构项，$\mathbb{E}_{z\sim p(z|x)}$是通过重参数来实现；第二项则称为KL散度项，这是它跟普通自编码器的显式差别，如果没有这一项，那么基本上退化为常规的AE。更详细的符号含义可以参考<a href="/archives/5343">《变分自编码器（二）：从贝叶斯观点出发》</a>。</p>
+<h3 id="nlpvae">NLP中的VAE</h3>
+<p>在NLP中，句子被编码为离散的整数ID，所以$q(x|z)$是一个离散型分布，可以用万能的“条件语言模型”来实现，因此理论上$q(x|z)$可以精确地拟合生成分布，问题就出在$q(x|z)$太强了，训练时重参数操作会来噪声，噪声一大，$z$的利用就变得困难起来，所以它干脆不要$z$了，退化为无条件语言模型（依然很强），$KL(p(z|x)\Vert q(z))$则随之下降到0，这就出现了KL散度消失现象。</p>
+<p>这种情况下的VAE模型并没有什么价值：KL散度为0说明编码器输出的是常数向量，而解码器则是一个普通的语言模型。而我们使用VAE通常来说是看中了它无监督构建编码向量的能力，所以要应用VAE的话还是得解决KL散度消失问题。事实上从2016开始，有不少工作在做这个问题，相应地也提出了很多方案，比如退火策略、更换先验分布等，读者Google一下“KL Vanishing”就可以找到很多文献了，这里不一一溯源。</p>
+<h2 id="bn">BN的巧与妙</h2>
+<p>本文的方案则是直接针对KL散度项入手，简单有效而且没什么超参数。其思想很简单：</p>
+<blockquote>
+<p>KL散度消失不就是KL散度项变成0吗？我调整一下编码器输出，让KL散度有一个大于零的下界，这样它不就肯定不会消失了吗？</p>
+</blockquote>
+<p>这个简单的思想的直接结果就是：在$\mu$后面加入BN层，如图  </p>
+<p><a href="/usr/uploads/2020/05/3260688433.png" title="点击查看原图"><img alt="往VAE里加入BN" src="/usr/uploads/2020/05/3260688433.png" /></a></p>
+<p>往VAE里加入BN</p>
+<h3 id="_1">推导过程简述</h3>
+<p>为什么会跟BN联系起来呢？我们来看KL散度项的形式：<br />
+\begin{equation}\mathbb{E}<em i="1">{x\sim\tilde{p}(x)}\left[KL\big(p(z|x)\big\Vert q(z)\big)\right] = \frac{1}{b} \sum</em>}^b \sum_{j=1}^d \frac{1}{2}\Big(\mu_{i,j}^2 + \sigma_{i,j}^2 - \log \sigma_{i,j}^2 - 1\Big)\end{equation<br />
+上式是采样了$b$个样本进行计算的结果，而编码向量的维度则是$d$维。由于我们总是有$e^x \geq x + 1$，所以$\sigma_{i,j}^2 - \log \sigma_{i,j}^2 - 1 \geq 0$，因此<br />
+\begin{equation}\mathbb{E}<em i="1">{x\sim\tilde{p}(x)}\left[KL\big(p(z|x)\big\Vert q(z)\big)\right] \geq \frac{1}{b} \sum</em>}^b \sum_{j=1}^d \frac{1}{2}\mu_{i,j}^2 = \frac{1}{2}\sum_{j=1}^d \left(\frac{1}{b} \sum_{i=1}^b \mu_{i,j}^2\right)\label{eq:kl}\end{equation<br />
+留意到括号里边的量，其实它就是$\mu$在batch内的二阶矩，如果我们往$\mu$加入BN层，那么大体上可以保证$\mu$的均值为$\beta$，方差为$\gamma^2$（$\beta,\gamma$是BN里边的可训练参数），这时候<br />
+\begin{equation}\mathbb{E}_{x\sim\tilde{p}(x)}\left[KL\big(p(z|x)\big\Vert q(z)\big)\right] \geq \frac{d}{2}\left(\beta^2 + \gamma^2\right)\label{eq:kl-lb}\end{equation}<br />
+所以只要控制好$\beta,\gamma$（主要是固定$\gamma$为某个常数），就可以让KL散度项有个正的下界，因此就不会出现KL散度消失现象了。这样一来，KL散度消失现象跟BN就被巧妙地联系起来了，通过BN来“杜绝”了KL散度消失的可能性。</p>
+<h3 id="ln">为什么不是LN？</h3>
+<p>善于推导的读者可能会想到，按照上述思路，如果只是为了让KL散度项有个正的下界，其实LN（Layer Normalization）也可以，也就是在式$\eqref{eq:kl}$中按$j$那一维归一化。</p>
+<p><strong>那为什么用BN而不是LN呢？</strong></p>
+<p>这个问题的答案也是BN的巧妙之处。直观来理解，KL散度消失是因为$z\sim p(z|x)$的噪声比较大，解码器无法很好地辨别出$z$中的非噪声成分，所以干脆弃之不用；而当给$\mu(x)$加上BN后，相当于适当地拉开了不同样本的$z$的距离，使得哪怕$z$带了噪声，区分起来也容易一些，所以这时候解码器乐意用$z$的信息，因此能缓解这个问题；相比之下，LN是在样本内进的行归一化，没有拉开样本间差距的作用，所以LN的效果不会有BN那么好。</p>
+<h2 id="_2">进一步的结果</h2>
+<p>事实上，原论文的推导到上面基本上就结束了，剩下的都是实验部分，包括通过实验来确定$\gamma$的值。然而，笔者认为目前为止的结论还有一些美中不足的地方，比如没有提供关于加入BN的更深刻理解，倒更像是一个工程的技巧，又比如只是$\mu(x)$加上了BN，$\sigma(x)$没有加上，未免有些不对称之感。</p>
+<p>经过笔者的推导，发现上面的结论可以进一步完善。</p>
+<h3 id="_3">联系到先验分布</h3>
+<p>对于VAE来说，它希望训练好后的模型的隐变量分布为先验分布$q(z)=\mathcal{N}(z;0,1)$，而后验分布则是$p(z|x)=\mathcal{N}(z; \mu(x),\sigma^2(x))$，所以VAE希望下式成立：<br />
+\begin{equation}q(z) = \int \tilde{p}(x)p(z|x)dx=\int \tilde{p}(x)\mathcal{N}(z; \mu(x),\sigma^2(x))dx\end{equation}<br />
+两边乘以$z$，并对$z$积分，得到<br />
+\begin{equation}0 = \int \tilde{p}(x)\mu(x)dx=\mathbb{E}<em _tilde_p="\tilde{p" x_sim="x\sim">{x\sim \tilde{p}(x)}[\mu(x)]\end{equation}<br />
+两边乘以$z^2$，并对$z$积分，得到<br />
+\begin{equation}1 = \int \tilde{p}(x)\left[\mu^2(x) + \sigma^2(x)\right]dx = \mathbb{E}</em>}(x)}\left[\mu^2(x)\right] + \mathbb{E<em _tilde_p="\tilde{p" x_sim="x\sim">{x\sim \tilde{p}(x)}\left[\sigma^2(x)\right]\end{equation}<br />
+如果往$\mu(x),\sigma(x)$都加入BN，那么我们就有<br />
+\begin{equation}\begin{aligned}<br />
+&amp;0 = \mathbb{E}</em>\\\}(x)}[\mu(x)] = \beta_{\mu<br />
+&amp;1 = \mathbb{E}<em _tilde_p="\tilde{p" x_sim="x\sim">{x\sim \tilde{p}(x)}\left[\mu^2(x)\right] + \mathbb{E}</em>^2}(x)}\left[\sigma^2(x)\right] = \beta_{\mu}^2 + \gamma_{\mu}^2 + \beta_{\sigma}^2 + \gamma_{\sigma<br />
+\end{aligned}\end{equation}<br />
+所以现在我们知道$\beta_{\mu}$一定是0，而如果我们也固定$\beta_{\sigma}=0$，那么我们就有约束关系：<br />
+\begin{equation}1 = \gamma_{\mu}^2 + \gamma_{\sigma}^2\label{eq:gamma2}\end{equation}</p>
+<h3 id="_4">参考的实现方案</h3>
+<p>经过这样的推导，我们发现可以往$\mu(x),\sigma(x)$都加入BN，并且可以固定$\beta_{\mu}=\beta_{\sigma}=0$，但此时需要满足约束$\eqref{eq:gamma2}$。要注意的是，这部分讨论还仅仅是对VAE的一般分析，并没有涉及到KL散度消失问题，哪怕这些条件都满足了，也无法保证KL项不趋于0。结合式$\eqref{eq:kl-lb}$我们可以知道，保证KL散度不消失的关键是确保$\gamma_{\mu} &gt; 0$，所以，笔者提出的最终策略是：<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\beta_{\mu}=\beta_{\sigma}=0\\\<br />
+&amp;\gamma_{\mu} = \sqrt{\tau + (1-\tau)\cdot\text{sigmoid}(\theta)}\\\<br />
+&amp;\gamma_{\sigma} = \sqrt{(1-\tau)\cdot\text{sigmoid}(-\theta)}<br />
+\end{aligned}\end{equation}<br />
+其中$\tau\in(0,1)$是一个常数，笔者在自己的实验中取了$\tau=0.5$，而$\theta$是可训练参数，上式利用了恒等式$\text{sigmoid}(-\theta) = 1-\text{sigmoid}(\theta)$。</p>
+<p>关键代码参考（Keras）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span> <span class="n">Scaler</span>(<span class="n">Layer</span>):
+    <span class="s">&quot;&quot;&quot;特殊的scale层</span>
+<span class="s">    &quot;&quot;&quot;</span>
+    <span class="n">def</span> <span class="n">__init__</span>(<span class="nb">self</span>, <span class="n">tau</span>=<span class="mf">0.5</span>, **<span class="n">kwargs</span>):
+        <span class="n">super</span>(<span class="n">Scaler</span>, <span class="nb">self</span>).<span class="n">__init__</span>(**<span class="n">kwargs</span>)
+        <span class="nb">self</span>.<span class="n">tau</span> = <span class="n">tau</span>
+
+    <span class="n">def</span> <span class="n">build</span>(<span class="nb">self</span>, <span class="n">input_shape</span>):
+        <span class="n">super</span>(<span class="n">Scaler</span>, <span class="nb">self</span>).<span class="n">build</span>(<span class="n">input_shape</span>)
+        <span class="nb">self</span>.<span class="n">scale</span> = <span class="nb">self</span>.<span class="n">add_weight</span>(
+            <span class="nb">name</span>=<span class="s">&#39;scale&#39;</span>, <span class="nb">shape</span>=(<span class="n">input_shape</span>[-<span class="mi">1</span>],), <span class="n">initializer</span>=<span class="s">&#39;zeros&#39;</span>
+        )
+
+    <span class="n">def</span> <span class="n">call</span>(<span class="nb">self</span>, <span class="n">inputs</span>, <span class="nb">mode</span>=<span class="s">&#39;positive&#39;</span>):
+        <span class="k">if</span> <span class="nb">mode</span> == <span class="s">&#39;positive&#39;</span>:
+            <span class="n">scale</span> = <span class="nb">self</span>.<span class="n">tau</span> + (<span class="mi">1</span> - <span class="nb">self</span>.<span class="n">tau</span>) * <span class="n">K</span>.<span class="n">sigmoid</span>(<span class="nb">self</span>.<span class="n">scale</span>)
+        <span class="n">else:</span>
+            <span class="n">scale</span> = (<span class="mi">1</span> - <span class="nb">self</span>.<span class="n">tau</span>) * <span class="n">K</span>.<span class="n">sigmoid</span>(-<span class="n">self</span>.<span class="n">scale</span>)
+        <span class="k">return</span> <span class="n">inputs</span> * <span class="n">K</span>.<span class="nb">sqrt</span>(<span class="n">scale</span>)
+
+    <span class="n">def</span> <span class="n">get_config</span>(<span class="nb">self</span>):
+        <span class="nb">config</span> = {<span class="s">&#39;tau&#39;</span>: <span class="nb">self</span>.<span class="n">tau</span>}
+        <span class="n">base_config</span> = <span class="n">super</span>(<span class="n">Scaler</span>, <span class="nb">self</span>).<span class="n">get_config</span>()
+        <span class="k">return</span> <span class="n">dict</span>(<span class="n">list</span>(<span class="n">base_config</span>.<span class="n">items</span>()) + <span class="n">list</span>(<span class="nb">config</span>.<span class="n">items</span>()))
+
+
+<span class="n">def</span> <span class="n">sampling</span>(<span class="n">inputs</span>):
+    <span class="s">&quot;&quot;&quot;重参数采样</span>
+<span class="s">    &quot;&quot;&quot;</span>
+    <span class="n">z_mean</span>, <span class="n">z_std</span> = <span class="n">inputs</span>
+    <span class="n">noise</span> = <span class="n">K</span>.<span class="n">random_normal</span>(<span class="nb">shape</span>=<span class="n">K</span>.<span class="nb">shape</span>(<span class="n">z_mean</span>))
+    <span class="k">return</span> <span class="n">z_mean</span> + <span class="n">z_std</span> * <span class="n">noise</span>
+
+
+<span class="n">e_outputs</span>  <span class="c1"># 假设e_outputs是编码器的输出向量</span>
+<span class="n">scaler</span> = <span class="n">Scaler</span>()
+<span class="n">z_mean</span> = <span class="n">Dense</span>(<span class="n">hidden_dims</span>)(<span class="n">e_outputs</span>)
+<span class="n">z_mean</span> = <span class="n">BatchNormalization</span>(<span class="n">scale</span>=<span class="nb">False</span>, <span class="n">center</span>=<span class="nb">False</span>, <span class="n">epsilon</span>=<span class="mf">1e-8</span>)(<span class="n">z_mean</span>)
+<span class="n">z_mean</span> = <span class="n">scaler</span>(<span class="n">z_mean</span>, <span class="nb">mode</span>=<span class="s">&#39;positive&#39;</span>)
+<span class="n">z_std</span> = <span class="n">Dense</span>(<span class="n">hidden_dims</span>)(<span class="n">e_outputs</span>)
+<span class="n">z_std</span> = <span class="n">BatchNormalization</span>(<span class="n">scale</span>=<span class="nb">False</span>, <span class="n">center</span>=<span class="nb">False</span>, <span class="n">epsilon</span>=<span class="mf">1e-8</span>)(<span class="n">z_std</span>)
+<span class="n">z_std</span> = <span class="n">scaler</span>(<span class="n">z_std</span>, <span class="nb">mode</span>=<span class="s">&#39;negative&#39;</span>)
+<span class="nb">z</span> = <span class="n">Lambda</span>(<span class="n">sampling</span>, <span class="nb">name</span>=<span class="s">&#39;Sampling&#39;</span>)([<span class="n">z_mean</span>, <span class="n">z_std</span>])
+</code></pre></div>
+
+<h2 id="_5">文章内容小结</h2>
+<p>本文简单分析了VAE在NLP中的KL散度消失现象，并介绍了通过BN层来防止KL散度消失、稳定训练流程的方法。这是一种简洁有效的方案，不单单是原论文，笔者私下也做了简单的实验，结果确实也表明了它的有效性，值得各位读者试用。因为其推导具有一般性，所以甚至任意场景（比如CV）中的VAE模型都可以尝试一下。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7381">https://spaces.ac.cn/archives/7381</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 06, 2020). 《 变分自编码器（五）：VAE + BN = 更好的VAE 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7381">https://spaces.ac.cn/archives/7381</a></p>
+<p>@online{kexuefm-7381,<br />
+title={ 变分自编码器（五）：VAE + BN = 更好的VAE},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/7381}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

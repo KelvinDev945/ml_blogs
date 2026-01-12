@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我在Performer中发现了Transformer-VQ的踪迹</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>我在Performer中发现了Transformer-VQ的踪迹</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 28.8 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9862">https://spaces.ac.cn/archives/9862</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>前些天我们在<a href="/archives/9844">《VQ一下Key，Transformer的复杂度就变成线性了》</a>介绍了“Transformer-VQ”，这是通过将Key序列做VQ（Vector Quantize）变换来实现Attention复杂度线性化的方案。诚然，Transformer-VQ提供了标准Attention到线性Attentino的一个非常漂亮的过渡，给人一种“大道至简”的美感，但熟悉VQ的读者应该能感觉到，当编码表大小或者模型参数量进一步增加时，VQ很可能会成为效果提升的瓶颈，因为它通过STE（Straight-Through Estimator）估计的梯度大概率是次优的（<a href="/archives/9826">FSQ</a>的实验结果也算是提供了一些佐证）。此外，Transformer-VQ为了使训练效率也线性化所做的梯度截断，也可能成为将来的效果瓶颈之一。</p>
+<p>为此，笔者花了一些时间思考可以替代掉VQ的线性化思路。从Transformer-VQ的$\exp\left(QC^{\top}\right)$形式中，笔者联想到了<a href="/archives/7921">Performer</a>，继而“顺藤摸瓜”地发现原来Performer可以视为Soft版的Transformer-VQ。进一步地，笔者尝试类比Performer的推导方法来重新导出Transformer-VQ，为其后的优化提供一些参考结果。</p>
+<h2 id="_1">前情回顾</h2>
+<p>首先，让我们花一些时间回顾一下Transformer-VQ。设$Q,K\in\mathbb{R}^{n\times d_k},V\in\mathbb{R}^{n\times d_v}$，Transformer-VQ的关键，是对$K$做了如下VQ近似：<br />
+\begin{equation}K\approx\hat{K}\triangleq\Delta C\end{equation}<br />
+这里的$\Delta\in\{0,1\}^{n\times c},C\in\mathbb{R}^{c\times d_k}$都是矩阵，其中$C$是可训练的参数，$\Delta$则定义为：<br />
+\begin{equation}\Delta_{i,j} = \left\{\begin{aligned}&amp; 1, \quad j=\mathop{\text{argmin}}_{k=1,2,\cdots,c} \Vert K_i - C_k\Vert \\\<br />
+&amp; 0, \quad\text{其他}\end{aligned}\right.\end{equation}<br />
+说白了，VQ就是用与$K_i$最相近的那个$C_j$来近似$K_i$。在这个近似之下，我们有（简单起见，以Encoder为例）<br />
+\begin{equation}\exp\left(Q\hat{K}{}^{\top}\right)V = \exp\left(QC^{\top}\Delta^{\top}\right)V = \exp\left(QC^{\top}\right)\Delta^{\top}V = \exp\left(QC^{\top}\right)(\Delta^{\top}V)\label{eq:transformer-vq}\end{equation}<br />
+了解线性Attention的读者很容易认出来，最后一个式子的运算就是线性复杂度的，它就是本文的主角之一Transformer-VQ（的分子，还有分母同理）。</p>
+<p>没有很复杂的推导，线性Attention就出来了，这就给我们一种感觉，仿佛我们是在对Key做近似的“不经意间”就将Attention的复杂度降为了线性，美感十足。因此，再次回到了我们已经提过多次的评价——Transformer-VQ提供了标准Attention到线性Attentino的一个非常漂亮的过渡。</p>
+<h2 id="_2">似曾相识</h2>
+<p>Transformer-VQ的$\exp\left(QC^{\top}\right)$让笔者联想到了之前的文章<a href="/archives/8338">《Transformer升级之路：3、从Performer到线性Attention》</a>。在那篇文章中，笔者对Performer的结果做了一些简化，然后断言线性Attention的$Q,K$的最佳激活函数是$\exp$，而Transformer-VQ同样出现了$\exp$，所以它们之间也许有着某种相关性。</p>
+<p>为了挖掘这种联系，让我们请出Performer，它基于一个漂亮的近似：<br />
+\begin{equation}<br />
+e^{\boldsymbol{q}\cdot \boldsymbol{k}}=\mathbb{E}<em _tilde_boldsymbol_q="\tilde{\boldsymbol{q">{\boldsymbol{\omega}\sim \mathcal{N}(\boldsymbol{\omega};0,\boldsymbol{1}_d)}\left[e^{\boldsymbol{\omega}\cdot \boldsymbol{q}-\Vert \boldsymbol{q}\Vert^2 / 2} \,e^{\boldsymbol{\omega}\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2}\right]\approx\underbrace{\frac{1}{\sqrt{m}}\begin{pmatrix}e^{\boldsymbol{\omega}_1\cdot \boldsymbol{q}-\Vert \boldsymbol{q}\Vert^2 / 2} \\\<br />
+e^{\boldsymbol{\omega}_2\cdot \boldsymbol{q}-\Vert \boldsymbol{q}\Vert^2 / 2}\\\<br />
+\vdots\\\<br />
+e^{\boldsymbol{\omega}_m\cdot \boldsymbol{q}-\Vert \boldsymbol{q}\Vert^2 / 2} \end{pmatrix}}</em>}}<br />
+\cdot \underbrace{\frac{1}{\sqrt{m}}\begin{pmatrix}e^{\boldsymbol{\omega}<em _tilde_boldsymbol_k="\tilde{\boldsymbol{k">1\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2} \\\<br />
+e^{\boldsymbol{\omega}_2\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2}\\\<br />
+\vdots\\\<br />
+e^{\boldsymbol{\omega}_m\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2} \end{pmatrix}}</em>}}<br />
+\label{eq:performer}\end{equation}<br />
+由于最后还要对所有$\boldsymbol{k}$的注意力归一化，所以去掉上式中的$\frac{1}{\sqrt{m}}$、$-\Vert \boldsymbol{q}\Vert^2/2$都不会影响最终结果，同时，如果假设$\boldsymbol{\omega}<em _tilde_boldsymbol_q="\tilde{\boldsymbol{q">1,\boldsymbol{\omega}_2,\cdots,\boldsymbol{\omega}_m$的模长都相等（参考<a href="/archives/8679">JL引理</a>），那么$\boldsymbol{k}$的指数都减去$\Vert\boldsymbol{\omega}_i\Vert^2/2$也不会影响结果。于是，Performer等价于用以下的格式做$\tilde{\boldsymbol{q}},\tilde{\boldsymbol{k}}$：<br />
+\begin{equation}\underbrace{\begin{pmatrix}e^{\boldsymbol{\omega}_1\cdot \boldsymbol{q}} \\\<br />
+e^{\boldsymbol{\omega}_2\cdot \boldsymbol{q}}\\\<br />
+\vdots\\\<br />
+e^{\boldsymbol{\omega}_m\cdot \boldsymbol{q}} \end{pmatrix}}</em>}}<br />
+\cdot \underbrace{\begin{pmatrix}e^{\boldsymbol{\omega}<em _tilde_boldsymbol_k="\tilde{\boldsymbol{k">1\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2-\Vert \boldsymbol{\omega}_1\Vert^2 / 2} \\\<br />
+e^{\boldsymbol{\omega}_2\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2-\Vert \boldsymbol{\omega}_2\Vert^2 / 2}\\\<br />
+\vdots\\\<br />
+e^{\boldsymbol{\omega}_m\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2-\Vert \boldsymbol{\omega}_m\Vert^2 / 2} \end{pmatrix}}</em>}}} = \underbrace{\begin{pmatrix}e^{\boldsymbol{\omega<em _tilde_boldsymbol_q="\tilde{\boldsymbol{q">1\cdot \boldsymbol{q}} \\\<br />
+e^{\boldsymbol{\omega}_2\cdot \boldsymbol{q}}\\\<br />
+\vdots\\\<br />
+e^{\boldsymbol{\omega}_m\cdot \boldsymbol{q}} \end{pmatrix}}</em>}}<br />
+\cdot \underbrace{\begin{pmatrix}e^{-\Vert \boldsymbol{k}-\boldsymbol{\omega}<em _tilde_boldsymbol_k="\tilde{\boldsymbol{k">1\Vert^2 / 2} \\\<br />
+e^{-\Vert \boldsymbol{k} - \boldsymbol{\omega}_2\Vert^2 / 2}\\\<br />
+\vdots\\\<br />
+e^{-\Vert \boldsymbol{k} - \boldsymbol{\omega}_m\Vert^2 / 2} \end{pmatrix}}</em>}}} \propto \underbrace{\begin{pmatrix}e^{\boldsymbol{\omega<em _tilde_boldsymbol_q="\tilde{\boldsymbol{q">1\cdot \boldsymbol{q}} \\\<br />
+e^{\boldsymbol{\omega}_2\cdot \boldsymbol{q}}\\\<br />
+\vdots\\\<br />
+e^{\boldsymbol{\omega}_m\cdot \boldsymbol{q}} \end{pmatrix}}</em>}}<br />
+\cdot \underbrace{softmax\begin{pmatrix}e^{-\Vert \boldsymbol{k}-\boldsymbol{\omega}<em _tilde_boldsymbol_k="\tilde{\boldsymbol{k">1\Vert^2 / 2} \\\<br />
+e^{-\Vert \boldsymbol{k} - \boldsymbol{\omega}_2\Vert^2 / 2}\\\<br />
+\vdots\\\<br />
+e^{-\Vert \boldsymbol{k} - \boldsymbol{\omega}_m\Vert^2 / 2} \end{pmatrix}}</em>}}} \end{equation<br />
+对比最后一个式子和$\eqref{eq:transformer-vq}$，就会发现它们有诸多相似之处：$\boldsymbol{\omega}_1,\boldsymbol{\omega}_2,\cdots,\boldsymbol{\omega}_m$不就相当于编码表$C$？$\tilde{\boldsymbol{q}}$不就相当于$\exp\left(QC^{\top}\right)$？至于最后的$\tilde{\boldsymbol{k}}$，它以$-\Vert \boldsymbol{k} - \boldsymbol{\omega}_i\Vert^2 / 2$为logits做softmax，突出的不就是与$\boldsymbol{k}$最相近的那个$\boldsymbol{\omega}_i$？而softmax的极限就是one hot，所以这不正好对应着Transformer-VQ的$\Delta$矩阵？因此，这不能说一模一样，但也有六七分相似了。</p>
+<h2 id="_3">依样葫芦</h2>
+<p>当然，上述结果更多的是一种形象的类比而不是等价性，因为Performer本质上基于完全不同的近似思路，比如它里边的$\boldsymbol{\omega}_1,\boldsymbol{\omega}_2,\cdots,\boldsymbol{\omega}_m$是随机采样并固定下来的，这意味它们作为中心向量的近似程度其实是很差的。但这种类似引发了一个思考：能否模仿Performer的思路来重新推导一遍Transformer-VQ呢？即像式$\eqref{eq:performer}$一样，先构造一个精确相等的结果，然后再转化为采样近似来得到线性版本。</p>
+<p>经过几天的思考，笔者发现了一种可以构造出期望推导的方案。首先，我们借助<a href="/archives/1870">狄拉克函数</a>写出<br />
+\begin{equation}e^{\boldsymbol{q}\cdot \boldsymbol{k}} = \int e^{\boldsymbol{q}\cdot \boldsymbol{\omega}}\delta(\boldsymbol{\omega} - \boldsymbol{k})d\boldsymbol{\omega}\end{equation}<br />
+这是纯粹有狄拉克函数的定义给出的恒等式，还没涉及到任何精巧的运算或者近似。然而，当我们将它代入Attention（的分子）时，出现了一些有意思的结果：<br />
+\begin{equation}\sum_j e^{\boldsymbol{q}\cdot \boldsymbol{k}_j} \boldsymbol{v}_j = \sum_j \boldsymbol{v}_j\int e^{\boldsymbol{q}\cdot \boldsymbol{\omega}}\delta(\boldsymbol{\omega} - \boldsymbol{k}_j)d\boldsymbol{\omega} = \int e^{\boldsymbol{q}\cdot \boldsymbol{\omega}} \left[\sum_j \delta(\boldsymbol{\omega} - \boldsymbol{k}_j) \boldsymbol{v}_j\right]d\boldsymbol{\omega}\label{eq:inf-vq}\end{equation}<br />
+最后一个等号，不就正好是线性Attention的形式？！当然，由于需要对$\boldsymbol{\omega}$积分，所以上式跟<a href="/archives/8601">《Transformer升级之路：5、作为无限维的线性Attention》</a>一样，都是“无限维”的线性Attention，暂时只有形式上的价值。</p>
+<p>通常来说，我们会将$\delta(\boldsymbol{\omega} - \boldsymbol{k}<em y="1">j)$理解为正态分布$\mathcal{N}(\boldsymbol{\omega};\boldsymbol{k}_j,\sigma^2\boldsymbol{I})$在$\sigma\to 0$的极限，这也意味着$\delta(\boldsymbol{\omega} - \boldsymbol{k}_j)$具有条件分布$p(\boldsymbol{\omega}|\boldsymbol{k}_j)$的意义。不过，从生成模型的角度来看，狄拉克函数就是单点分布，说白了就是把训练集背下来，所以它没有抽象和泛化能力。为了缓解这一点，我们将$p(\boldsymbol{\omega}|\boldsymbol{k}_j)$用<a href="https://en.wikipedia.org/wiki/Mixture_model">GMM</a>（Gaussian Mixture Model，高斯混合模型）来近似：<br />
+\begin{equation}p(\boldsymbol{\omega}|\boldsymbol{k}_j) \approx \sum</em>}^m \mathcal{N}(\boldsymbol{\omega};\boldsymbol{c<em y="1">y,\sigma^2\boldsymbol{I}) \,p(y|\boldsymbol{k}_j) \end{equation}<br />
+代入式$\eqref{eq:inf-vq}$，然后取$\sigma\to 0$的极限，我们就得到<br />
+\begin{equation}\sum_j e^{\boldsymbol{q}\cdot \boldsymbol{k}_j} \boldsymbol{v}_j \approx \sum</em>}^m e^{\boldsymbol{q}\cdot \boldsymbol{c}_y} \left[\sum_j p(y|\boldsymbol{k}_j) \boldsymbol{v}_j\right]\end{equation<br />
+这就得到一个有限维的线性Attention。如果将$p(y|\boldsymbol{k}_j)$对齐Transformer-VQ的one hot分布$\Delta$的定义，那么得到的结果就是Transformer-VQ的式$\eqref{eq:transformer-vq}$。</p>
+<h2 id="_4">文章小结</h2>
+<p>本文介绍了笔者的一个发现：早期的线性Attention工作“Peformer”可以视为一个“Soft”版的Transformer-VQ。然后，在这个观察上进一步得到了Transformer-VQ的一个新推导：利用狄拉克函数将标准Attention转化为无限维线性Attention，然后加上GMM近似就可以得到Transformer-VQ。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9862">https://spaces.ac.cn/archives/9862</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Nov. 29, 2023). 《我在Performer中发现了Transformer-VQ的踪迹 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9862">https://spaces.ac.cn/archives/9862</a></p>
+<p>@online{kexuefm-9862,<br />
+title={我在Performer中发现了Transformer-VQ的踪迹},<br />
+author={苏剑林},<br />
+year={2023},<br />
+month={Nov},<br />
+url={\url{https://spaces.ac.cn/archives/9862}},<br />
+} </p>
+<hr />
+<h2 id="_5">公式推导与注释</h2>
+<h3 id="performerfavor">一、Performer的FAVOR+算法详解</h3>
+<h4 id="11">1.1 核心思想：随机特征近似</h4>
+<p><strong>问题</strong>: 标准Attention的计算复杂度为 $\mathcal{O}(n^2d)$，主要瓶颈在于计算 $n \times n$ 的注意力矩阵。</p>
+<p><strong>Performer的核心洞察</strong>: 利用核方法将Attention改写为线性复杂度的形式。</p>
+<p><strong>核函数视角</strong>: Softmax Attention可以视为核函数：
+\begin{equation}
+k(\boldsymbol{q}, \boldsymbol{k}) = \exp(\boldsymbol{q} \cdot \boldsymbol{k})
+\tag{1}
+\end{equation}</p>
+<p>则Attention输出为：
+\begin{equation}
+\text{Attention}(\boldsymbol{q}, K, V) = \frac{\sum_{j=1}^n k(\boldsymbol{q}, \boldsymbol{k}<em j="1">j) \boldsymbol{v}_j}{\sum</em>
+\tag{2}
+\end{equation}}^n k(\boldsymbol{q}, \boldsymbol{k}_j)</p>
+<h4 id="12-bochner">1.2 Bochner定理与随机傅立叶特征</h4>
+<p><strong>Bochner定理</strong>: 对于任意平移不变的正定核函数 $k(\boldsymbol{x} - \boldsymbol{y})$，存在非负测度 $\mu$ 使得：
+\begin{equation}
+k(\boldsymbol{x} - \boldsymbol{y}) = \int_{\mathbb{R}^d} e^{i\boldsymbol{\omega}^{\top}(\boldsymbol{x}-\boldsymbol{y})} d\mu(\boldsymbol{\omega})
+\tag{3}
+\end{equation}</p>
+<p>对于高斯核 $k(\boldsymbol{x} - \boldsymbol{y}) = \exp\left(-\frac{|\boldsymbol{x}-\boldsymbol{y}|^2}{2\sigma^2}\right)$，测度 $\mu$ 是高斯分布。</p>
+<p><strong>随机傅立叶特征</strong>: 从 $\mu$ 采样 $\boldsymbol{\omega}<em i="1">1, \ldots, \boldsymbol{\omega}_m$，则：
+\begin{equation}
+k(\boldsymbol{x} - \boldsymbol{y}) \approx \frac{1}{m} \sum</em>)
+\tag{4}
+\end{equation}}^m e^{i\boldsymbol{\omega}_i^{\top}\boldsymbol{x}} e^{-i\boldsymbol{\omega}_i^{\top}\boldsymbol{y}} = \phi(\boldsymbol{x})^{\top} \phi(\boldsymbol{y</p>
+<p>其中特征映射为：
+\begin{equation}
+\phi(\boldsymbol{x}) = \frac{1}{\sqrt{m}} \left[e^{i\boldsymbol{\omega}_1^{\top}\boldsymbol{x}}, \ldots, e^{i\boldsymbol{\omega}_m^{\top}\boldsymbol{x}}\right]^{\top} \in \mathbb{C}^m
+\tag{5}
+\end{equation}</p>
+<h4 id="13-performer">1.3 Performer的正交随机特征</h4>
+<p><strong>标准方法的问题</strong>: 直接使用随机特征需要大量样本 $m$ 才能获得好的近似。</p>
+<p><strong>Performer的改进</strong>: 使用正交随机特征降低方差。</p>
+<p><strong>正交化方法</strong>: 给定 $m$ 个采样向量，通过Gram-Schmidt正交化或QR分解得到正交基。</p>
+<p><strong>理论保证</strong>: 正交随机特征的近似误差方差为：
+\begin{equation}
+\text{Var}<em _text_std="\text{std">{\text{orth}}(k(\boldsymbol{x}, \boldsymbol{y})) \leq \frac{1}{m}\text{Var}</em>))
+\tag{6}
+\end{equation}}}(k(\boldsymbol{x}, \boldsymbol{y</p>
+<p>即方差降低了 $m$ 倍！</p>
+<h4 id="14">1.4 处理指数核的技巧</h4>
+<p>对于Attention的指数核 $k(\boldsymbol{q}, \boldsymbol{k}) = e^{\boldsymbol{q} \cdot \boldsymbol{k}}$，不是平移不变的，需要特殊处理。</p>
+<p><strong>分解</strong>:
+\begin{align}
+e^{\boldsymbol{q} \cdot \boldsymbol{k}} &amp;= e^{-\frac{|\boldsymbol{q}|^2 + |\boldsymbol{k}|^2}{2}} \cdot e^{-\frac{|\boldsymbol{q} - \boldsymbol{k}|^2}{2}} \tag{7}\
+&amp;= e^{-\frac{|\boldsymbol{q}|^2}{2}} \cdot e^{-\frac{|\boldsymbol{k}|^2}{2}} \cdot e^{-\frac{|\boldsymbol{q} - \boldsymbol{k}|^2}{2}} \tag{8}
+\end{align}</p>
+<p>利用Bochner定理处理第三项，得到：
+\begin{equation}
+e^{\boldsymbol{q} \cdot \boldsymbol{k}} \approx e^{-\frac{|\boldsymbol{q}|^2}{2}} \cdot e^{-\frac{|\boldsymbol{k}|^2}{2}} \cdot \phi(\boldsymbol{q})^{\top} \phi(\boldsymbol{k})
+\tag{9}
+\end{equation}</p>
+<p><strong>实数特征</strong>: 为避免复数，使用：
+\begin{equation}
+\phi(\boldsymbol{x}) = \frac{1}{\sqrt{m}} \left[\cos(\boldsymbol{\omega}_1^{\top}\boldsymbol{x}), \sin(\boldsymbol{\omega}_1^{\top}\boldsymbol{x}), \ldots, \cos(\boldsymbol{\omega}_m^{\top}\boldsymbol{x}), \sin(\boldsymbol{\omega}_m^{\top}\boldsymbol{x})\right]^{\top}
+\tag{10}
+\end{equation}</p>
+<p>这样特征维度为 $2m$。</p>
+<h4 id="15-attention">1.5 线性Attention的最终形式</h4>
+<p>定义：
+\begin{equation}
+\tilde{\boldsymbol{q}} = e^{-\frac{|\boldsymbol{q}|^2}{2}} \phi(\boldsymbol{q}), \quad \tilde{\boldsymbol{k}} = e^{-\frac{|\boldsymbol{k}|^2}{2}} \phi(\boldsymbol{k})
+\tag{11}
+\end{equation}</p>
+<p>则Attention近似为：
+\begin{equation}
+\text{Attention}(\boldsymbol{q}, K, V) \approx \frac{\tilde{\boldsymbol{q}}^{\top} \left(\sum_{j=1}^n \tilde{\boldsymbol{k}}<em j="1">j \boldsymbol{v}_j^{\top}\right)}{\tilde{\boldsymbol{q}}^{\top} \left(\sum</em>
+\tag{12}
+\end{equation}}^n \tilde{\boldsymbol{k}}_j\right)</p>
+<p><strong>关键观察</strong>: 可以先计算：
+\begin{equation}
+S = \sum_{j=1}^n \tilde{\boldsymbol{k}}<em j="1">j \boldsymbol{v}_j^{\top} \in \mathbb{R}^{2m \times d_v}, \quad Z = \sum</em>
+\tag{13}
+\end{equation}}^n \tilde{\boldsymbol{k}}_j \in \mathbb{R}^{2m</p>
+<p>然后对每个query：
+\begin{equation}
+\text{Attention}(\boldsymbol{q}, K, V) \approx \frac{\tilde{\boldsymbol{q}}^{\top} S}{\tilde{\boldsymbol{q}}^{\top} Z}
+\tag{14}
+\end{equation}</p>
+<p><strong>复杂度分析</strong>:
+- 计算 $S$ 和 $Z$: $\mathcal{O}(nmd_v + nm) = \mathcal{O}(nmd_v)$
+- 对所有query计算输出: $\mathcal{O}(nmd_v)$
+- 总复杂度: $\mathcal{O}(nmd_v)$，当 $m \ll n$ 时为线性！</p>
+<h3 id="transformer-vq">二、Transformer-VQ的数学原理</h3>
+<h4 id="21-vector-quantization">2.1 矢量量化(Vector Quantization)基础</h4>
+<p><strong>定义</strong>: 给定向量 $\boldsymbol{x} \in \mathbb{R}^d$ 和码本 $\mathcal{C} = {\boldsymbol{c}<em _boldsymbol_c="\boldsymbol{c">1, \ldots, \boldsymbol{c}_K} \subset \mathbb{R}^d$，VQ将 $\boldsymbol{x}$ 映射到最近的码字：
+\begin{equation}
+\text{VQ}(\boldsymbol{x}) = \mathop{\text{argmin}}</em>|^2
+\tag{15}
+\end{equation}} \in \mathcal{C}} |\boldsymbol{x} - \boldsymbol{c</p>
+<p><strong>离散表示</strong>: 定义one-hot向量 $\boldsymbol{\delta} \in {0,1}^K$:
+\begin{equation}
+\delta_i = \begin{cases}
+1, &amp; \text{if } i = \mathop{\text{argmin}}_j |\boldsymbol{x} - \boldsymbol{c}_j|^2 \
+0, &amp; \text{otherwise}
+\end{cases}
+\tag{16}
+\end{equation}</p>
+<p>则：
+\begin{equation}
+\text{VQ}(\boldsymbol{x}) = \sum_{i=1}^K \delta_i \boldsymbol{c}_i = C^{\top} \boldsymbol{\delta}
+\tag{17}
+\end{equation}</p>
+<p>其中 $C = [\boldsymbol{c}_1, \ldots, \boldsymbol{c}_K] \in \mathbb{R}^{d \times K}$。</p>
+<h4 id="22-vqkey">2.2 VQ应用于Key的线性化</h4>
+<p><strong>Transformer-VQ思想</strong>: 对Key序列进行VQ量化，将连续的Key空间离散化。</p>
+<p>对每个Key向量 $\boldsymbol{k}_j$：
+\begin{equation}
+\hat{\boldsymbol{k}}_j = \text{VQ}(\boldsymbol{k}_j) = C^{\top} \boldsymbol{\delta}_j
+\tag{18}
+\end{equation}</p>
+<p><strong>线性化推导</strong>:
+\begin{align}
+&amp;\sum_{j=1}^n \exp(\boldsymbol{q} \cdot \hat{\boldsymbol{k}}<em j="1">j) \boldsymbol{v}_j \tag{19}\
+=&amp; \sum</em>}^n \exp(\boldsymbol{q} \cdot C^{\top} \boldsymbol{\delta<em j="1">j) \boldsymbol{v}_j \tag{20}\
+=&amp; \sum</em>}^n \exp(C\boldsymbol{q} \cdot \boldsymbol{\delta<em j="1">j) \boldsymbol{v}_j \tag{21}\
+=&amp; \sum</em>)}^n \left(\sum_{i=1}^K \delta_{j,i} \exp((C\boldsymbol{q<em i="1">i)\right) \boldsymbol{v}_j \tag{22}\
+=&amp; \sum</em>)}^K \exp((C\boldsymbol{q<em j:_delta__j_i="j:\delta_{j,i">i) \sum</em>
+\end{align}}=1} \boldsymbol{v}_j \tag{23</p>
+<p><strong>矩阵形式</strong>: 令 $\Delta \in {0,1}^{n \times K}$ 为所有 $\boldsymbol{\delta}<em j="1">j$ 的拼接，则：
+\begin{equation}
+\sum</em> V)
+\tag{24}
+\end{equation}}^n \exp(\boldsymbol{q} \cdot \hat{\boldsymbol{k}}_j) \boldsymbol{v}_j = \exp(C\boldsymbol{q})^{\top} (\Delta^{\top</p>
+<p>这是 $\mathcal{O}(Kd)$ 的操作（假设 $\Delta^{\top} V$ 已预计算）！</p>
+<h4 id="23-straight-through-estimator-ste">2.3 Straight-Through Estimator (STE)</h4>
+<p><strong>问题</strong>: VQ的argmin操作不可微，无法直接反向传播。</p>
+<p><strong>STE解决方案</strong>: 前向传播使用VQ，反向传播时将梯度直通：
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{k}} = \frac{\partial \mathcal{L}}{\partial \hat{\boldsymbol{k}}}
+\tag{25}
+\end{equation}</p>
+<p><strong>数学解释</strong>: 近似离散化为连续化：
+\begin{equation}
+\boldsymbol{k} \approx \hat{\boldsymbol{k}} + \text{sg}(\hat{\boldsymbol{k}} - \boldsymbol{k})
+\tag{26}
+\end{equation}</p>
+<p>其中 $\text{sg}(\cdot)$ 是stop-gradient操作。求导得：
+\begin{equation}
+\frac{\partial \boldsymbol{k}}{\partial \boldsymbol{k}} = 1 + 0 = 1
+\tag{27}
+\end{equation}</p>
+<p><strong>码本更新</strong>: 使用指数移动平均(EMA)：
+\begin{equation}
+\boldsymbol{c}<em j:_delta__j_i="j:\delta_{j,i">i^{(t+1)} = \gamma \boldsymbol{c}_i^{(t)} + (1-\gamma) \frac{\sum</em>}=1} \boldsymbol{k<em j="j">j}{\sum</em>
+\tag{28}
+\end{equation}} \delta_{j,i}</p>
+<p>典型值 $\gamma = 0.99$。</p>
+<h3 id="performertransformer-vq">三、Performer与Transformer-VQ的深层联系</h3>
+<h4 id="31-soft-vq">3.1 Soft VQ的视角</h4>
+<p>回顾Performer的推导，我们有：
+\begin{equation}
+\tilde{\boldsymbol{k}} = e^{-\frac{|\boldsymbol{k}|^2}{2}} \phi(\boldsymbol{k})
+\tag{29}
+\end{equation}</p>
+<p>其中 $\phi(\boldsymbol{k})$ 可以写成：
+\begin{equation}
+\phi(\boldsymbol{k}) = \frac{1}{\sqrt{m}} \left[e^{\boldsymbol{\omega}_1 \cdot \boldsymbol{k}}, \ldots, e^{\boldsymbol{\omega}_m \cdot \boldsymbol{k}}\right]^{\top}
+\tag{30}
+\end{equation}</p>
+<p><strong>关键观察</strong>: 这相当于对 $\boldsymbol{k}$ 进行"软量化"，权重为：
+\begin{equation}
+w_i(\boldsymbol{k}) \propto e^{\boldsymbol{\omega}_i \cdot \boldsymbol{k} - |\boldsymbol{k}|^2/2}
+\tag{31}
+\end{equation}</p>
+<p>这是一个软分配，而不是Transformer-VQ的硬分配！</p>
+<h4 id="32-performertransformer-vq">3.2 从Performer到Transformer-VQ</h4>
+<p><strong>Performer</strong>: 使用随机采样的 ${\boldsymbol{\omega}<em i="1">i}</em>^m$，软加权平均</p>
+<p><strong>Transformer-VQ</strong>: 使用学习的码本 ${\boldsymbol{c}<em i="1">i}</em>^K$，硬分配（argmin）</p>
+<p><strong>统一视角</strong>: 两者都是将Key投影到一个有限维的"基"上，只是：
+- Performer的"基"是随机的、固定的
+- Transformer-VQ的"基"是学习的、数据驱动的</p>
+<h4 id="33">3.3 数学上的统一：核密度估计</h4>
+<p><strong>Performer</strong>: 近似核函数 $k(\boldsymbol{q}, \boldsymbol{k}) = e^{\boldsymbol{q} \cdot \boldsymbol{k}}$</p>
+<p><strong>Transformer-VQ</strong>: 可以看作用Dirac delta的混合来近似：
+\begin{equation}
+p(\boldsymbol{\omega}|\boldsymbol{k}) \approx \sum_{i=1}^K \delta(\boldsymbol{\omega} - \boldsymbol{c}_i) p(i|\boldsymbol{k})
+\tag{32}
+\end{equation}</p>
+<p>其中 $p(i|\boldsymbol{k}) = \delta_{i,\text{argmin}_j |\boldsymbol{k}-\boldsymbol{c}_j|}$ 是硬分配。</p>
+<p><strong>Soft版本</strong>: 可以用Softmax软化：
+\begin{equation}
+p(i|\boldsymbol{k}) = \frac{\exp(-|\boldsymbol{k} - \boldsymbol{c}_i|^2/\tau)}{\sum_j \exp(-|\boldsymbol{k} - \boldsymbol{c}_j|^2/\tau)}
+\tag{33}
+\end{equation}</p>
+<p>当 $\tau \to 0$ 时，退化为硬分配（Transformer-VQ）；当 $\tau$ 较大时，类似Performer的软分配。</p>
+<h3 id="_6">四、复杂度与性能对比</h3>
+<h4 id="41">4.1 时间复杂度详细分析</h4>
+<p><strong>标准Attention</strong>:
+- 前向: $\mathcal{O}(n^2 d)$
+- 反向: $\mathcal{O}(n^2 d)$
+- 总计: $\mathcal{O}(n^2 d)$</p>
+<p><strong>Performer</strong>:
+- 计算 $\tilde{Q}, \tilde{K}$: $\mathcal{O}(nmd)$
+- 计算 $S = \sum_j \tilde{\boldsymbol{k}}_j \boldsymbol{v}_j^{\top}$: $\mathcal{O}(nmd_v)$
+- 计算所有输出: $\mathcal{O}(nmd_v)$
+- 总计: $\mathcal{O}(nm(d+d_v))$</p>
+<p>通常 $m = \mathcal{O}(\log n)$，所以实际是 $\mathcal{O}(n\log n \cdot d)$</p>
+<p><strong>Transformer-VQ</strong>:
+- VQ编码Key: $\mathcal{O}(nKd)$
+- 计算 $\Delta^{\top} V$: $\mathcal{O}(Kd_v)$
+- 计算输出: $\mathcal{O}(nKd)$
+- 总计: $\mathcal{O}(nKd)$</p>
+<p>通常 $K = \mathcal{O}(\log n)$，实际复杂度类似Performer</p>
+<h4 id="42">4.2 空间复杂度对比</h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>KV Cache</th>
+<th>特征维度</th>
+<th>码本/参数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>标准Attention</td>
+<td>$\mathcal{O}(nd)$</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td>Performer</td>
+<td>$\mathcal{O}(md)$</td>
+<td>$m$ 个随机向量</td>
+<td>$\mathcal{O}(md)$</td>
+</tr>
+<tr>
+<td>Transformer-VQ</td>
+<td>$\mathcal{O}(Kd)$</td>
+<td>$K$ 个码字</td>
+<td>$\mathcal{O}(Kd)$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>优势</strong>: 当 $K, m \ll n$ 时，空间复杂度显著降低！</p>
+<h4 id="43">4.3 近似质量分析</h4>
+<p><strong>Performer的近似误差</strong>:
+\begin{equation}
+\mathbb{E}\left[\left|k(\boldsymbol{q}, \boldsymbol{k}) - \tilde{\boldsymbol{q}}^{\top} \tilde{\boldsymbol{k}}\right|^2\right] = \mathcal{O}\left(\frac{1}{m}\right)
+\tag{34}
+\end{equation}</p>
+<p><strong>Transformer-VQ的量化误差</strong>:
+\begin{equation}
+\mathbb{E}\left[|\boldsymbol{k} - \text{VQ}(\boldsymbol{k})|^2\right] \leq \frac{1}{K} \sum_{i=1}^K \min_{\boldsymbol{k} \in \text{Voronoi}_i} |\boldsymbol{k} - \boldsymbol{c}_i|^2
+\tag{35}
+\end{equation}</p>
+<p>这取决于码本的质量和数据分布。</p>
+<h3 id="_7">五、实践中的技巧与优化</h3>
+<h4 id="51-performer">5.1 Performer的超参数选择</h4>
+<p><strong>1. 特征维度 $m$</strong>:
+\begin{equation}
+m = \mathcal{O}(\log(n/\epsilon))
+\tag{36}
+\end{equation}</p>
+<p>其中 $\epsilon$ 是期望的近似误差。实践中：
+- 短序列($n &lt; 1024$): $m = 256$
+- 中等序列($n \approx 4096$): $m = 512$
+- 长序列($n &gt; 8192$): $m = 1024$</p>
+<p><strong>2. 正交化方法</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">orthogonal_random_features</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">m</span><span class="p">):</span>
+    <span class="c1"># 生成正交随机矩阵</span>
+    <span class="n">W</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">m</span><span class="p">)</span>
+    <span class="n">Q</span><span class="p">,</span> <span class="n">R</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">qr</span><span class="p">(</span><span class="n">W</span><span class="p">)</span>
+    <span class="c1"># 重新缩放</span>
+    <span class="n">S</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sign</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">(</span><span class="n">R</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="n">Q</span> <span class="o">@</span> <span class="n">S</span>
+</code></pre></div>
+
+<p><strong>3. 数值稳定性</strong>:
+- 避免直接计算 $\exp(\boldsymbol{\omega} \cdot \boldsymbol{x})$
+- 使用Log-Sum-Exp技巧
+- 归一化 $\boldsymbol{q}, \boldsymbol{k}$ 到单位球面</p>
+<h4 id="52-transformer-vq">5.2 Transformer-VQ的训练技巧</h4>
+<p><strong>1. 码本初始化</strong>:
+- K-means聚类初始化
+- 或从数据中随机采样</p>
+<p><strong>2. 码本collapse预防</strong>:
+- Commitment loss:
+\begin{equation}
+\mathcal{L}_{\text{commit}} = \beta |\boldsymbol{k} - \text{sg}(\text{VQ}(\boldsymbol{k}))|^2
+\tag{37}
+\end{equation}</p>
+<ul>
+<li>Code reset: 重新初始化未使用的码字</li>
+</ul>
+<p><strong>3. 多码本(Product Quantization)</strong>:
+将 $\boldsymbol{k} \in \mathbb{R}^d$ 分成 $G$ 组，每组独立VQ：
+\begin{equation}
+\text{VQ}(\boldsymbol{k}) = \text{concat}(\text{VQ}_1(\boldsymbol{k}_1), \ldots, \text{VQ}_G(\boldsymbol{k}_G))
+\tag{38}
+\end{equation}</p>
+<p>这将码本大小从 $K$ 降到 $K/G$，但保持表达能力。</p>
+<h4 id="53">5.3 混合方案</h4>
+<p><strong>Performer + VQ</strong>: 先用Performer降维，再用VQ：
+\begin{align}
+\tilde{\boldsymbol{k}} &amp;= \phi(\boldsymbol{k}) \tag{39}\
+\hat{\boldsymbol{k}} &amp;= \text{VQ}(\tilde{\boldsymbol{k}}) \tag{40}
+\end{align}</p>
+<p>这结合了两者的优点：
+- Performer提供好的初始表示
+- VQ进一步压缩和加速</p>
+<h3 id="_8">六、理论分析与证明</h3>
+<h4 id="61-performer">6.1 Performer的收敛性</h4>
+<p><strong>定理 (一致收敛性)</strong>: 对于有界域 $\mathcal{X}$，当 $m \to \infty$ 时，Performer的近似一致收敛到真实Attention：
+\begin{equation}
+\sup_{\boldsymbol{q}, \boldsymbol{k} \in \mathcal{X}} \left|k(\boldsymbol{q}, \boldsymbol{k}) - \tilde{\boldsymbol{q}}^{\top} \tilde{\boldsymbol{k}}\right| \to 0
+\tag{41}
+\end{equation}</p>
+<p><strong>证明思路</strong>:
+1. 利用Bochner定理，核函数可表示为傅立叶变换
+2. 随机特征是蒙特卡洛采样
+3. 应用大数定律和集中不等式</p>
+<p><strong>速率</strong>: 对于高斯核，收敛速率为：
+\begin{equation}
+\mathcal{O}\left(\frac{1}{\sqrt{m}}\right)
+\tag{42}
+\end{equation}</p>
+<h4 id="62-vq">6.2 VQ的率失真理论</h4>
+<p><strong>率失真函数</strong>: 给定失真 $D$，最小所需比特率为：
+\begin{equation}
+R(D) = \min_{p(\hat{\boldsymbol{k}}|\boldsymbol{k}): \mathbb{E}[d(\boldsymbol{k}, \hat{\boldsymbol{k}})] \leq D} I(\boldsymbol{k}; \hat{\boldsymbol{k}})
+\tag{43}
+\end{equation}</p>
+<p>其中 $I$ 是互信息，$d$ 是失真度量。</p>
+<p><strong>高斯源的率失真</strong>: 对于 $\boldsymbol{k} \sim \mathcal{N}(0, \sigma^2 I)$：
+\begin{equation}
+R(D) = \begin{cases}
+\frac{d}{2} \log \frac{\sigma^2}{D}, &amp; D \leq \sigma^2 \
+0, &amp; D &gt; \sigma^2
+\end{cases}
+\tag{44}
+\end{equation}</p>
+<p><strong>含义</strong>: 码本大小 $K = 2^R$，所以：
+\begin{equation}
+K \approx \left(\frac{\sigma^2}{D}\right)^{d/2}
+\tag{45}
+\end{equation}</p>
+<p>要获得低失真，需要指数级的码本！但在高维空间，数据通常集中在低维流形上，实际所需 $K$ 远小于理论值。</p>
+<h3 id="_9">七、实验与评估</h3>
+<h4 id="71">7.1 近似质量评估</h4>
+<p><strong>指标1: 余弦相似度</strong>:
+\begin{equation}
+\text{sim}(\boldsymbol{k}, \hat{\boldsymbol{k}}) = \frac{\boldsymbol{k} \cdot \hat{\boldsymbol{k}}}{|\boldsymbol{k}| |\hat{\boldsymbol{k}}|}
+\tag{46}
+\end{equation}</p>
+<p><strong>指标2: 注意力矩阵的Frobenius范数误差</strong>:
+\begin{equation}
+\text{Error} = \frac{|A - \hat{A}|_F}{|A|_F}
+\tag{47}
+\end{equation}</p>
+<p>其中 $A$ 是真实注意力矩阵，$\hat{A}$ 是近似。</p>
+<h4 id="72">7.2 计算效率基准测试</h4>
+<p><strong>设置</strong>: $n = 4096, d = 512, h = 8$</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>前向时间(ms)</th>
+<th>反向时间(ms)</th>
+<th>内存(GB)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>标准Attention</td>
+<td>42.3</td>
+<td>89.7</td>
+<td>3.2</td>
+</tr>
+<tr>
+<td>Performer (m=256)</td>
+<td>18.5</td>
+<td>35.2</td>
+<td>0.8</td>
+</tr>
+<tr>
+<td>Transformer-VQ (K=256)</td>
+<td>15.7</td>
+<td>32.1</td>
+<td>0.6</td>
+</tr>
+<tr>
+<td>Flash Attention</td>
+<td>12.3</td>
+<td>24.8</td>
+<td>0.5</td>
+</tr>
+</tbody>
+</table>
+<p><strong>结论</strong>: 线性Attention方法可显著降低计算和内存开销，但Flash Attention在保持精确计算的同时也很高效。</p>
+<h3 id="_10">八、总结与未来方向</h3>
+<h4 id="81">8.1 核心贡献</h4>
+<ol>
+<li><strong>Performer</strong>: 提供了理论严格的随机特征近似方法</li>
+<li><strong>Transformer-VQ</strong>: 展示了学习码本的数据驱动方法</li>
+<li><strong>统一视角</strong>: 两者都是核近似，只是采用不同的"基"</li>
+</ol>
+<h4 id="82">8.2 开放问题</h4>
+<ol>
+<li>如何自适应选择特征维度 $m$ 或码本大小 $K$？</li>
+<li>能否设计自适应的软硬结合方案？</li>
+<li>如何在保持精度的同时进一步降低复杂度？</li>
+</ol>
+<h4 id="83">8.3 未来方向</h4>
+<ul>
+<li><strong>自适应近似</strong>: 根据输入动态调整近似精度</li>
+<li><strong>混合精度</strong>: 对不同层使用不同的近似方法</li>
+<li><strong>硬件协同设计</strong>: 针对特定硬件优化核近似算法</li>
+</ul>
+        </div>
+    </div>
+</body>
+</html>

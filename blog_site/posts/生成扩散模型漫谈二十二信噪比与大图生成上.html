@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成扩散模型漫谈（二十二）：信噪比与大图生成（上）</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>生成扩散模型漫谈（二十二）：信噪比与大图生成（上）</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 45.9 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10047">https://spaces.ac.cn/archives/10047</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>盘点主流的图像扩散模型作品，我们会发现一个特点：当前多数做高分辨率图像生成（下面简称“大图生成”）的工作，都是先通过Encoder变换到Latent空间进行的（即LDM，<a href="https://papers.cool/arxiv/2112.10752">Latent Diffusion Model</a>），直接在原始Pixel空间训练的扩散模型，大多数分辨率都不超过64<em>64，而恰好，LDM通过AutoEncoder变换后的Latent，大小通常也不超过64</em>64。这就自然引出了一系列问题：扩散模型是不是对于高分辨率生成存在固有困难？能否在Pixel空间直接生成高分辨率图像？</p>
+<p>论文<a href="https://papers.cool/arxiv/2301.11093">《Simple diffusion: End-to-end diffusion for high resolution images》</a>尝试回答了这个问题，它通过“信噪比”分析了大图生成的困难，并以此来优化noise schdule，同时提出只需在最低分辨率feature上对架构进行scale up、多尺度Loss等技巧来保证训练效率和效果，这些改动使得原论文成功在Pixel空间上训练了分辨率高达1024*1024的图像扩散模型。</p>
+<h2 id="ldm">LDM回顾</h2>
+<p>在进入正题之前，我们不妨先反过来想一想：为什么LDM能成功成为主流的扩散模型做法？笔者认为，主要原始是两方面：</p>
+<blockquote>
+<p>1、不管是应用还是学术，用LDM的主要原因想必是效率：当前主流的工作都直接重用了LDM论文所开源的训练好的AutoEncoder，它的Encoder部分会将512<em>512的图像变成了64</em>64的Latent，相当于说只用到64<em>64分辨率这个级别的算力和时间，就可以生成512</em>512的图像，这个效率显然是非常吸引人的；</p>
+<p>2、LDM契合了FID这个指标，这让它看起来是效果无损的：FID全称是“Fréchet Inception Distance”，其中Inception是指用ImageNet预训练的InceptionV3模型作为Encoder编码图片，然后假设编码特征服从高斯分布来算$\mathcal{W}$距离，而LDM也是先Encoder编码，两个Encoder虽然不完全相同，但也有一定共性，因此在FID上表现为几乎无损。</p>
+</blockquote>
+<p>我们还可以稍微展开一下。LDM的AutoEncoder在训练阶段组合了很多内容——它的重构Loss并不只有常规的MAE或者MSE，还包括对抗Loss和Perceptual Loss，对抗Loss用来保证重构结果的清晰度，而Perceptual Loss用来保证重构结果的语义和风格的相似性。<a href="https://papers.cool/arxiv/1603.08155">Perceptual Loss</a>跟FID很相似，都是用ImageNet模型的特征计算的相似性指标，只不过用的不是InceptionV3而是VGG-16，由于训练任务的相似性，可以猜测两者特征有很多共性，因此Perceptual Loss的加入变相地保证了FID的损失尽可能少。</p>
+<p>此外，LDM的Encoder对原始图像来说是降维的，比如原始图像大小为512<em>512</em>3，直接patchify的话结果是64<em>64</em>192，但LDM的Encoder出来的特征是64<em>64</em>4，降低到了1/48，同时为了进一步降低编码特征的方差，避免模型“死记硬背”，LDM还对Encoder出来的特征加了相应的正则项，可选的有<a href="/archives/5253">VAE</a>的KL散度项或<a href="/archives/6760">VQ-VAE</a>的VQ正则化。降维和正则的设计，都会压缩特征的多样性，提高特征的泛化能力，但也会导致重构难度增加，最终导致了有损的重构结果。</p>
+<p>到这里，LDM能成功的原因其实就“豁然开朗”了：“降维 + 正则”的组合，降低了Latent的信息量，从而降低了在Latent空间学习扩散模型的难度，同时Perceptual Loss的存在，保证了重构虽然有损但FID几乎无损（Perceptual Loss的Encoder跟FID一样都用InceptionV3理论上更好）。这样一来，对于FID这个指标来说，LDM几乎就是免费午餐了，因此不管是学术和工程都乐意沿用它。</p>
+<h2 id="_1">信噪之比</h2>
+<p>尽管LDM简单高效，但它毕竟是有损的，其Latent只能保持宏观上的语义，局部细节可能会严重缺失。而在之前的文章<a href="/archives/9984">《“闭门造车”之多模态思路浅谈（一）：无损输入》</a>中，笔者表达过一个观点：当作为输入时，图像最好的表示方式就是原始Pixel数组。基于这个观点，笔者最近都比较关注直接在Pixel空间上训练的扩散模型。</p>
+<p>然而，将低分辨率（比如64<em>64）图像的扩散模型配置直接应用于高分辨率（比如512</em>512）的大图生成时，会存在算力消耗过大、收敛速度太慢等问题，而且效果上也比不上LDM（至少FID指标如此），Simple diffusion逐一分析了这些问题并提出了相应的解决方案。其中，笔者认为利用“信噪比（Signal-to-Noise Ratio，SNR）”的概念来分析高分辨率扩散模型的学习效率低问题最为精彩。</p>
+<p>具体来说，Simple diffusion观察到，如果我们给高分辨率图像加上某个方差的noise，那么相对于加上同样方差的noise的低分辨率图像来说，它的信噪比其实更高，原论文的Figure 3非常直观地演示了这一点，如下图所示。第一行图片，是由512<em>512的图片加了特定方差的noise后再降采样（平均Pooling）到64</em>64的，而第二行则是直接在64*64的图片加上同样方差的noise，很明显第一行的图片更加清晰，也就是相对信噪比更高了。</p>
+<p><a href="/usr/uploads/2024/04/656907425.png" title="点击查看原图"><img alt="同一noise不同分辨率的信噪比" src="/usr/uploads/2024/04/656907425.png" /></a></p>
+<p>同一noise不同分辨率的信噪比</p>
+<p>所谓“信噪比”，顾名思义即“信号与噪声的强度之比”，信噪比更高（即噪声的占比更低）意味着去噪更容易，换言之训练阶段Denoiser面对的更多是简单样本，但实际上大图生成的难度显然更高，也就是说我们的目标是一个更难的模型，但却给了更简单的样本，因此导致了学习效率的低下。</p>
+<h2 id="_2">向低看齐</h2>
+<p>我们也可以从数学上描述这一点。沿用本系列的记号，通过加噪来构造$\boldsymbol{x}_t$的运算可以表示为<br />
+\begin{equation}\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon},\quad \boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})\end{equation}<br />
+其中$\bar{\alpha}_t,\bar{\beta}_t$就称为noise schedule，满足$\bar{\alpha}_0=\bar{\beta}_T=1, \bar{\alpha}_T=\bar{\beta}_0=0$，此外一般来说它们还有额外的约束，比如在DDPM中通常是$\bar{\alpha}_t^2 + \bar{\beta}_t^2=1$，本文将沿用这个约束。</p>
+<p>对于一个随机变量来说，信噪比是均值平方与方差之比。给定$\boldsymbol{x}_0$，$\boldsymbol{x}_t$的均值显然是$\bar{\alpha}_t \mathbb{E}[\boldsymbol{x}_0]$，方差则是$\bar{\beta}_t^2$，于是信噪比为$\frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2}\mathbb{E}[\boldsymbol{x}_0]^2$，由于我们总是在给定$\boldsymbol{x}_0$下讨论，因此我们也可以简单地说信噪比就是$SNR(t) = \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2}$</p>
+<p>当我们对$\boldsymbol{x}<em i="1">t$使用$s\times s$大小的平均Pooling时，每个$s\times s$的patch通过取平均变成了一个标量，即<br />
+\begin{equation}\frac{1}{s^2}\sum</em>}^s \sum_{j=1}^s\boldsymbol{x<em i="1">t^{(i,j)} = \bar{\alpha}_t\left(\frac{1}{s^2}\sum</em>}^s \sum_{j=1}^s \boldsymbol{x<em i="1">0^{(i,j)}\right) + \bar{\beta}_t\left(\frac{1}{s^2}\sum</em>}^s \sum_{j=1}^s \boldsymbol{\varepsilon}^{(i,j)}\right) ,\quad \boldsymbol{\varepsilon}^{(i,j)}\sim\mathcal{N}(0, 1)\end{equation<br />
+平均Pooling不改变均值，但会降低方差，从而提高信噪比，这是因为正态分布的可加性得出<br />
+\begin{equation}\frac{1}{s^2}\sum_{i=1}^s \sum_{j=1}^s \boldsymbol{\varepsilon}^{(i,j)}\sim\mathcal{N}(0, 1/s^2)\end{equation}<br />
+所以在同一noise schedule下，如果我们将高分辨率图像通过平均Pooling来对齐低分辨率，那么就会发现信噪比更高，是原来的$s^2$倍：<br />
+\begin{equation}SNR^{w\times h\to w/s\times h/s}(t) = SNR^{w/s\times h/s}(t) \times s^2 \end{equation}<br />
+反过来想，如果我们已经有一个在低分辨率图像上调好了的noise schedule $\bar{\alpha}_t^{w/s\times h/s},\bar{\beta}_t^{w/s\times h/s}$，那么当我们想要scale up到更高分辨率时，应该要调整noise schedule为$\bar{\alpha}_t^{w\times h},\bar{\beta}_t^{w\times h}$，使得它降采样到低分辨率后，其信噪比能够跟已经调好的低分辨率的noise schedule对齐，这样才能最大程度上“传承”已经低分辨率扩散模型的学习效率，即<br />
+\begin{equation} \frac{(\bar{\alpha}_t^{w\times h})^2}{(\bar{\beta}_t^{w\times h})^2} \times s^2 = \frac{(\bar{\alpha}_t^{w/s\times h/s})^2}{(\bar{\beta}_t^{w/s\times h/s})^2} \end{equation}<br />
+如果加上约束$\bar{\alpha}_t^2 + \bar{\beta}_t^2=1$，那么就可以从$\bar{\alpha}_t^{w/s\times h/s},\bar{\beta}_t^{w/s\times h/s}$中唯一地解出$\bar{\alpha}_t^{w\times h},\bar{\beta}_t^{w\times h}$。这就解决了高分辨率扩散的noise schedule设置问题。</p>
+<h2 id="_3">架构拓展</h2>
+<p>为了做好大图的扩散生成，除了要调整noise schedule之外，我们还需要把架构也scale up上去，因为前面我们也已经说了，大图生成是一个更难的问题，因此理应需要更加重量级的架构。</p>
+<p>扩散模型常用的就是<a href="https://papers.cool/arxiv/1505.04597">U-Net</a>或者<a href="https://papers.cool/arxiv/2209.12152">U-Vit</a>，两者都是先逐渐降采样然后逐渐上采样，比如512<em>512的输入，一般先进行一个block的运算，然后降采样到256</em>256，接着进行新一个block的运算，在降采样到128<em>128，依此类推，降采样到一个最低的分辨率16</em>16，接下来再次重复这个过程，但将降采样改为上采样，直到分辨率恢复512*512。默认设置下，我们会将参数平均分到每一个block中，但这样一来靠近输入和输出的block由于输入尺寸都很大，因此计算量会急剧增加，导致模型训练效率低下甚至不可行。</p>
+<p>Simple diffusion提出了两个应对方案。第一，它提出可以直接在第一层（而不是第一个block，每个block有多个层）之后就降采样，并且考虑一步到位低降到128<em>128甚至64</em>64，最后输出的时候，也是在最后一层之前才从64<em>64或者128</em>128直接上采样到512<em>512，这样模型的大部分block所处理的分辨率都降低了，从而降低了整体计算量；第二，它提出将模型所scale up的层都放到最低分辨率（即16</em>16）之后，而不是平摊到每一个分辨率的block，即新增的层处理的都是16*16的输入，包括Dropout也都只加入到低分辨率的层中，这样一来分辨率增加带来的计算压力就明显减少了。</p>
+<p>此外，为了进一步稳定训练，论文提出了“多尺度Loss”的训练目标。默认情况下，扩散模型的Loss等价于MSE损失<br />
+\begin{equation}\mathcal{L}=\frac{1}{wh}\Vert \boldsymbol{\varepsilon} - \boldsymbol{\epsilon}<em s="s" s_times="s\times">{\boldsymbol{\theta}}(\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, t)\Vert^2\end{equation}<br />
+Simple diffusion将它泛化为<br />
+\begin{equation}\mathcal{L}</em>} = \frac{1}{(w/s)(h/s)}\big\Vert \mathcal{D<em h_s="h/s" w_s_times="w/s\times">{w/s\times h/s}[\boldsymbol{\varepsilon}] - \mathcal{D}</em>}[\boldsymbol{\epsilon<em h_s="h/s" w_s_times="w/s\times">{\boldsymbol{\theta}}(\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, t)]\big\Vert^2\end{equation}<br />
+其中$\mathcal{D}</em>[\cdot]$是通过平均Pooling将输入变换到$w/s\times h/s$的下采样算子，原论文取了多个$s$对应的Loss进行平均，作为最终的训练目标。这个多尺度Loss的目标也很明显，跟通过信噪比对齐来调整noise schedule一样，都是保证训练出来的高分辨率扩散模型至少不差于直接训练的低分辨率模型。</p>
+<p>至于实验部分，大家自行看原论文就好。Simple diffusion实验的最大分辨率是1024*1024（在附录中提到），效果都尚可，并且对比实验表明上述提出的一些技巧都是有提升的，最终直接在Pixel空间中训练出来的扩撒模型，相比LDM也取得了有竞争力的效果。</p>
+<h2 id="_4">文章小结</h2>
+<p>在这篇文章中，我们介绍了Simple diffusion，这是一篇探索如何直接在Pixel空间中端到端地训练图像扩散模型的工作，利用了信噪比的概念介绍了高分辨率扩散模型的训练效率低问题，并由此来指标调整新的noise schedule，以及探索了如何尽可能节约算力成本地scale up模型架构。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10047">https://spaces.ac.cn/archives/10047</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Apr. 08, 2024). 《生成扩散模型漫谈（二十二）：信噪比与大图生成（上） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10047">https://spaces.ac.cn/archives/10047</a></p>
+<p>@online{kexuefm-10047,<br />
+title={生成扩散模型漫谈（二十二）：信噪比与大图生成（上）},<br />
+author={苏剑林},<br />
+year={2024},<br />
+month={Apr},<br />
+url={\url{https://spaces.ac.cn/archives/10047}},<br />
+} </p>
+<hr />
+<h2 id="_5">公式推导与注释</h2>
+<p>本节提供文章中涉及的关键数学公式的详细推导过程，帮助读者深入理解信噪比（SNR）在扩散模型中的作用，以及如何通过SNR指导大图生成的噪声调度设计。</p>
+<h3 id="1">1. 扩散过程的基础定义</h3>
+<p><strong>公式1.1 - 前向扩散过程</strong></p>
+<p>扩散模型的前向过程通过逐步向数据添加高斯噪声来构造带噪声的样本。给定原始数据 $\boldsymbol{x}_0$，在时刻 $t$ 的带噪样本可以表示为：</p>
+<p>$$
+\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})
+$$</p>
+<p>其中：
+- $\boldsymbol{x}_0$ 是原始干净数据
+- $\bar{\alpha}_t$ 是信号保留系数（signal retention coefficient）
+- $\bar{\beta}_t$ 是噪声强度系数（noise strength coefficient）
+- $\boldsymbol{\varepsilon}$ 是标准高斯噪声</p>
+<p><strong>推导说明</strong>：这个公式可以从马尔可夫链的累积形式推导得出。假设每一步的扩散为：</p>
+<p>$$
+\boldsymbol{x}_t = \sqrt{1-\beta_t} \boldsymbol{x}_{t-1} + \sqrt{\beta_t} \boldsymbol{\varepsilon}_t
+$$</p>
+<p>通过递归展开并利用高斯分布的可加性，可以得到上述累积形式，其中：</p>
+<p>$$
+\bar{\alpha}_t = \prod_{s=1}^t \sqrt{1-\beta_s}, \quad \bar{\beta}_t = \sqrt{1 - \bar{\alpha}_t^2}
+$$</p>
+<p><strong>公式1.2 - 边界条件</strong></p>
+<p>噪声调度必须满足边界条件：</p>
+<p>$$
+\begin{cases}
+\bar{\alpha}_0 = 1, & \bar{\beta}_0 = 0 \\
+\bar{\alpha}_T = 0, & \bar{\beta}_T = 1
+\end{cases}
+$$</p>
+<p><strong>物理意义</strong>：
+- 当 $t=0$ 时，没有添加任何噪声，$\boldsymbol{x}_0$ 保持不变
+- 当 $t=T$ 时，原始信号完全被噪声淹没，$\boldsymbol{x}_T \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$</p>
+<p><strong>公式1.3 - 方差保持条件</strong></p>
+<p>DDPM通常采用方差保持（variance preserving）条件：</p>
+<p>$$
+\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1
+$$</p>
+<p><strong>推导过程</strong>：</p>
+<p>给定 $\boldsymbol{x}_0$，条件分布 $\boldsymbol{x}_t | \boldsymbol{x}_0$ 的均值和方差为：</p>
+<p>$$
+\begin{aligned}
+\mathbb{E}[\boldsymbol{x}_t | \boldsymbol{x}_0] &= \bar{\alpha}_t \boldsymbol{x}_0 \\
+\text{Var}[\boldsymbol{x}_t | \boldsymbol{x}_0] &= \bar{\beta}_t^2 \boldsymbol{I}
+\end{aligned}
+$$</p>
+<p>如果我们假设 $\boldsymbol{x}_0$ 的各维度方差为1（标准化假设），那么 $\boldsymbol{x}_t$ 的无条件方差为：</p>
+<p>$$
+\text{Var}[\boldsymbol{x}_t] = \mathbb{E}[\text{Var}[\boldsymbol{x}_t | \boldsymbol{x}_0]] + \text{Var}[\mathbb{E}[\boldsymbol{x}_t | \boldsymbol{x}_0]]
+$$</p>
+<p>$$
+= \bar{\beta}_t^2 \boldsymbol{I} + \bar{\alpha}_t^2 \text{Var}[\boldsymbol{x}_0]
+$$</p>
+<p>$$
+= \bar{\beta}_t^2 \boldsymbol{I} + \bar{\alpha}_t^2 \boldsymbol{I} = (\bar{\alpha}_t^2 + \bar{\beta}_t^2) \boldsymbol{I}
+$$</p>
+<p>为了保持方差恒定为1，我们要求 $\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1$。</p>
+<h3 id="2-snr">2. 信噪比（SNR）的数学定义</h3>
+<p><strong>公式2.1 - SNR的基础定义</strong></p>
+<p>对于随机变量 $X$，其信噪比定义为均值平方与方差的比值：</p>
+<p>$$
+\text{SNR}(X) = \frac{(\mathbb{E}[X])^2}{\text{Var}[X]}
+$$</p>
+<p><strong>统计学解释</strong>：信噪比衡量了信号（均值）相对于噪声（方差）的强度。高SNR意味着信号清晰，低SNR意味着信号被噪声淹没。</p>
+<p><strong>公式2.2 - 扩散过程中的SNR</strong></p>
+<p>对于带噪样本 $\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$，给定 $\boldsymbol{x}_0$ 的条件SNR为：</p>
+<p>$$
+\text{SNR}(t | \boldsymbol{x}_0) = \frac{(\mathbb{E}[\boldsymbol{x}_t | \boldsymbol{x}_0])^2}{\text{Var}[\boldsymbol{x}_t | \boldsymbol{x}_0]}
+$$</p>
+<p><strong>详细推导</strong>：</p>
+<p>条件均值：
+$$
+\mathbb{E}[\boldsymbol{x}_t | \boldsymbol{x}_0] = \mathbb{E}[\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon} | \boldsymbol{x}_0]
+$$</p>
+<p>$$
+= \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \mathbb{E}[\boldsymbol{\varepsilon}] = \bar{\alpha}_t \boldsymbol{x}_0
+$$</p>
+<p>因此均值平方为：
+$$
+(\mathbb{E}[\boldsymbol{x}_t | \boldsymbol{x}_0])^2 = \bar{\alpha}_t^2 \boldsymbol{x}_0^2
+$$</p>
+<p>条件方差：
+$$
+\text{Var}[\boldsymbol{x}_t | \boldsymbol{x}_0] = \text{Var}[\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon} | \boldsymbol{x}_0]
+$$</p>
+<p>$$
+= \bar{\beta}_t^2 \text{Var}[\boldsymbol{\varepsilon}] = \bar{\beta}_t^2
+$$</p>
+<p>因此信噪比为：
+$$
+\text{SNR}(t | \boldsymbol{x}_0) = \frac{\bar{\alpha}_t^2 \boldsymbol{x}_0^2}{\bar{\beta}_t^2}
+$$</p>
+<p><strong>公式2.3 - 简化的SNR定义</strong></p>
+<p>由于我们总是在给定 $\boldsymbol{x}_0$ 的条件下讨论，并且 $\boldsymbol{x}_0$ 可以视为常数，因此简化定义：</p>
+<p>$$
+\text{SNR}(t) = \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2}
+$$</p>
+<p>这个定义忽略了 $\boldsymbol{x}_0^2$ 因子，仅关注噪声调度参数本身的比值。</p>
+<p><strong>公式2.4 - 基于方差保持条件的SNR表达</strong></p>
+<p>利用 $\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1$，可以将SNR改写为：</p>
+<p>$$
+\text{SNR}(t) = \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2} = \frac{\bar{\alpha}_t^2}{1 - \bar{\alpha}_t^2}
+$$</p>
+<p>或者：
+$$
+\text{SNR}(t) = \frac{1 - \bar{\beta}_t^2}{\bar{\beta}_t^2} = \frac{1}{\bar{\beta}_t^2} - 1
+$$</p>
+<p><strong>反向表达</strong>：从SNR也可以反解出 $\bar{\alpha}_t$ 和 $\bar{\beta}_t$：</p>
+<p>$$
+\bar{\alpha}_t = \sqrt{\frac{\text{SNR}(t)}{1 + \text{SNR}(t)}}
+$$</p>
+<p>$$
+\bar{\beta}_t = \sqrt{\frac{1}{1 + \text{SNR}(t)}}
+$$</p>
+<p><strong>验证</strong>：
+$$
+\bar{\alpha}_t^2 + \bar{\beta}_t^2 = \frac{\text{SNR}(t)}{1 + \text{SNR}(t)} + \frac{1}{1 + \text{SNR}(t)} = 1 \quad \checkmark
+$$</p>
+<h3 id="3-snr">3. SNR的单调性与性质</h3>
+<p><strong>公式3.1 - SNR的单调递减性</strong></p>
+<p>在合理的噪声调度下，SNR随时间单调递减：</p>
+<p>$$
+\frac{d \text{SNR}(t)}{dt} < 0, \quad \forall t \in [0, T]
+$$</p>
+<p><strong>推导过程</strong>：</p>
+<p>$$
+\text{SNR}(t) = \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2}
+$$</p>
+<p>对时间求导：
+$$
+\frac{d \text{SNR}(t)}{dt} = \frac{d}{dt}\left(\frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2}\right)
+$$</p>
+<p>使用商法则：
+$$
+= \frac{2\bar{\alpha}_t \frac{d\bar{\alpha}_t}{dt} \cdot \bar{\beta}_t^2 - \bar{\alpha}_t^2 \cdot 2\bar{\beta}_t \frac{d\bar{\beta}_t}{dt}}{\bar{\beta}_t^4}
+$$</p>
+<p>$$
+= \frac{2\bar{\alpha}_t \bar{\beta}_t}{\bar{\beta}_t^4} \left(\bar{\beta}_t \frac{d\bar{\alpha}_t}{dt} - \bar{\alpha}_t \frac{d\bar{\beta}_t}{dt}\right)
+$$</p>
+<p>$$
+= \frac{2\bar{\alpha}_t}{\bar{\beta}_t^3} \left(\bar{\beta}_t \frac{d\bar{\alpha}_t}{dt} - \bar{\alpha}_t \frac{d\bar{\beta}_t}{dt}\right)
+$$</p>
+<p>利用约束 $\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1$，对时间求导：</p>
+<p>$$
+2\bar{\alpha}_t \frac{d\bar{\alpha}_t}{dt} + 2\bar{\beta}_t \frac{d\bar{\beta}_t}{dt} = 0
+$$</p>
+<p>$$
+\Rightarrow \quad \bar{\alpha}_t \frac{d\bar{\alpha}_t}{dt} = -\bar{\beta}_t \frac{d\bar{\beta}_t}{dt}
+$$</p>
+<p>代入前面的导数表达式：
+$$
+\frac{d \text{SNR}(t)}{dt} = \frac{2\bar{\alpha}_t}{\bar{\beta}_t^3} \left(\bar{\beta}_t \frac{d\bar{\alpha}_t}{dt} + \bar{\alpha}_t \frac{d\bar{\alpha}_t}{dt} / \bar{\beta}_t \cdot \bar{\beta}_t\right)
+$$</p>
+<p>由于在前向扩散中 $\bar{\alpha}_t$ 递减（$\frac{d\bar{\alpha}_t}{dt} &lt; 0$），而 $\bar{\beta}_t$ 递增（$\frac{d\bar{\beta}_t}{dt} &gt; 0$），可以验证：</p>
+<p>$$
+\bar{\beta}_t \frac{d\bar{\alpha}_t}{dt} - \bar{\alpha}_t \frac{d\bar{\beta}_t}{dt} < 0
+$$</p>
+<p>因此 $\frac{d \text{SNR}(t)}{dt} &lt; 0$，SNR单调递减。</p>
+<p><strong>物理意义</strong>：随着扩散过程的进行，噪声逐渐增强，信号逐渐减弱，因此信噪比必然下降。</p>
+<p><strong>公式3.2 - SNR的边界值</strong></p>
+<p>由边界条件可知：</p>
+<p>$$
+\begin{aligned}
+\text{SNR}(0) &= \frac{\bar{\alpha}_0^2}{\bar{\beta}_0^2} = \frac{1}{0} = +\infty \\
+\text{SNR}(T) &= \frac{\bar{\alpha}_T^2}{\bar{\beta}_T^2} = \frac{0}{1} = 0
+\end{aligned}
+$$</p>
+<p><strong>解释</strong>：
+- $t=0$ 时没有噪声，信号完美，SNR为无穷大
+- $t=T$ 时信号完全消失，只剩噪声，SNR为0</p>
+<p><strong>公式3.3 - 对数SNR</strong></p>
+<p>为了便于计算和分析，常使用对数SNR：</p>
+<p>$$
+\log \text{SNR}(t) = \log \bar{\alpha}_t^2 - \log \bar{\beta}_t^2 = 2\log \bar{\alpha}_t - 2\log \bar{\beta}_t
+$$</p>
+<p>对数SNR的单调性更容易处理：</p>
+<p>$$
+\frac{d \log \text{SNR}(t)}{dt} = \frac{1}{\text{SNR}(t)} \cdot \frac{d \text{SNR}(t)}{dt} < 0
+$$</p>
+<h3 id="4">4. 分辨率与信噪比的关系</h3>
+<p><strong>公式4.1 - 平均池化操作的数学表示</strong></p>
+<p>对于大小为 $w \times h$ 的图像 $\boldsymbol{x}_t$，使用 $s \times s$ 的平均池化（Average Pooling）降采样到 $\frac{w}{s} \times \frac{h}{s}$：</p>
+<p>$$
+\mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_t]_{(i,j)} = \frac{1}{s^2} \sum_{p=0}^{s-1} \sum_{q=0}^{s-1} \boldsymbol{x}_t^{(si+p, sj+q)}
+$$</p>
+<p>其中 $(i,j)$ 是降采样后图像的像素位置。</p>
+<p><strong>公式4.2 - 平均池化下的带噪样本</strong></p>
+<p>将 $\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$ 代入池化操作：</p>
+<p>$$
+\mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_t]_{(i,j)} = \frac{1}{s^2} \sum_{p=0}^{s-1} \sum_{q=0}^{s-1} \left(\bar{\alpha}_t \boldsymbol{x}_0^{(si+p, sj+q)} + \bar{\beta}_t \boldsymbol{\varepsilon}^{(si+p, sj+q)}\right)
+$$</p>
+<p>$$
+= \bar{\alpha}_t \cdot \frac{1}{s^2} \sum_{p,q} \boldsymbol{x}_0^{(si+p, sj+q)} + \bar{\beta}_t \cdot \frac{1}{s^2} \sum_{p,q} \boldsymbol{\varepsilon}^{(si+p, sj+q)}
+$$</p>
+<p>$$
+= \bar{\alpha}_t \mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_0]_{(i,j)} + \bar{\beta}_t \mathcal{D}_{w/s \times h/s}[\boldsymbol{\varepsilon}]_{(i,j)}
+$$</p>
+<p><strong>公式4.3 - 噪声池化的方差变化</strong></p>
+<p>关键观察：平均池化会降低噪声的方差。由于 $\boldsymbol{\varepsilon}^{(i,j)} \sim \mathcal{N}(0, 1)$ 是独立同分布的，根据方差的性质：</p>
+<p>$$
+\text{Var}\left[\frac{1}{s^2} \sum_{p,q} \boldsymbol{\varepsilon}^{(si+p, sj+q)}\right] = \frac{1}{s^4} \sum_{p,q} \text{Var}[\boldsymbol{\varepsilon}^{(si+p, sj+q)}]
+$$</p>
+<p>$$
+= \frac{1}{s^4} \cdot s^2 \cdot 1 = \frac{1}{s^2}
+$$</p>
+<p>因此：
+$$
+\mathcal{D}_{w/s \times h/s}[\boldsymbol{\varepsilon}]_{(i,j)} \sim \mathcal{N}\left(0, \frac{1}{s^2}\right)
+$$</p>
+<p><strong>公式4.4 - 降采样后的SNR</strong></p>
+<p>降采样后的带噪样本可以重新表示为：</p>
+<p>$$
+\mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_t]_{(i,j)} = \bar{\alpha}_t \mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_0]_{(i,j)} + \bar{\beta}_t \tilde{\boldsymbol{\varepsilon}}_{(i,j)}
+$$</p>
+<p>其中 $\tilde{\boldsymbol{\varepsilon}}_{(i,j)} \sim \mathcal{N}(0, 1/s^2)$。</p>
+<p>给定降采样后的信号，条件方差为：</p>
+<p>$$
+\text{Var}[\mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_t]_{(i,j)} | \mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_0]_{(i,j)}] = \bar{\beta}_t^2 \cdot \frac{1}{s^2}
+$$</p>
+<p>条件均值的平方为：</p>
+<p>$$
+(\mathbb{E}[\mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_t]_{(i,j)} | \mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_0]_{(i,j)}])^2 = \bar{\alpha}_t^2 (\mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_0]_{(i,j)})^2
+$$</p>
+<p>因此降采样后的SNR为：</p>
+<p>$$
+\text{SNR}^{\text{downsampled}}(t) = \frac{\bar{\alpha}_t^2 (\mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_0]_{(i,j)})^2}{\bar{\beta}_t^2 / s^2}
+$$</p>
+<p>$$
+= s^2 \cdot \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2} \cdot (\mathcal{D}_{w/s \times h/s}[\boldsymbol{x}_0]_{(i,j)})^2
+$$</p>
+<p>忽略信号强度因子，简化为：</p>
+<p>$$
+\text{SNR}^{\text{downsampled}}(t) = s^2 \cdot \text{SNR}(t)
+$$</p>
+<p><strong>结论</strong>：降采样使得信噪比增加了 $s^2$ 倍。</p>
+<p><strong>公式4.5 - 分辨率无关性的数学表述</strong></p>
+<p>为了保证不同分辨率下的扩散模型具有相同的学习难度，我们要求高分辨率图像降采样后的SNR与直接在低分辨率上的SNR相同：</p>
+<p>$$
+\text{SNR}^{w \times h \to w/s \times h/s}(t) = \text{SNR}^{w/s \times h/s}(t)
+$$</p>
+<p>即：
+$$
+s^2 \cdot \frac{(\bar{\alpha}_t^{w \times h})^2}{(\bar{\beta}_t^{w \times h})^2} = \frac{(\bar{\alpha}_t^{w/s \times h/s})^2}{(\bar{\beta}_t^{w/s \times h/s})^2}
+$$</p>
+<p>整理得：
+$$
+\frac{(\bar{\alpha}_t^{w \times h})^2}{(\bar{\beta}_t^{w \times h})^2} = \frac{1}{s^2} \cdot \frac{(\bar{\alpha}_t^{w/s \times h/s})^2}{(\bar{\beta}_t^{w/s \times h/s})^2}
+$$</p>
+<h3 id="5">5. 噪声调度的分辨率自适应</h3>
+<p><strong>公式5.1 - 从低分辨率推导高分辨率的噪声调度</strong></p>
+<p>假设已知低分辨率 $w/s \times h/s$ 的噪声调度 $(\bar{\alpha}_t^{\text{low}}, \bar{\beta}_t^{\text{low}})$，现在需要求解高分辨率 $w \times h$ 的噪声调度 $(\bar{\alpha}_t^{\text{high}}, \bar{\beta}_t^{\text{high}})$。</p>
+<p>约束条件有两个：</p>
+<ol>
+<li>
+<p>SNR对齐条件：
+$$
+\frac{(\bar{\alpha}_t^{\text{high}})^2}{(\bar{\beta}_t^{\text{high}})^2} = \frac{1}{s^2} \cdot \frac{(\bar{\alpha}_t^{\text{low}})^2}{(\bar{\beta}_t^{\text{low}})^2}
+$$</p>
+</li>
+<li>
+<p>方差保持条件：
+$$
+(\bar{\alpha}_t^{\text{high}})^2 + (\bar{\beta}_t^{\text{high}})^2 = 1
+$$</p>
+</li>
+</ol>
+<p><strong>公式5.2 - 求解过程</strong></p>
+<p>从SNR对齐条件：
+$$
+(\bar{\alpha}_t^{\text{high}})^2 = \frac{1}{s^2} \cdot \frac{(\bar{\alpha}_t^{\text{low}})^2}{(\bar{\beta}_t^{\text{low}})^2} \cdot (\bar{\beta}_t^{\text{high}})^2
+$$</p>
+<p>代入方差保持条件：
+$$
+\frac{1}{s^2} \cdot \frac{(\bar{\alpha}_t^{\text{low}})^2}{(\bar{\beta}_t^{\text{low}})^2} \cdot (\bar{\beta}_t^{\text{high}})^2 + (\bar{\beta}_t^{\text{high}})^2 = 1
+$$</p>
+<p>$$
+(\bar{\beta}_t^{\text{high}})^2 \left(\frac{1}{s^2} \cdot \frac{(\bar{\alpha}_t^{\text{low}})^2}{(\bar{\beta}_t^{\text{low}})^2} + 1\right) = 1
+$$</p>
+<p>$$
+(\bar{\beta}_t^{\text{high}})^2 \left(\frac{(\bar{\alpha}_t^{\text{low}})^2 + s^2 (\bar{\beta}_t^{\text{low}})^2}{s^2 (\bar{\beta}_t^{\text{low}})^2}\right) = 1
+$$</p>
+<p>利用 $(\bar{\alpha}_t^{\text{low}})^2 + (\bar{\beta}_t^{\text{low}})^2 = 1$：</p>
+<p>$$
+(\bar{\beta}_t^{\text{high}})^2 \left(\frac{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2}{s^2 (\bar{\beta}_t^{\text{low}})^2}\right) = 1
+$$</p>
+<p>解得：
+$$
+(\bar{\beta}_t^{\text{high}})^2 = \frac{s^2 (\bar{\beta}_t^{\text{low}})^2}{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2}
+$$</p>
+<p>$$
+\bar{\beta}_t^{\text{high}} = \frac{s \bar{\beta}_t^{\text{low}}}{\sqrt{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2}}
+$$</p>
+<p>相应地：
+$$
+(\bar{\alpha}_t^{\text{high}})^2 = 1 - (\bar{\beta}_t^{\text{high}})^2 = 1 - \frac{s^2 (\bar{\beta}_t^{\text{low}})^2}{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2}
+$$</p>
+<p>$$
+= \frac{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2 - s^2 (\bar{\beta}_t^{\text{low}})^2}{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2}
+$$</p>
+<p>$$
+= \frac{1 - (\bar{\beta}_t^{\text{low}})^2}{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2} = \frac{(\bar{\alpha}_t^{\text{low}})^2}{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2}
+$$</p>
+<p>$$
+\bar{\alpha}_t^{\text{high}} = \frac{\bar{\alpha}_t^{\text{low}}}{\sqrt{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2}}
+$$</p>
+<p><strong>公式5.3 - 验证SNR对齐</strong></p>
+<p>验证推导结果是否满足SNR对齐条件：</p>
+<p>$$
+\frac{(\bar{\alpha}_t^{\text{high}})^2}{(\bar{\beta}_t^{\text{high}})^2} = \frac{(\bar{\alpha}_t^{\text{low}})^2 / [1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2]}{s^2 (\bar{\beta}_t^{\text{low}})^2 / [1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2]}
+$$</p>
+<p>$$
+= \frac{(\bar{\alpha}_t^{\text{low}})^2}{s^2 (\bar{\beta}_t^{\text{low}})^2} = \frac{1}{s^2} \cdot \frac{(\bar{\alpha}_t^{\text{low}})^2}{(\bar{\beta}_t^{\text{low}})^2} \quad \checkmark
+$$</p>
+<p><strong>公式5.4 - 特殊情况分析</strong></p>
+<p>当 $s=1$（分辨率不变）时：
+$$
+\bar{\alpha}_t^{\text{high}} = \bar{\alpha}_t^{\text{low}}, \quad \bar{\beta}_t^{\text{high}} = \bar{\beta}_t^{\text{low}} \quad \checkmark
+$$</p>
+<p>当 $\bar{\beta}_t^{\text{low}} \to 0$（接近 $t=0$）时：
+$$
+\bar{\beta}_t^{\text{high}} \approx s \bar{\beta}_t^{\text{low}}, \quad \bar{\alpha}_t^{\text{high}} \approx \bar{\alpha}_t^{\text{low}}
+$$</p>
+<p>这表明在噪声很小时，高分辨率的噪声强度近似为 $s$ 倍。</p>
+<p>当 $\bar{\beta}_t^{\text{low}} \to 1$（接近 $t=T$）时：
+$$
+\bar{\beta}_t^{\text{high}} \to \frac{s}{\sqrt{s^2}} = 1, \quad \bar{\alpha}_t^{\text{high}} \to 0 \quad \checkmark
+$$</p>
+<p>满足边界条件。</p>
+<h3 id="6-snr">6. 损失函数与SNR加权</h3>
+<p><strong>公式6.1 - 标准MSE损失</strong></p>
+<p>扩散模型的标准训练目标是预测添加的噪声，使用均方误差（MSE）损失：</p>
+<p>$$
+\mathcal{L}_{\text{MSE}} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}} \left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\|^2\right]
+$$</p>
+<p>其中 $\boldsymbol{\epsilon}_{\boldsymbol{\theta}}$ 是神经网络预测的噪声。</p>
+<p><strong>公式6.2 - 归一化的MSE损失</strong></p>
+<p>为了消除分辨率的影响，通常对损失进行归一化：</p>
+<p>$$
+\mathcal{L} = \frac{1}{wh} \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}} \left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, t)\|^2\right]
+$$</p>
+<p>这里除以像素总数 $wh$，使得损失值不随图像大小变化。</p>
+<p><strong>公式6.3 - 多尺度损失</strong></p>
+<p>Simple Diffusion提出的多尺度损失在不同分辨率上计算MSE：</p>
+<p>$$
+\mathcal{L}_{s \times s} = \frac{1}{(w/s)(h/s)} \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}} \left[\|\mathcal{D}_{w/s \times h/s}[\boldsymbol{\varepsilon}] - \mathcal{D}_{w/s \times h/s}[\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)]\|^2\right]
+$$</p>
+<p><strong>推导说明</strong>：</p>
+<p>将预测噪声和真实噪声都降采样到 $w/s \times h/s$ 分辨率后再计算MSE。这样做的好处是：</p>
+<ol>
+<li>确保模型在多个尺度上都能准确预测噪声</li>
+<li>低分辨率的loss更容易优化，可以稳定训练</li>
+<li>高分辨率的loss关注细节，提升生成质量</li>
+</ol>
+<p><strong>公式6.4 - 组合多尺度损失</strong></p>
+<p>最终的训练目标是多个尺度损失的加权组合：</p>
+<p>$$
+\mathcal{L}_{\text{multi-scale}} = \sum_{s \in \mathcal{S}} w_s \mathcal{L}_{s \times s}
+$$</p>
+<p>其中 $\mathcal{S}$ 是选择的尺度集合（如 ${1, 2, 4, 8}$），$w_s$ 是对应权重。</p>
+<p><strong>公式6.5 - SNR加权的损失函数</strong></p>
+<p>另一种改进是基于SNR对损失进行加权。由于不同时间步的SNR不同，去噪难度也不同，可以引入SNR相关的权重：</p>
+<p>$$
+\mathcal{L}_{\text{SNR-weighted}} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}} \left[w(\text{SNR}(t)) \|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\|^2\right]
+$$</p>
+<p><strong>常见的权重函数</strong>：</p>
+<ol>
+<li>常数权重：$w(\text{SNR}(t)) = 1$</li>
+<li>SNR权重：$w(\text{SNR}(t)) = \text{SNR}(t)$</li>
+<li>截断SNR权重：$w(\text{SNR}(t)) = \min(\text{SNR}(t), \lambda)$</li>
+<li>对数SNR权重：$w(\text{SNR}(t)) = \log(1 + \text{SNR}(t))$</li>
+</ol>
+<p><strong>公式6.6 - v-prediction的SNR关系</strong></p>
+<p>除了预测噪声 $\boldsymbol{\varepsilon}$，还可以预测速度项 $\boldsymbol{v}$：</p>
+<p>$$
+\boldsymbol{v}_t = \bar{\alpha}_t \boldsymbol{\varepsilon} - \bar{\beta}_t \boldsymbol{x}_0
+$$</p>
+<p>v-prediction的损失函数为：</p>
+<p>$$
+\mathcal{L}_v = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}} \left[\|\boldsymbol{v}_t - \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\|^2\right]
+$$</p>
+<p><strong>与SNR的关系</strong>：</p>
+<p>将 $\boldsymbol{v}_t$ 展开：
+$$
+\boldsymbol{v}_t = \bar{\alpha}_t \boldsymbol{\varepsilon} - \bar{\beta}_t \boldsymbol{x}_0
+$$</p>
+<p>如果从 $\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$ 出发：</p>
+<p>$$
+\boldsymbol{\varepsilon} = \frac{\boldsymbol{x}_t - \bar{\alpha}_t \boldsymbol{x}_0}{\bar{\beta}_t}
+$$</p>
+<p>代入：
+$$
+\boldsymbol{v}_t = \bar{\alpha}_t \cdot \frac{\boldsymbol{x}_t - \bar{\alpha}_t \boldsymbol{x}_0}{\bar{\beta}_t} - \bar{\beta}_t \boldsymbol{x}_0
+$$</p>
+<p>$$
+= \frac{\bar{\alpha}_t}{\bar{\beta}_t} \boldsymbol{x}_t - \frac{\bar{\alpha}_t^2}{\bar{\beta}_t} \boldsymbol{x}_0 - \bar{\beta}_t \boldsymbol{x}_0
+$$</p>
+<p>$$
+= \frac{\bar{\alpha}_t}{\bar{\beta}_t} \boldsymbol{x}_t - \left(\frac{\bar{\alpha}_t^2}{\bar{\beta}_t} + \bar{\beta}_t\right) \boldsymbol{x}_0
+$$</p>
+<p>利用 $\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1$：</p>
+<p>$$
+\frac{\bar{\alpha}_t^2}{\bar{\beta}_t} + \bar{\beta}_t = \frac{\bar{\alpha}_t^2 + \bar{\beta}_t^2}{\bar{\beta}_t} = \frac{1}{\bar{\beta}_t}
+$$</p>
+<p>因此：
+$$
+\boldsymbol{v}_t = \frac{\bar{\alpha}_t}{\bar{\beta}_t} \boldsymbol{x}_t - \frac{1}{\bar{\beta}_t} \boldsymbol{x}_0 = \frac{1}{\bar{\beta}_t} (\bar{\alpha}_t \boldsymbol{x}_t - \boldsymbol{x}_0)
+$$</p>
+<p>这个形式与SNR密切相关，因为 $\frac{\bar{\alpha}_t}{\bar{\beta}_t} = \sqrt{\text{SNR}(t)}$。</p>
+<h3 id="7">7. 时间重参数化</h3>
+<p><strong>公式7.1 - 时间变量的重参数化动机</strong></p>
+<p>在原始的时间参数化 $t \in [0, T]$ 下，不同时间步对应的SNR变化可能不均匀。为了使训练更稳定，可以引入新的时间变量 $\tau$，使得SNR关于 $\tau$ 的变化更加线性。</p>
+<p><strong>公式7.2 - 基于SNR的时间重参数化</strong></p>
+<p>定义新时间变量 $\tau$ 与 SNR 的关系：</p>
+<p>$$
+\tau = g(\text{SNR}(t))
+$$</p>
+<p>其中 $g$ 是单调函数。常见的选择包括：</p>
+<ol>
+<li>对数重参数化：$\tau = \log \text{SNR}(t)$</li>
+<li>线性重参数化：$\tau = \text{SNR}(t)$</li>
+<li>反函数重参数化：$\tau = \frac{1}{\text{SNR}(t)}$</li>
+</ol>
+<p><strong>公式7.3 - 对数SNR重参数化的详细推导</strong></p>
+<p>选择 $\tau = \log \text{SNR}(t)$，则：</p>
+<p>$$
+\tau = \log \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2} = 2\log \bar{\alpha}_t - 2\log \bar{\beta}_t
+$$</p>
+<p>反解：
+$$
+\text{SNR}(t) = e^{\tau}
+$$</p>
+<p>$$
+\frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2} = e^{\tau}
+$$</p>
+<p>结合 $\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1$：</p>
+<p>$$
+\bar{\alpha}_t^2 = e^{\tau} \bar{\beta}_t^2
+$$</p>
+<p>$$
+e^{\tau} \bar{\beta}_t^2 + \bar{\beta}_t^2 = 1
+$$</p>
+<p>$$
+\bar{\beta}_t^2 (e^{\tau} + 1) = 1
+$$</p>
+<p>$$
+\bar{\beta}_t = \frac{1}{\sqrt{e^{\tau} + 1}} = \frac{1}{\sqrt{e^{\tau} + 1}}
+$$</p>
+<p>$$
+\bar{\alpha}_t = \sqrt{e^{\tau}} \cdot \frac{1}{\sqrt{e^{\tau} + 1}} = \frac{\sqrt{e^{\tau}}}{\sqrt{e^{\tau} + 1}} = \frac{e^{\tau/2}}{\sqrt{e^{\tau} + 1}}
+$$</p>
+<p>或者更简洁地：
+$$
+\bar{\alpha}_t = \sqrt{\frac{e^{\tau}}{e^{\tau} + 1}} = \sqrt{\text{sigmoid}(\tau)}
+$$</p>
+<p>$$
+\bar{\beta}_t = \sqrt{\frac{1}{e^{\tau} + 1}} = \sqrt{1 - \text{sigmoid}(\tau)}
+$$</p>
+<p><strong>公式7.4 - 时间重参数化后的扩散过程</strong></p>
+<p>使用 $\tau$ 作为新时间变量，扩散过程变为：</p>
+<p>$$
+\boldsymbol{x}_{\tau} = \sqrt{\text{sigmoid}(\tau)} \boldsymbol{x}_0 + \sqrt{1 - \text{sigmoid}(\tau)} \boldsymbol{\varepsilon}
+$$</p>
+<p>边界条件：
+- $\tau \to +\infty$ 时，$\text{sigmoid}(\tau) \to 1$，$\boldsymbol{x}<em _tau="\tau">{\tau} \approx \boldsymbol{x}_0$
+- $\tau \to -\infty$ 时，$\text{sigmoid}(\tau) \to 0$，$\boldsymbol{x}</em>$} \approx \boldsymbol{\varepsilon</p>
+<p><strong>公式7.5 - 均匀采样策略</strong></p>
+<p>在 $\tau$ 空间中进行均匀采样：</p>
+<p>$$
+\tau_i = \tau_{\min} + \frac{i}{N}(\tau_{\max} - \tau_{\min}), \quad i = 0, 1, \ldots, N
+$$</p>
+<p>这样可以保证在整个SNR范围内采样更均匀，避免某些SNR区间训练不足。</p>
+<p><strong>公式7.6 - 连续时间扩散的积分形式</strong></p>
+<p>在连续时间框架下，扩散过程可以写成随机微分方程（SDE）：</p>
+<p>$$
+d\boldsymbol{x}_t = f(t) \boldsymbol{x}_t dt + g(t) d\boldsymbol{w}_t
+$$</p>
+<p>其中 $\boldsymbol{w}_t$ 是标准布朗运动。</p>
+<p>积分形式：
+$$
+\boldsymbol{x}_t = \boldsymbol{x}_0 \exp\left(\int_0^t f(s) ds\right) + \int_0^t g(s) \exp\left(\int_s^t f(u) du\right) d\boldsymbol{w}_s
+$$</p>
+<p>对应的 SNR 演化：
+$$
+\log \text{SNR}(t) = 2\int_0^t f(s) ds - \log\left(\int_0^t g(s)^2 \exp\left(2\int_s^t f(u) du\right) ds\right)
+$$</p>
+<h3 id="8">8. 反向过程与去噪</h3>
+<p><strong>公式8.1 - 反向过程的条件分布</strong></p>
+<p>给定 $\boldsymbol{x}_t$ 和 $\boldsymbol{x}_0$，反向一步的条件分布为：</p>
+<p>$$
+q(\boldsymbol{x}_{t-1} | \boldsymbol{x}_t, \boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_{t-1}; \tilde{\boldsymbol{\mu}}_t(\boldsymbol{x}_t, \boldsymbol{x}_0), \tilde{\beta}_t \boldsymbol{I})
+$$</p>
+<p>其中：
+$$
+\tilde{\boldsymbol{\mu}}_t(\boldsymbol{x}_t, \boldsymbol{x}_0) = \frac{\sqrt{\bar{\alpha}_{t-1}} \beta_t}{1 - \bar{\alpha}_t} \boldsymbol{x}_0 + \frac{\sqrt{\alpha_t}(1-\bar{\alpha}_{t-1})}{1-\bar{\alpha}_t} \boldsymbol{x}_t
+$$</p>
+<p>$$
+\tilde{\beta}_t = \frac{1 - \bar{\alpha}_{t-1}}{1 - \bar{\alpha}_t} \beta_t
+$$</p>
+<p><strong>公式8.2 - 用预测噪声表示反向均值</strong></p>
+<p>由于 $\boldsymbol{x}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\varepsilon}}{\bar{\alpha}_t}$，代入上式：</p>
+<p>$$
+\tilde{\boldsymbol{\mu}}_t(\boldsymbol{x}_t, \boldsymbol{\varepsilon}) = \frac{\sqrt{\bar{\alpha}_{t-1}} \beta_t}{1 - \bar{\alpha}_t} \cdot \frac{\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\varepsilon}}{\bar{\alpha}_t} + \frac{\sqrt{\alpha_t}(1-\bar{\alpha}_{t-1})}{1-\bar{\alpha}_t} \boldsymbol{x}_t
+$$</p>
+<p>整理：
+$$
+= \frac{1}{1-\bar{\alpha}_t} \left[\frac{\sqrt{\bar{\alpha}_{t-1}} \beta_t}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\varepsilon}) + \sqrt{\alpha_t}(1-\bar{\alpha}_{t-1}) \boldsymbol{x}_t\right]
+$$</p>
+<p>利用 $\beta_t = 1 - \alpha_t$ 和 $\bar{\alpha}<em t-1="t-1">t = \bar{\alpha}</em>$（需要从递推关系验证）：} \sqrt{\alpha_t</p>
+<p>$$
+= \frac{1}{\sqrt{\alpha_t}} \left(\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}} \boldsymbol{\varepsilon}\right)
+$$</p>
+<p><strong>公式8.3 - 预测模型的目标</strong></p>
+<p>神经网络 $\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$ 预测噪声 $\boldsymbol{\varepsilon}$，反向采样时使用：</p>
+<p>$$
+\boldsymbol{x}_{t-1} = \frac{1}{\sqrt{\alpha_t}} \left(\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}} \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\right) + \sqrt{\tilde{\beta}_t} \boldsymbol{z}
+$$</p>
+<p>其中 $\boldsymbol{z} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$。</p>
+<p><strong>公式8.4 - SNR与去噪难度的关系</strong></p>
+<p>去噪的难度与SNR密切相关。当SNR较高时（噪声少），预测噪声相对容易；当SNR较低时（噪声多），预测噪声困难。</p>
+<p>定义预测误差：
+$$
+\Delta \boldsymbol{\varepsilon} = \boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)
+$$</p>
+<p>预测误差对 $\boldsymbol{x}_0$ 重建的影响：</p>
+<p>$$
+\hat{\boldsymbol{x}}_0 = \frac{\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)}{\bar{\alpha}_t}
+$$</p>
+<p>$$
+= \frac{\boldsymbol{x}_t - \bar{\beta}_t (\boldsymbol{\varepsilon} - \Delta \boldsymbol{\varepsilon})}{\bar{\alpha}_t}
+$$</p>
+<p>$$
+= \boldsymbol{x}_0 + \frac{\bar{\beta}_t}{\bar{\alpha}_t} \Delta \boldsymbol{\varepsilon}
+$$</p>
+<p>重建误差与SNR的关系：
+$$
+\|\hat{\boldsymbol{x}}_0 - \boldsymbol{x}_0\|^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2} \|\Delta \boldsymbol{\varepsilon}\|^2 = \frac{1}{\text{SNR}(t)} \|\Delta \boldsymbol{\varepsilon}\|^2
+$$</p>
+<p><strong>结论</strong>：SNR越低，同样的噪声预测误差会导致更大的图像重建误差。</p>
+<h3 id="9">9. 方差保持的深入分析</h3>
+<p><strong>公式9.1 - 无条件方差的推导</strong></p>
+<p>考虑数据分布 $p(\boldsymbol{x}_0)$，无条件方差为：</p>
+<p>$$
+\text{Var}[\boldsymbol{x}_t] = \mathbb{E}_{\boldsymbol{x}_0, \boldsymbol{\varepsilon}}[(\boldsymbol{x}_t - \mathbb{E}[\boldsymbol{x}_t])^2]
+$$</p>
+<p>首先计算无条件均值：
+$$
+\mathbb{E}[\boldsymbol{x}_t] = \mathbb{E}_{\boldsymbol{x}_0, \boldsymbol{\varepsilon}}[\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}]
+$$</p>
+<p>$$
+= \bar{\alpha}_t \mathbb{E}[\boldsymbol{x}_0] + \bar{\beta}_t \mathbb{E}[\boldsymbol{\varepsilon}] = \bar{\alpha}_t \mathbb{E}[\boldsymbol{x}_0]
+$$</p>
+<p>假设数据已中心化（$\mathbb{E}[\boldsymbol{x}_0] = 0$），则 $\mathbb{E}[\boldsymbol{x}_t] = 0$。</p>
+<p>无条件方差：
+$$
+\text{Var}[\boldsymbol{x}_t] = \mathbb{E}[\boldsymbol{x}_t^2] = \mathbb{E}_{\boldsymbol{x}_0, \boldsymbol{\varepsilon}}[(\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon})^2]
+$$</p>
+<p>展开：
+$$
+= \mathbb{E}[\bar{\alpha}_t^2 \boldsymbol{x}_0^2 + 2\bar{\alpha}_t \bar{\beta}_t \boldsymbol{x}_0 \boldsymbol{\varepsilon} + \bar{\beta}_t^2 \boldsymbol{\varepsilon}^2]
+$$</p>
+<p>$$
+= \bar{\alpha}_t^2 \mathbb{E}[\boldsymbol{x}_0^2] + 2\bar{\alpha}_t \bar{\beta}_t \mathbb{E}[\boldsymbol{x}_0] \mathbb{E}[\boldsymbol{\varepsilon}] + \bar{\beta}_t^2 \mathbb{E}[\boldsymbol{\varepsilon}^2]
+$$</p>
+<p>$$
+= \bar{\alpha}_t^2 \text{Var}[\boldsymbol{x}_0] + 0 + \bar{\beta}_t^2
+$$</p>
+<p>如果 $\text{Var}[\boldsymbol{x}_0] = 1$（标准化数据），则：</p>
+<p>$$
+\text{Var}[\boldsymbol{x}_t] = \bar{\alpha}_t^2 + \bar{\beta}_t^2
+$$</p>
+<p>要使方差保持为1，需要 $\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1$。</p>
+<p><strong>公式9.2 - 方差爆炸与方差保持的对比</strong></p>
+<p>除了方差保持（VP, Variance Preserving），还有方差爆炸（VE, Variance Exploding）方案：</p>
+<p>VP方案：
+$$
+\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1, \quad \boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}
+$$</p>
+<p>$$
+\text{Var}[\boldsymbol{x}_t] = 1 \text{ (常数)}
+$$</p>
+<p>VE方案：
+$$
+\bar{\alpha}_t = 1, \quad \boldsymbol{x}_t = \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}
+$$</p>
+<p>$$
+\text{Var}[\boldsymbol{x}_t] = 1 + \bar{\beta}_t^2 \text{ (随 } t \text{ 增长)}
+$$</p>
+<p><strong>SNR的对比</strong>：</p>
+<p>VP的SNR：
+$$
+\text{SNR}_{\text{VP}}(t) = \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2} = \frac{\bar{\alpha}_t^2}{1 - \bar{\alpha}_t^2}
+$$</p>
+<p>VE的SNR：
+$$
+\text{SNR}_{\text{VE}}(t) = \frac{1}{\bar{\beta}_t^2}
+$$</p>
+<p><strong>公式9.3 - 方差保持条件的放松</strong></p>
+<p>在某些应用中，可以放松方差保持条件，允许：</p>
+<p>$$
+\bar{\alpha}_t^2 + \lambda_t \bar{\beta}_t^2 = 1
+$$</p>
+<p>其中 $\lambda_t$ 是可调参数。这提供了VP和VE之间的插值。</p>
+<h3 id="10-snr">10. 实际应用中的SNR调度设计</h3>
+<p><strong>公式10.1 - 余弦调度（Cosine Schedule）</strong></p>
+<p>余弦调度是常用的噪声调度方案：</p>
+<p>$$
+\bar{\alpha}_t = \cos\left(\frac{t/T + s}{1 + s} \cdot \frac{\pi}{2}\right)
+$$</p>
+<p>其中 $s$ 是小常数（如 $s=0.008$），用于避免在 $t=0$ 时梯度过小。</p>
+<p>对应的SNR：
+$$
+\text{SNR}(t) = \frac{\bar{\alpha}_t^2}{1 - \bar{\alpha}_t^2} = \frac{\cos^2\left(\frac{t/T + s}{1 + s} \cdot \frac{\pi}{2}\right)}{1 - \cos^2\left(\frac{t/T + s}{1 + s} \cdot \frac{\pi}{2}\right)}
+$$</p>
+<p>$$
+= \frac{\cos^2\left(\frac{t/T + s}{1 + s} \cdot \frac{\pi}{2}\right)}{\sin^2\left(\frac{t/T + s}{1 + s} \cdot \frac{\pi}{2}\right)} = \cot^2\left(\frac{t/T + s}{1 + s} \cdot \frac{\pi}{2}\right)
+$$</p>
+<p><strong>公式10.2 - 线性调度（Linear Schedule）</strong></p>
+<p>线性调度直接线性插值 $\beta_t$：</p>
+<p>$$
+\beta_t = \beta_{\min} + \frac{t}{T}(\beta_{\max} - \beta_{\min})
+$$</p>
+<p>累积形式：
+$$
+\bar{\alpha}_t = \prod_{s=1}^t \sqrt{1 - \beta_s}
+$$</p>
+<p>近似为（连续时间）：
+$$
+\bar{\alpha}_t \approx \exp\left(-\frac{1}{2}\int_0^t \beta_s ds\right) = \exp\left(-\frac{1}{2}\left[\beta_{\min} t + \frac{t^2}{2T}(\beta_{\max} - \beta_{\min})\right]\right)
+$$</p>
+<p><strong>公式10.3 - 分辨率自适应的余弦调度</strong></p>
+<p>对于分辨率 $w \times h$，参考分辨率为 $w_0 \times h_0$，缩放因子 $s^2 = \frac{wh}{w_0 h_0}$。</p>
+<p>调整后的余弦调度：</p>
+<p>$$
+\bar{\alpha}_t^{w \times h} = \frac{\bar{\alpha}_t^{w_0 \times h_0}}{\sqrt{1 + (s^2-1)(\bar{\beta}_t^{w_0 \times h_0})^2}}
+$$</p>
+<p>$$
+\bar{\beta}_t^{w \times h} = \frac{s \bar{\beta}_t^{w_0 \times h_0}}{\sqrt{1 + (s^2-1)(\bar{\beta}_t^{w_0 \times h_0})^2}}
+$$</p>
+<p><strong>公式10.4 - 验证调度的合理性</strong></p>
+<p>一个好的噪声调度应该满足：</p>
+<ol>
+<li>单调性：$\frac{d\text{SNR}(t)}{dt} &lt; 0$</li>
+<li>平滑性：$\frac{d^2\text{SNR}(t)}{dt^2}$ 连续且不剧烈变化</li>
+<li>覆盖范围：$\text{SNR}(0)$ 足够大，$\text{SNR}(T)$ 足够小</li>
+</ol>
+<p><strong>检查余弦调度的单调性</strong>：</p>
+<p>$$
+\frac{d\bar{\alpha}_t}{dt} = -\sin\left(\frac{t/T + s}{1 + s} \cdot \frac{\pi}{2}\right) \cdot \frac{1}{T(1+s)} \cdot \frac{\pi}{2} < 0 \quad \checkmark
+$$</p>
+<p>$$
+\frac{d\text{SNR}(t)}{dt} = \frac{d}{dt}\left[\cot^2\left(\frac{t/T + s}{1 + s} \cdot \frac{\pi}{2}\right)\right] < 0 \quad \checkmark
+$$</p>
+<h3 id="11">11. 总结与展望</h3>
+<p><strong>关键公式汇总</strong>：</p>
+<ol>
+<li>
+<p><strong>扩散过程</strong>：$\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$</p>
+</li>
+<li>
+<p><strong>信噪比定义</strong>：$\text{SNR}(t) = \frac{\bar{\alpha}_t^2}{\bar{\beta}_t^2}$</p>
+</li>
+<li>
+<p><strong>方差保持</strong>：$\bar{\alpha}_t^2 + \bar{\beta}_t^2 = 1$</p>
+</li>
+<li>
+<p><strong>分辨率自适应</strong>：降采样使SNR增加 $s^2$ 倍</p>
+</li>
+<li>
+<p><strong>噪声调度求解</strong>：
+   $$\bar{\beta}_t^{\text{high}} = \frac{s \bar{\beta}_t^{\text{low}}}{\sqrt{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2}}$$</p>
+</li>
+</ol>
+<p>$$\bar{\alpha}_t^{\text{high}} = \frac{\bar{\alpha}_t^{\text{low}}}{\sqrt{1 + (s^2-1) (\bar{\beta}_t^{\text{low}})^2}}$$</p>
+<ol>
+<li>
+<p><strong>多尺度损失</strong>：$\mathcal{L}<em s="s">{\text{multi-scale}} = \sum</em>$} w_s \mathcal{L}_{s \times s</p>
+</li>
+<li>
+<p><strong>时间重参数化</strong>：$\bar{\alpha}_t = \sqrt{\text{sigmoid}(\tau)}, \quad \bar{\beta}_t = \sqrt{1-\text{sigmoid}(\tau)}$</p>
+</li>
+<li>
+<p><strong>去噪更新</strong>：$\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">{t-1} = \frac{1}{\sqrt{\alpha_t}} \left(\boldsymbol{x}_t - \frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}} \boldsymbol{\epsilon}</em>$}}(\boldsymbol{x}_t, t)\right) + \sqrt{\tilde{\beta}_t} \boldsymbol{z</p>
+</li>
+</ol>
+<p>这些公式构成了基于信噪比分析的扩散模型理论框架，为大图生成提供了理论指导和实践方案。通过SNR对齐，可以将低分辨率模型的经验迁移到高分辨率设置，显著提升训练效率和生成质量。</p>
+        </div>
+    </div>
+</body>
+</html>

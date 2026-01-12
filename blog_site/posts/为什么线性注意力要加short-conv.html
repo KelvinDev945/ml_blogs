@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>为什么线性注意力要加Short C...</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>为什么线性注意力要加Short C...</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 40.2 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/11320">https://spaces.ac.cn/archives/11320</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>如果读者有关注模型架构方面的进展，那么就会发现，比较新的线性Attention（参考<a href="/archives/11033">《线性注意力简史：从模仿、创新到反哺》</a>）模型都给$\boldsymbol{Q},\boldsymbol{K},\boldsymbol{V}$加上了Short Conv，比如下图所示的<a href="https://papers.cool/arxiv/2406.06484">DeltaNet</a>：  </p>
+<p><a href="/usr/uploads/2025/10/175536171.png" title="点击查看原图"><img alt="DeltaNet中的Short Conv" src="/usr/uploads/2025/10/175536171.png" /></a></p>
+<p>DeltaNet中的Short Conv</p>
+<p>为什么要加这个Short Conv呢？直观理解可能是增加模型深度、增强模型的Token-Mixing能力等，说白了就是补偿线性化导致的表达能力下降。这个说法当然是大差不差，但它属于“万能模版”式的回答，我们更想对它的生效机制有更准确的认知。</p>
+<p>接下来，笔者将给出自己的一个理解（更准确说应该是猜测）。</p>
+<h2 id="_1">测试训练</h2>
+<p>从<a href="/archives/11033">《线性注意力简史：从模仿、创新到反哺》</a>我们知道，目前的新式线性Attention背后的核心思想都是<a href="https://papers.cool/arxiv/2407.04620">TTT（Test Time Training）</a>或者说Online Learning。TTT基于优化器更新与RNN迭代的相似性，通过优化器来构建（不一定是线性的）RNN模型，诸如DeltaNet、GDN、Comba等线性Attention都可以看成它的特例。</p>
+<p>具体来说，TTT将$\boldsymbol{K},\boldsymbol{V}$视为成对的语料$(\boldsymbol{k}<em t-1="t-1">1, \boldsymbol{v}_1),(\boldsymbol{k}_2, \boldsymbol{v}_2),\cdots,(\boldsymbol{k}_t, \boldsymbol{v}_t)$，我们用它训练一个模型$\boldsymbol{v} = \boldsymbol{f}(\boldsymbol{S}_t;\boldsymbol{k})$，然后输出$\boldsymbol{o}_t = \boldsymbol{f}(\boldsymbol{S}_t;\boldsymbol{q}_t)$，其中$\boldsymbol{S}_t$是模型参数，用SGD更新：<br />
+\begin{equation} \boldsymbol{S}_t = \boldsymbol{S}</em>} - \eta_t\nabla_{\boldsymbol{S<em t-1="t-1">{t-1}}\mathcal{L}(\boldsymbol{f}(\boldsymbol{S}</em>};\boldsymbol{k<em t-1="t-1">t), \boldsymbol{v}_t)\end{equation}<br />
+当然，如果我们愿意，也可以考虑其他优化器，比如<a href="https://papers.cool/arxiv/2505.23884">《Test-Time Training Done Right》</a>尝试了Muon优化器。除了可以改变优化器外，可以灵活改变的地方还有模型$\boldsymbol{v} = \boldsymbol{f}(\boldsymbol{S}_t;\boldsymbol{k})$的架构以及损失函数$\mathcal{L}(\boldsymbol{f}(\boldsymbol{S}</em>_t)$。此外，我们还可以考虑以Chunk为单位的Mini-batch TTT。};\boldsymbol{k}_t), \boldsymbol{v</p>
+<p>不难想象，理论上TTT的灵活性非常高，可以构建任意复杂的RNN模型。当架构选择线性模型$\boldsymbol{v} = \boldsymbol{S}_t\boldsymbol{k}$且损失函数选择平方误差时，结果对应DeltaNet；如果我们加上一些正则项，那么可以衍生出GDN等变体。</p>
+<h2 id="_2">灵魂拷问</h2>
+<p>将TTT放在前面，主要是想表明，当前主流的线性Attention的底层逻辑跟TTT一样，核心都是语料对$(\boldsymbol{k}_1, \boldsymbol{v}_1),(\boldsymbol{k}_2, \boldsymbol{v}_2),\cdots,(\boldsymbol{k}_t, \boldsymbol{v}_t)$的Online Learning。这就很自然地引申出一个疑问：为什么要这样做？这样做究竟学出个什么来？</p>
+<p>要回答这个问题，首先得反思一下“我们究竟想要什么”。按照Softmax Attention的特点，我们想要的应该是根据$(\boldsymbol{k}_1, \boldsymbol{v}_1),(\boldsymbol{k}_2, \boldsymbol{v}_2),\cdots,(\boldsymbol{k}_t, \boldsymbol{v}_t)$和$\boldsymbol{q}_t$算出一个$\boldsymbol{o}_t$来，这个过程理想情况下应该依赖于全体$(\boldsymbol{k},\boldsymbol{v})$。同时，我们还希望能常数复杂度实现这个目标，所以一个直观想法是先将$(\boldsymbol{k},\boldsymbol{v})$压缩成（与$t$无关的）固定大小的State，然后再读取这个State。</p>
+<p>怎么实现这个压缩呢？TTT的想法是：设计一个模型$\boldsymbol{v} = \boldsymbol{f}(\boldsymbol{S}_t;\boldsymbol{k})$，然后用这些$(\boldsymbol{k},\boldsymbol{v})$对去“训练”这个模型，训练完成后，模型某种意义上就“背下”了这些$(\boldsymbol{k},\boldsymbol{v})$对，这就相当于就全体$(\boldsymbol{k},\boldsymbol{v})$压缩到了固定大小的模型权重$\boldsymbol{S}_t$中。至于$\boldsymbol{q}<br />
+_t$怎么利用$\boldsymbol{S}_t$，直接将它代入模型中得到$\boldsymbol{o}<br />
+_t = \boldsymbol{f}(\boldsymbol{S}_t;\boldsymbol{q}_t)$是一个比较自然的选择，但原则上我们也可以设计别的利用方式。</p>
+<p>也就是说，TTT的核心任务是利用 <em>“训练模型”约等于“背诵训练集”</em> 这件事情，来实现$\boldsymbol{K},\boldsymbol{V}$的压缩。然而， <em>“训练模型”约等于“背诵训练集”</em> 这件事情并不是那么平凡，它有一些前提条件。</p>
+<h2 id="_3">键值同源</h2>
+<p>举个例子，如果我们取$\boldsymbol{K}=\boldsymbol{V}$，那么TTT这套框架理论上就失效了，因为这时候模型$\boldsymbol{v} = \boldsymbol{f}(\boldsymbol{S}_t;\boldsymbol{k})$的最优解就是恒等变换，它是一个平凡解，这相当于没记住任何东西。像DeltaNet这种在线更新的或许还能抢救一下，而像<a href="https://papers.cool/arxiv/2506.05233">MesaNet</a>这种基于准确解的就真的直接输出单位阵$\boldsymbol{I}$了。</p>
+<p>可能有读者会反问：好端端地为啥要考虑$\boldsymbol{K}=\boldsymbol{V}$这种不科学的选择呢？的确，$\boldsymbol{K}=\boldsymbol{V}$是比较极端的选择，这里只是作为一个例子，说明 <em>“训练模型”约等于“背诵训练集”</em> 并不是随意成立的。其次，我们在<a href="/archives/10907">《Transformer升级之路：20、MLA好在哪里?（上）》</a>已经验证过，对于Softmax Attention来说，$\boldsymbol{K}=\boldsymbol{V}$也能取得不错的结果。</p>
+<p>这说明，$\boldsymbol{K}=\boldsymbol{V}$并不是Attention机制的本质障碍，但在TTT框架里边它却能导致模型失效，这是因为$\boldsymbol{K},\boldsymbol{V}$完全重合，那么它们俩之间的回归就没有东西可学了。类似地，我们可以想象，$\boldsymbol{K},\boldsymbol{V}$的信息重合度越高，那么它们之间可学的东西就越少，换言之TTT对“训练集”的记忆程度就越低。</p>
+<p>在一般的Attention机制中，$\boldsymbol{q}_t,\boldsymbol{k}_t,\boldsymbol{v}_t$都是由同一个输入$\boldsymbol{x}_t$经过不同的线性投影得到的，换句话说$\boldsymbol{k}_t,\boldsymbol{v}_t$具有相同的源头$\boldsymbol{x}_t$，这就始终有种“自己预测自己”的感觉，可学的东西有限。</p>
+<h2 id="_4">卷积救场</h2>
+<p>怎么让TTT在键值同源甚至$\boldsymbol{K}=\boldsymbol{V}$时能学出更有价值的结果呢？其实答案很早就有了——可以追溯到Word2Vec甚至更早的年代——那就是不要“预测自己”，而是“预测周围”。</p>
+<p>以<a href="https://papers.cool/arxiv/1301.3781">Word2Vec</a>为例，我们知道它的训练方式是“中心词预测上下文”；之前流行的<a href="https://papers.cool/arxiv/1810.04805">BERT</a>，预训练方式是MLM，它是某些词Mask掉来预测这些词，可以说是“上下文预测中心词”；现在主流的LLM，训练任务则是NTP（Next Token Predict），根据上文预测下一个词。很明显，它们的共同特点都是不预测自己，而是预测周围。</p>
+<p>所以，想要改进TTT，那么就要改变$(\boldsymbol{k}<em t-1="t-1">t,\boldsymbol{v}_t)$这样的“自己预测自己”的配对方式，考虑到当前LLM以NTP为主，在TTT中我们也可以考虑NTP，比如$(\boldsymbol{k}</em>},\boldsymbol{v<em t-1="t-1">t)$来构建语料对，即用$\boldsymbol{k}</em>$也能学出非平凡的结果。此时TTT内外都是NTP任务，具有漂亮的一致性。}$来预测$\boldsymbol{v}_t$，这样即便$\boldsymbol{K}=\boldsymbol{V</p>
+<p>不过，只用$\boldsymbol{k}<em t-1="t-1">{t-1}$预测$\boldsymbol{v}_t$的话，似乎把$\boldsymbol{k}_t$浪费掉了，所以进一步的想法是把$\boldsymbol{k}</em>}$和$\boldsymbol{k<em t-1="t-1">t$以某种方式混合起来再预测$\boldsymbol{v}_t$。到这里，大家可能反应过来了，“把$\boldsymbol{k}</em>$加Short Conv，是将TTT的训练目标从“预测自己”转化为NTP，让TTT至少有能力学出一个n-gram模型。}$和$\boldsymbol{k}_t$以某种方式混合起来”这不就相当于kernel_size=2的Conv嘛！所以，给$\boldsymbol{K</p>
+<p>至于给$\boldsymbol{Q},\boldsymbol{V}$加Short Conv，则完全是顺带的，根据飞来阁（FLA群）的消息，给$\boldsymbol{Q},\boldsymbol{V}$加虽然也有一点作用，但远不如给$\boldsymbol{K}$加Short Conv带来的提升，这也算是佐证了我们的猜测。</p>
+<h2 id="_5">文章小结</h2>
+<p>这篇文章对“为什么线性注意力要加Short Conv”这个问题给出了一个闭门造车的理解。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/11320">https://spaces.ac.cn/archives/11320</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Oct. 05, 2025). 《为什么线性注意力要加Short Conv？ 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/11320">https://spaces.ac.cn/archives/11320</a></p>
+<p>@online{kexuefm-11320,<br />
+title={为什么线性注意力要加Short Conv？},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={Oct},<br />
+url={\url{https://spaces.ac.cn/archives/11320}},<br />
+} </p>
+<hr />
+<hr />
+<h2 id="_6">公式推导与注释</h2>
+<h3 id="1">1. 标准注意力机制的数学定义</h3>
+<p>标准的自注意力（Self-Attention）机制可以形式化表示为：</p>
+<p>$$
+\text{Attention}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}) = \text{softmax}\left(\frac{\boldsymbol{Q}\boldsymbol{K}^T}{\sqrt{d_k}}\right)\boldsymbol{V}
+$$</p>
+<p><strong>注释</strong>：这里 $\boldsymbol{Q} \in \mathbb{R}^{n \times d_k}$ 是查询矩阵，$\boldsymbol{K} \in \mathbb{R}^{n \times d_k}$ 是键矩阵，$\boldsymbol{V} \in \mathbb{R}^{n \times d_v}$ 是值矩阵，其中 $n$ 是序列长度，$d_k$ 和 $d_v$ 分别是键和值的维度。温度系数 $\sqrt{d_k}$ 用于控制softmax函数的尖锐程度。</p>
+<h3 id="2">2. 标准注意力的计算复杂度分析</h3>
+<p>对于序列长度为 $n$ 的输入，标准注意力机制的计算复杂度分解如下：</p>
+<p><strong>步骤1：计算注意力得分矩阵</strong></p>
+<p>$$
+\boldsymbol{S} = \boldsymbol{Q}\boldsymbol{K}^T \in \mathbb{R}^{n \times n}
+$$</p>
+<p><strong>复杂度分析</strong>：矩阵乘法 $\boldsymbol{Q}\boldsymbol{K}^T$ 需要计算 $n \times n$ 个元素，每个元素需要 $d_k$ 次乘法和加法，因此时间复杂度为 $O(n^2 d_k)$，空间复杂度为 $O(n^2)$。</p>
+<p><strong>步骤2：应用softmax归一化</strong></p>
+<p>$$
+\boldsymbol{A}_{i,j} = \frac{\exp(\boldsymbol{S}_{i,j}/\sqrt{d_k})}{\sum_{k=1}^n \exp(\boldsymbol{S}_{i,k}/\sqrt{d_k})}
+$$</p>
+<p><strong>复杂度分析</strong>：对于 $n \times n$ 的矩阵，softmax操作需要 $O(n^2)$ 的时间复杂度。</p>
+<p><strong>步骤3：加权求和</strong></p>
+<p>$$
+\boldsymbol{O} = \boldsymbol{A}\boldsymbol{V} \in \mathbb{R}^{n \times d_v}
+$$</p>
+<p><strong>复杂度分析</strong>：矩阵乘法 $\boldsymbol{A}\boldsymbol{V}$ 的时间复杂度为 $O(n^2 d_v)$。</p>
+<p><strong>总体复杂度</strong>：标准注意力的总时间复杂度为 $O(n^2(d_k + d_v))$，空间复杂度为 $O(n^2)$。当序列长度 $n$ 很大时，这种二次复杂度成为主要瓶颈。</p>
+<h3 id="3">3. 线性注意力的基本思想</h3>
+<p>线性注意力的核心思想是通过特征映射函数 $\phi(\cdot)$ 将注意力机制线性化，避免显式计算 $n \times n$ 的注意力矩阵。</p>
+<p><strong>核技巧（Kernel Trick）的应用</strong>：</p>
+<p>假设存在特征映射 $\phi: \mathbb{R}^{d_k} \to \mathbb{R}^{d_\phi}$，使得：</p>
+<p>$$
+\exp\left(\frac{\boldsymbol{q}_i^T \boldsymbol{k}_j}{\sqrt{d_k}}\right) \approx \phi(\boldsymbol{q}_i)^T \phi(\boldsymbol{k}_j)
+$$</p>
+<p><strong>注释</strong>：这个近似是线性注意力的关键。通过这种方式，我们可以将注意力权重的计算转化为特征空间中的内积计算。</p>
+<h3 id="4">4. 线性注意力的数学推导</h3>
+<p>标准注意力的第 $i$ 个输出向量可以写成：</p>
+<p>$$
+\boldsymbol{o}_i = \frac{\sum_{j=1}^n \exp(\boldsymbol{q}_i^T \boldsymbol{k}_j) \boldsymbol{v}_j}{\sum_{j=1}^n \exp(\boldsymbol{q}_i^T \boldsymbol{k}_j)}
+$$</p>
+<p><strong>引入特征映射后的线性化</strong>：</p>
+<p>使用特征映射 $\phi(\cdot)$ 近似，我们得到：</p>
+<p>$$
+\boldsymbol{o}_i \approx \frac{\sum_{j=1}^n \phi(\boldsymbol{q}_i)^T \phi(\boldsymbol{k}_j) \boldsymbol{v}_j}{\sum_{j=1}^n \phi(\boldsymbol{q}_i)^T \phi(\boldsymbol{k}_j)}
+$$</p>
+<p><strong>关键的代数变换</strong>：</p>
+<p>利用线性代数的结合律，我们可以重新组合求和顺序：</p>
+<p>$$
+\boldsymbol{o}_i = \frac{\phi(\boldsymbol{q}_i)^T \left(\sum_{j=1}^n \phi(\boldsymbol{k}_j) \boldsymbol{v}_j^T\right)}{\phi(\boldsymbol{q}_i)^T \left(\sum_{j=1}^n \phi(\boldsymbol{k}_j)\right)}
+$$</p>
+<p><strong>定义累积矩阵</strong>：</p>
+<p>令 $\boldsymbol{S} = \sum_{j=1}^n \phi(\boldsymbol{k}<em>j) \boldsymbol{v}_j^T \in \mathbb{R}^{d</em>\phi \times d_v}$ 和 $\boldsymbol{z} = \sum_{j=1}^n \phi(\boldsymbol{k}<em>j) \in \mathbb{R}^{d</em>\phi}$，则：</p>
+<p>$$
+\boldsymbol{o}_i = \frac{\phi(\boldsymbol{q}_i)^T \boldsymbol{S}}{\phi(\boldsymbol{q}_i)^T \boldsymbol{z}}
+$$</p>
+<p><strong>注释</strong>：这个重新组合是线性注意力能够降低复杂度的关键。注意 $\boldsymbol{S}$ 和 $\boldsymbol{z}$ 只需要计算一次，然后可以被所有查询位置重用。</p>
+<h3 id="5">5. 线性注意力的复杂度分析</h3>
+<p><strong>计算 $\boldsymbol{S}$ 的复杂度</strong>：</p>
+<p>$$
+\boldsymbol{S} = \sum_{j=1}^n \phi(\boldsymbol{k}_j) \boldsymbol{v}_j^T
+$$</p>
+<ul>
+<li>每个 $\phi(\boldsymbol{k}<em>j) \boldsymbol{v}_j^T$ 是 $d</em>\phi \times d_v$ 的矩阵，需要 $O(d_\phi d_v)$ 时间</li>
+<li>总共需要累加 $n$ 次，因此时间复杂度为 $O(n d_\phi d_v)$</li>
+</ul>
+<p><strong>计算 $\boldsymbol{z}$ 的复杂度</strong>：</p>
+<p>$$
+\boldsymbol{z} = \sum_{j=1}^n \phi(\boldsymbol{k}_j)
+$$</p>
+<ul>
+<li>时间复杂度为 $O(n d_\phi)$</li>
+</ul>
+<p><strong>计算所有输出的复杂度</strong>：</p>
+<p>对于每个查询位置 $i$：</p>
+<p>$$
+\boldsymbol{o}_i = \frac{\phi(\boldsymbol{q}_i)^T \boldsymbol{S}}{\phi(\boldsymbol{q}_i)^T \boldsymbol{z}}
+$$</p>
+<ul>
+<li>$\phi(\boldsymbol{q}<em>i)^T \boldsymbol{S}$ 需要 $O(d</em>\phi d_v)$ 时间</li>
+<li>$\phi(\boldsymbol{q}<em>i)^T \boldsymbol{z}$ 需要 $O(d</em>\phi)$ 时间</li>
+<li>对于 $n$ 个位置，总时间复杂度为 $O(n d_\phi d_v)$</li>
+</ul>
+<p><strong>总体复杂度</strong>：线性注意力的总时间复杂度为 $O(n d_\phi (d_v + d_k))$，相比标准注意力的 $O(n^2 d_k)$，从序列长度的二次复杂度降低到线性复杂度。</p>
+<h3 id="6">6. 常用的特征映射函数</h3>
+<p><strong>ELU特征映射</strong>（Performers）：</p>
+<p>$$
+\phi(\boldsymbol{x}) = \text{elu}(\boldsymbol{x}) + 1
+$$</p>
+<p>其中 $\text{elu}(x) = \begin{cases} x &amp; \text{if } x &gt; 0 \ e^x - 1 &amp; \text{if } x \leq 0 \end{cases}$</p>
+<p><strong>注释</strong>：加1是为了保证所有元素非负，这样可以确保注意力权重的非负性。</p>
+<p><strong>随机特征映射</strong>（Performers）：</p>
+<p>$$
+\phi(\boldsymbol{x}) = \frac{1}{\sqrt{m}} \left[\cos(\boldsymbol{\omega}_1^T \boldsymbol{x}), \sin(\boldsymbol{\omega}_1^T \boldsymbol{x}), \ldots, \cos(\boldsymbol{\omega}_m^T \boldsymbol{x}), \sin(\boldsymbol{\omega}_m^T \boldsymbol{x})\right]^T
+$$</p>
+<p>其中 $\boldsymbol{\omega}_i \sim \mathcal{N}(0, \boldsymbol{I})$ 是从标准正态分布中随机采样的向量。</p>
+<p><strong>注释</strong>：这是基于随机傅里叶特征的映射，理论上可以任意精确地近似高斯核函数。</p>
+<p><strong>ReLU特征映射</strong>（Linear Attention）：</p>
+<p>$$
+\phi(\boldsymbol{x}) = \text{ReLU}(\boldsymbol{x}) = \max(0, \boldsymbol{x})
+$$</p>
+<p><strong>注释</strong>：这是最简单的特征映射，计算效率高，但近似精度相对较低。</p>
+<h3 id="7">7. 因果线性注意力的推导</h3>
+<p>在自回归场景中，位置 $i$ 的输出只能依赖于位置 $j \leq i$ 的信息。因果线性注意力可以表示为：</p>
+<p>$$
+\boldsymbol{o}_i = \frac{\sum_{j=1}^i \phi(\boldsymbol{q}_i)^T \phi(\boldsymbol{k}_j) \boldsymbol{v}_j}{\sum_{j=1}^i \phi(\boldsymbol{q}_i)^T \phi(\boldsymbol{k}_j)}
+$$</p>
+<p><strong>递推形式的推导</strong>：</p>
+<p>定义累积状态：</p>
+<p>$$
+\boldsymbol{S}_i = \sum_{j=1}^i \phi(\boldsymbol{k}_j) \boldsymbol{v}_j^T, \quad \boldsymbol{z}_i = \sum_{j=1}^i \phi(\boldsymbol{k}_j)
+$$</p>
+<p>则有递推关系：</p>
+<p>$$
+\begin{aligned}
+\boldsymbol{S}_i &= \boldsymbol{S}_{i-1} + \phi(\boldsymbol{k}_i) \boldsymbol{v}_i^T \\
+\boldsymbol{z}_i &= \boldsymbol{z}_{i-1} + \phi(\boldsymbol{k}_i)
+\end{aligned}
+$$</p>
+<p>输出可以表示为：</p>
+<p>$$
+\boldsymbol{o}_i = \frac{\phi(\boldsymbol{q}_i)^T \boldsymbol{S}_i}{\phi(\boldsymbol{q}_i)^T \boldsymbol{z}_i}
+$$</p>
+<p><strong>注释</strong>：这种递推形式使得因果线性注意力可以高效地实现流式推理，每个时间步只需要 $O(d_\phi d_v)$ 的计算量。</p>
+<h3 id="8">8. 线性注意力的局限性：缺乏局部建模能力</h3>
+<p><strong>问题陈述</strong>：线性注意力通过全局累积的方式计算注意力，导致它在建模局部依赖关系时能力不足。</p>
+<p><strong>数学分析</strong>：</p>
+<p>标准注意力的权重矩阵 $\boldsymbol{A} \in \mathbb{R}^{n \times n}$ 是稠密的，第 $i$ 行的权重分布可以是任意的概率分布：</p>
+<p>$$
+\boldsymbol{A}_{i,:} = \text{softmax}(\boldsymbol{q}_i^T \boldsymbol{K}^T) \in \Delta^{n-1}
+$$</p>
+<p>其中 $\Delta^{n-1}$ 表示 $(n-1)$ 维单纯形（概率单纯形）。</p>
+<p><strong>线性注意力的权重分布</strong>：</p>
+<p>对于线性注意力，权重实际上是：</p>
+<p>$$
+\alpha_{i,j} = \frac{\phi(\boldsymbol{q}_i)^T \phi(\boldsymbol{k}_j)}{\sum_{k=1}^n \phi(\boldsymbol{q}_i)^T \phi(\boldsymbol{k}_k)}
+$$</p>
+<p><strong>局部性缺失的证明</strong>：</p>
+<p>考虑位置 $i$ 对其相邻位置 $i-1$ 和 $i+1$ 的注意力权重。在标准注意力中，可以通过调整 $\boldsymbol{q}<em i-1="i-1">i$、$\boldsymbol{k}</em>$ 使得：}$、$\boldsymbol{k}_{i+1</p>
+<p>$$
+\alpha_{i,i-1} + \alpha_{i,i+1} \approx 1
+$$</p>
+<p>即几乎所有注意力集中在相邻位置。</p>
+<p>但在线性注意力中，由于特征映射 $\phi$ 通常是逐元素的非线性函数，它难以产生这种尖锐的局部注意力分布。特别是，$\phi(\boldsymbol{q}<em k="1">i)^T \phi(\boldsymbol{k}_j)$ 的值受到全局归一化项 $\sum</em>_k)$ 的影响，难以实现高度局部化的权重分配。}^n \phi(\boldsymbol{q}_i)^T \phi(\boldsymbol{k</p>
+<h3 id="9-short-conv">9. 短卷积（Short Conv）的数学定义</h3>
+<p>短卷积是一种卷积核大小较小的一维卷积操作，通常核大小 $k \in {3, 5, 7}$。</p>
+<p><strong>一维卷积的数学表示</strong>：</p>
+<p>对于输入序列 $\boldsymbol{X} = [\boldsymbol{x}_1, \boldsymbol{x}_2, \ldots, \boldsymbol{x}_n] \in \mathbb{R}^{n \times d}$，卷积操作定义为：</p>
+<p>$$
+\boldsymbol{y}_i = \sum_{j=-(k-1)/2}^{(k-1)/2} \boldsymbol{W}_j \boldsymbol{x}_{i+j} + \boldsymbol{b}
+$$</p>
+<p>其中 $\boldsymbol{W}_j \in \mathbb{R}^{d \times d}$ 是第 $j$ 个位置的卷积核权重，$\boldsymbol{b} \in \mathbb{R}^d$ 是偏置项。</p>
+<p><strong>注释</strong>：这里假设卷积核大小 $k$ 是奇数，中心在位置0。对于边界位置，通常使用padding策略。</p>
+<h3 id="10">10. 深度可分离卷积的数学表示</h3>
+<p>在实践中，为了降低计算量，短卷积通常使用深度可分离卷积（Depthwise Separable Convolution）实现。</p>
+<p><strong>深度卷积（Depthwise Convolution）</strong>：</p>
+<p>$$
+\boldsymbol{y}_i^{(c)} = \sum_{j=-(k-1)/2}^{(k-1)/2} w_j^{(c)} \boldsymbol{x}_{i+j}^{(c)} + b^{(c)}
+$$</p>
+<p>其中 $c \in {1, 2, \ldots, d}$ 是通道索引，每个通道独立应用一维卷积。</p>
+<p><strong>注释</strong>：深度卷积将标准卷积的 $O(k d^2)$ 参数量降低到 $O(k d)$。</p>
+<p><strong>逐点卷积（Pointwise Convolution）</strong>：</p>
+<p>$$
+\boldsymbol{z}_i = \boldsymbol{W}_p \boldsymbol{y}_i + \boldsymbol{b}_p
+$$</p>
+<p>其中 $\boldsymbol{W}_p \in \mathbb{R}^{d \times d}$ 是逐点卷积的权重矩阵。</p>
+<p><strong>完整的深度可分离卷积</strong>：</p>
+<p>$$
+\text{ShortConv}(\boldsymbol{X}) = \boldsymbol{W}_p \cdot \text{DepthwiseConv}(\boldsymbol{X}) + \boldsymbol{b}_p
+$$</p>
+<p><strong>复杂度分析</strong>：深度可分离卷积的参数量为 $O(kd + d^2)$，计算量为 $O(n(kd + d^2))$，相比标准卷积的 $O(kd^2)$ 参数量显著降低。</p>
+<h3 id="11">11. 因果卷积的数学性质</h3>
+<p>在自回归模型中，需要使用因果卷积（Causal Convolution）确保位置 $i$ 的输出不依赖于未来位置。</p>
+<p><strong>因果卷积的定义</strong>：</p>
+<p>$$
+\boldsymbol{y}_i = \sum_{j=0}^{k-1} \boldsymbol{W}_j \boldsymbol{x}_{i-j}
+$$</p>
+<p><strong>注释</strong>：与标准卷积不同，因果卷积只向左看（只依赖历史信息），卷积核从当前位置向左延伸 $k-1$ 个位置。</p>
+<p><strong>因果性的形式化定义</strong>：</p>
+<p>定义函数 $f: \mathbb{R}^{n \times d} \to \mathbb{R}^{n \times d}$ 是因果的，当且仅当：</p>
+<p>$$
+\forall i \in \{1, \ldots, n\}, \quad f(\boldsymbol{X})_i = g(\boldsymbol{x}_1, \ldots, \boldsymbol{x}_i)
+$$</p>
+<p>即位置 $i$ 的输出只依赖于位置 $1$ 到 $i$ 的输入。</p>
+<p><strong>因果卷积的因果性证明</strong>：</p>
+<p>对于因果卷积 $\boldsymbol{y}<em j="0">i = \sum</em>}^{k-1} \boldsymbol{W<em i-j="i-j">j \boldsymbol{x}</em>}$，显然 $\boldsymbol{y<em i-k_1="i-k+1">i$ 只依赖于 $\boldsymbol{x}</em>_i$，满足因果性定义。}, \ldots, \boldsymbol{x</p>
+<h3 id="12">12. 卷积的感受野分析</h3>
+<p><strong>单层卷积的感受野</strong>：</p>
+<p>对于核大小为 $k$ 的卷积层，每个输出位置的感受野（receptive field）大小为 $k$。</p>
+<p>$$
+\text{RF}_1 = k
+$$</p>
+<p><strong>多层卷积的感受野</strong>：</p>
+<p>对于 $L$ 层核大小为 $k$ 的卷积网络，感受野呈线性增长：</p>
+<p>$$
+\text{RF}_L = 1 + L(k-1)
+$$</p>
+<p><strong>推导过程</strong>：</p>
+<ul>
+<li>第1层：感受野为 $k$</li>
+<li>第2层：每个位置看到第1层的 $k$ 个位置，而第1层每个位置看到输入的 $k$ 个位置，因此总感受野为 $k + (k-1) = 2k - 1$</li>
+<li>第 $L$ 层：递推可得 $\text{RF}_L = k + (L-1)(k-1) = 1 + L(k-1)$</li>
+</ul>
+<p><strong>注释</strong>：这说明卷积网络的感受野增长相对缓慢，要覆盖长距离依赖需要堆叠多层或使用扩张卷积（dilated convolution）。</p>
+<h3 id="13-short-conv">13. Short Conv的局部建模能力</h3>
+<p>短卷积天然具有局部建模能力，这体现在以下几个方面：</p>
+<p><strong>位置相关的权重分配</strong>：</p>
+<p>对于位置 $i$，其输出 $\boldsymbol{y}_i$ 对不同位置输入的权重是固定的：</p>
+<p>$$
+\frac{\partial \boldsymbol{y}_i}{\partial \boldsymbol{x}_{i+j}} = \begin{cases} \boldsymbol{W}_j & \text{if } |j| \leq (k-1)/2 \\ \boldsymbol{0} & \text{otherwise} \end{cases}
+$$</p>
+<p><strong>局部性的数学刻画</strong>：</p>
+<p>定义局部性度量为非零梯度的范围：</p>
+<p>$$
+\text{Locality}(\text{ShortConv}) = k
+$$</p>
+<p>相比之下，全局注意力的局部性度量为：</p>
+<p>$$
+\text{Locality}(\text{Attention}) = n
+$$</p>
+<p><strong>注释</strong>：短卷积的局部性度量与序列长度 $n$ 无关，这使得它在建模局部模式时更加高效和稳定。</p>
+<h3 id="14">14. 线性注意力的表达能力限制</h3>
+<p><strong>泛函分析视角</strong>：</p>
+<p>将注意力机制视为一个从输入序列到输出序列的映射：</p>
+<p>$$
+\mathcal{F}: (\mathbb{R}^d)^n \to (\mathbb{R}^d)^n
+$$</p>
+<p>标准注意力可以表示任意的排列不变函数（permutation-invariant function），但线性注意力由于其近似性质，表达能力受到限制。</p>
+<p><strong>线性注意力的表达能力界</strong>：</p>
+<p>设 $f$ 是标准注意力实现的函数，$\tilde{f}$ 是线性注意力的近似，则存在误差界：</p>
+<p>$$
+\|\mathcal{F}(\boldsymbol{X}) - \tilde{\mathcal{F}}(\boldsymbol{X})\|_F \leq C \cdot \epsilon(\phi)
+$$</p>
+<p>其中 $\epsilon(\phi)$ 是特征映射 $\phi$ 对softmax核的近似误差，$C$ 是依赖于输入的常数。</p>
+<p><strong>近似误差的来源</strong>：</p>
+<ol>
+<li><strong>核函数近似误差</strong>：$\exp(\boldsymbol{q}^T \boldsymbol{k}) \approx \phi(\boldsymbol{q})^T \phi(\boldsymbol{k})$ 的近似误差</li>
+<li><strong>注意力分布误差</strong>：近似后的注意力分布与真实分布的偏差</li>
+<li><strong>输出加权误差</strong>：误差在加权求和过程中的累积</li>
+</ol>
+<h3 id="15-short-conv">15. Short Conv补偿线性注意力的理论依据</h3>
+<p><strong>互补性原理</strong>：</p>
+<p>线性注意力擅长全局信息聚合，但缺乏局部建模能力；短卷积擅长局部特征提取，但感受野有限。两者的结合可以实现优势互补。</p>
+<p><strong>数学表示</strong>：</p>
+<p>结合后的机制可以表示为：</p>
+<p>$$
+\boldsymbol{O} = \text{LinearAttention}(\text{ShortConv}(\boldsymbol{Q}), \text{ShortConv}(\boldsymbol{K}), \text{ShortConv}(\boldsymbol{V}))
+$$</p>
+<p>或者：</p>
+<p>$$
+\boldsymbol{O} = \text{ShortConv}(\text{LinearAttention}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}))
+$$</p>
+<p><strong>注释</strong>：前者是在注意力之前应用短卷积（pre-conv），后者是在注意力之后应用（post-conv）。实践中通常使用pre-conv，因为它可以让注意力机制处理已经过局部增强的特征。</p>
+<h3 id="16">16. 联合机制的表达能力分析</h3>
+<p><strong>定理</strong>（联合机制的表达能力）：</p>
+<p>设 $\mathcal{F}<em _text_conv="\text{conv">{\text{linear}}$ 是线性注意力的函数空间，$\mathcal{F}</em>$ 是短卷积的函数空间，则联合机制的函数空间满足：}</p>
+<p>$$
+\mathcal{F}_{\text{linear}} \cup \mathcal{F}_{\text{conv}} \subseteq \mathcal{F}_{\text{joint}} \subseteq \mathcal{F}_{\text{linear}} \otimes \mathcal{F}_{\text{conv}}
+$$</p>
+<p>其中 $\otimes$ 表示函数空间的张量积。</p>
+<p><strong>证明思路</strong>：</p>
+<ol>
+<li>
+<p><strong>包含性</strong>：联合机制可以通过适当的参数设置退化为纯线性注意力或纯短卷积，因此 $\mathcal{F}<em _text_conv="\text{conv">{\text{linear}} \cup \mathcal{F}</em>$}} \subseteq \mathcal{F}_{\text{joint}</p>
+</li>
+<li>
+<p><strong>有界性</strong>：联合机制的输出可以分解为两部分的组合，因此 $\mathcal{F}<em _text_linear="\text{linear">{\text{joint}} \subseteq \mathcal{F}</em>$}} \otimes \mathcal{F}_{\text{conv}</p>
+</li>
+</ol>
+<p><strong>注释</strong>：这个定理说明联合机制的表达能力至少不小于单独使用任一机制，且可能更强。</p>
+<h3 id="17-short-conv">17. 频域分析：Short Conv的频率响应</h3>
+<p><strong>离散时间傅里叶变换（DTFT）</strong>：</p>
+<p>对于卷积核 $\boldsymbol{w} = [w_0, w_1, \ldots, w_{k-1}]$，其频率响应为：</p>
+<p>$$
+H(\omega) = \sum_{j=0}^{k-1} w_j e^{-i\omega j}
+$$</p>
+<p>其中 $\omega \in [0, 2\pi]$ 是角频率。</p>
+<p><strong>短卷积的频率特性</strong>：</p>
+<p>对于核大小 $k=3$ 的短卷积 $[w_{-1}, w_0, w_1]$，频率响应为：</p>
+<p>$$
+H(\omega) = w_0 + w_1 e^{-i\omega} + w_{-1} e^{i\omega} = w_0 + 2\text{Re}(w_1 e^{-i\omega})
+$$</p>
+<p><strong>注释</strong>：短卷积通常表现为低通滤波器或带通滤波器，能够平滑高频噪声并保留低频趋势信息。</p>
+<h3 id="18">18. 线性注意力的频率特性</h3>
+<p><strong>线性注意力在频域的表示</strong>：</p>
+<p>线性注意力的输出可以写成：</p>
+<p>$$
+\boldsymbol{O} = \text{diag}^{-1}(\boldsymbol{\Phi}_Q \boldsymbol{\Phi}_K^T \mathbf{1}) \cdot \boldsymbol{\Phi}_Q \boldsymbol{\Phi}_K^T \boldsymbol{V}
+$$</p>
+<p>其中 $\boldsymbol{\Phi}_Q = [\phi(\boldsymbol{q}_1), \ldots, \phi(\boldsymbol{q}_n)]^T$，$\mathbf{1}$ 是全1向量。</p>
+<p><strong>频域特性</strong>：</p>
+<p>线性注意力的频率响应是输入相关的，不像卷积那样有固定的频率响应函数。对于特征映射 $\phi(\boldsymbol{x}) = \text{ReLU}(\boldsymbol{x})$，线性注意力倾向于保留所有频率成分，但高频成分可能由于归一化而被削弱。</p>
+<p><strong>互补性的频域解释</strong>：</p>
+<ul>
+<li>短卷积：提供固定的频率滤波，强化局部平滑性</li>
+<li>线性注意力：提供内容自适应的全局信息整合</li>
+</ul>
+<p>两者结合可以在频域上实现更全面的信号处理。</p>
+<h3 id="19">19. 计算复杂度的严格对比</h3>
+<p><strong>标准注意力</strong>：</p>
+<ul>
+<li>时间复杂度：$O(n^2 d)$</li>
+<li>空间复杂度：$O(n^2 + nd)$</li>
+</ul>
+<p><strong>线性注意力</strong>：</p>
+<ul>
+<li>时间复杂度：$O(nd_\phi d)$</li>
+<li>空间复杂度：$O(d_\phi d + nd)$</li>
+</ul>
+<p><strong>Short Conv</strong>：</p>
+<ul>
+<li>时间复杂度：$O(nkd)$（深度可分离）或 $O(nkd^2)$（标准卷积）</li>
+<li>空间复杂度：$O(kd + nd)$</li>
+</ul>
+<p><strong>联合机制（Linear Attention + Short Conv）</strong>：</p>
+<p>假设在Q、K、V上都应用Short Conv，然后进行线性注意力：</p>
+<p>$$
+\begin{aligned}
+\text{时间复杂度} &= 3 \times O(nkd) + O(nd_\phi d) \\
+&= O(n(3kd + d_\phi d)) \\
+&= O(nd(3k + d_\phi))
+\end{aligned}
+$$</p>
+<p><strong>复杂度对比表</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>机制</th>
+<th>时间复杂度</th>
+<th>序列长度依赖</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>标准注意力</td>
+<td>$O(n^2 d)$</td>
+<td>二次</td>
+</tr>
+<tr>
+<td>线性注意力</td>
+<td>$O(nd_\phi d)$</td>
+<td>线性</td>
+</tr>
+<tr>
+<td>Short Conv</td>
+<td>$O(nkd)$</td>
+<td>线性</td>
+</tr>
+<tr>
+<td>联合机制</td>
+<td>$O(nd(3k + d_\phi))$</td>
+<td>线性</td>
+</tr>
+</tbody>
+</table>
+<p><strong>注释</strong>：联合机制保持了线性复杂度，仅增加了一个较小的常数因子 $3k$，通常 $k \in {3, 5, 7}$。</p>
+<h3 id="20-deltanet">20. DeltaNet中的具体实现</h3>
+<p>DeltaNet中的联合机制可以表示为：</p>
+<p>$$
+\begin{aligned}
+\tilde{\boldsymbol{Q}} &= \text{ShortConv}(\boldsymbol{Q}) \\
+\tilde{\boldsymbol{K}} &= \text{ShortConv}(\boldsymbol{K}) \\
+\tilde{\boldsymbol{V}} &= \text{ShortConv}(\boldsymbol{V}) \\
+\boldsymbol{O} &= \text{LinearAttention}(\tilde{\boldsymbol{Q}}, \tilde{\boldsymbol{K}}, \tilde{\boldsymbol{V}})
+\end{aligned}
+$$</p>
+<p><strong>Short Conv的参数化</strong>：</p>
+<p>DeltaNet使用深度可分离卷积，对于维度 $d$ 的输入：</p>
+<p>$$
+\text{ShortConv}(\boldsymbol{X})_i = \boldsymbol{W}_p \left( \bigoplus_{c=1}^d \sum_{j=0}^{k-1} w_j^{(c)} x_{i-j}^{(c)} \right)
+$$</p>
+<p>其中 $\bigoplus$ 表示通道拼接，$\boldsymbol{W}_p \in \mathbb{R}^{d \times d}$ 是逐点卷积权重。</p>
+<p><strong>线性注意力的参数化</strong>：</p>
+<p>DeltaNet使用门控机制和特殊的特征映射：</p>
+<p>$$
+\phi(\boldsymbol{x}) = \text{swish}(\boldsymbol{x}) \cdot \boldsymbol{g}
+$$</p>
+<p>其中 $\boldsymbol{g} = \sigma(\boldsymbol{W}_g \boldsymbol{x} + \boldsymbol{b}_g)$ 是门控向量，$\text{swish}(x) = x \cdot \sigma(x)$。</p>
+<h3 id="21-short-conv">21. 因果掩码与Short Conv的结合</h3>
+<p>在自回归生成中，需要同时考虑因果性约束：</p>
+<p><strong>因果Short Conv + 因果线性注意力</strong>：</p>
+<p>$$
+\begin{aligned}
+\tilde{\boldsymbol{q}}_i &= \sum_{j=0}^{k-1} \boldsymbol{W}_j^Q \boldsymbol{q}_{i-j} \\
+\tilde{\boldsymbol{k}}_i &= \sum_{j=0}^{k-1} \boldsymbol{W}_j^K \boldsymbol{k}_{i-j} \\
+\tilde{\boldsymbol{v}}_i &= \sum_{j=0}^{k-1} \boldsymbol{W}_j^V \boldsymbol{v}_{i-j} \\
+\boldsymbol{S}_i &= \boldsymbol{S}_{i-1} + \phi(\tilde{\boldsymbol{k}}_i) \tilde{\boldsymbol{v}}_i^T \\
+\boldsymbol{z}_i &= \boldsymbol{z}_{i-1} + \phi(\tilde{\boldsymbol{k}}_i) \\
+\boldsymbol{o}_i &= \frac{\phi(\tilde{\boldsymbol{q}}_i)^T \boldsymbol{S}_i}{\phi(\tilde{\boldsymbol{q}}_i)^T \boldsymbol{z}_i}
+\end{aligned}
+$$</p>
+<p><strong>递推计算的状态维护</strong>：</p>
+<p>需要维护的状态包括：</p>
+<ol>
+<li>线性注意力的累积矩阵 $\boldsymbol{S}<em>i \in \mathbb{R}^{d</em>\phi \times d_v}$</li>
+<li>线性注意力的归一化向量 $\boldsymbol{z}<em>i \in \mathbb{R}^{d</em>\phi}$</li>
+<li>短卷积的历史缓存 $[\boldsymbol{q}<em i-k_1="i-k+1">{i-k+1}, \ldots, \boldsymbol{q}_i]$, $[\boldsymbol{k}</em>}, \ldots, \boldsymbol{k<em i-k_1="i-k+1">i]$, $[\boldsymbol{v}</em>_i]$}, \ldots, \boldsymbol{v</li>
+</ol>
+<p><strong>状态空间复杂度</strong>：</p>
+<p>$$
+\text{Space} = O(d_\phi d_v + d_\phi + 3kd) = O(d_\phi d_v + kd)
+$$</p>
+<p><strong>注释</strong>：相比纯线性注意力，联合机制仅增加了 $O(kd)$ 的状态存储，通常 $k$ 很小（3-7），因此增加的开销可接受。</p>
+<h3 id="22">22. 训练稳定性分析</h3>
+<p><strong>梯度流分析</strong>：</p>
+<p>对于损失函数 $\mathcal{L}$，其关于输入 $\boldsymbol{X}$ 的梯度可以通过链式法则计算：</p>
+<p>$$
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{X}} = \frac{\partial \mathcal{L}}{\partial \boldsymbol{O}} \frac{\partial \boldsymbol{O}}{\partial \tilde{\boldsymbol{V}}} \frac{\partial \tilde{\boldsymbol{V}}}{\partial \boldsymbol{V}} \frac{\partial \boldsymbol{V}}{\partial \boldsymbol{X}} + \text{其他路径}
+$$</p>
+<p><strong>Short Conv对梯度流的影响</strong>：</p>
+<p>短卷积提供了额外的梯度传播路径，可以缓解线性注意力可能存在的梯度消失问题。具体地，对于 $L$ 层网络，梯度的范数满足：</p>
+<p>$$
+\left\|\frac{\partial \mathcal{L}}{\partial \boldsymbol{X}^{(1)}}\right\| \geq \frac{\|\frac{\partial \mathcal{L}}{\partial \boldsymbol{X}^{(L)}}\|}{C^L}
+$$</p>
+<p>其中 $C$ 是依赖于激活函数和归一化方式的常数。短卷积的引入可以减小 $C$，从而改善梯度传播。</p>
+<h3 id="23-short-conv">23. 位置编码与Short Conv的交互</h3>
+<p><strong>相对位置信息的隐式编码</strong>：</p>
+<p>短卷积通过其固定的卷积核权重隐式地编码了相对位置信息。对于位置 $i$ 和 $i+j$，它们通过卷积核 $\boldsymbol{W}_j$ 产生直接的信息交互。</p>
+<p><strong>与显式位置编码的比较</strong>：</p>
+<p>显式位置编码（如RoPE）：</p>
+<p>$$
+\boldsymbol{q}_i^T \boldsymbol{k}_j = (\boldsymbol{R}_i \boldsymbol{q}_i)^T (\boldsymbol{R}_j \boldsymbol{k}_j) = \boldsymbol{q}_i^T \boldsymbol{R}_{i-j}^T \boldsymbol{k}_j
+$$</p>
+<p>Short Conv隐式位置编码：</p>
+<p>$$
+\tilde{\boldsymbol{x}}_i = \sum_{j=-(k-1)/2}^{(k-1)/2} \boldsymbol{W}_j \boldsymbol{x}_{i+j}
+$$</p>
+<p><strong>注释</strong>：两种方式都编码了相对位置，但机制不同。Short Conv的位置信息是"硬编码"的（固定权重），而注意力机制中的位置编码是通过调制注意力权重来实现的。</p>
+<h3 id="24">24. 长距离依赖的建模能力</h3>
+<p><strong>有效建模距离</strong>：</p>
+<p>定义有效建模距离为模型能够有效利用的最大距离依赖：</p>
+<p>$$
+D_{\text{eff}} = \max\{|i-j| : \frac{\partial \boldsymbol{o}_i}{\partial \boldsymbol{x}_j} > \epsilon\}
+$$</p>
+<p>其中 $\epsilon$ 是一个小的阈值。</p>
+<p><strong>不同机制的有效距离</strong>：</p>
+<ol>
+<li><strong>标准注意力</strong>：$D_{\text{eff}} = O(n)$，可以建模任意距离的依赖</li>
+<li><strong>线性注意力</strong>：$D_{\text{eff}} = O(n)$，但对远距离依赖的建模能力弱于标准注意力</li>
+<li><strong>Short Conv</strong>：$D_{\text{eff}} = O(k)$，仅能建模局部依赖</li>
+<li><strong>联合机制</strong>：$D_{\text{eff}} = O(n)$，结合了线性注意力的全局覆盖和Short Conv的局部强化</li>
+</ol>
+<p><strong>定量分析</strong>：</p>
+<p>对于距离 $d$ 的依赖，其梯度的衰减率为：</p>
+<p>$$
+\left\|\frac{\partial \boldsymbol{o}_i}{\partial \boldsymbol{x}_{i-d}}\right\| \sim \begin{cases}
+\alpha^d & \text{线性注意力} \\
+0 & \text{Short Conv (if } d > k\text{)} \\
+\beta^d & \text{联合机制}
+\end{cases}
+$$</p>
+<p>其中 $\beta &lt; \alpha &lt; 1$，说明联合机制有更好的长距离依赖建模能力。</p>
+<h3 id="25">25. 实验验证：合成任务</h3>
+<p><strong>长距离复制任务（Long Range Copy）</strong>：</p>
+<p>输入序列形式为 $[x_1, \ldots, x_k, 0, \ldots, 0]$，目标是在末尾输出 $[x_1, \ldots, x_k]$。</p>
+<p>任务难度随着中间0的长度 $n$ 增加而增加。</p>
+<p><strong>性能度量</strong>：</p>
+<p>准确率定义为正确复制的token比例：</p>
+<p>$$
+\text{Acc} = \frac{1}{k} \sum_{i=1}^k \mathbb{1}[\hat{y}_i = x_i]
+$$</p>
+<p><strong>理论预测</strong>：</p>
+<ul>
+<li>标准注意力：$\text{Acc} \approx 1$（几乎完美）</li>
+<li>纯线性注意力：$\text{Acc} = 0.6 \sim 0.8$（性能下降）</li>
+<li>纯Short Conv：$\text{Acc} \approx 0$（无法建模长距离依赖）</li>
+<li>联合机制：$\text{Acc} = 0.85 \sim 0.95$（显著改善）</li>
+</ul>
+<h3 id="26-inductive-bias">26. 归纳偏置（Inductive Bias）分析</h3>
+<p><strong>卷积的归纳偏置</strong>：</p>
+<ol>
+<li><strong>局部性（Locality）</strong>：相邻位置具有相关性</li>
+<li><strong>平移等变性（Translation Equivariance）</strong>：$f(\text{shift}(\boldsymbol{X})) = \text{shift}(f(\boldsymbol{X}))$</li>
+<li><strong>参数共享（Parameter Sharing）</strong>：所有位置使用相同的卷积核</li>
+</ol>
+<p><strong>线性注意力的归纳偏置</strong>：</p>
+<ol>
+<li><strong>排列等变性（Permutation Equivariance）</strong>：输出顺序随输入顺序变化</li>
+<li><strong>全局聚合（Global Aggregation）</strong>：每个位置都能访问全局信息</li>
+<li><strong>内容依赖（Content Dependence）</strong>：权重依赖于输入内容</li>
+</ol>
+<p><strong>联合机制的归纳偏置</strong>：</p>
+<p>结合了两者的优点：</p>
+<p>$$
+\text{Inductive Bias}_{\text{joint}} = \text{Locality} + \text{Global} + \text{Content}
+$$</p>
+<p>这使得模型既能捕捉局部模式，又能进行全局信息整合。</p>
+<h3 id="27">27. 参数效率分析</h3>
+<p><strong>参数数量对比</strong>：</p>
+<p>假设输入维度为 $d$，头数为 $h$，每头维度为 $d_h = d/h$。</p>
+<p><strong>标准注意力的参数</strong>：</p>
+<p>$$
+\begin{aligned}
+\text{Params}_{\text{attn}} &= 3 \times (d \times d) + (d \times d) \\
+&= 4d^2
+\end{aligned}
+$$</p>
+<p>包括 $\boldsymbol{W}_Q, \boldsymbol{W}_K, \boldsymbol{W}_V, \boldsymbol{W}_O$。</p>
+<p><strong>线性注意力的参数</strong>（与标准注意力相同）：</p>
+<p>$$
+\text{Params}_{\text{linear}} = 4d^2
+$$</p>
+<p><strong>Short Conv的参数</strong>（深度可分离）：</p>
+<p>$$
+\begin{aligned}
+\text{Params}_{\text{conv}} &= k \times d + (d \times d) \\
+&= kd + d^2
+\end{aligned}
+$$</p>
+<p><strong>联合机制的参数</strong>：</p>
+<p>$$
+\begin{aligned}
+\text{Params}_{\text{joint}} &= 4d^2 + 3 \times (kd + d^2) \\
+&= 7d^2 + 3kd \\
+&= d^2(7 + \frac{3k}{d})
+\end{aligned}
+$$</p>
+<p><strong>参数增长率</strong>：</p>
+<p>$$
+\frac{\text{Params}_{\text{joint}}}{\text{Params}_{\text{attn}}} = \frac{7d^2 + 3kd}{4d^2} = 1.75 + \frac{3k}{4d}
+$$</p>
+<p>对于典型值 $d=512, k=5$，参数增长约为 $1.75 + 0.03 = 1.78$ 倍。</p>
+<p><strong>注释</strong>：虽然参数量增加了约75%，但这个增加是可控的，而且换来了显著的建模能力提升。</p>
+<h3 id="28-flash-linear-attentionshort-conv">28. Flash Linear Attention与Short Conv</h3>
+<p><strong>Flash Linear Attention的核心思想</strong>：</p>
+<p>通过分块计算和在线更新来减少内存占用：</p>
+<p>$$
+\boldsymbol{S}^{(b)} = \boldsymbol{S}^{(b-1)} + \sum_{i \in \text{block } b} \phi(\boldsymbol{k}_i) \boldsymbol{v}_i^T
+$$</p>
+<p><strong>与Short Conv的兼容性</strong>：</p>
+<p>Short Conv可以在块级别应用，不影响Flash Linear Attention的分块策略：</p>
+<p>$$
+\begin{aligned}
+\tilde{\boldsymbol{K}}^{(b)} &= \text{ShortConv}(\boldsymbol{K}^{(b-1:b+1)}) \\
+\tilde{\boldsymbol{V}}^{(b)} &= \text{ShortConv}(\boldsymbol{V}^{(b-1:b+1)}) \\
+\boldsymbol{S}^{(b)} &= \boldsymbol{S}^{(b-1)} + \sum_{i \in \text{block } b} \phi(\tilde{\boldsymbol{k}}_i) \tilde{\boldsymbol{v}}_i^T
+\end{aligned}
+$$</p>
+<p><strong>注释</strong>：由于Short Conv的感受野较小，只需要跨越相邻块的边界即可正确计算卷积。</p>
+<h3 id="29-short-conv">29. 多头注意力中的Short Conv</h3>
+<p><strong>多头线性注意力</strong>：</p>
+<p>$$
+\text{MultiHead}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}) = \text{Concat}(\text{head}_1, \ldots, \text{head}_h) \boldsymbol{W}_O
+$$</p>
+<p>其中：</p>
+<p>$$
+\text{head}_i = \text{LinearAttention}(\boldsymbol{Q}\boldsymbol{W}_i^Q, \boldsymbol{K}\boldsymbol{W}_i^K, \boldsymbol{V}\boldsymbol{W}_i^V)
+$$</p>
+<p><strong>引入Short Conv的两种方式</strong>：</p>
+<p><strong>方式1：头内卷积</strong>（在每个头内独立应用）：</p>
+<p>$$
+\text{head}_i = \text{LinearAttention}(\text{ShortConv}(\boldsymbol{Q}\boldsymbol{W}_i^Q), \text{ShortConv}(\boldsymbol{K}\boldsymbol{W}_i^K), \text{ShortConv}(\boldsymbol{V}\boldsymbol{W}_i^V))
+$$</p>
+<p><strong>方式2：头间卷积</strong>（在投影之前应用）：</p>
+<p>$$
+\text{head}_i = \text{LinearAttention}(\text{ShortConv}(\boldsymbol{Q})\boldsymbol{W}_i^Q, \text{ShortConv}(\boldsymbol{K})\boldsymbol{W}_i^K, \text{ShortConv}(\boldsymbol{V})\boldsymbol{W}_i^V)
+$$</p>
+<p><strong>比较</strong>：</p>
+<ul>
+<li>头内卷积：每个头有独立的卷积参数，表达能力更强，但参数量更大</li>
+<li>头间卷积：所有头共享卷积参数，参数效率更高</li>
+</ul>
+<p>实践中通常使用头间卷积（方式2），在参数效率和性能之间取得平衡。</p>
+<h3 id="30-short-conv">30. 理论总结：为什么需要Short Conv</h3>
+<p><strong>核心论点</strong>：</p>
+<p>线性注意力通过特征映射线性化注意力机制，实现了 $O(nd)$ 的线性复杂度，但牺牲了以下能力：</p>
+<ol>
+<li><strong>精确的注意力权重分配</strong>：特征映射 $\phi(\boldsymbol{q})^T \phi(\boldsymbol{k})$ 无法完美近似 $\exp(\boldsymbol{q}^T \boldsymbol{k})$</li>
+<li><strong>尖锐的局部注意力</strong>：难以产生高度集中在少数位置的注意力分布</li>
+<li><strong>位置敏感的建模</strong>：全局累积的方式削弱了对局部位置关系的敏感性</li>
+</ol>
+<p><strong>Short Conv的补偿机制</strong>：</p>
+<p>Short Conv通过以下方式补偿这些不足：</p>
+<ol>
+<li><strong>增强局部特征</strong>：在注意力之前提取局部模式，使得线性注意力处理的是已经过局部增强的特征</li>
+<li><strong>提供位置信息</strong>：卷积核的固定权重隐式编码了相对位置信息</li>
+<li><strong>平滑特征表示</strong>：通过局部平均减少噪声，使得线性注意力的全局聚合更加稳定</li>
+</ol>
+<p><strong>数学表达</strong>：</p>
+<p>联合机制的表达能力可以近似表示为：</p>
+<p>$$
+\mathcal{F}_{\text{joint}}(\boldsymbol{X}) \approx \mathcal{F}_{\text{attn}}(\boldsymbol{X}) + \epsilon(\boldsymbol{X})
+$$</p>
+<p>其中 $\epsilon(\boldsymbol{X})$ 是相对标准注意力的近似误差。通过引入Short Conv，我们有：</p>
+<p>$$
+\|\epsilon(\boldsymbol{X})\|_{\text{with conv}} < \|\epsilon(\boldsymbol{X})\|_{\text{without conv}}
+$$</p>
+<p><strong>实践意义</strong>：</p>
+<p>这个理论分析解释了为什么近期的高效Transformer模型（如DeltaNet、Mamba等）都采用了线性注意力+短卷积的组合架构。这不仅仅是经验性的设计，而是有深刻的理论支撑。</p>
+<p><strong>结论</strong>：</p>
+<p>Short Conv是线性注意力不可或缺的补充机制，它通过提供局部建模能力、位置信息编码和特征平滑，使得线性注意力能够在保持线性复杂度的同时，接近标准注意力的表达能力。这种互补性设计是构建高效且强大的Transformer模型的关键。</p>
+        </div>
+    </div>
+</body>
+</html>

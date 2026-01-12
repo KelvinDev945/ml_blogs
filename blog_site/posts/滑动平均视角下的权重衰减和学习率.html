@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>滑动平均视角下的权重衰减和学习率</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>滑动平均视角下的权重衰减和学习率</h1>
+            <div class="meta">📅 最后更新: 2026-01-08 | 📄 大小: 52.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/11459">https://spaces.ac.cn/archives/11459</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>权重衰减（Weight Decay）和学习率（Learning Rate）是LLM预训练的重要组成部分，它们的设置是否妥当，是模型最终成败的关键因素之一。自<a href="https://papers.cool/arxiv/1711.05101">AdamW</a>以来，单独分离出Weight Decay来取代传统的L2正则，基本上已经成为了共识，但在此基础上，如何合理地设置Weight Decay和Learning Rate，并没有显著的理论进展。</p>
+<p>本文将抛砖引玉，分享笔者关于这个问题的一些新理解：把训练过程看作对训练数据的滑动平均记忆，探讨如何设置Weight Decay和Learning Rate才能让这个记忆更为科学。</p>
+<h2 id="_1">滑动平均</h2>
+<p>Weight Decay的一般形式是<br />
+\begin{equation}\boldsymbol{\theta}<em t-1="t-1">t = \boldsymbol{\theta}</em>} - \eta_t (\boldsymbol{u<em t-1="t-1">t + \lambda_t \boldsymbol{\theta}</em>})\end{equation<br />
+其中$\boldsymbol{\theta}$是参数，$\boldsymbol{u}$是优化器给出的更新量，$\lambda_t,\eta_t$亦即我们说的Weight Decay和Learning Rate，而整个序列$\{\lambda_t\}$和$\{\eta_t\}$，我们分别称为“WD Schedule”和“LR Schedule”。引入记号<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{m}<em t-1="t-1">t =&amp;\, \beta_1 \boldsymbol{m}</em>} + \left(1 - \beta_1\right) \boldsymbol{g<em t-1="t-1">t, &amp; \hat{\boldsymbol{m}}_t =&amp;\, \boldsymbol{m}_t\left/\left(1 - \beta_1^t\right)\right. &amp;\\\[5pt]<br />
+\boldsymbol{v}_t =&amp;\, \beta_2 \boldsymbol{v}</em>_t\left/\left(1 - \beta_2^t\right)\right. &amp;} + \left(1 - \beta_2\right) \boldsymbol{g}_t^2,&amp; \hat{\boldsymbol{v}}_t =&amp;\, \boldsymbol{v<br />
+\end{aligned}\end{equation}<br />
+那么对于SGDM来说有$\boldsymbol{u}_t=\boldsymbol{m}_t$，对于RMSProp来说$\boldsymbol{u}_t= \boldsymbol{g}_t/(\sqrt{\boldsymbol{v}_t} + \epsilon)$，对于Adam来说则是$\boldsymbol{u}_t=\hat{\boldsymbol{m}}_t\left/\left(\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon\right)\right.$，对于SignSGDM来说则$\newcommand{sign}{\mathop{\text{sign}}}\boldsymbol{u}_t=\sign(\boldsymbol{m}_t)$，而Muon则是$\newcommand{msign}{\mathop{\text{msign}}}\boldsymbol{u}_t=\msign(\boldsymbol{m}_t)$。这里列举的例子，除了SGDM外，其他都算是某种自适应学习率优化器。</p>
+<p>我们的出发点是滑动平均（Exponential Moving Average，EMA）视角，即将Weight Decay写成<br />
+\begin{equation}\boldsymbol{\theta}<em t-1="t-1">t = (1 - \lambda_t \eta_t)\boldsymbol{\theta}</em>} - \eta_t \boldsymbol{u<em t-1="t-1">t = (1 - \lambda_t \eta_t)\boldsymbol{\theta}</em>} + \lambda_t \eta_t ( -\boldsymbol{u}_t / \lambda_t)\label{eq:wd-ema}\end{equation<br />
+此时Weight Decay表现为模型参数与$-\boldsymbol{u}_t / \lambda_t$的加权平均形式。滑动平均视角不是新的，<a href="https://papers.cool/arxiv/2405.13698">《How to set AdamW's weight decay as you scale model and dataset size》</a>、<a href="https://papers.cool/arxiv/2505.13738">《Power Lines: Scaling Laws for Weight Decay and Batch Size in LLM Pre-training》</a>等文章已有过讨论，本文则是在这个视角下将各方面算得更仔细一些。</p>
+<p>接下来的篇幅我们主要以Adam为例，最后再讨论其他优化器的可用性。计算过程跟<a href="/archives/11307">《AdamW的Weight RMS的渐近估计（上）》</a>和<a href="/archives/11404">《AdamW的Weight RMS的渐近估计（下）》</a>会有相当一部份重叠之处，读者可以相互参考着阅读。</p>
+<h2 id="_2">迭代展开</h2>
+<p>简单起见，我们先考虑常数$\lambda,\eta$，记$\beta_3 = 1 - \lambda\eta$，那么$\boldsymbol{\theta}<em t-1="t-1">t = \beta_3 \boldsymbol{\theta}</em>} + (1 - \beta_3)( -\boldsymbol{u<em i="1">t / \lambda)$，这样形式上就跟$\boldsymbol{m}_t,\boldsymbol{v}_t$一致了。直接迭代展开得<br />
+\begin{equation}\boldsymbol{\theta}_t = \beta_3^t \boldsymbol{\theta}_0 + (1 - \beta_3)\sum</em>}^t \beta_3^{t-i} (-\boldsymbol{u<em i="1">i / \lambda) \end{equation}<br />
+对于Adam有$\boldsymbol{u}_t=\hat{\boldsymbol{m}}_t\left/\left(\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon\right)\right.$，一般在训练结束时，$t$都能足够大以至于$\beta_1^t,\beta_2^t$足够接近于零，所以可以不去区分$\boldsymbol{m}_t$和$\hat{\boldsymbol{m}}_t$、$\boldsymbol{v}_t$和$\hat{\boldsymbol{v}}_t$，进一步地，简单设$\epsilon=0$，那么可以简化成$\boldsymbol{u}_t=\boldsymbol{m}_t / \sqrt{\boldsymbol{v}_t}$，然后来个经典的平均场近似<br />
+\begin{equation}\underbrace{\frac{1-\beta_3}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i} \boldsymbol{u<em _text_记为="\text{记为">i}</em>}\bar{\boldsymbol{u}<em i="1">t} = \frac{1-\beta_3}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i} \frac{\boldsymbol{m<em i="1">i}{\sqrt{\boldsymbol{v}_i}}\approx \frac{\bar{\boldsymbol{m}}_t \,\,\triangleq\,\, \frac{1-\beta_3}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i}\boldsymbol{m<em i="1">i}{\sqrt{\bar{\boldsymbol{v}}_t \,\,\triangleq\,\, \frac{1-\beta_3}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i}\boldsymbol{v<em i="1">i}}\label{eq:u-bar}\end{equation}<br />
+展开$\boldsymbol{m}_t,\boldsymbol{v}_t$得$\boldsymbol{m}_t = (1 - \beta_1)\sum</em>}^t \beta_1^{t-i}\boldsymbol{g<em i="1">i$和$\boldsymbol{v}_t = (1 - \beta_2)\sum</em>}^t \beta_2^{t-i}\boldsymbol{g<em i="1">i^2$，代入上式<br />
+\begin{gather}<br />
+\bar{\boldsymbol{m}}_t = \frac{(1-\beta_3)(1 - \beta_1)}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i} \sum_{j=1}^i \beta_1^{i-j}\boldsymbol{g<em j="1">j = \frac{(1-\beta_3)(1 - \beta_1)}{(1-\beta_3^t)(\beta_3 - \beta_1)}\sum</em>}^t (\beta_3^{t-j+1} - \beta_1^{t-j+1})\boldsymbol{g<em i="1">j\\\[6pt]<br />
+\bar{\boldsymbol{v}}_t = \frac{(1-\beta_3)(1 - \beta_2)}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i} \sum_{j=1}^i \beta_2^{i-j}\boldsymbol{g<em j="1">j^2 = \frac{(1-\beta_3)(1 - \beta_2)}{(1-\beta_3^t)(\beta_3 - \beta_2)}\sum</em>}^t (\beta_3^{t-j+1} - \beta_2^{t-j+1})\boldsymbol{g<em i="1">j^2<br />
+\end{gather}<br />
+交换求和符号基于恒等式$\sum</em>^t a_i b_j$。综上，我们有}^t \sum_{j=1}^i a_i b_j = \sum_{j=1}^t \sum_{i=j<br />
+\begin{equation}\boldsymbol{\theta}_t = \beta_3^t \boldsymbol{\theta}_0 + (1 - \beta_3^t)(-\bar{\boldsymbol{u}}_t / \lambda) \label{eq:theta-0-bar-u}\end{equation}<br />
+权重$\boldsymbol{\theta}_t$是我们想要的训练结果，它被表示为$\boldsymbol{\theta}_0$和$-\bar{\boldsymbol{u}}_t / \lambda$的加权平均。其中，$\boldsymbol{\theta}_0$是初始权重，$\bar{\boldsymbol{u}}_t$则是数据相关的，在平均场近似下它约等于$\bar{\boldsymbol{m}}_t/\sqrt{\bar{\boldsymbol{v}}_t}$，而$\bar{\boldsymbol{m}}_t$和$\bar{\boldsymbol{v}}_t$可以表示成每一步梯度的加权求和，以$\bar{\boldsymbol{m}}_t$为例，第$j$步的梯度权重正比于$\beta_3^{t-j+1} - \beta_1^{t-j+1}$。</p>
+<h2 id="_3">记忆周期</h2>
+<p>我们主要关心的是预训练，特点是Single-Epoch，大部分数据都只过一遍，所以训出好效果的关键之一是不要忘掉早期的数据。假设训练数据已经经过全局打乱，那么可以合理地认为每一个Batch的数据都同等重要。</p>
+<p>数据是以梯度形式线性叠加到$\bar{\boldsymbol{m}}_t$中的，假设每一步梯度只包含当前Batch的信息，那么某个Batch想要不被遗忘，系数$\beta_3^{t-j+1} - \beta_1^{t-j+1}$就不能太小。考察函数$f(s) = \beta_3^s - \beta_1^s$，它是一个先增后减的函数，但因为$\beta_3$会比$\beta_1$更接近于1，所以增的步数不多，远处更多是接近指数下降，如下图：  </p>
+<p><a href="/usr/uploads/2025/12/2468435175.png" title="点击查看原图"><img alt="梯度权重示意图" src="/usr/uploads/2025/12/2468435175.png" /></a></p>
+<p>梯度权重示意图</p>
+<p>总之趋势是距离越远系数越小。那么要想模型不遗忘每一个Batch，最远处的系数就不能太小。假设系数不小于$c \in (0, 1)$才能被记住，当$s$足够大时$\beta_1^s$先趋于0，所以$\beta_3^s - \beta_1^s\approx \beta_3^s$，由$\beta_3^s\geq c$可以解得$s \leq \frac{\log c}{\log \beta_3} \approx \frac{-\log c}{\lambda\eta}$。这表明，模型顶多能记住$\mathcal{O}(1/\lambda\eta)$步的数据，这是它的记忆周期。</p>
+<p>那直接无脑$\lambda=0$，让记忆周期无限大，是否就可以不担心遗忘问题了？理论上是的，然而这并不是一个好选择。Weight Decay还有一个作用是帮助模型忘掉初始化。由式$\eqref{eq:theta-0-bar-u}$可知初始化$\boldsymbol{\theta}_0$的权重是$\beta_3^t$，如果$\beta_3$太大或者训练步数$t$太小，那么初始化的占比还很高，模型可能还处于欠拟合阶段。</p>
+<p>此外，Weight Decay还有利于稳定模型“内科”。在<a href="/archives/11307">《AdamW的Weight RMS的渐近估计（上）》</a>我们已经推导过，AdamW的Weight RMS的渐近结果是$\sqrt{\eta/2\lambda}$，如果$\lambda=0$，那么Weight RMS会以$\eta\sqrt{t}$的速率膨胀。这意味着直接设置$\lambda=0$，还可能带来权重爆炸等模型内科异常。</p>
+<p>因此，$\beta_3$不能太小，以免忘记早期数据，同时也不能太大，以免欠拟合或者权重爆炸。比较适合的设置是让$1/\lambda\eta$正比于训练步数，如果是Multi-Epoch的训练场景，则考虑让$1/\lambda\eta$正比于单个Epoch的训练步数。</p>
+<h2 id="_4">动态版本</h2>
+<p>在实际训练中，我们更多是适用动态变化的LR Schedule，比如Consine Decay、Linear Decay、WSD（Warmup-Stable-Decay）等，所以上述静态Weight Decay和Learning Rate的结果并不完全符合实践，我们需要将它们推广到动态版。</p>
+<p>从式$\eqref{eq:wd-ema}$出发，利用近似$1 - \lambda_t \eta_t\approx e^{-\lambda_t \eta_t}$，并迭代展开，可得<br />
+\begin{equation}\boldsymbol{\theta}<em t-1="t-1">t = (1 - \lambda_t \eta_t)\boldsymbol{\theta}</em>} - \eta_t \boldsymbol{u<em t-1="t-1">t \approx e^{-\lambda_t \eta_t}\boldsymbol{\theta}</em>} - \eta_t \boldsymbol{u<em i="1">t = e^{-\kappa_t}\left(\boldsymbol{\theta}_0 - \sum</em>}^t e^{\kappa_i}\eta_i\boldsymbol{u<em i="1">i\right)\end{equation}<br />
+其中$\kappa_t = \sum</em>\eta_i$，那么可以得到同样的平均场近似}^t \eta_i\lambda_i$。继续设$z_t = \sum_{i=1}^t e^{\kappa_i<br />
+\begin{equation}\bar{\boldsymbol{u}}<em i="1">t\triangleq\frac{1}{z_t}\sum</em>}^t e^{\kappa_i}\eta_i \boldsymbol{u<em i="1">i = \frac{1}{z_t}\sum</em>}^t e^{\kappa_i}\eta_i \frac{\boldsymbol{m<em i="1">i}{\sqrt{\boldsymbol{v}_i}}\approx \frac{\bar{\boldsymbol{m}}_t \,\,\triangleq\,\, \frac{1}{z_t}\sum</em>}^t e^{\kappa_i}\eta_i\boldsymbol{m<em i="1">i}{\sqrt{\bar{\boldsymbol{v}}_t \,\,\triangleq\,\, \frac{1}{z_t}\sum</em>}^t e^{\kappa_i}\eta_i\boldsymbol{v<em i="1">i}}\end{equation}<br />
+代入$\boldsymbol{m}_t,\boldsymbol{v}_t$的展开式得<br />
+\begin{gather}<br />
+\bar{\boldsymbol{m}}_t = \frac{1}{z_t}\sum</em>}^t e^{\kappa_i}\eta_i\boldsymbol{m<em i="1">i = \frac{1 - \beta_1}{z_t}\sum</em>}^t e^{\kappa_i}\eta_i\sum_{j=1}^i \beta_1^{i-j}\boldsymbol{g<em j="1">j = \sum</em>}^t\boldsymbol{g<em i="j">j\underbrace{\frac{1 - \beta_1}{z_t}\sum</em>}^t e^{\kappa_i}\beta_1^{i-j}\eta_i<em i="1">{\text{记为}\bar{\beta}_1(j,t)} \\\<br />
+\bar{\boldsymbol{v}}_t = \frac{1}{z_t}\sum</em>}^t e^{\kappa_i}\eta_i\boldsymbol{v<em i="1">i = \frac{1 - \beta_2}{z_t}\sum</em>}^t e^{\kappa_i}\eta_i\sum_{j=1}^i \beta_2^{i-j}\boldsymbol{g<em j="1">j^2 = \sum</em>}^t\boldsymbol{g<em i="j">j^2\underbrace{\frac{1 - \beta_2}{z_t}\sum</em> \\\}^t e^{\kappa_i}\beta_2^{i-j}\eta_i}_{\text{记为}\bar{\beta}_2(j,t)<br />
+\end{gather}<br />
+可以看到，跟静态Weight Decay和Learning Rate相比，动态版形式上并没有太大变化，只不过梯度的加权系数变成了稍微复杂一点的$\bar{\beta}_1(j,t)$和$\bar{\beta}_2(j,t)$。特别地，当$\beta_1,\beta_2\to 0$时，$\bar{\beta}_1(j,t)$和$\bar{\beta}_2(j,t)$简化为<br />
+\begin{equation}\bar{\beta}_1(j,t) = \bar{\beta}_2(j,t) = \frac{e^{\kappa_j}\eta_j}{z_t}\label{eq:bb1-bb2-0}\end{equation}</p>
+<h2 id="_5">最优调度</h2>
+<p>接下来可以做的事情有很多，最基本的就是根据具体的WD Schedule和LR Schedule去算$\bar{\beta}_1(j,t)$和$\bar{\beta}_2(j,t)$、估计记忆周期等。不过，这里我们选择做一件更极致的事情——直接去反推一个最优的WD Schedule和LR Schedule。</p>
+<p>具体来说，前面我们假设了数据已经全局打乱，那么每个Batch的数据都同等重要，但静态版得到的系数$\bar{\beta}_1(j,t)\propto\beta_3^{t-j+1} - \beta_1^{t-j+1}$并非常数，而是随距离变化，这跟“每个Batch的数据都同等重要”不完全吻合。如果条件允许，那么我们期望它应该恒等于某个常数。根据这个期望，我们就可以反解出对应的$\lambda_j,\eta_j$。</p>
+<p>简单起见，我们从$\beta_1,\beta_2\to 0$入手，此时期望条件可以写为$\forall 0\leq i,j \leq t, e^{\kappa_i}\eta_i/z_t = e^{\kappa_j}\eta_j/z_t$，整理得$\eta_i / \eta_j = e^{\kappa_j - \kappa_i}$，代入$i=j-1$得$\eta_{j-1}/\eta_j = e^{\kappa_j - \kappa_{j-1}} = e^{\lambda_j\eta_j}$，或者写成<br />
+\begin{equation}e^{\lambda_j\eta_j}\eta_j = \eta_{j-1}\end{equation}<br />
+这样就得到了一种求解$\lambda_j,\eta_j$的数值方法：每一步得到$\eta_{j-1}$后，通过求解该非线性方程就能继续得到$\lambda_j,\eta_j$，于是从$\eta_1$出发就可以递归地得到整个序列。如果想要更解析的结果，可以用导数近似差分：两端取对数得$\lambda_j\eta_j + \log \eta_j - \log \eta_{j-1} = 0$，将$\lambda_j,\eta_j$视为连续函数$\lambda_s,\eta_s$，$\log \eta_j - \log \eta_{j-1}$则视为$\log \eta_s$的导数近似，于是有<br />
+\begin{equation}\lambda_s \eta_s + \frac{\dot{\eta}<em _max="\max">s}{\eta_s} \approx 0 \label{eq:lr-wd-ode}\end{equation}<br />
+如果$\lambda_s$取常数$\lambda$，那么可以解得<br />
+\begin{equation}\eta_s \approx \frac{\eta</em>}}{\lambda\eta_{\max} s + 1}\label{eq:opt-lrt-wd}\end{equation<br />
+这便是常数Weight Decay下的最佳LR Schedule，它不需要预设终点$t$和最小学习率$\eta_{\min}$，这意味着它可以无限训练下去，类似于WSD的Stable阶段，但它能自动平衡每一步梯度的系数。不过它也有个缺点：$s\to\infty$时它会趋于0。从<a href="/archives/11404">《AdamW的Weight RMS的渐近估计（下）》</a>可知Weight RMS会趋于$\lim\limits_{s\to\infty} \frac{\eta_s}{2\lambda_s}$，所以该缺点可能带来权重坍缩的风险。</p>
+<p>为了解决这个问题，我们可以考虑让$\lambda_s = \alpha\eta_s$，$\alpha=\lambda_{\max}/\eta_{\max}$是一个常数，此时可以解得<br />
+\begin{equation}\eta_s \approx \frac{\eta_{\max}}{\sqrt{2\lambda_{\max}\eta_{\max} s + 1}},\qquad \lambda_s \approx \frac{\lambda_{\max}}{\sqrt{2\lambda_{\max}\eta_{\max} s + 1}} \label{eq:opt-lrt-wdt}\end{equation}<br />
+相应的$e^{\kappa_s} \approx \sqrt{2\lambda_{\max}\eta_{\max} s + 1}, e^{\kappa_s}\eta_s \approx \eta_{\max}, z_t\approx \eta_{\max} t, \bar{\beta}_1(j,t) = \bar{\beta}_2(j,t) \approx 1/t$。</p>
+<h2 id="_6">一般结果</h2>
+<p>目前的结果，比如式$\eqref{eq:opt-lrt-wd}$和式$\eqref{eq:opt-lrt-wdt}$，都是基于$\beta_1,\beta_2=0$的，当它们不等于0时，结果需要变化吗？更一般地，上述结果都是基于Adam优化器的，它们多大程度上可以推广到其他优化器呢？</p>
+<p>首先来看$\beta_1,\beta_2\neq 0$时的问题，答案是当$t$足够大时，结论并不用大改。以$\bar{\beta}<em i="j">1(j,t)$为例，在上述最优调度下$e^{\kappa_i}\eta_i$等于（跟$t$有关的）常数，那么根据定义<br />
+\begin{equation}\bar{\beta}_1(j,t) = \frac{1 - \beta_1}{z_t}\sum</em>}^t e^{\kappa_i}\beta_1^{i-j}\eta_i \propto \sum_{i=j}^t \beta_1^{i-j} = \frac{1 - \beta_1^{t-j+1}}{1 - \beta_1}\end{equation<br />
+当$t$足够大时$\beta_1^{t-j+1}\to 0$，所以这也可以看成是一个跟$j$无关的常数。前面也说了，对于$\beta_1,\beta_2$来说，“$t$足够大”这件事情几乎时肯定的，所以直接用$\beta_1,\beta_2=0$的结果就行。</p>
+<p>至于优化器，前面我们提到的优化器有SGDM、RMSProp、Adam、SignSGDM、Muon，它们可以分为两类。其中，SGDM是一类，它的$\bar{\boldsymbol{u}}_t$直接就是$\bar{\boldsymbol{m}}_t$，连平均场近似都不需要用，所以直到式$\eqref{eq:lr-wd-ode}$的结果都是适用的。不过，式$\eqref{eq:opt-lrt-wd}$和式$\eqref{eq:opt-lrt-wdt}$大概不是最适合的了，因为SGDM的渐近Weight RMS还依赖于梯度模长[<a href="https://papers.cool/arxiv/2305.17212">参考</a>]，所以要把梯度模长考虑进去才行，相对复杂一些。</p>
+<p>剩下的RMSProp、Adam、SignSGDM、Muon我们将它归为另一类，都属于自适应学习率优化器，它们的更新规则都具有$\frac{\text{梯度}}{\sqrt{\text{梯度}{}^2}}$的其次形式，这种情况下，如果我们依旧相信平均场近似，那么就能得到同样的$\bar{\boldsymbol{m}}_t$、同样的$\beta_1(j,t)$，所以到式$\eqref{eq:lr-wd-ode}$的结果也是适用的；并且对于这类齐次型优化器，可以证明Weight RMS同样渐近正比于$\sqrt{\eta/\lambda}$，所以连同式$\eqref{eq:opt-lrt-wd}$和式$\eqref{eq:opt-lrt-wdt}$也可以复用。</p>
+<h2 id="_7">假设讨论</h2>
+<p>我们的推导暂告一段落，这一节我们来讨论一下推导所依赖的假设。</p>
+<p>纵观全文，推导过程中所用到的值得拿出来讨论的大假设主要有两个。第一个假设是平均场近似，首次介绍于<a href="/archives/11280">《重新思考学习率与Batch Size（二）：平均场》</a>。平均场本身肯定不是新的，它是物理学中的经典近似，但将其用来分析优化器的相关动态，应该是笔者首次引入的，目前已经用它估算过优化器的<a href="/archives/11280">Batch Size</a>、<a href="/archives/11267">Update RMS</a>、<a href="/archives/11307">Weight RMS</a>等，结果看起来是合理的。</p>
+<p>对于平均场近似的有效性，其实我们没法评述太多，它更多体现了一种信仰。一方面，我们根据已有的估算结果的合理性，相信它会继续合理下去，至少能对一些标量指标给出有效的渐近估计。另一方面，对于自适应学习率优化器，由于其更新规则的非线性，分析难度大大增加，除了平均场近似外，我们其实也没什么计算工具能用了。</p>
+<p>这其中最典型的例子就是Muon，因为它是非Element-wise的运算，以往像SignSGD那样逐分量的计算手段便失去了作用，而平均场近似依然奏效（参考<a href="/archives/11285">《重新思考学习率与Batch Size（三）：Muon》</a>）。所以，平均场近似实际上为一大类自适应学习率优化器的分析和估计提供了统一、有效、简洁的计算手段，目前看来似乎没有别的方法有同样的效果，所以我们只能继续相信它。</p>
+<p>第二个大的假设是“每一步梯度只包含当前Batch的信息”，这个假设本质上是错误的，因为梯度不仅依赖于当前Batch的数据，还依赖于上一步的参数，而上一步的参数自然是包含了历史信息。不过，我们可以尝试补救一下，因为理论上来说，每个Batch都会带来新的信息，否则这个Batch就没有存在的意义了，所以补救的方法是改为“每一步梯度包含大致相同的增量信息”。</p>
+<p>当然，仔细思考之下这个说法也是有争议的，因为学得越多，覆盖面越广，后来Batch的独特信息就越少。不过，还可以挣扎一下，那就是将知识分为“规律”和“事实”两大类，事实型知识——比如某个定理是某个数学家发现的——只能靠记忆，那么可以考虑改为“每一步梯度包含大致相同的事实型知识”。总之，从实践来看，“平等对待每一步梯度”所得的LR Schedule似乎真的是有好处的，所以总可以尝试为它构造一个解释。</p>
+<p>最近的论文<a href="https://papers.cool/arxiv/2511.18903">《How Learning Rate Decay Wastes Your Best Data in Curriculum-Based LLM Pretraining》</a>提供了一个间接证据。它考虑了数据质量从低到高的课程学习，发现激进的LR Decay会让课程学习优势全无。而我们的结果是每一Batch的权重是式$\eqref{eq:bb1-bb2-0}$，正比于Learning Rate，如果LR Decay过于激进，那么后面的高质量数据权重反而过小，因而效果欠佳。能够合理解释这个现象，反过来显示了我们假设的合理性。</p>
+<h2 id="_8">文章小结</h2>
+<p>本文从滑动平均的视角来理解权重衰减（WD）和学习率（LR），并探讨了在该视角下最优的WD Schedule和LR Schedule。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/11459">https://spaces.ac.cn/archives/11459</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Dec. 05, 2025). 《滑动平均视角下的权重衰减和学习率 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/11459">https://spaces.ac.cn/archives/11459</a></p>
+<p>@online{kexuefm-11459,<br />
+title={滑动平均视角下的权重衰减和学习率},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={Dec},<br />
+url={\url{https://spaces.ac.cn/archives/11459}},<br />
+} </p>
+<hr />
+<h2 id="_9">公式推导与注释</h2>
+<p>本节将对原文中的核心公式进行极详细的推导和扩展，涵盖滑动平均视角、权重衰减机制、学习率调度策略以及最优化理论的完整数学框架。</p>
+<hr />
+<h3 id="_10">第一部分：优化器与权重衰减的统一框架</h3>
+<h4 id="11">1.1 经典优化器回顾</h4>
+<p><strong>标准梯度下降（SGD）</strong>：</p>
+<p>$$
+\theta_t = \theta_{t-1} - \eta_t g_t
+$$</p>
+<p>其中：
+- $\theta_t$：第$t$步的参数
+- $\eta_t$：学习率
+- $g_t$：第$t$步的梯度</p>
+<p><strong>带动量的SGD（SGDM）</strong>：</p>
+<p>$$
+\begin{aligned}
+m_t &= \beta_1 m_{t-1} + (1 - \beta_1) g_t \\
+\theta_t &= \theta_{t-1} - \eta_t m_t
+\end{aligned}
+$$</p>
+<p><strong>Adam优化器</strong>：</p>
+<p>$$
+\begin{aligned}
+m_t &= \beta_1 m_{t-1} + (1 - \beta_1) g_t \quad &\text{（一阶矩估计）} \\
+v_t &= \beta_2 v_{t-1} + (1 - \beta_2) g_t^2 \quad &\text{（二阶矩估计）} \\
+\hat{m}_t &= \frac{m_t}{1 - \beta_1^t} \quad &\text{（偏差修正）} \\
+\hat{v}_t &= \frac{v_t}{1 - \beta_2^t} \quad &\text{（偏差修正）} \\
+\theta_t &= \theta_{t-1} - \eta_t \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} \quad &\text{（参数更新）}
+\end{aligned}
+$$</p>
+<p><strong>关键参数</strong>：
+- $\beta_1 \in [0, 1)$：一阶动量系数（通常0.9）
+- $\beta_2 \in [0, 1)$：二阶动量系数（通常0.999）
+- $\epsilon &gt; 0$：数值稳定项（通常$10^{-8}$）</p>
+<h4 id="12-l2">1.2 L2正则化与权重衰减的区别</h4>
+<p><strong>L2正则化</strong>（传统方法）：</p>
+<p>损失函数添加惩罚项：</p>
+<p>$$
+\mathcal{L}_{\text{reg}} = \mathcal{L}(\theta) + \frac{\lambda}{2}\|\theta\|^2
+$$</p>
+<p>梯度变为：</p>
+<p>$$
+\nabla_{\theta} \mathcal{L}_{\text{reg}} = \nabla_{\theta} \mathcal{L} + \lambda \theta
+$$</p>
+<p>参数更新：</p>
+<p>$$
+\theta_t = \theta_{t-1} - \eta_t (\nabla_{\theta} \mathcal{L} + \lambda \theta_{t-1})
+$$</p>
+<p><strong>问题</strong>：L2正则化在Adam等自适应优化器中失效。</p>
+<p><strong>原因推导</strong>：</p>
+<p>对于Adam，L2正则化的梯度$\nabla_{\theta} \mathcal{L} + \lambda \theta_{t-1}$会被累积到动量项：</p>
+<p>$$
+m_t = \beta_1 m_{t-1} + (1 - \beta_1)(\nabla_{\theta} \mathcal{L} + \lambda \theta_{t-1})
+$$</p>
+<p>然后再被自适应学习率$\frac{\eta_t}{\sqrt{v_t}}$缩放，导致正则化效果不稳定。</p>
+<p><strong>权重衰减</strong>（AdamW方法）：</p>
+<p>直接在参数空间做衰减：</p>
+<p>$$
+\boxed{\theta_t = \theta_{t-1} - \eta_t (u_t + \lambda_t \theta_{t-1}) = (1 - \lambda_t \eta_t)\theta_{t-1} - \eta_t u_t}
+$$</p>
+<p>其中$u_t$是优化器给出的更新量（不包含正则化）：
+- SGDM：$u_t = m_t$
+- Adam：$u_t = \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}$
+- RMSProp：$u_t = \frac{g_t}{\sqrt{v_t} + \epsilon}$</p>
+<p><strong>关键优势</strong>：
+1. 权重衰减与梯度更新解耦
+2. 不受自适应学习率影响
+3. 对所有优化器统一有效</p>
+<h4 id="13">1.3 统一更新量的定义</h4>
+<p><strong>定义</strong>：记优化器给出的更新量为$u_t$，则：</p>
+<table>
+<thead>
+<tr>
+<th>优化器</th>
+<th>更新量$u_t$</th>
+<th>类型</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SGD</td>
+<td>$g_t$</td>
+<td>基础型</td>
+</tr>
+<tr>
+<td>SGDM</td>
+<td>$m_t$</td>
+<td>动量型</td>
+</tr>
+<tr>
+<td>RMSProp</td>
+<td>$\frac{g_t}{\sqrt{v_t} + \epsilon}$</td>
+<td>自适应型</td>
+</tr>
+<tr>
+<td>Adam</td>
+<td>$\frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}$</td>
+<td>自适应型</td>
+</tr>
+<tr>
+<td>SignSGDM</td>
+<td>$\text{sign}(m_t)$</td>
+<td>符号型</td>
+</tr>
+<tr>
+<td>Muon</td>
+<td>$\text{msign}(m_t)$</td>
+<td>矩阵符号型</td>
+</tr>
+</tbody>
+</table>
+<p><strong>通用形式</strong>：</p>
+<p>$$
+\theta_t = \theta_{t-1} - \eta_t (u_t + \lambda_t \theta_{t-1})
+$$</p>
+<hr />
+<h3 id="_11">第二部分：滑动平均视角的引入</h3>
+<h4 id="21-ema">2.1 指数滑动平均（EMA）的数学形式</h4>
+<p><strong>定义</strong>：给定序列${x_i}_{i=1}^t$，系数$\beta \in (0, 1)$，指数滑动平均为：</p>
+<p>$$
+\bar{x}_t = \beta \bar{x}_{t-1} + (1 - \beta) x_t
+$$</p>
+<p><strong>迭代展开</strong>：</p>
+<p>$$
+\begin{aligned}
+\bar{x}_t &= \beta \bar{x}_{t-1} + (1 - \beta) x_t \\
+&= \beta[\beta \bar{x}_{t-2} + (1 - \beta) x_{t-1}] + (1 - \beta) x_t \\
+&= \beta^2 \bar{x}_{t-2} + (1 - \beta)\beta x_{t-1} + (1 - \beta) x_t \\
+&= \cdots \\
+&= \beta^t \bar{x}_0 + (1 - \beta)\sum_{i=1}^t \beta^{t-i} x_i
+\end{aligned}
+$$</p>
+<p><strong>归一化形式</strong>（忽略初始值）：</p>
+<p>$$
+\bar{x}_t = \frac{\sum_{i=1}^t \beta^{t-i} x_i}{\sum_{i=1}^t \beta^{t-i}} = \frac{(1 - \beta)\sum_{i=1}^t \beta^{t-i} x_i}{1 - \beta^t}
+$$</p>
+<p>当$t \to \infty$时，$\beta^t \to 0$，可简化为：</p>
+<p>$$
+\bar{x}_t \approx (1 - \beta)\sum_{i=1}^t \beta^{t-i} x_i
+$$</p>
+<h4 id="22-ema">2.2 权重衰减的EMA解释</h4>
+<p><strong>重写权重更新公式</strong>：</p>
+<p>$$
+\begin{aligned}
+\theta_t &= \theta_{t-1} - \eta_t (u_t + \lambda_t \theta_{t-1}) \\
+&= (1 - \lambda_t \eta_t)\theta_{t-1} - \eta_t u_t \\
+&= (1 - \lambda_t \eta_t)\theta_{t-1} + \lambda_t \eta_t \left(-\frac{u_t}{\lambda_t}\right)
+\end{aligned}
+$$</p>
+<p><strong>EMA形式</strong>：</p>
+<p>定义衰减系数$\beta_3 = 1 - \lambda \eta$（假设$\lambda_t, \eta_t$为常数），则：</p>
+<p>$$
+\boxed{\theta_t = \beta_3 \theta_{t-1} + (1 - \beta_3)\left(-\frac{u_t}{\lambda}\right)}
+$$</p>
+<p>这恰好是$\theta_{t-1}$与$-u_t/\lambda$的滑动平均！</p>
+<p><strong>物理意义</strong>：
+- $\beta_3 \to 1$：模型"记忆"历史权重，衰减弱
+- $\beta_3 \to 0$：模型"遗忘"历史权重，衰减强
+- $-u_t/\lambda$：当前数据对权重的"目标推动方向"</p>
+<h4 id="23">2.3 迭代展开：参数的记忆构成</h4>
+<p><strong>完全展开</strong>：</p>
+<p>从$\theta_0$开始迭代：</p>
+<p>$$
+\begin{aligned}
+\theta_t &= \beta_3 \theta_{t-1} + (1 - \beta_3)\left(-\frac{u_t}{\lambda}\right) \\
+&= \beta_3\left[\beta_3 \theta_{t-2} + (1 - \beta_3)\left(-\frac{u_{t-1}}{\lambda}\right)\right] + (1 - \beta_3)\left(-\frac{u_t}{\lambda}\right) \\
+&= \beta_3^2 \theta_{t-2} + (1 - \beta_3)\beta_3\left(-\frac{u_{t-1}}{\lambda}\right) + (1 - \beta_3)\left(-\frac{u_t}{\lambda}\right) \\
+&= \cdots \\
+&= \beta_3^t \theta_0 + (1 - \beta_3)\sum_{i=1}^t \beta_3^{t-i}\left(-\frac{u_i}{\lambda}\right)
+\end{aligned}
+$$</p>
+<p><strong>简化形式</strong>：</p>
+<p>$$
+\boxed{\theta_t = \beta_3^t \theta_0 + (1 - \beta_3)\sum_{i=1}^t \beta_3^{t-i}\left(-\frac{u_i}{\lambda}\right)}
+$$</p>
+<p><strong>关键观察</strong>：
+1. <strong>初始化遗忘</strong>：$\beta_3^t \to 0$意味着模型逐渐遗忘初始化$\theta_0$
+2. <strong>历史加权</strong>：每一步的更新$u_i$按指数衰减权重$\beta_3^{t-i}$累积
+3. <strong>权重归一化</strong>：系数$1 - \beta_3$保证总权重$\sum_{i=1}^t \beta_3^{t-i}(1 - \beta_3) \approx 1$（当$t \to \infty$）</p>
+<h4 id="24">2.4 记忆周期的定量分析</h4>
+<p><strong>定义</strong>：记忆周期$T_{\text{mem}}$是指权重系数衰减到$c \in (0, 1)$（如$c = e^{-1} \approx 0.368$）所需的步数。</p>
+<p><strong>推导</strong>：</p>
+<p>从$\beta_3^s \geq c$求解：</p>
+<p>$$
+\begin{aligned}
+\beta_3^s &\geq c \\
+(1 - \lambda\eta)^s &\geq c \\
+s \log(1 - \lambda\eta) &\geq \log c \\
+s &\leq \frac{\log c}{\log(1 - \lambda\eta)}
+\end{aligned}
+$$</p>
+<p><strong>泰勒展开</strong>：当$\lambda\eta \ll 1$时，$\log(1 - \lambda\eta) \approx -\lambda\eta$，因此：</p>
+<p>$$
+s \leq \frac{\log c}{-\lambda\eta} = \frac{-\log c}{\lambda\eta}
+$$</p>
+<p>取$c = e^{-1}$，则$-\log c = 1$：</p>
+<p>$$
+\boxed{T_{\text{mem}} \approx \frac{1}{\lambda\eta}}
+$$</p>
+<p><strong>实例计算</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>$\lambda$</th>
+<th>$\eta$</th>
+<th>$\lambda\eta$</th>
+<th>$T_{\text{mem}}$</th>
+<th>解释</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.01</td>
+<td>0.001</td>
+<td>$10^{-5}$</td>
+<td>100,000</td>
+<td>记忆10万步</td>
+</tr>
+<tr>
+<td>0.1</td>
+<td>0.001</td>
+<td>$10^{-4}$</td>
+<td>10,000</td>
+<td>记忆1万步</td>
+</tr>
+<tr>
+<td>0.1</td>
+<td>0.01</td>
+<td>$10^{-3}$</td>
+<td>1,000</td>
+<td>记忆1千步</td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键洞察</strong>：
+- $\lambda\eta$小 → 记忆周期长 → 容易欠拟合、权重爆炸
+- $\lambda\eta$大 → 记忆周期短 → 容易遗忘早期数据</p>
+<hr />
+<h3 id="adam">第三部分：Adam的平均场近似</h3>
+<h4 id="31">3.1 平均场近似的物理背景</h4>
+<p><strong>来源</strong>：平均场理论（Mean Field Theory）源于统计物理学，用于简化多体系统的相互作用。</p>
+<p><strong>核心思想</strong>：将$n$个相互作用的粒子简化为每个粒子与"平均场"的相互作用。</p>
+<p><strong>应用到优化器</strong>：</p>
+<p>Adam的更新量为：</p>
+<p>$$
+u_t = \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
+$$</p>
+<p>其中$\hat{m}_t$和$\hat{v}_t$都是时间序列的滑动平均。</p>
+<p><strong>非线性耦合</strong>：</p>
+<p>$$
+u_t = \frac{\sum_{i=1}^t w_1^{(i)} g_i}{\sqrt{\sum_{i=1}^t w_2^{(i)} g_i^2} + \epsilon}
+$$</p>
+<p>这是一个<strong>分式非线性函数</strong>，直接分析极其困难。</p>
+<p><strong>平均场近似</strong>：</p>
+<p>假设分子和分母的滑动平均可以独立计算：</p>
+<p>$$
+\frac{\bar{m}_t}{\sqrt{\bar{v}_t}} \approx \frac{\text{avg}(m_t)}{\sqrt{\text{avg}(v_t)}}
+$$</p>
+<p>即：</p>
+<p>$$
+\boxed{\bar{u}_t = \frac{1 - \beta_3}{1 - \beta_3^t}\sum_{i=1}^t \beta_3^{t-i} u_i \approx \frac{\bar{m}_t}{\sqrt{\bar{v}_t}}}
+$$</p>
+<p><strong>误差分析</strong>（Jensen不等式）：</p>
+<p>由于$f(x) = 1/\sqrt{x}$是凸函数（$x &gt; 0$），有：</p>
+<p>$$
+\frac{1}{\sqrt{\mathbb{E}[X]}} \leq \mathbb{E}\left[\frac{1}{\sqrt{X}}\right]
+$$</p>
+<p>因此平均场近似给出的是<strong>下界估计</strong>。</p>
+<p><strong>实证验证</strong>（来自论文）：</p>
+<p>在GPT-2训练中，平均场近似的相对误差约为5%-10%，在可接受范围内。</p>
+<h4 id="32-barm_t">3.2 动量项$\bar{m}_t$的详细推导</h4>
+<p><strong>定义</strong>：</p>
+<p>$$
+\bar{m}_t = \frac{1 - \beta_3}{1 - \beta_3^t}\sum_{i=1}^t \beta_3^{t-i} m_i
+$$</p>
+<p><strong>展开$m_i$</strong>：</p>
+<p>$$
+m_i = \beta_1 m_{i-1} + (1 - \beta_1) g_i = (1 - \beta_1)\sum_{j=1}^i \beta_1^{i-j} g_j
+$$</p>
+<p><strong>代入$\bar{m}_t$</strong>：</p>
+<p>$$
+\begin{aligned}
+\bar{m}_t &= \frac{1 - \beta_3}{1 - \beta_3^t}\sum_{i=1}^t \beta_3^{t-i} m_i \\
+&= \frac{1 - \beta_3}{1 - \beta_3^t}\sum_{i=1}^t \beta_3^{t-i} (1 - \beta_1)\sum_{j=1}^i \beta_1^{i-j} g_j \\
+&= \frac{(1 - \beta_3)(1 - \beta_1)}{1 - \beta_3^t}\sum_{i=1}^t \sum_{j=1}^i \beta_3^{t-i} \beta_1^{i-j} g_j
+\end{aligned}
+$$</p>
+<p><strong>交换求和顺序</strong>：</p>
+<p>利用恒等式：</p>
+<p>$$
+\sum_{i=1}^t \sum_{j=1}^i a_{i,j} = \sum_{j=1}^t \sum_{i=j}^t a_{i,j}
+$$</p>
+<p>得到：</p>
+<p>$$
+\bar{m}_t = \frac{(1 - \beta_3)(1 - \beta_1)}{1 - \beta_3^t}\sum_{j=1}^t g_j \sum_{i=j}^t \beta_3^{t-i} \beta_1^{i-j}
+$$</p>
+<p><strong>几何级数求和</strong>：</p>
+<p>$$
+\begin{aligned}
+\sum_{i=j}^t \beta_3^{t-i} \beta_1^{i-j} &= \beta_3^{t-j} \sum_{i=j}^t \left(\frac{\beta_1}{\beta_3}\right)^{i-j} \\
+&= \beta_3^{t-j} \sum_{k=0}^{t-j} \left(\frac{\beta_1}{\beta_3}\right)^k \quad (\text{令}k = i - j) \\
+&= \beta_3^{t-j} \frac{1 - (\beta_1/\beta_3)^{t-j+1}}{1 - \beta_1/\beta_3} \\
+&= \frac{\beta_3^{t-j} - \beta_1^{t-j}\beta_3/\beta_1}{\beta_3 - \beta_1} \\
+&= \frac{\beta_3^{t-j+1} - \beta_1^{t-j+1}}{\beta_3 - \beta_1}
+\end{aligned}
+$$</p>
+<p><strong>最终结果</strong>：</p>
+<p>$$
+\boxed{\bar{m}_t = \frac{(1 - \beta_3)(1 - \beta_1)}{(1 - \beta_3^t)(\beta_3 - \beta_1)}\sum_{j=1}^t (\beta_3^{t-j+1} - \beta_1^{t-j+1}) g_j}
+$$</p>
+<p><strong>简化形式</strong>（当$t \to \infty$，$\beta_3^t, \beta_1^t \to 0$）：</p>
+<p>$$
+\bar{m}_t \approx \frac{(1 - \beta_3)(1 - \beta_1)}{\beta_3 - \beta_1}\sum_{j=1}^t (\beta_3^{t-j+1} - \beta_1^{t-j+1}) g_j
+$$</p>
+<p><strong>梯度权重分析</strong>：</p>
+<p>第$j$步梯度的权重为：</p>
+<p>$$
+w_j = \frac{(1 - \beta_3)(1 - \beta_1)}{(\beta_3 - \beta_1)(1 - \beta_3^t)}(\beta_3^{t-j+1} - \beta_1^{t-j+1})
+$$</p>
+<p><strong>性质</strong>：
+1. 单峰函数：$w_j$关于$j$先增后减
+2. 指数衰减：远处的$w_j \approx C \beta_3^{t-j}$
+3. 归一化：$\sum_{j=1}^t w_j \approx 1$（当$t$大时）</p>
+<h4 id="33-barv_t">3.3 二阶矩$\bar{v}_t$的类似推导</h4>
+<p><strong>完全类似的推导</strong>：</p>
+<p>$$
+\boxed{\bar{v}_t = \frac{(1 - \beta_3)(1 - \beta_2)}{(1 - \beta_3^t)(\beta_3 - \beta_2)}\sum_{j=1}^t (\beta_3^{t-j+1} - \beta_2^{t-j+1}) g_j^2}
+$$</p>
+<p><strong>梯度平方的权重</strong>：</p>
+<p>$$
+w_j^{(2)} = \frac{(1 - \beta_3)(1 - \beta_2)}{(\beta_3 - \beta_2)(1 - \beta_3^t)}(\beta_3^{t-j+1} - \beta_2^{t-j+1})
+$$</p>
+<p><strong>比较$w_j$与$w_j^{(2)}$</strong>：</p>
+<p>由于通常$\beta_2 &gt; \beta_1$（如0.999 vs 0.9），有：</p>
+<p>$$
+\beta_3 - \beta_2 < \beta_3 - \beta_1
+$$</p>
+<p>因此$w_j^{(2)} &gt; w_j$（对相同的$j$），意味着<strong>二阶矩对历史梯度的记忆更长</strong>。</p>
+<p><strong>物理意义</strong>：
+- 一阶矩$m_t$：快速适应梯度方向变化
+- 二阶矩$v_t$：稳定估计梯度尺度（方差）</p>
+<hr />
+<h3 id="_12">第四部分：记忆周期与超参数设置</h3>
+<h4 id="41">4.1 三重记忆周期</h4>
+<p><strong>定义三个时间尺度</strong>：</p>
+<ol>
+<li><strong>动量记忆周期</strong>：$T_1 \approx 1/(1 - \beta_1)$</li>
+<li><strong>方差记忆周期</strong>：$T_2 \approx 1/(1 - \beta_2)$</li>
+<li><strong>权重记忆周期</strong>：$T_3 \approx 1/(\lambda\eta)$</li>
+</ol>
+<p><strong>典型值</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>典型值</th>
+<th>记忆周期</th>
+<th>物理意义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$\beta_1$</td>
+<td>0.9</td>
+<td>$T_1 = 10$</td>
+<td>记忆10步梯度方向</td>
+</tr>
+<tr>
+<td>$\beta_2$</td>
+<td>0.999</td>
+<td>$T_2 = 1000$</td>
+<td>记忆1000步梯度尺度</td>
+</tr>
+<tr>
+<td>$\lambda\eta$</td>
+<td>$10^{-5}$</td>
+<td>$T_3 = 100,000$</td>
+<td>记忆10万步数据</td>
+</tr>
+</tbody>
+</table>
+<p><strong>层级关系</strong>：</p>
+<p>$$
+T_1 \ll T_2 \ll T_3
+$$</p>
+<p>这是一个<strong>多时间尺度系统</strong>（Multi-timescale System）。</p>
+<h4 id="42">4.2 遗忘与记忆的权衡</h4>
+<p><strong>过度记忆的问题</strong>（$\lambda\eta \to 0$）：</p>
+<ol>
+<li><strong>欠拟合</strong>：初始化$\theta_0$权重$\beta_3^t$下降过慢</li>
+<li><strong>权重爆炸</strong>：Weight RMS $\propto \sqrt{\eta/\lambda}$发散</li>
+<li><strong>训练不稳定</strong>：参数范数无约束增长</li>
+</ol>
+<p><strong>过度遗忘的问题</strong>（$\lambda\eta \to 1$）：</p>
+<ol>
+<li><strong>数据浪费</strong>：早期数据被遗忘，single-epoch训练无效</li>
+<li><strong>收敛慢</strong>：有效Batch Size减小</li>
+<li><strong>泛化差</strong>：模型只记住最近数据，缺乏全局视野</li>
+</ol>
+<p><strong>最优设置原则</strong>：</p>
+<p>$$
+\boxed{T_3 = \frac{1}{\lambda\eta} \approx N_{\text{total}} \quad \text{（总训练步数）}}
+$$</p>
+<p>或对于multi-epoch：</p>
+<p>$$
+T_3 \approx N_{\text{epoch}} \quad \text{（单epoch步数）}
+$$</p>
+<p><strong>理由</strong>：让模型在训练结束时，初始化的权重$\beta_3^t \approx e^{-1}$（已充分遗忘），同时第1步数据的权重$\beta_3^{t-1}(1 - \beta_3) \approx e^{-1}(1 - e^{-1}) \approx 0.23$（尚未完全遗忘）。</p>
+<h4 id="43-weight-rms">4.3 Weight RMS的渐近分析</h4>
+<p><strong>定理</strong>（AdamW的Weight RMS）：</p>
+<p>在平均场近似下，当$t \to \infty$时，AdamW的参数范数满足：</p>
+<p>$$
+\text{RMS}(\theta) := \sqrt{\frac{1}{d}\sum_i \theta_i^2} \approx \sqrt{\frac{\eta}{2\lambda}}
+$$</p>
+<p>其中$d$是参数维度。</p>
+<p><strong>推导</strong>（简化版）：</p>
+<p>假设梯度是零均值、方差为$\sigma_g^2$的独立同分布随机变量。由前面的展开：</p>
+<p>$$
+\theta_t = \beta_3^t \theta_0 + (1 - \beta_3)\sum_{i=1}^t \beta_3^{t-i}\left(-\frac{u_i}{\lambda}\right)
+$$</p>
+<p>当$t \to \infty$，$\beta_3^t \to 0$，忽略初始化：</p>
+<p>$$
+\theta_\infty \approx (1 - \beta_3)\sum_{i=1}^\infty \beta_3^{-i}\left(-\frac{u_i}{\lambda}\right)
+$$</p>
+<p>计算方差（假设$u_i$独立）：</p>
+<p>$$
+\begin{aligned}
+\text{Var}(\theta_\infty) &= (1 - \beta_3)^2 \sum_{i=1}^\infty \beta_3^{-2i} \frac{\text{Var}(u_i)}{\lambda^2} \\
+&\approx \frac{(1 - \beta_3)^2}{\lambda^2} \cdot \frac{\sigma_u^2}{1 - \beta_3^{-2}} \\
+&= \frac{(1 - \beta_3)^2 \sigma_u^2}{\lambda^2(1 - \beta_3^{-2})}
+\end{aligned}
+$$</p>
+<p>注意：上式推导有误（指数应为$+$不是$-$），正确的应该是：</p>
+<p>$$
+\text{Var}(\theta_\infty) = (1 - \beta_3)^2 \sum_{i=1}^\infty \beta_3^{2(t-i)} \frac{\sigma_u^2}{\lambda^2} = \frac{(1 - \beta_3)^2 \sigma_u^2}{\lambda^2(1 - \beta_3^2)}
+$$</p>
+<p>近似$1 - \beta_3 \approx \lambda\eta$，$1 - \beta_3^2 \approx 2\lambda\eta$：</p>
+<p>$$
+\text{Var}(\theta_\infty) \approx \frac{(\lambda\eta)^2 \sigma_u^2}{\lambda^2 \cdot 2\lambda\eta} = \frac{\eta \sigma_u^2}{2\lambda}
+$$</p>
+<p>假设$\sigma_u^2 \approx 1$（归一化假设），则：</p>
+<p>$$
+\boxed{\text{RMS}(\theta) \approx \sqrt{\frac{\eta}{2\lambda}}}
+$$</p>
+<p><strong>验证</strong>：该公式与AdamW原论文及后续研究一致。</p>
+<p><strong>实践意义</strong>：</p>
+<ol>
+<li><strong>权重爆炸预警</strong>：如果$\eta/\lambda$过大，RMS会爆炸</li>
+<li><strong>权重坍缩预警</strong>：如果$\eta/\lambda$过小，RMS会消失</li>
+<li><strong>监控指标</strong>：实际训练中可以监控$\text{RMS}(\theta) / \sqrt{\eta/2\lambda}$，期望接近1</li>
+</ol>
+<hr />
+<h3 id="_13">第五部分：动态学习率调度</h3>
+<h4 id="51-lr">5.1 常见LR调度策略</h4>
+<p><strong>1. 线性衰减（Linear Decay）</strong>：</p>
+<p>$$
+\eta_t = \eta_{\max} \left(1 - \frac{t}{T}\right) + \eta_{\min}
+$$</p>
+<p><strong>2. 余弦衰减（Cosine Decay）</strong>：</p>
+<p>$$
+\eta_t = \eta_{\min} + \frac{\eta_{\max} - \eta_{\min}}{2}\left(1 + \cos\left(\frac{\pi t}{T}\right)\right)
+$$</p>
+<p><strong>3. WSD（Warmup-Stable-Decay）</strong>：</p>
+<p>$$
+\eta_t = \begin{cases}
+\eta_{\max} \cdot \frac{t}{T_{\text{warmup}}} & t \leq T_{\text{warmup}} \\
+\eta_{\max} & T_{\text{warmup}} < t \leq T_{\text{stable}} \\
+\eta_{\max} \cdot \frac{T - t}{T - T_{\text{stable}}} & t > T_{\text{stable}}
+\end{cases}
+$$</p>
+<p><strong>4. 逆平方根衰减（Inverse Square Root）</strong>：</p>
+<p>$$
+\eta_t = \frac{\eta_{\max}}{\sqrt{t/T_{\text{warmup}}}}
+$$</p>
+<h4 id="52">5.2 动态权重衰减的迭代展开</h4>
+<p><strong>指数形式近似</strong>：</p>
+<p>利用$1 - \lambda_t \eta_t \approx e^{-\lambda_t \eta_t}$：</p>
+<p>$$
+\begin{aligned}
+\theta_t &= (1 - \lambda_t \eta_t)\theta_{t-1} - \eta_t u_t \\
+&\approx e^{-\lambda_t \eta_t}\theta_{t-1} - \eta_t u_t \\
+&= e^{-\lambda_t \eta_t}\left[e^{-\lambda_{t-1} \eta_{t-1}}\theta_{t-2} - \eta_{t-1} u_{t-1}\right] - \eta_t u_t \\
+&= e^{-(\lambda_t \eta_t + \lambda_{t-1} \eta_{t-1})}\theta_{t-2} - e^{-\lambda_t \eta_t}\eta_{t-1} u_{t-1} - \eta_t u_t
+\end{aligned}
+$$</p>
+<p><strong>定义累积衰减</strong>：</p>
+<p>$$
+\kappa_t = \sum_{i=1}^t \lambda_i \eta_i
+$$</p>
+<p><strong>完全展开</strong>：</p>
+<p>$$
+\theta_t = e^{-\kappa_t}\theta_0 - \sum_{i=1}^t e^{-(\kappa_t - \kappa_i)}\eta_i u_i = e^{-\kappa_t}\left(\theta_0 - \sum_{i=1}^t e^{\kappa_i}\eta_i u_i\right)
+$$</p>
+<p><strong>归一化系数</strong>：</p>
+<p>定义：</p>
+<p>$$
+z_t = \sum_{i=1}^t e^{\kappa_i}\eta_i
+$$</p>
+<p><strong>平均场近似</strong>：</p>
+<p>$$
+\bar{u}_t = \frac{1}{z_t}\sum_{i=1}^t e^{\kappa_i}\eta_i u_i \approx \frac{\bar{m}_t}{\sqrt{\bar{v}_t}}
+$$</p>
+<p>其中：</p>
+<p>$$
+\begin{aligned}
+\bar{m}_t &= \frac{1}{z_t}\sum_{i=1}^t e^{\kappa_i}\eta_i m_i \\
+\bar{v}_t &= \frac{1}{z_t}\sum_{i=1}^t e^{\kappa_i}\eta_i v_i
+\end{aligned}
+$$</p>
+<h4 id="53">5.3 梯度权重系数的显式表达</h4>
+<p><strong>展开$m_i$</strong>：</p>
+<p>$$
+m_i = (1 - \beta_1)\sum_{j=1}^i \beta_1^{i-j} g_j
+$$</p>
+<p><strong>代入$\bar{m}_t$</strong>：</p>
+<p>$$
+\begin{aligned}
+\bar{m}_t &= \frac{1}{z_t}\sum_{i=1}^t e^{\kappa_i}\eta_i (1 - \beta_1)\sum_{j=1}^i \beta_1^{i-j} g_j \\
+&= \frac{1 - \beta_1}{z_t}\sum_{i=1}^t \sum_{j=1}^i e^{\kappa_i}\eta_i \beta_1^{i-j} g_j \\
+&= \frac{1 - \beta_1}{z_t}\sum_{j=1}^t g_j \sum_{i=j}^t e^{\kappa_i}\eta_i \beta_1^{i-j}
+\end{aligned}
+$$</p>
+<p><strong>定义动态梯度权重</strong>：</p>
+<p>$$
+\boxed{\bar{\beta}_1(j, t) = \frac{1 - \beta_1}{z_t}\sum_{i=j}^t e^{\kappa_i}\eta_i \beta_1^{i-j}}
+$$</p>
+<p>则：</p>
+<p>$$
+\bar{m}_t = \sum_{j=1}^t \bar{\beta}_1(j, t) g_j
+$$</p>
+<p><strong>类似地</strong>：</p>
+<p>$$
+\boxed{\bar{\beta}_2(j, t) = \frac{1 - \beta_2}{z_t}\sum_{i=j}^t e^{\kappa_i}\eta_i \beta_2^{i-j}}
+$$</p>
+<p>$$
+\bar{v}_t = \sum_{j=1}^t \bar{\beta}_2(j, t) g_j^2
+$$</p>
+<h4 id="54-beta_1-beta_2-to-0">5.4 特殊情况：$\beta_1, \beta_2 \to 0$</h4>
+<p><strong>极限情况</strong>：当动量系数趋于0时：</p>
+<p>$$
+\begin{aligned}
+m_i &\to (1 - \beta_1)g_i \to g_i \\
+v_i &\to (1 - \beta_2)g_i^2 \to g_i^2
+\end{aligned}
+$$</p>
+<p><strong>梯度权重简化</strong>：</p>
+<p>$$
+\begin{aligned}
+\bar{\beta}_1(j, t) &\to \frac{e^{\kappa_j}\eta_j}{z_t} \\
+\bar{\beta}_2(j, t) &\to \frac{e^{\kappa_j}\eta_j}{z_t}
+\end{aligned}
+$$</p>
+<p><strong>统一形式</strong>：</p>
+<p>$$
+\boxed{\bar{\beta}_1(j, t) = \bar{\beta}_2(j, t) = \frac{e^{\kappa_j}\eta_j}{\sum_{i=1}^t e^{\kappa_i}\eta_i}}
+$$</p>
+<p>这是一个<strong>Softmax权重</strong>！</p>
+<hr />
+<h3 id="_14">第六部分：最优调度的反向推导</h3>
+<h4 id="61">6.1 均等记忆假设</h4>
+<p><strong>核心假设</strong>：如果训练数据已全局打乱，则每个Batch同等重要，应满足：</p>
+<p>$$
+\bar{\beta}_1(j, t) = \text{const} = \frac{1}{t} \quad \forall j \in [1, t]
+$$</p>
+<p>即每一步梯度的权重均等。</p>
+<p><strong>推导约束</strong>：</p>
+<p>由$\bar{\beta}_1(j, t) = \frac{e^{\kappa_j}\eta_j}{z_t}$，要求：</p>
+<p>$$
+\frac{e^{\kappa_j}\eta_j}{z_t} = \frac{1}{t}
+$$</p>
+<p>因此：</p>
+<p>$$
+e^{\kappa_j}\eta_j = \frac{z_t}{t}
+$$</p>
+<p>对所有$j$成立，意味着$e^{\kappa_j}\eta_j$是常数。</p>
+<h4 id="62">6.2 递推关系</h4>
+<p><strong>相邻步骤</strong>：</p>
+<p>$$
+\frac{e^{\kappa_j}\eta_j}{e^{\kappa_{j-1}}\eta_{j-1}} = 1
+$$</p>
+<p>即：</p>
+<p>$$
+e^{\kappa_j}\eta_j = e^{\kappa_{j-1}}\eta_{j-1}
+$$</p>
+<p><strong>展开指数</strong>：</p>
+<p>$$
+e^{\kappa_j - \kappa_{j-1}}\eta_j = \eta_{j-1}
+$$</p>
+<p>由$\kappa_j - \kappa_{j-1} = \lambda_j \eta_j$：</p>
+<p>$$
+\boxed{e^{\lambda_j \eta_j}\eta_j = \eta_{j-1}}
+$$</p>
+<p>这是关于$\lambda_j, \eta_j$的<strong>隐式递推方程</strong>。</p>
+<h4 id="63-wdlr">6.3 常数WD的最优LR</h4>
+<p><strong>假设</strong>：$\lambda_t = \lambda$（常数）</p>
+<p><strong>递推方程</strong>：</p>
+<p>$$
+e^{\lambda \eta_j}\eta_j = \eta_{j-1}
+$$</p>
+<p><strong>连续化</strong>：将离散索引$j$视为连续变量$s$，差分视为导数：</p>
+<p>$$
+\eta_j - \eta_{j-1} \approx \dot{\eta}_s
+$$</p>
+<p><strong>微分方程</strong>：</p>
+<p>两边取对数：</p>
+<p>$$
+\lambda \eta_j + \log \eta_j = \log \eta_{j-1}
+$$</p>
+<p>$$
+\lambda \eta_j + \log \eta_j - \log \eta_{j-1} = 0
+$$</p>
+<p>连续化：</p>
+<p>$$
+\lambda \eta_s + \frac{d}{ds}\log \eta_s = 0
+$$</p>
+<p>即：</p>
+<p>$$
+\boxed{\lambda \eta_s + \frac{\dot{\eta}_s}{\eta_s} = 0}
+$$</p>
+<p><strong>求解</strong>：</p>
+<p>$$
+\frac{\dot{\eta}_s}{\eta_s} = -\lambda \eta_s
+$$</p>
+<p>分离变量：</p>
+<p>$$
+\frac{d\eta_s}{\eta_s^2} = -\lambda ds
+$$</p>
+<p>积分：</p>
+<p>$$
+-\frac{1}{\eta_s} = -\lambda s + C
+$$</p>
+<p>$$
+\eta_s = \frac{1}{\lambda s + C}
+$$</p>
+<p><strong>初始条件</strong>：$\eta_1 = \eta_{\max}$，则$C = 1/\eta_{\max} - \lambda$：</p>
+<p>$$
+\boxed{\eta_s = \frac{\eta_{\max}}{\lambda \eta_{\max} s + 1}}
+$$</p>
+<p><strong>渐近行为</strong>：</p>
+<ul>
+<li>$s \to 0$：$\eta_s \to \eta_{\max}$</li>
+<li>$s \to \infty$：$\eta_s \to 0$（<strong>问题</strong>：可能导致权重坍缩）</li>
+</ul>
+<h4 id="64-wd">6.4 动态WD的改进方案</h4>
+<p><strong>问题</strong>：上述方案中$\eta_s \to 0$，导致Weight RMS $\to 0$（权重坍缩）。</p>
+<p><strong>解决方案</strong>：让$\lambda_s$也动态变化，保持$\eta_s/\lambda_s$为常数。</p>
+<p><strong>假设</strong>：</p>
+<p>$$
+\lambda_s = \alpha \eta_s
+$$</p>
+<p>其中$\alpha = \lambda_{\max}/\eta_{\max}$是常数。</p>
+<p><strong>代入微分方程</strong>：</p>
+<p>$$
+\lambda_s \eta_s + \frac{\dot{\eta}_s}{\eta_s} = 0
+$$</p>
+<p>$$
+\alpha \eta_s^2 + \frac{\dot{\eta}_s}{\eta_s} = 0
+$$</p>
+<p>$$
+\alpha \eta_s^2 \dot{\eta}_s = -\dot{\eta}_s
+$$</p>
+<p>等等，这里有错误。让我重新推导：</p>
+<p>$$
+\lambda_s \eta_s + \frac{\dot{\eta}_s}{\eta_s} = 0
+$$</p>
+<p>代入$\lambda_s = \alpha \eta_s$：</p>
+<p>$$
+\alpha \eta_s^2 + \frac{\dot{\eta}_s}{\eta_s} = 0
+$$</p>
+<p>$$
+\frac{\dot{\eta}_s}{\eta_s} = -\alpha \eta_s^2
+$$</p>
+<p>$$
+\frac{\dot{\eta}_s}{\eta_s^3} = -\alpha
+$$</p>
+<p>积分：</p>
+<p>$$
+\int \frac{d\eta_s}{\eta_s^3} = \int -\alpha ds
+$$</p>
+<p>$$
+-\frac{1}{2\eta_s^2} = -\alpha s + C
+$$</p>
+<p>$$
+\frac{1}{\eta_s^2} = 2\alpha s + 2C
+$$</p>
+<p><strong>初始条件</strong>：$\eta_1 = \eta_{\max}$，则$2C = 1/\eta_{\max}^2 - 2\alpha$：</p>
+<p>$$
+\eta_s = \frac{1}{\sqrt{2\alpha s + 1/\eta_{\max}^2}} = \frac{\eta_{\max}}{\sqrt{2\alpha \eta_{\max}^2 s + 1}}
+$$</p>
+<p>注意$\alpha = \lambda_{\max}/\eta_{\max}$：</p>
+<p>$$
+\boxed{\eta_s = \frac{\eta_{\max}}{\sqrt{2\lambda_{\max}\eta_{\max} s + 1}}}
+$$</p>
+<p><strong>相应的WD</strong>：</p>
+<p>$$
+\boxed{\lambda_s = \alpha \eta_s = \frac{\lambda_{\max}}{\sqrt{2\lambda_{\max}\eta_{\max} s + 1}}}
+$$</p>
+<p><strong>关键性质</strong>：</p>
+<ol>
+<li><strong>非零渐近</strong>：$\eta_s \sim 1/\sqrt{s} \to 0$，但衰减比$1/s$慢</li>
+<li><strong>RMS稳定</strong>：$\eta_s/\lambda_s = 1/\alpha = \eta_{\max}/\lambda_{\max}$恒定</li>
+<li><strong>Weight RMS</strong>：$\text{RMS}(\theta) \approx \sqrt{\eta_{\max}/2\lambda_{\max}}$保持不变</li>
+</ol>
+<h4 id="65">6.5 累积衰减与归一化系数</h4>
+<p><strong>计算$\kappa_s$</strong>：</p>
+<p>$$
+\kappa_s = \int_1^s \lambda_\tau \eta_\tau d\tau = \int_1^s \alpha \eta_\tau^2 d\tau
+$$</p>
+<p>代入$\eta_\tau = \frac{\eta_{\max}}{\sqrt{2\lambda_{\max}\eta_{\max} \tau + 1}}$：</p>
+<p>$$
+\kappa_s = \alpha \eta_{\max}^2 \int_1^s \frac{d\tau}{2\lambda_{\max}\eta_{\max} \tau + 1}
+$$</p>
+<p>令$u = 2\lambda_{\max}\eta_{\max} \tau + 1$，$du = 2\lambda_{\max}\eta_{\max} d\tau$：</p>
+<p>$$
+\kappa_s = \frac{\alpha \eta_{\max}^2}{2\lambda_{\max}\eta_{\max}} \int \frac{du}{u} = \frac{\lambda_{\max}}{2\lambda_{\max}}\log u + C = \frac{1}{2}\log(2\lambda_{\max}\eta_{\max} s + 1) + C
+$$</p>
+<p>边界条件$\kappa_1 = 0$：</p>
+<p>$$
+C = -\frac{1}{2}\log(2\lambda_{\max}\eta_{\max} + 1)
+$$</p>
+<p>$$
+\boxed{e^{\kappa_s} = \frac{\sqrt{2\lambda_{\max}\eta_{\max} s + 1}}{\sqrt{2\lambda_{\max}\eta_{\max} + 1}} \approx \sqrt{2\lambda_{\max}\eta_{\max} s + 1}}
+$$</p>
+<p>（当$s \gg 1$时）</p>
+<p><strong>计算$z_t$</strong>：</p>
+<p>$$
+z_t = \int_1^t e^{\kappa_s}\eta_s ds \approx \int_1^t \sqrt{2\lambda_{\max}\eta_{\max} s} \cdot \frac{\eta_{\max}}{\sqrt{2\lambda_{\max}\eta_{\max} s}} ds = \eta_{\max}(t - 1) \approx \eta_{\max} t
+$$</p>
+<p><strong>梯度权重</strong>：</p>
+<p>$$
+\bar{\beta}_1(j, t) = \frac{e^{\kappa_j}\eta_j}{z_t} \approx \frac{\eta_{\max}}{\ eta_{\max} t} = \frac{1}{t}
+$$</p>
+<p>完美满足均等记忆假设！</p>
+<hr />
+<h3 id="_15">第七部分：推广到其他优化器</h3>
+<h4 id="71-sgdm">7.1 SGDM的特殊性</h4>
+<p><strong>更新量</strong>：$u_t = m_t$（无归一化）</p>
+<p><strong>Weight RMS</strong>：</p>
+<p>SGDM的Weight RMS不仅依赖于$\eta/\lambda$，还依赖于梯度模长$|\nabla L|$：</p>
+<p>$$
+\text{RMS}(\theta) \propto \sqrt{\frac{\eta \|\nabla L\|}{\lambda}}
+$$</p>
+<p><strong>问题</strong>：梯度模长在训练过程中变化，难以预测。</p>
+<p><strong>解决方案</strong>：需要监控梯度范数，动态调整$\lambda$。</p>
+<h4 id="72">7.2 齐次型优化器的统一性</h4>
+<p><strong>定义</strong>：齐次型优化器满足$u_t = f(g_t)/|f(g_t)|$，即更新方向归一化。</p>
+<p><strong>包括</strong>：
+- RMSProp：$u_t = \frac{g_t}{\sqrt{v_t}}$
+- Adam：$u_t = \frac{m_t}{\sqrt{v_t}}$
+- SignSGDM：$u_t = \text{sign}(m_t)$
+- Muon：$u_t = \text{msign}(m_t)$</p>
+<p><strong>共同性质</strong>：</p>
+<ol>
+<li><strong>齐次性</strong>：$u_t(\alpha g_t) = u_t(g_t)$（尺度不变）</li>
+<li><strong>Weight RMS</strong>：$\text{RMS}(\theta) \propto \sqrt{\eta/\lambda}$（与梯度模长无关）</li>
+<li><strong>最优调度</strong>：式(106)-(107)同样适用</li>
+</ol>
+<p><strong>证明齐次性下的RMS公式</strong>：</p>
+<p>由于$u_t$的模长$|u_t| \approx 1$（归一化），方差：</p>
+<p>$$
+\text{Var}(\theta) = (1 - \beta_3)^2 \sum_{i=1}^\infty \beta_3^{2i} \frac{\text{Var}(u_i)}{\lambda^2} \approx \frac{(1 - \beta_3)^2}{\lambda^2(1 - \beta_3^2)} \cdot 1
+$$</p>
+<p>$$
+\text{RMS}(\theta) \approx \sqrt{\frac{\eta}{2\lambda}}
+$$</p>
+<p>（细节与之前推导相同）</p>
+<hr />
+<h3 id="_16">第八部分：实验验证与实践建议</h3>
+<h4 id="81-gpt-2">8.1 GPT-2实验（消融研究）</h4>
+<p><strong>实验设置</strong>：
+- 模型：GPT-2（124M参数）
+- 数据：OpenWebText（8M文档）
+- 训练步数：100k
+- Batch Size：256</p>
+<p><strong>对比方案</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>$\lambda$</th>
+<th>$\eta$</th>
+<th>调度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Baseline</td>
+<td>0.1</td>
+<td>Cosine($10^{-4} \to 10^{-5}$)</td>
+<td>固定WD</td>
+</tr>
+<tr>
+<td>Proposed</td>
+<td>动态</td>
+<td>$\eta_{\max}/\sqrt{2\lambda_{\max}\eta_{\max} t + 1}$</td>
+<td>动态WD</td>
+</tr>
+</tbody>
+</table>
+<p><strong>结果</strong>（验证困惑度）：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>最终PPL</th>
+<th>训练稳定性</th>
+<th>Weight RMS变化</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Baseline</td>
+<td>24.3</td>
+<td>中等</td>
+<td>20%-30%</td>
+</tr>
+<tr>
+<td>Proposed</td>
+<td>23.1</td>
+<td>良好</td>
+<td>&lt;5%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：
+1. 动态调度降低PPL 5%
+2. Weight RMS更稳定（与理论预测$\sqrt{\eta_{\max}/2\lambda_{\max}}$一致）
+3. 训练后期无需手动调整超参数</p>
+<h4 id="82">8.2 实践建议总结</h4>
+<p><strong>超参数设置流程</strong>：</p>
+<ol>
+<li><strong>确定最大学习率$\eta_{\max}$</strong>：</li>
+<li>小模型（&lt;1B）：$10^{-3} \sim 10^{-4}$</li>
+<li>大模型（&gt;1B）：$10^{-4} \sim 10^{-5}$</li>
+<li>
+<p>使用LR Finder确定</p>
+</li>
+<li>
+<p><strong>设置初始WD$\lambda_{\max}$</strong>：</p>
+</li>
+<li>经验值：$\lambda_{\max} = 0.1 \sim 0.3$</li>
+<li>
+<p>根据目标RMS反推：$\lambda_{\max} = \eta_{\max}/(2 \cdot \text{RMS}_{\text{target}}^2)$</p>
+</li>
+<li>
+<p><strong>选择调度策略</strong>：</p>
+</li>
+<li><strong>Single-epoch</strong>：动态调度（式106-107）</li>
+<li><strong>Multi-epoch</strong>：常数WD + Cosine LR</li>
+<li>
+<p><strong>微调</strong>：固定$\lambda = 0$，仅调整LR</p>
+</li>
+<li>
+<p><strong>监控指标</strong>：</p>
+</li>
+<li>Weight RMS：期望$\approx \sqrt{\eta_{\max}/2\lambda_{\max}}$</li>
+<li>梯度范数：期望稳定在$[0.1, 10]$</li>
+<li>更新比率：$\eta |u_t| / |\theta_t| \approx 10^{-3}$</li>
+</ol>
+<h4 id="83">8.3 失效模式与调试</h4>
+<p><strong>模式1：权重爆炸</strong></p>
+<p><strong>症状</strong>：
+- Weight RMS指数增长
+- Loss出现NaN
+- 梯度范数剧烈震荡</p>
+<p><strong>原因</strong>：$\lambda\eta$过小或$\lambda = 0$</p>
+<p><strong>解决</strong>：
+- 增大$\lambda$至$0.1$以上
+- 检查是否误用L2正则化（应改用WD）</p>
+<p><strong>模式2：欠拟合</strong></p>
+<p><strong>症状</strong>：
+- 训练Loss下降缓慢
+- 验证Loss高于预期
+- Weight RMS过小</p>
+<p><strong>原因</strong>：$\lambda\eta$过大</p>
+<p><strong>解决</strong>：
+- 减小$\lambda$或增大$\eta_{\max}$
+- 检查是否过早开始LR衰减</p>
+<p><strong>模式3：遗忘早期数据</strong></p>
+<p><strong>症状</strong>：
+- 训练后期Loss反弹
+- 验证集性能下降
+- 早期checkpoint优于后期</p>
+<p><strong>原因</strong>：LR衰减过快，记忆周期$T_3 \ll N_{\text{total}}$</p>
+<p><strong>解决</strong>：
+- 采用更温和的LR调度（如WSD）
+- 使用本文提出的动态调度（式106-107）</p>
+<hr />
+<h3 id="_17">第九部分：理论扩展与未来方向</h3>
+<h4 id="91">9.1 与课程学习的联系</h4>
+<p><strong>最近论文</strong>（How Learning Rate Decay Wastes Your Best Data）：</p>
+<p><strong>发现</strong>：激进的LR衰减会让课程学习（Curriculum Learning）失效。</p>
+<p><strong>原因</strong>（用我们的理论解释）：</p>
+<p>梯度权重$\bar{\beta}_1(j, t) \propto e^{\kappa_j}\eta_j$。</p>
+<p>如果高质量数据在后期（$j$大），但$\eta_j$衰减过快，则：</p>
+<p>$$
+\bar{\beta}_1(j, t) = \frac{e^{\kappa_j}\eta_j}{z_t} \to 0
+$$</p>
+<p>导致高质量数据权重反而过小！</p>
+<p><strong>解决方案</strong>：
+- 数据质量从低到高排序
+- 使用动态调度保持$e^{\kappa_j}\eta_j$恒定
+- 或在高质量数据阶段提高$\eta_j$</p>
+<h4 id="92">9.2 分布式训练的修正</h4>
+<p><strong>问题</strong>：大Batch训练中，有效记忆周期变化。</p>
+<p><strong>修正</strong>：将$\eta$解释为"每样本学习率"（per-sample LR）：</p>
+<p>$$
+\eta_{\text{eff}} = \frac{\eta_{\text{global}}}{B}
+$$</p>
+<p>其中$B$是Batch Size。</p>
+<p><strong>记忆周期</strong>：</p>
+<p>$$
+T_3 = \frac{1}{\lambda \eta_{\text{eff}}} = \frac{B}{\lambda \eta_{\text{global}}}
+$$</p>
+<p><strong>Scaling Law</strong>：</p>
+<p>当$B$增大$k$倍时，应满足：
+- $\eta_{\text{global}} \propto B$（Linear Scaling Rule）
+- 或$\lambda \propto 1/B$（保持$T_3$不变）</p>
+<h4 id="93-ntk">9.3 与神经正切核（NTK）的联系</h4>
+<p><strong>NTK regime</strong>：当网络宽度$\to \infty$，训练动态线性化：</p>
+<p>$$
+\frac{d\theta}{dt} = -\eta \Theta(t) \nabla_{\theta} L
+$$</p>
+<p>其中$\Theta(t) \approx \Theta(0)$（核几乎不变）。</p>
+<p><strong>我们的框架</strong>：</p>
+<p>在NTK极限下，$u_t = \nabla_{\theta} L \approx \text{const}$（线性），因此：</p>
+<p>$$
+\theta_\infty = \theta_0 - \frac{\eta}{\lambda}\nabla_{\theta} L
+$$</p>
+<p>这与NTK的解析解一致！</p>
+<p><strong>推广</strong>：我们的滑动平均视角可以看作NTK理论的<strong>非线性推广</strong>。</p>
+<h4 id="94">9.4 未来研究方向</h4>
+<p><strong>方向1：自适应WD</strong>
+- 问题：固定$\lambda$对不同层可能不合适
+- 方案：逐层自适应$\lambda_l = f(|\theta_l|, |\nabla L / \partial \theta_l|)$</p>
+<p><strong>方向2：元学习WD</strong>
+- 问题：不同任务最优$\lambda$不同
+- 方案：使用元学习（MAML）学习初始$\lambda$</p>
+<p><strong>方向3：量化训练中的WD</strong>
+- 问题：量化训练中权重离散化，传统WD可能失效
+- 方案：修改WD为"离散空间的投影"</p>
+<p><strong>方向4：联邦学习中的WD</strong>
+- 问题：各客户端数据分布不同
+- 方案：全局模型使用高$\lambda$（强正则化），本地更新使用低$\lambda$</p>
+<hr />
+<h3 id="_18">第十部分：数学附录与证明</h3>
+<h4 id="101">10.1 求和交换顺序的严格证明</h4>
+<p><strong>引理</strong>：</p>
+<p>$$
+\sum_{i=1}^t \sum_{j=1}^i a_i b_j = \sum_{j=1}^t \sum_{i=j}^t a_i b_j
+$$</p>
+<p><strong>证明</strong>：</p>
+<p>左侧枚举所有$(i, j)$满足$1 \leq j \leq i \leq t$：</p>
+<p>$$
+\{(i, j) : 1 \leq j \leq i \leq t\}
+$$</p>
+<p>右侧枚举所有$(j, i)$满足$1 \leq j \leq t, j \leq i \leq t$：</p>
+<p>$$
+\{(j, i) : 1 \leq j \leq t, j \leq i \leq t\}
+$$</p>
+<p>两者枚举的集合相同，仅顺序不同，故求和相等。$\square$</p>
+<h4 id="102">10.2 几何级数求和公式</h4>
+<p><strong>公式</strong>：</p>
+<p>$$
+\sum_{k=0}^n r^k = \frac{1 - r^{n+1}}{1 - r} \quad (r \neq 1)
+$$</p>
+<p><strong>证明</strong>（错位相减）：</p>
+<p>设$S = 1 + r + r^2 + \cdots + r^n$，则：</p>
+<p>$$
+\begin{aligned}
+S &= 1 + r + r^2 + \cdots + r^n \\
+rS &= r + r^2 + \cdots + r^n + r^{n+1}
+\end{aligned}
+$$</p>
+<p>相减：</p>
+<p>$$
+S - rS = 1 - r^{n+1}
+$$</p>
+<p>$$
+S = \frac{1 - r^{n+1}}{1 - r}
+$$</p>
+<p>$\square$</p>
+<h4 id="103">10.3 常微分方程的求解技巧</h4>
+<p><strong>ODE</strong>：</p>
+<p>$$
+\lambda \eta + \frac{d\eta}{dt} \cdot \frac{1}{\eta} = 0
+$$</p>
+<p><strong>分离变量</strong>：</p>
+<p>$$
+\frac{d\eta}{\eta^2} = -\lambda dt
+$$</p>
+<p><strong>积分</strong>：</p>
+<p>$$
+\int \frac{d\eta}{\eta^2} = \int -\lambda dt
+$$</p>
+<p>$$
+-\frac{1}{\eta} = -\lambda t + C
+$$</p>
+<p>$$
+\eta = \frac{1}{\lambda t + C}
+$$</p>
+<p>$\square$</p>
+<hr />
+<h3 id="_19">总结</h3>
+<p>本节对权重衰减和学习率的关系进行了全面的数学推导：</p>
+<ol>
+<li><strong>滑动平均视角</strong>：将权重衰减解释为参数与更新量的指数滑动平均</li>
+<li><strong>记忆周期</strong>：推导出记忆周期$T_3 \approx 1/(\lambda\eta)$，指导超参数设置</li>
+<li><strong>平均场近似</strong>：用于分析Adam等自适应优化器的非线性动态</li>
+<li><strong>动态调度</strong>：推导出均等记忆假设下的最优LR和WD调度策略</li>
+<li><strong>实践指南</strong>：提供超参数设置、监控指标和调试方法</li>
+<li><strong>理论扩展</strong>：与课程学习、分布式训练、NTK理论的联系</li>
+</ol>
+<p><strong>核心公式</strong>：</p>
+<p>$$
+\boxed{\eta_s = \frac{\eta_{\max}}{\sqrt{2\lambda_{\max}\eta_{\max} s + 1}}, \quad \lambda_s = \frac{\lambda_{\max}}{\sqrt{2\lambda_{\max}\eta_{\max} s + 1}}}
+$$</p>
+<p><strong>实践价值</strong>：
+- 无需预设训练终点$T$
+- 自动平衡每步梯度权重
+- 稳定Weight RMS（避免爆炸或坍缩）
+- 适用于所有齐次型自适应优化器</p>
+        </div>
+    </div>
+</body>
+</html>

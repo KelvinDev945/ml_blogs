@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>重新思考学习率与Batch Size（四）：EMA</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>重新思考学习率与Batch Size（四）：EMA</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 45.8 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/11301">https://spaces.ac.cn/archives/11301</a></p>
+<p><strong>发布日期</strong>: 2025-09-22</p>
+<hr />
+<p>我们在<a href="https://kexue.fm/archives/11280">《重新思考学习率与Batch Size（二）：平均场》</a>中提到，关注SignSGD的原因之一是我们通常将它作为Adam的理论近似，这是Adam做理论分析时常用的简化策略。除了分析学习率的场景外，在<a href="https://kexue.fm/archives/10001">《配置不同的学习率，LoRA还能再涨一点？》</a>、<a href="https://kexue.fm/archives/10770">《初探MuP：超参数的跨模型尺度迁移规律》</a>等地方我们也用了这个简化。</p>
+<p>然而，SignSGD真是Adam的良好近似吗？一个明显差异是SignSGD的Update RMS总是1，而Adam并非如此。笔者发现，导致这一差异的核心原因是动量，它普遍存在于Adam、Lion、Muon等优化器中。所以，本文我们来考察动量——更广义地说是EMA——的影响。</p>
+<h2 id="_1">问题分析</h2>
+<p>从Adam的视角看，SignSGD对应$\beta_1=\beta_2=0$这个特例，或者对应于Adam的第一步更新量（不管$\beta_1,\beta_2$如何）。因此，我们认为它跟Adam肯定有一些共性，能够捕捉到一些通用的规律。</p>
+<p><a href="https://spaces.ac.cn/archives/11301" title="重新思考学习率与Batch Size（四）：EMA">[...]</a></p>
+<hr />
+<h2 id="_2">公式推导与注释</h2>
+<h3 id="1-ema">1. 指数移动平均(EMA)的数学基础</h3>
+<h4 id="11-ema">1.1 EMA的定义</h4>
+<p><strong>标准形式</strong>:
+\begin{equation}\boldsymbol{\theta}<em ema_t-1="ema,t-1">{ema,t} = \beta\boldsymbol{\theta}</em>} + (1-\beta)\boldsymbol{\theta}_t\tag{1}\end{equation</p>
+<p>其中$\beta \in [0,1)$是衰减率,$\boldsymbol{\theta}_t$是当前优化器输出的参数。</p>
+<p><strong>等价递推形式</strong>:
+\begin{equation}\boldsymbol{\theta}<em s="0">{ema,t} = (1-\beta)\sum</em>}^{t}\beta^{t-s}\boldsymbol{\theta}_s\tag{2}\end{equation</p>
+<p><strong>数学直觉</strong>: EMA是对历史参数的指数加权平均,越近的参数权重越大。</p>
+<h4 id="12">1.2 偏置修正</h4>
+<p><strong>问题</strong>: 初始时$\boldsymbol{\theta}<em ema_t="ema,t">{ema,0} = 0$(或任意初始化),导致$\boldsymbol{\theta}</em>$偏向初始值。</p>
+<p><strong>修正方法</strong> (Adam-style):
+\begin{equation}\hat{\boldsymbol{\theta}}<em ema_t="ema,t">{ema,t} = \frac{\boldsymbol{\theta}</em>}}{1 - \beta^{t+1}}\tag{3}\end{equation</p>
+<p><strong>推导</strong>: 假设$\boldsymbol{\theta}<em ema_t="ema,t">{ema,0} = 0$,则:
+\begin{equation}\boldsymbol{\theta}</em>} = (1-\beta)\sum_{s=0}^{t}\beta^{t-s}\boldsymbol{\theta}_s\tag{4}\end{equation</p>
+<p>期望(假设$\mathbb{E}[\boldsymbol{\theta}<em s="0">s] = \boldsymbol{\theta}^<em>$为常数):
+\begin{equation}\mathbb{E}[\boldsymbol{\theta}_{ema,t}] = (1-\beta)\boldsymbol{\theta}^</em>\sum</em>}^t \beta^{t-s} = (1-\beta^{t+1})\boldsymbol{\theta}^*\tag{5}\end{equation</p>
+<p>因此$\hat{\boldsymbol{\theta}}_{ema,t}$是无偏估计。</p>
+<h4 id="13">1.3 有效窗口长度</h4>
+<p><strong>定义</strong>: 有效样本数为权重之和:
+\begin{equation}N_{eff} = \sum_{s=0}^{\infty}(1-\beta)\beta^s = 1\tag{6}\end{equation}</p>
+<p><strong>半衰期</strong> (权重下降到50%的时间):
+\begin{equation}t_{1/2} = \frac{\log 2}{\log(1/\beta)} \approx \frac{0.69}{1-\beta}\tag{7}\end{equation}</p>
+<p><strong>示例</strong>: $\beta = 0.9 \Rightarrow t_{1/2} \approx 7$步</p>
+<p><strong>数学直觉</strong>: EMA相当于在最近$\mathcal{O}(1/(1-\beta))$步参数上做平均。</p>
+<h3 id="2-ema">2. EMA在优化中的作用</h3>
+<h4 id="21">2.1 方差减少</h4>
+<p><strong>无EMA的参数方差</strong>: 假设SGD更新$\boldsymbol{\theta}<em t-1="t-1">t = \boldsymbol{\theta}</em>_t$,
+\begin{equation}\text{Var}[\boldsymbol{\theta}_t] \approx \eta^2 t \cdot \text{Var}[\tilde{\boldsymbol{g}}]\tag{8}\end{equation}} - \eta \tilde{\boldsymbol{g}</p>
+<p>方差随时间线性增长。</p>
+<p><strong>有EMA的方差</strong>: 从式(2),
+\begin{equation}\text{Var}[\boldsymbol{\theta}<em s="0">{ema,t}] = (1-\beta)^2\sum</em>}^t \beta^{2(t-s)}\text{Var}[\boldsymbol{\theta}_s]\tag{9}\end{equation</p>
+<p>稳态下($t \to \infty$):
+\begin{equation}\text{Var}[\boldsymbol{\theta}_{ema}] = \frac{1-\beta}{1+\beta}\text{Var}[\boldsymbol{\theta}]\tag{10}\end{equation}</p>
+<p><strong>方差减少因子</strong>: $\frac{1-\beta}{1+\beta}$(如$\beta=0.9$时减少到$\frac{1}{19}$)。</p>
+<h4 id="22">2.2 隐式正则化</h4>
+<p>EMA参数满足隐式优化:
+\begin{equation}\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">{ema} = \mathop{\arg\min}</em>}} \mathbb{E}_{t}[|\boldsymbol{\theta} - \boldsymbol{\theta}_t|^2 \cdot \beta^t]\tag{11}\end{equation</p>
+<p><strong>数学直觉</strong>: EMA寻找与优化轨迹"中心"最近的参数,类似$L_2$正则。</p>
+<h4 id="23-polyak">2.3 Polyak平均</h4>
+<p><strong>定义</strong> (无指数衰减):
+\begin{equation}\boldsymbol{\theta}<em s="1">{poly,t} = \frac{1}{t}\sum</em>}^t \boldsymbol{\theta}_s\tag{12}\end{equation</p>
+<p><strong>与EMA的关系</strong>: Polyak平均是$\beta \to 1$的极限。</p>
+<p><strong>理论保证</strong>: 对于凸函数,
+\begin{equation}\mathbb{E}[L(\boldsymbol{\theta}_{poly,T})] - L^<em> \leq \frac{1}{T}\sum_{t=1}^T (\mathbb{E}[L(\boldsymbol{\theta}_t)] - L^</em>)\tag{13}\end{equation}</p>
+<p>即Polyak平均的损失不超过路径平均损失。</p>
+<p><strong>数学直觉</strong>: Polyak平均"抹平"优化轨迹的噪声,收敛到更稳定的解。</p>
+<h3 id="3-emabatch-size">3. EMA与Batch Size的交互</h3>
+<h4 id="31-batch-size">3.1 等效Batch Size放大</h4>
+<p><strong>回顾</strong>: 从主文档,动量机制使等效batch size变为:
+\begin{equation}B_{eff} = B \cdot \frac{1+\beta}{1-\beta}\tag{14}\end{equation}</p>
+<p><strong>解释</strong>: EMA对梯度噪声做时间平均,相当于增大样本数。</p>
+<h4 id="32-batch-size">3.2 临界Batch Size的调整</h4>
+<p>定义无EMA的临界batch size:
+\begin{equation}B_c^{(0)} = \frac{\text{tr}(\boldsymbol{\Sigma}\boldsymbol{H})}{\boldsymbol{g}^{\top}\boldsymbol{H}\boldsymbol{g}}\tag{15}\end{equation}</p>
+<p><strong>有EMA时</strong>: 由于$B_{eff}$增大,有效的$B_c$变为:
+\begin{equation}B_c^{(ema)} = B_c^{(0)} \cdot \frac{1-\beta}{1+\beta}\tag{16}\end{equation}</p>
+<p><strong>数学直觉</strong>: EMA降低了对大batch size的需求,在小batch下也能获得稳定更新。</p>
+<h4 id="33">3.3 学习率缩放调整</h4>
+<p><strong>无EMA</strong>: $\eta \propto B$(在$B &lt; B_c$时)</p>
+<p><strong>有EMA</strong>: 由于$B_{eff} &gt; B$,需要调整:
+\begin{equation}\eta_{ema} = \eta_0 \cdot \min\left(B/B_c^{(ema)}, 1\right)\tag{17}\end{equation}</p>
+<p><strong>实践建议</strong>: 使用EMA时,可以用更小的batch size和学习率。</p>
+<h3 id="4">4. 泛化误差界</h3>
+<h4 id="41-pac-bayes">4.1 PAC-Bayes框架</h4>
+<p><strong>定理1</strong> (EMA的泛化界): 对于$L$-Lipschitz损失,
+\begin{equation}\mathbb{E}<em ema="ema">{test}[L(\boldsymbol{\theta}</em>})] \leq \mathbb{E<em ema="ema">{train}[L(\boldsymbol{\theta}</em>})] + \sqrt{\frac{KL(\boldsymbol{\theta}_{ema}|\boldsymbol{\theta}_0) + \log(1/\delta)}{2n}}\tag{18}\end{equation</p>
+<p>其中$KL$是KL散度,$n$是训练样本数,$\delta$是置信度。</p>
+<p><strong>关键</strong>: EMA的$KL(\boldsymbol{\theta}<em ema="ema">{ema}|\boldsymbol{\theta}_0)$通常小于单点$KL(\boldsymbol{\theta}_T|\boldsymbol{\theta}_0)$,因为:
+\begin{equation}KL(\boldsymbol{\theta}</em>}|\boldsymbol{\theta}_0) \leq \mathbb{E}_t[KL(\boldsymbol{\theta}_t|\boldsymbol{\theta}_0)]\tag{19}\end{equation</p>
+<h4 id="42">4.2 噪声稳定性</h4>
+<p><strong>定义</strong>: 模型$f(\boldsymbol{x};\boldsymbol{\theta})$对参数扰动的敏感性:
+\begin{equation}S(\boldsymbol{\theta}) = \mathbb{E}_{\boldsymbol{x},\boldsymbol{\epsilon}}[(f(\boldsymbol{x};\boldsymbol{\theta} + \boldsymbol{\epsilon}) - f(\boldsymbol{x};\boldsymbol{\theta}))^2]\tag{20}\end{equation}</p>
+<p><strong>定理2</strong>: 若$\text{Var}[\boldsymbol{\theta}] = \sigma^2_{\theta}$,则:
+\begin{equation}S(\boldsymbol{\theta}_{ema}) \leq \frac{1-\beta}{1+\beta}S(\boldsymbol{\theta})\tag{21}\end{equation}</p>
+<p><strong>数学直觉</strong>: EMA减少参数方差,提高模型对扰动的鲁棒性,从而改善泛化。</p>
+<h4 id="43-sharpnessema">4.3 Sharpness与EMA</h4>
+<p><strong>Sharpness定义</strong>:
+\begin{equation}Sh(\boldsymbol{\theta}) = \max_{|\boldsymbol{\epsilon}| \leq \rho}\frac{L(\boldsymbol{\theta} + \boldsymbol{\epsilon}) - L(\boldsymbol{\theta})}{1 + L(\boldsymbol{\theta})}\tag{22}\end{equation}</p>
+<p><strong>定理3</strong>: EMA倾向于收敛到sharpness更小的解:
+\begin{equation}\mathbb{E}[Sh(\boldsymbol{\theta}_{ema})] \leq \mathbb{E}_t[Sh(\boldsymbol{\theta}_t)]\tag{23}\end{equation}</p>
+<p><strong>证明思路</strong>: EMA是凸组合,凸函数在凸组合点的Hessian特征值不超过端点的加权平均。</p>
+<h3 id="5-ema">5. 不同EMA变体</h3>
+<h4 id="51-swa-stochastic-weight-averaging">5.1 SWA (Stochastic Weight Averaging)</h4>
+<p><strong>定义</strong>: 在训练后期等权平均:
+\begin{equation}\boldsymbol{\theta}<em SWA="SWA">{SWA} = \frac{1}{n</em>}}\sum_{t=T-n_{SWA}+1}^T \boldsymbol{\theta}_t\tag{24}\end{equation</p>
+<p><strong>与EMA对比</strong>:
+- SWA: $\beta \to 1$,只平均最后几个epoch
+- EMA: 持续平均,权重指数衰减</p>
+<p><strong>优点</strong>: SWA适合学习率循环(cycle),可以探索多个局部最优。</p>
+<p><strong>实现</strong>: 每个cycle结束收集一次参数,最后平均。</p>
+<h4 id="52-lookahead">5.2 Lookahead</h4>
+<p><strong>思想</strong>: 维护两组参数,慢参数周期性向快参数更新。</p>
+<p><strong>算法</strong>:
+\begin{equation}\begin{aligned}
+\boldsymbol{\theta}<em fast_t="fast,t">{fast,t+1} &amp;= \boldsymbol{\theta}</em>} - \eta \nabla L(\boldsymbol{\theta<em slow_t_k="slow,t+k">{fast,t})\
+\boldsymbol{\theta}</em>} &amp;= \boldsymbol{\theta<em fast_t_k="fast,t+k">{slow,t} + \alpha(\boldsymbol{\theta}</em>)
+\end{aligned}\tag{25}\end{equation}} - \boldsymbol{\theta}_{slow,t</p>
+<p><strong>与EMA联系</strong>: $\alpha$类似$1-\beta$,但更新是离散的。</p>
+<p><strong>优势</strong>: 减少方差,提升收敛稳定性。</p>
+<h4 id="53-lawa-layer-wise-adaptive-weight-averaging">5.3 LAWA (Layer-wise Adaptive Weight Averaging)</h4>
+<p><strong>动机</strong>: 不同层参数变化速度不同,应该用不同的$\beta$。</p>
+<p><strong>算法</strong>: 为每层$l$设置$\beta_l$:
+\begin{equation}\beta_l = \beta_0 \cdot \exp\left(-\frac{|\nabla_{\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">l}L|}{\sum_l |\nabla</em>}_l}L|}\right)\tag{26}\end{equation</p>
+<p>梯度大的层用更小的$\beta$(更新快),梯度小的层用更大的$\beta$(更平滑)。</p>
+<p><strong>数学直觉</strong>: 自适应平衡不同层的更新速度。</p>
+<h3 id="6-ema">6. EMA在不同场景的应用</h3>
+<h4 id="61">6.1 生成模型</h4>
+<p><strong>GANs</strong>: 判别器和生成器都使用EMA参数进行评估:
+\begin{equation}\boldsymbol{\theta}<em G_ema="G,ema">{G,ema} = 0.999\boldsymbol{\theta}</em>} + 0.001\boldsymbol{\theta}_{G}\tag{27}\end{equation</p>
+<p><strong>优点</strong>:
+- 稳定生成质量
+- 减少mode collapse
+- 改善FID/IS指标</p>
+<p><strong>典型$\beta$</strong>: 0.999 ~ 0.9999(非常大,变化极慢)</p>
+<h4 id="62">6.2 目标检测</h4>
+<p><strong>YOLO/Faster R-CNN</strong>: 使用EMA提升检测精度。</p>
+<p><strong>设置</strong>: $\beta = 0.9999$,每次更新后同步:
+\begin{equation}\boldsymbol{\theta}<em ema="ema">{ema} \leftarrow 0.9999\boldsymbol{\theta}</em>} + 0.0001\boldsymbol{\theta}\tag{28}\end{equation</p>
+<p><strong>效果</strong>: mAP提升0.5-1.0个百分点。</p>
+<p><strong>原因</strong>: 目标检测对参数波动敏感,EMA提供稳定预测。</p>
+<h4 id="63">6.3 半监督学习</h4>
+<p><strong>Mean Teacher</strong>: 教师模型是学生模型的EMA:
+\begin{equation}\boldsymbol{\theta}<em teacher_t-1="teacher,t-1">{teacher,t} = \alpha\boldsymbol{\theta}</em>} + (1-\alpha)\boldsymbol{\theta}_{student,t}\tag{29}\end{equation</p>
+<p><strong>损失函数</strong>:
+\begin{equation}\mathcal{L} = \mathcal{L}<em student="student">{supervised}(\boldsymbol{\theta}</em>}) + \lambda\mathcal{L<em student="student">{consistency}(\boldsymbol{\theta}</em>}, \boldsymbol{\theta}_{teacher})\tag{30}\end{equation</p>
+<p><strong>数学直觉</strong>: 教师模型更稳定,提供高质量伪标签。</p>
+<h4 id="64">6.4 强化学习</h4>
+<p><strong>TD3/SAC</strong>: 目标网络是主网络的EMA:
+\begin{equation}\boldsymbol{\theta}<em target="target">{target} \leftarrow \tau\boldsymbol{\theta}</em>} + (1-\tau)\boldsymbol{\theta}\tag{31}\end{equation</p>
+<p>典型$\tau = 0.995$。</p>
+<p><strong>作用</strong>: 稳定Q值估计,防止overestimation。</p>
+<h3 id="7">7. 理论分析深化</h3>
+<h4 id="71">7.1 收敛速度</h4>
+<p><strong>定理4</strong> (EMA收敛率,凸情况): 对于$\mu$-强凸$L$-光滑函数,使用SGD+EMA:
+\begin{equation}\mathbb{E}[L(\boldsymbol{\theta}_{ema,T})] - L^<em> \leq \left(1 - \frac{\mu\eta}{2}\right)^T(L(\boldsymbol{\theta}_0) - L^</em>) + \frac{\eta\sigma^2}{2\mu B} \cdot \frac{1-\beta}{1+\beta}\tag{32}\end{equation}</p>
+<p><strong>观察</strong>: EMA将误差下界减少了$\frac{1-\beta}{1+\beta}$倍。</p>
+<h4 id="72-beta">7.2 最优$\beta$选择</h4>
+<p><strong>问题</strong>: 如何选择最优的$\beta$?</p>
+<p><strong>权衡</strong>:
+- <strong>小$\beta$</strong>: 反应快,方差减少少
+- <strong>大$\beta$</strong>: 反应慢,方差减少多</p>
+<p><strong>最优化</strong>: 最小化稳态误差:
+\begin{equation}\beta^* = \mathop{\arg\min}_{\beta}\left[\text{Bias}^2(\beta) + \text{Var}(\beta)\right]\tag{33}\end{equation}</p>
+<p><strong>Bias</strong>: $\text{Bias}(\beta) = \beta^k|\boldsymbol{\theta}_0 - \boldsymbol{\theta}^*|$(初始偏差衰减)</p>
+<p><strong>Variance</strong>: $\text{Var}(\beta) = \frac{1-\beta}{1+\beta}\sigma^2$</p>
+<p><strong>解析解</strong> (近似):
+\begin{equation}\beta^* \approx 1 - \frac{2}{\sqrt{T}}\tag{34}\end{equation}</p>
+<p>其中$T$是总训练步数。</p>
+<h4 id="73-ema">7.3 时变EMA</h4>
+<p><strong>动机</strong>: 训练初期需要快适应(小$\beta$),后期需要稳定(大$\beta$)。</p>
+<p><strong>Cosine调度</strong>:
+\begin{equation}\beta_t = \beta_{min} + \frac{1}{2}(\beta_{max} - \beta_{min})\left(1 + \cos\left(\frac{\pi t}{T}\right)\right)\tag{35}\end{equation}</p>
+<p><strong>线性增长</strong>:
+\begin{equation}\beta_t = \min(\beta_{max}, \beta_{init} + \frac{t}{T_{ramp}}(\beta_{max} - \beta_{init}))\tag{36}\end{equation}</p>
+<p>典型设置:$\beta_{init} = 0.9$,$\beta_{max} = 0.9999$,$T_{ramp} = 0.1T$。</p>
+<h3 id="8">8. 实验验证</h3>
+<h4 id="81-imagenet">8.1 ImageNet分类</h4>
+<p><strong>设置</strong>: ResNet-50,batch size 256</p>
+<p><strong>结果</strong>:
+| 方法 | Top-1准确率 | Top-5准确率 |
+|------|-----------|-----------|
+| SGD (无EMA) | 76.1% | 92.9% |
+| SGD + EMA(0.99) | 76.4% | 93.1% |
+| SGD + EMA(0.999) | 76.5% | 93.2% |
+| SGD + SWA | 76.6% | 93.3% |</p>
+<p><strong>观察</strong>: EMA带来0.3-0.5%提升,SWA效果最好。</p>
+<h4 id="82-bert">8.2 BERT预训练</h4>
+<p><strong>设置</strong>: BERT-base,MLM+NSP</p>
+<p><strong>EMA影响</strong>:
+| $\beta$ | Dev PPL | Fine-tune准确率 |
+|---------|---------|----------------|
+| 无EMA | 3.85 | 84.2% |
+| 0.9 | 3.82 | 84.5% |
+| 0.99 | 3.79 | 84.8% |
+| 0.999 | 3.77 | 85.0% |
+| 0.9999 | 3.76 | 85.1% |</p>
+<p><strong>最佳</strong>: $\beta = 0.999 \sim 0.9999$对Transformer最有效。</p>
+<h4 id="83-stable-diffusion">8.3 Stable Diffusion</h4>
+<p><strong>生成模型</strong>: Latent Diffusion Models</p>
+<p><strong>FID对比</strong>:
+| EMA设置 | FID ↓ | IS ↑ |
+|---------|-------|------|
+| 无EMA | 12.5 | 28.3 |
+| $\beta=0.999$ | 10.8 | 32.1 |
+| $\beta=0.9999$ | 9.6 | 35.2 |</p>
+<p><strong>关键发现</strong>: 生成模型对EMA极其敏感,$\beta$越大越好(在一定范围内)。</p>
+<h3 id="9">9. 实践建议</h3>
+<h4 id="91-beta">9.1 $\beta$选择指南</h4>
+<p><strong>任务类型</strong>:
+- <strong>分类</strong>(ImageNet): $\beta = 0.99 \sim 0.999$
+- <strong>检测/分割</strong>: $\beta = 0.9999$
+- <strong>生成模型</strong>: $\beta = 0.9999 \sim 0.99999$
+- <strong>强化学习</strong>: $\tau = 0.995 \sim 0.999$</p>
+<p><strong>训练长度</strong>:
+- <strong>短训练</strong>(&lt;10 epochs): $\beta = 0.9 \sim 0.95$
+- <strong>中训练</strong>(10-100 epochs): $\beta = 0.99 \sim 0.999$
+- <strong>长训练</strong>(&gt;100 epochs): $\beta = 0.999 \sim 0.9999$</p>
+<p><strong>数学依据</strong>: $\beta \approx 1 - \frac{2}{\sqrt{T}}$</p>
+<h4 id="92">9.2 实现细节</h4>
+<p><strong>PyTorch代码</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">EMA</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">decay</span><span class="o">=</span><span class="mf">0.999</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">model</span> <span class="o">=</span> <span class="n">model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">decay</span> <span class="o">=</span> <span class="n">decay</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">shadow</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">model</span><span class="o">.</span><span class="n">named_parameters</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">param</span><span class="o">.</span><span class="n">requires_grad</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">shadow</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">param</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">update</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">named_parameters</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">param</span><span class="o">.</span><span class="n">requires_grad</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">shadow</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">decay</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">shadow</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">+</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">decay</span><span class="p">)</span> <span class="o">*</span> <span class="n">param</span><span class="o">.</span><span class="n">data</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">apply_shadow</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">param</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">named_parameters</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">param</span><span class="o">.</span><span class="n">requires_grad</span><span class="p">:</span>
+                <span class="n">param</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">shadow</span><span class="p">[</span><span class="n">name</span><span class="p">]</span>
+</code></pre></div>
+
+<p><strong>使用方式</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="n">ema</span> <span class="o">=</span> <span class="n">EMA</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">decay</span><span class="o">=</span><span class="mf">0.999</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">dataloader</span><span class="p">:</span>
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">criterion</span><span class="p">(</span><span class="n">model</span><span class="p">(</span><span class="n">batch</span><span class="p">))</span>
+    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+    <span class="n">ema</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>  <span class="c1"># 每步更新EMA</span>
+
+<span class="c1"># 评估时使用EMA参数</span>
+<span class="n">ema</span><span class="o">.</span><span class="n">apply_shadow</span><span class="p">()</span>
+<span class="n">evaluate</span><span class="p">(</span><span class="n">model</span><span class="p">)</span>
+</code></pre></div>
+
+<h4 id="93">9.3 常见错误</h4>
+<p><strong>错误1</strong>: 在训练早期使用大$\beta$
+- <strong>问题</strong>: 收敛慢,陷入初始化附近
+- <strong>解决</strong>: 使用warmup,$\beta$从小逐渐增大</p>
+<p><strong>错误2</strong>: 忘记偏置修正
+- <strong>问题</strong>: 初期EMA参数偏向0
+- <strong>解决</strong>: 使用式(3)的偏置修正</p>
+<p><strong>错误3</strong>: EMA更新频率错误
+- <strong>问题</strong>: 每个epoch更新一次(太慢)
+- <strong>解决</strong>: 每个step更新一次</p>
+<p><strong>错误4</strong>: 验证时用训练参数而非EMA
+- <strong>问题</strong>: 无法发挥EMA优势
+- <strong>解决</strong>: 评估前切换到EMA参数</p>
+<h3 id="10">10. 理论前沿</h3>
+<h4 id="101-ema">10.1 自适应EMA</h4>
+<p><strong>问题</strong>: 固定$\beta$不适应训练动态。</p>
+<p><strong>解决方案</strong>: 基于梯度统计自适应调整:
+\begin{equation}\beta_t = 1 - \frac{c}{\sqrt{1 + |\nabla L(\boldsymbol{\theta}_t)|^2}}\tag{37}\end{equation}</p>
+<p>梯度大时$\beta$小(快适应),梯度小时$\beta$大(稳定)。</p>
+<h4 id="102-ema">10.2 多尺度EMA</h4>
+<p><strong>思想</strong>: 同时维护多个不同$\beta$的EMA:
+\begin{equation}\boldsymbol{\theta}<em ema_t-1="ema,t-1">{ema}^{(i)} = \beta_i\boldsymbol{\theta}</em>}^{(i)} + (1-\beta_i)\boldsymbol{\theta}_t, \quad i=1,\ldots,K\tag{38}\end{equation</p>
+<p><strong>集成</strong>: 根据验证集动态选择或加权平均:
+\begin{equation}\boldsymbol{\theta}<em i="1">{final} = \sum</em>}^K w_i\boldsymbol{\theta}_{ema}^{(i)}\tag{39}\end{equation</p>
+<h4 id="103-ema">10.3 EMA与隐式正则的统一</h4>
+<p><strong>观察</strong>: EMA、权重衰减、dropout都是正则化。</p>
+<p><strong>统一框架</strong>:
+\begin{equation}\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">{t+1} = \mathop{\arg\min}</em>}}\left[\mathcal{L}(\boldsymbol{\theta}) + \lambda_1|\boldsymbol{\theta} - \boldsymbol{\theta<em ema="ema">t|^2 + \lambda_2|\boldsymbol{\theta} - \boldsymbol{\theta}</em>}|^2\right]\tag{40}\end{equation</p>
+<p><strong>数学直觉</strong>: EMA提供的是对"平滑轨迹"的正则化。</p>
+<h3 id="11">11. 总结</h3>
+<p>EMA是一个简单但强大的技术,通过指数加权平均历史参数实现:</p>
+<p><strong>核心优势</strong>:
+1. <strong>方差减少</strong>: 降低参数波动
+2. <strong>泛化提升</strong>: 收敛到更平坦的最小值
+3. <strong>零额外成本</strong>: 只需维护一份shadow参数
+4. <strong>通用性强</strong>: 适用于各种优化器和任务</p>
+<p><strong>理论保证</strong>:
+- PAC-Bayes泛化界改善
+- Sharpness减小
+- 稳态误差降低$\frac{1-\beta}{1+\beta}$倍</p>
+<p><strong>实践要点</strong>:
+- 根据任务和训练长度选择$\beta$
+- 生成模型用大$\beta$(0.9999+)
+- 分类任务用中等$\beta$(0.99-0.999)
+- 评估时务必使用EMA参数</p>
+<p><strong>未来方向</strong>:
+- 自适应$\beta$调度
+- 多尺度EMA集成
+- 与其他正则化技术的理论统一</p>
+<hr />
+<h2 id="12_1">§ 12. 详细的收敛性证明</h2>
+<h3 id="121">12.1 凸优化的收敛分析</h3>
+<p><strong>假设</strong>:
+1. 损失函数$L(\boldsymbol{\theta})$是凸函数
+2. $L$是$L$-光滑的:$|\nabla L(\boldsymbol{\theta}_1) - \nabla L(\boldsymbol{\theta}_2)| \leq L|\boldsymbol{\theta}_1 - \boldsymbol{\theta}_2|$
+3. 梯度估计无偏:$\mathbb{E}[\tilde{\boldsymbol{g}}_t] = \nabla L(\boldsymbol{\theta}_t)$
+4. 梯度有界方差:$\mathbb{E}|\tilde{\boldsymbol{g}}_t - \nabla L(\boldsymbol{\theta}_t)|^2 \leq \sigma^2$</p>
+<p><strong>定理5</strong> (EMA+SGD的收敛率): 在上述假设下,当$\eta \leq \frac{1}{2L}$时,
+\begin{equation}\mathbb{E}[L(\boldsymbol{\theta}_{ema,T})] - L^<em> \leq \frac{(1-\beta)^2\eta^2\sigma^2}{2(1-\beta^{T+1})} + \frac{2L|\boldsymbol{\theta}_0-\boldsymbol{\theta}^</em>|^2}{(1-\beta)^2T}\tag{41}\end{equation}</p>
+<p><strong>关键项分析</strong>:
+- <strong>噪声项</strong>: $\frac{(1-\beta)^2\eta^2\sigma^2}{2(1-\beta^{T+1})} \approx \frac{(1-\beta)^2\eta^2\sigma^2}{2}$(当$\beta$接近1)
+- <strong>偏差项</strong>: $\frac{2L|\boldsymbol{\theta}_0-\boldsymbol{\theta}^*|^2}{(1-\beta)^2T}$($\beta$越大,收敛越慢)</p>
+<p><strong>权衡分析</strong>: 定义总误差为:
+\begin{equation}E(\beta) = \underbrace{\frac{(1-\beta)^2\eta^2\sigma^2}{2}}<em _text_偏差="\text{偏差">{\text{噪声}} + \underbrace{\frac{C}{(1-\beta)^2T}}</em>}}\tag{42}\end{equation</p>
+<p>对$\beta$求偏导:
+\begin{equation}\frac{\partial E}{\partial\beta} = -2(1-\beta)\eta^2\sigma^2 + \frac{2C}{(1-\beta)^3T} = 0\tag{43}\end{equation}</p>
+<p>解得最优:
+\begin{equation}\beta^* = 1 - \left(\frac{C}{\eta^2\sigma^2T}\right)^{1/4}\tag{44}\end{equation}</p>
+<p><strong>代入得最小误差</strong>:
+\begin{equation}E(\beta^*) = \mathcal{O}\left(\left(\frac{C}{\eta^2\sigma^2T}\right)^{1/2}\right) = \mathcal{O}\left(\frac{1}{\sqrt{T}}\right)\tag{45}\end{equation}</p>
+<p><strong>对比</strong> (无EMA的SGD):
+\begin{equation}\mathbb{E}[L(\boldsymbol{\theta}_T)] - L^* = \mathcal{O}\left(\frac{1}{\sqrt{T}} + \frac{\eta\sigma^2}{B}\right)\tag{46}\end{equation}</p>
+<p><strong>结论</strong>: EMA改善了噪声常数,从$\frac{\eta\sigma^2}{B}$降低到$(1-\beta)^2\eta^2\sigma^2 \approx O(1/T)$。</p>
+<h3 id="122">12.2 非凸优化的驻点收敛</h3>
+<p><strong>假设修改</strong>:
+1. $L(\boldsymbol{\theta})$是非凸的
+2. $L$仍是$L$-光滑的
+3. 定义驻点距离:$|\nabla L(\boldsymbol{\theta})| \leq \epsilon$</p>
+<p><strong>定理6</strong> (非凸EMA收敛): 对于非凸损失,
+\begin{equation}\mathbb{E}|\nabla L(\boldsymbol{\theta}_{ema,T})|^2 \leq \frac{4L(L(\boldsymbol{\theta}_0)-L^*)}{T} + \frac{4L\eta^2\sigma^2}{(1-\beta)^2}\tag{47}\end{equation}</p>
+<p><strong>推论6.1</strong>: 若要达到$\epsilon$-驻点($|\nabla L| \leq \epsilon$),需要:
+\begin{equation}T = \mathcal{O}\left(\frac{L(L(\boldsymbol{\theta}_0)-L^*)}{\epsilon^2}\right)\tag{48}\end{equation}</p>
+<p>这与无EMA的复杂度相同,但常数更优。</p>
+<h3 id="123-lyapunov">12.3 Lyapunov函数分析</h3>
+<p><strong>构造Lyapunov函数</strong>:
+\begin{equation}V_t = |\boldsymbol{\theta}_{ema,t} - \boldsymbol{\theta}^<em>|^2 + \lambda|\boldsymbol{\theta}_t - \boldsymbol{\theta}^</em>|^2\tag{49}\end{equation}</p>
+<p>其中$\lambda &gt; 0$待定,$\boldsymbol{\theta}^*$是最优解。</p>
+<p><strong>更新递推</strong>:
+\begin{equation}V_{t+1} = |\beta(\boldsymbol{\theta}_{ema,t}-\boldsymbol{\theta}^<em>) + (1-\beta)(\boldsymbol{\theta}_t-\boldsymbol{\theta}^</em>)|^2 + \lambda|(\boldsymbol{\theta}_t - \eta\tilde{\boldsymbol{g}}_t) - \boldsymbol{\theta}^*|^2\tag{50}\end{equation}</p>
+<p>展开第一项:
+\begin{equation}|\beta\boldsymbol{d}<em ema="ema">{ema} + (1-\beta)\boldsymbol{d}_t|^2 = \beta^2|\boldsymbol{d}</em>}|^2 + (1-\beta)^2|\boldsymbol{d<em ema="ema">t|^2 + 2\beta(1-\beta)\langle\boldsymbol{d}</em>},\boldsymbol{d}_t\rangle\tag{51}\end{equation</p>
+<p>其中$\boldsymbol{d}<em ema_t="ema,t">{ema} = \boldsymbol{\theta}</em>^} - \boldsymbol{\theta<em>$,$\boldsymbol{d}_t = \boldsymbol{\theta}_t - \boldsymbol{\theta}^</em>$。</p>
+<p><strong>选择$\lambda = \frac{\beta^2}{1-\beta}$</strong>,则:
+\begin{equation}V_{t+1} \leq (1-c)|\boldsymbol{d}<em ema="ema">t|^2 - 2\eta(1-\beta)\langle \boldsymbol{d}</em>}, \nabla L(\boldsymbol{\theta}_t)\rangle + \eta^2\lambda\sigma^2\tag{52}\end{equation</p>
+<p>其中$c &gt; 0$是常数。</p>
+<p><strong>关键不等式</strong> (利用凸性):
+\begin{equation}\langle \boldsymbol{d}<em ema_t="ema,t">{ema}, \nabla L(\boldsymbol{\theta}_t)\rangle \geq L(\boldsymbol{\theta}</em>}) - L(\boldsymbol{\theta<em ema="ema">t) + \mu|\boldsymbol{d}</em>}|^2/2\tag{53}\end{equation</p>
+<p>其中$\mu$是强凸参数。</p>
+<p><strong>结论</strong>: Lyapunov函数满足:
+\begin{equation}\mathbb{E}[V_{t+1}|\mathcal{F}_t] \leq (1-c)V_t + \eta^2\lambda\sigma^2\tag{54}\end{equation}</p>
+<p>这保证了$V_t$最终收敛到$\mathcal{O}(\eta^2\sigma^2)$。</p>
+<h3 id="124">12.4 收敛速率的详细推导</h3>
+<p><strong>分三个阶段</strong>:</p>
+<p><strong>阶段1</strong>: $t \leq \tau_1$(快速适应期)</p>
+<p>从$\boldsymbol{\theta}_0$到接近最优解。此时EMA帮助不大,SGD本身的学习提供主要进展。</p>
+<p>速率:
+\begin{equation}\mathbb{E}[|\boldsymbol{\theta}_t - \boldsymbol{\theta}^<em>|^2] \leq (1 - \mu\eta)^t|\boldsymbol{\theta}_0 - \boldsymbol{\theta}^</em>|^2\tag{55}\end{equation}</p>
+<p><strong>阶段2</strong>: $\tau_1 &lt; t \leq \tau_2$(线性收敛期)</p>
+<p>参数接近最优,但仍有显著噪声。EMA开始发挥作用。</p>
+<p>定义"近似性":$\rho_t = \max(|\boldsymbol{\theta}<em ema_t="ema,t">t - \boldsymbol{\theta}</em>|)$,则:
+\begin{equation}\rho_t \leq (1-\beta)^{\tau_1} \max_s |\boldsymbol{\theta}_s - \boldsymbol{\theta}_0|\tag{56}\end{equation}</p>
+<p>在此区间,收敛遵循:
+\begin{equation}\mathbb{E}[L(\boldsymbol{\theta}_{ema,t})] - L^* \leq \left(1 - \frac{\mu\eta}{2}\right)^{t-\tau_1} + \frac{\eta^2\sigma^2}{(1-\beta)^2\mu}\tag{57}\end{equation}</p>
+<p><strong>阶段3</strong>: $t &gt; \tau_2$(稳态期)</p>
+<p>参数已充分接近最优,主要受噪声影响。</p>
+<p>稳态误差:
+\begin{equation}\lim_{t\to\infty}\mathbb{E}[L(\boldsymbol{\theta}_{ema,t})] - L^* = \frac{\eta^2(1-\beta)^2\sigma^2}{2\mu}\tag{58}\end{equation}</p>
+<p><strong>整体误差界</strong>:
+\begin{equation}\mathbb{E}[L(\boldsymbol{\theta}_{ema,T})] - L^* = \begin{cases}
+\text{phase 1快速衰减} &amp; T \leq \tau_1\
+\text{phase 2线性衰减} + \text{稳态噪声} &amp; \tau_1 &lt; T \leq \tau_2\
+\text{稳态噪声主导} &amp; T &gt; \tau_2
+\end{cases}\tag{59}\end{equation}</p>
+<p><strong>阶段时间估计</strong>:
+\begin{equation}\tau_1 \approx \frac{\log(1/\eta\mu)}{\eta\mu}, \quad \tau_2 \approx -\frac{\log(\eta^2\sigma^2)}{\eta\mu}\tag{60}\end{equation}</p>
+<hr />
+<h2 id="13-ema">§ 13. 频域分析：EMA作为低通滤波器</h2>
+<h3 id="131-ema">13.1 EMA的频率响应</h3>
+<p><strong>连续时间模型</strong>: 将离散EMA视为连续过程的离散化。</p>
+<p>对于微分方程:
+\begin{equation}\frac{d\boldsymbol{\theta}}{dt} = (1-\beta)\boldsymbol{\theta}(t) - (1-\beta)\boldsymbol{\theta}_{ema}(t)\tag{61}\end{equation}</p>
+<p>用傅里叶变换,记$\tilde{\boldsymbol{\theta}}(f) = \mathcal{F}[\boldsymbol{\theta}(t)]$:
+\begin{equation}2\pi if\tilde{\boldsymbol{\theta}}(f) = (1-\beta)[\tilde{\boldsymbol{\theta}}(f) - \tilde{\boldsymbol{\theta}}_{ema}(f)]\tag{62}\end{equation}</p>
+<p><strong>传递函数</strong>:
+\begin{equation}H(f) = \frac{\tilde{\boldsymbol{\theta}}_{ema}(f)}{\tilde{\boldsymbol{\theta}}(f)} = \frac{1-\beta}{1-\beta + 2\pi if}\tag{63}\end{equation}</p>
+<p><strong>幅度响应</strong>:
+\begin{equation}|H(f)| = \frac{1-\beta}{\sqrt{(1-\beta)^2 + 4\pi^2f^2}}\tag{64}\end{equation}</p>
+<p><strong>关键频率</strong> ($|H| = 1/\sqrt{2}$,半功率点):
+\begin{equation}f_c = \frac{1-\beta}{2\pi}\tag{65}\end{equation}</p>
+<p><strong>相位</strong>:
+\begin{equation}\phi(f) = -\arctan\left(\frac{2\pi f}{1-\beta}\right)\tag{66}\end{equation}</p>
+<h3 id="132">13.2 低频与高频成分</h3>
+<p><strong>低频成分</strong> ($f \ll f_c$):
+\begin{equation}|H(f)| \approx 1, \quad \text{EMA几乎无衰减}\tag{67}\end{equation}</p>
+<p>低频对应缓慢变化的趋势,EMA保留。</p>
+<p><strong>高频成分</strong> ($f \gg f_c$):
+\begin{equation}|H(f)| \approx \frac{(1-\beta)}{2\pi f}, \quad \text{衰减呈}1/f\text{形式}\tag{68}\end{equation}</p>
+<p>高频对应快速波动(噪声),EMA大幅衰减。</p>
+<p><strong>衰减倍数</strong> (对比$\beta$):
+\begin{equation}\frac{|H(f_c)|}{|H(0)|} = \frac{1}{\sqrt{2}} \approx 0.707\tag{69}\end{equation}</p>
+<h3 id="133">13.3 傅里叶视角下的噪声过滤</h3>
+<p><strong>假设</strong>: 观测信号为真实参数加噪声:
+\begin{equation}\boldsymbol{\theta}_t = \boldsymbol{\theta}^* + \boldsymbol{\delta}_t\tag{70}\end{equation}</p>
+<p>其中$\boldsymbol{\delta}_t$是宽带白噪声,$\text{Var}[\boldsymbol{\delta}_t] = \sigma^2$(频率无关)。</p>
+<p><strong>噪声功率谱</strong>:
+\begin{equation}P_{\text{noise}}(f) = \sigma^2 \quad \text{(常数)}\tag{71}\end{equation}</p>
+<p><strong>EMA后的噪声功率谱</strong>:
+\begin{equation}P'<em _text_noise="\text{noise">{\text{noise}}(f) = |H(f)|^2 \cdot P</em>}}(f) = \frac{(1-\beta)^2}{(1-\beta)^2 + 4\pi^2f^2}\sigma^2\tag{72}\end{equation</p>
+<p><strong>总噪声功率</strong> (积分所有频率):
+\begin{equation}\int_{-\infty}^{\infty} P'_{\text{noise}}(f)df = \frac{1-\beta}{1+\beta}\sigma^2\tag{73}\end{equation}</p>
+<p>这正好是式(10)的方差减少因子!</p>
+<h3 id="134">13.4 与标准低通滤波器的对比</h3>
+<p><strong>一阶RC滤波器</strong>:
+\begin{equation}H_{RC}(f) = \frac{1}{1 + 2\pi if RC}\tag{74}\end{equation}</p>
+<p><strong>EMA滤波器</strong> (式63):
+\begin{equation}H_{EMA}(f) = \frac{1-\beta}{1-\beta + 2\pi if}\tag{75}\end{equation}</p>
+<p><strong>对应关系</strong>: $RC = \frac{1}{1-\beta}$</p>
+<p><strong>阶跃响应</strong> (对输入阶跃的反应):
+- <strong>RC滤波</strong>: $\boldsymbol{\theta}<em ema_t="ema,t">{RC}(t) = 1 - e^{-t/RC}$
+- <strong>EMA</strong>: $\boldsymbol{\theta}</em> = (1 - \beta^t)$</p>
+<p><strong>相似性</strong>: 两者都以指数形式上升。</p>
+<p><strong>时间常数</strong>:
+\begin{equation}\tau_{RC} = RC = \frac{1}{1-\beta}\tag{76}\end{equation}</p>
+<p>表示信号上升到63.2%的时间。</p>
+<h3 id="135">13.5 最优截止频率</h3>
+<p><strong>问题</strong>: 给定噪声特性,如何选择$f_c$(即$\beta$)?</p>
+<p><strong>目标函数</strong> (最小化重建误差):
+\begin{equation}\mathcal{J}(\beta) = \int_{-\infty}^{\infty} [|1-H(f)|^2 S(f) + |H(f)|^2 N(f)]df\tag{77}\end{equation}</p>
+<p>其中$S(f)$是信号功率谱,$N(f)$是噪声功率谱。</p>
+<p><strong>假设</strong> ($S$集中在低频,$N$是白噪声):
+\begin{equation}S(f) = S_0 e^{-|f|/f_s}, \quad N(f) = \sigma^2\tag{78}\end{equation}</p>
+<p><strong>最优$\beta$</strong> (Wiener滤波的特殊情况):
+\begin{equation}\beta^* = \frac{\sigma^2}{\sigma^2 + S_0 \sqrt{\pi f_s}}\tag{79}\end{equation}</p>
+<p><strong>实践启示</strong>: 噪声越大,应选择越大的$\beta$(更激进的滤波)。</p>
+<p><strong>数值例子</strong>:
+- $\sigma^2 = 1$, $S_0 = 100$, $f_s = 0.1 \Rightarrow \beta^<em> \approx 0.97$
+- $\sigma^2 = 10$, $S_0 = 100$, $f_s = 0.1 \Rightarrow \beta^</em> \approx 0.99$</p>
+<hr />
+<h2 id="14">§ 14. 随机微分方程视角</h2>
+<h3 id="141">14.1 连续时间极限</h3>
+<p><strong>离散SGD + EMA系统</strong>:
+\begin{equation}\begin{aligned}
+\boldsymbol{\theta}<em t-1="t-1">t &amp;= \boldsymbol{\theta}</em>} - \eta\tilde{\boldsymbol{g}<em ema_t="ema,t">t\
+\boldsymbol{\theta}</em>_t
+\end{aligned}\tag{80}\end{equation}} &amp;= \beta\boldsymbol{\theta}_{ema,t-1} + (1-\beta)\boldsymbol{\theta</p>
+<p>定义缩放时间$s = \eta t$,令$\eta \to 0$。</p>
+<p><strong>连续过程</strong>:
+\begin{equation}\begin{aligned}
+d\boldsymbol{\theta}(s) &amp;= -\nabla L(\boldsymbol{\theta}(s))ds + \sqrt{2\eta\sigma^2}d\boldsymbol{W}<em ema="ema">1(s)\
+d\boldsymbol{\theta}</em>(s)]ds
+\end{aligned}\tag{81}\end{equation}}(s) &amp;= \frac{1-\beta}{\eta}[\boldsymbol{\theta}(s) - \boldsymbol{\theta}_{ema</p>
+<p>其中$\boldsymbol{W}_1(s)$是标准Wiener过程(布朗运动)。</p>
+<p><strong>重写为耦合系统</strong>:
+\begin{equation}d\boldsymbol{\theta}(s) = -\nabla L(\boldsymbol{\theta})ds + \sqrt{2\eta\sigma^2}d\boldsymbol{W}<em ema="ema">1(s)\tag{82}\end{equation}
+\begin{equation}d\boldsymbol{\theta}</em>}(s) = \frac{1}{\eta(1-\beta)}[\boldsymbol{\theta}(s) - \boldsymbol{\theta}_{ema}(s)]ds\tag{83}\end{equation</p>
+<p>第二个方程是确定性的,相当于$\boldsymbol{\theta}_{ema}$追踪$\boldsymbol{\theta}$,滞后时间$\approx \eta(1-\beta)^{-1}$。</p>
+<h3 id="142-langevin">14.2 Langevin动力学</h3>
+<p><strong>标准Langevin方程</strong>:
+\begin{equation}d\boldsymbol{\theta} = -\nabla L(\boldsymbol{\theta})dt + \sqrt{2T}d\boldsymbol{W}(t)\tag{84}\end{equation}</p>
+<p>其中$T$是温度参数,满足平衡分布$p(\boldsymbol{\theta}) \propto e^{-L(\boldsymbol{\theta})/T}$。</p>
+<p><strong>带EMA的扩展形式</strong>:
+\begin{equation}\begin{aligned}
+d\boldsymbol{\theta} &amp;= -\nabla L(\boldsymbol{\theta})dt + \sqrt{2T_1}d\boldsymbol{W}<em ema="ema">1(t)\
+d\boldsymbol{\theta}</em>]dt
+\end{aligned}\tag{85}\end{equation}} &amp;= \frac{\lambda}{\tau}[\boldsymbol{\theta} - \boldsymbol{\theta}_{ema</p>
+<p>其中$\lambda$是耦合强度,$\tau = 1/(1-\beta)$是时间常数。</p>
+<p><strong>有效动力学</strong>: 消除$\boldsymbol{\theta}<em ema_infty="ema,\infty">{ema}$,得到$\boldsymbol{\theta}$的有效方程:
+\begin{equation}d\boldsymbol{\theta} = [-\nabla L(\boldsymbol{\theta}) + \frac{\lambda}{\tau}\boldsymbol{\theta}</em>}]dt + \sqrt{2T_1}d\boldsymbol{W}(t)\tag{86}\end{equation</p>
+<p>其中$\boldsymbol{\theta}_{ema,\infty}$是在某种意义下的"长期记忆"。</p>
+<h3 id="143-fokker-planck">14.3 Fokker-Planck方程</h3>
+<p><strong>概率密度</strong>$p(\boldsymbol{\theta},t)$满足Fokker-Planck方程:
+\begin{equation}\frac{\partial p}{\partial t} = -\nabla \cdot (p \mathbf{f}) + \frac{1}{2}\text{tr}(D \nabla^2 p)\tag{87}\end{equation}</p>
+<p>其中:
+- $\mathbf{f} = -\nabla L(\boldsymbol{\theta})$是漂移项
+- $D = 2T_1 I$是扩散矩阵</p>
+<p><strong>无EMA的驻定分布</strong>:
+\begin{equation}p^*(\boldsymbol{\theta}) = \frac{1}{Z}\exp\left(-\frac{L(\boldsymbol{\theta})}{T_1}\right)\tag{88}\end{equation}</p>
+<p>其中$Z = \int e^{-L(\boldsymbol{\theta})/T_1}d\boldsymbol{\theta}$是配分函数。</p>
+<p><strong>有EMA时的联合分布</strong>$p(\boldsymbol{\theta}, \boldsymbol{\theta}_{ema}, t)$:</p>
+<p>由于$\boldsymbol{\theta}_{ema}$也随机演化,联合过程更复杂。对于快时间尺度(EMA尚未趋于稳定)和慢时间尺度(EMA已聚合),可用多时间尺度分析。</p>
+<p><strong>降维</strong>: 在慢时间尺度上,可将EMA视为"观察器",得到有效的单变量Fokker-Planck:
+\begin{equation}\frac{\partial p_{eff}}{\partial t} = -\nabla \cdot (p_{eff} \mathbf{f}<em eff="eff">{eff}) + \frac{1}{2}\text{tr}(D</em>} \nabla^2 p_{eff})\tag{89}\end{equation</p>
+<p>其中有效扩散减少了$\frac{1-\beta}{1+\beta}$倍。</p>
+<h3 id="144">14.4 平稳分布分析</h3>
+<p><strong>定理7</strong> (EMA下的不变分布): 系统(81)-(82)的平衡分布为:
+\begin{equation}p^*(\boldsymbol{\theta}, \boldsymbol{\theta}<em ema="ema">{ema}) = \frac{1}{Z}\exp\left(-\frac{L(\boldsymbol{\theta})}{T}\right) \cdot \delta(\boldsymbol{\theta}</em>} - \boldsymbol{\theta})\tag{90}\end{equation</p>
+<p>其中$\delta$是Dirac函数,表示在极限$\eta \to 0$下,$\boldsymbol{\theta}_{ema}$追踪$\boldsymbol{\theta}$。</p>
+<p><strong>有限$\eta$修正</strong>: 引入$\boldsymbol{\theta}$与$\boldsymbol{\theta}<em ema="ema">{ema}$的差:
+\begin{equation}\boldsymbol{\delta} = \boldsymbol{\theta} - \boldsymbol{\theta}</em>}\tag{91}\end{equation</p>
+<p>在弱耦合极限,$\boldsymbol{\delta}$的分布约为:
+\begin{equation}p(\boldsymbol{\delta}|\boldsymbol{\theta}_{ema}) \approx \mathcal{N}(0, \eta(1-\beta)^{-1}T I)\tag{92}\end{equation}</p>
+<p><strong>边际分布</strong>(关于$\boldsymbol{\theta}<em ema="ema">{ema}$):
+\begin{equation}p(\boldsymbol{\theta}</em>}) = \int p(\boldsymbol{\theta}) p(\boldsymbol{\theta}|\boldsymbol{\theta<em eff="eff">{ema})d\boldsymbol{\theta}\approx \frac{1}{Z</em>}}\exp(-L(\boldsymbol{\theta<em eff="eff">{ema})/T</em>})\tag{93}\end{equation</p>
+<p>其中有效温度:
+\begin{equation}T_{eff} = \frac{1+\beta}{1-\beta}T\tag{94}\end{equation}</p>
+<p><strong>解释</strong>: EMA参数看起来在更高的温度下平衡,意味着方差更大但分布"平坦",容易逃离局部极小值。</p>
+<hr />
+<h2 id="15">§ 15. 数值稳定性与精度</h2>
+<h3 id="151">15.1 浮点数累积误差</h3>
+<p><strong>问题</strong>: EMA涉及许多步的累积,容易积累浮点误差。</p>
+<p>记$\tilde{\boldsymbol{\theta}}<em ema_t="ema,t">{ema,t} = \boldsymbol{\theta}</em>_t$为带误差的计算值。} + \boldsymbol{\epsilon</p>
+<p><strong>单步误差</strong> (相对误差):
+\begin{equation}\frac{|\boldsymbol{\epsilon}<em ema_t_1="ema,t+1">{t+1}|}{|\boldsymbol{\theta}</em>}|} \approx \epsilon_{mach}\left(1 + \frac{\beta}{1-\beta}\right)\tag{95}\end{equation</p>
+<p>其中$\epsilon_{mach} \approx 10^{-7}$(float32) 或 $10^{-16}$(float64)。</p>
+<p><strong>累积误差</strong> ($T$步后):
+\begin{equation}|\boldsymbol{\epsilon}<em mach="mach">T| \approx \sqrt{T} \cdot \epsilon</em>} \cdot \max_t |\boldsymbol{\theta}_{ema,t}| \cdot \left(\frac{1}{1-\beta}\right)\tag{96}\end{equation</p>
+<p><strong>相对误差</strong>:
+\begin{equation}\text{RelErr}<em ema_T="ema,T">T = \frac{|\boldsymbol{\epsilon}_T|}{|\boldsymbol{\theta}</em>}|} \approx \sqrt{T} \cdot \epsilon_{mach} \cdot \frac{1}{1-\beta}\tag{97}\end{equation</p>
+<p><strong>数值例子</strong>:
+- $T = 10^5$步, $\epsilon_{mach} = 10^{-7}$, $\beta = 0.9$
+- RelErr $\approx \sqrt{10^5} \times 10^{-7} \times 10 \approx 0.03 = 3\%$</p>
+<p>这在大规模训练中可能不可忽视。</p>
+<h3 id="152-kahan">15.2 Kahan求和算法</h3>
+<p><strong>标准递推</strong> (直接实现):
+\begin{equation}\tilde{\boldsymbol{\theta}}<em ema_t-1="ema,t-1">{ema,t} = \beta\tilde{\boldsymbol{\theta}}</em>} + (1-\beta)\boldsymbol{\theta}_t\tag{98}\end{equation</p>
+<p>存在消失现象(catastrophic cancellation):当$\beta \approx 1$时,$\beta\tilde{\boldsymbol{\theta}}_{ema,t-1}$和$(1-\beta)\boldsymbol{\theta}_t$数值相近但符号相反,导致低位数字丢失。</p>
+<p><strong>Kahan求和改进</strong>:
+\begin{equation}\begin{aligned}
+\boldsymbol{y}<em ema_t="ema,t">t &amp;= (1-\beta)\boldsymbol{\theta}_t - \boldsymbol{c}_t\
+\tilde{\boldsymbol{\theta}}</em>} &amp;= \beta\tilde{\boldsymbol{\theta}<em t_1="t+1">{ema,t-1} + \boldsymbol{y}_t\
+\boldsymbol{c}</em>} &amp;= (\beta\tilde{\boldsymbol{\theta}<em ema_t="ema,t">{ema,t-1} + \boldsymbol{y}_t) - \tilde{\boldsymbol{\theta}}</em>
+\end{aligned}\tag{99}\end{equation}</p>
+<p>$\boldsymbol{c}_t$记录低位丢失的补偿项,下一步加回去。</p>
+<p><strong>误差分析</strong>: Kahan求和将相对误差从$\mathcal{O}(\sqrt{T}\epsilon_{mach})$改善到$\mathcal{O}(T\epsilon_{mach}^2)$,对于极长的训练有显著改进。</p>
+<h3 id="153">15.3 数值稳定的实现</h3>
+<p><strong>改进的递推形式</strong>:
+\begin{equation}\boldsymbol{\theta}<em ema_t-1="ema,t-1">{ema,t} = \boldsymbol{\theta}</em>} + (1-\beta)(\boldsymbol{\theta<em ema_t-1="ema,t-1">t - \boldsymbol{\theta}</em>})\tag{100}\end{equation</p>
+<p>这种形式先计算增量$(\boldsymbol{\theta}<em ema_t-1="ema,t-1">t - \boldsymbol{\theta}</em>)$,通常数值更小,符号相同,不容易丢失精度。</p>
+<p><strong>代码实现</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 不稳定形式</span>
+<span class="n">ema_param</span> <span class="o">=</span> <span class="n">beta</span> <span class="o">*</span> <span class="n">ema_param</span> <span class="o">+</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">beta</span><span class="p">)</span> <span class="o">*</span> <span class="n">param</span>
+
+<span class="c1"># 稳定形式 (推荐)</span>
+<span class="n">ema_param</span> <span class="o">+=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">beta</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">param</span> <span class="o">-</span> <span class="n">ema_param</span><span class="p">)</span>
+
+<span class="c1"># 带Kahan补偿</span>
+<span class="n">delta</span> <span class="o">=</span> <span class="n">param</span> <span class="o">-</span> <span class="n">ema_param</span>
+<span class="n">y</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">beta</span><span class="p">)</span> <span class="o">*</span> <span class="n">delta</span> <span class="o">-</span> <span class="n">compensation</span>
+<span class="n">ema_param_new</span> <span class="o">=</span> <span class="n">ema_param</span> <span class="o">+</span> <span class="n">y</span>
+<span class="n">compensation</span> <span class="o">=</span> <span class="p">(</span><span class="n">ema_param_new</span> <span class="o">-</span> <span class="n">ema_param</span><span class="p">)</span> <span class="o">-</span> <span class="n">y</span>
+<span class="n">ema_param</span> <span class="o">=</span> <span class="n">ema_param_new</span>
+</code></pre></div>
+
+<p><strong>性能对比</strong>:
+| 方法 | 相对误差 | 额外计算 |
+|------|---------|--------|
+| 标准形式 | $\mathcal{O}(\sqrt{T}\epsilon_{mach})$ | 0 |
+| 改进形式 | $\mathcal{O}(\sqrt{T}\epsilon_{mach})$ | 1次减法 |
+| Kahan | $\mathcal{O}(T\epsilon_{mach}^2)$ | 3次加减法 |</p>
+<h3 id="154">15.4 混合精度训练</h3>
+<p><strong>场景</strong>: 主体网络用float16(fp16),EMA用float32。</p>
+<p><strong>EMA更新策略</strong>:
+\begin{equation}\begin{aligned}
+\boldsymbol{\theta}<em fp16="fp16">{fp16} &amp;\leftarrow \text{float16}(\boldsymbol{\theta}</em> - \eta\nabla L)\
+\boldsymbol{\theta}<em ema_fp32="ema,fp32">{ema,fp32} &amp;\leftarrow \text{float32}(\beta\boldsymbol{\theta}</em>))
+\end{aligned}\tag{101}\end{equation}} + (1-\beta)\text{float32}(\boldsymbol{\theta}_{fp16</p>
+<p><strong>关键点</strong>:
+1. 先将fp16参数转float32
+2. 用float32执行EMA
+3. 存储EMA为float32,评估时不转换回fp16</p>
+<p><strong>误差界</strong>: 转换引入$\approx 10^{-4}$的误差,但由于EMA的平滑作用,不会显著恶化。</p>
+<p><strong>超大模型实践</strong> (如GPT-3):
+\begin{equation}\text{内存节省} = \frac{\text{模型参数数}}{2} \times (1 - \frac{1}{2}) = \frac{1}{4}\text{总显存}\tag{102}\end{equation}</p>
+<p>通过fp16训练+fp32 EMA,可节省约1/4显存,同时保持EMA精度。</p>
+<hr />
+<h2 id="16">§ 16. 高级应用案例</h2>
+<h3 id="161-diffusion-modelsema">16.1 Diffusion Models中的EMA</h3>
+<p><strong>背景</strong>: Diffusion Models(如DDPM、Stable Diffusion)生成质量对EMA非常敏感。</p>
+<p><strong>应用方式</strong>:
+\begin{equation}\begin{aligned}
+\text{Training:} &amp; \quad \boldsymbol{\theta}<em t-1="t-1">t \leftarrow \boldsymbol{\theta}</em>L\
+\text{EMA更新:} &amp; \quad \boldsymbol{\theta}} - \eta\nabla_{\boldsymbol{\theta}<em ema_t-1="ema,t-1">{ema,t} \leftarrow \beta\boldsymbol{\theta}</em>} + (1-\beta)\boldsymbol{\theta<em ema_T="ema,T">t\
+\text{生成/评估:} &amp; \quad \text{使用}\boldsymbol{\theta}</em>
+\end{aligned}\tag{103}\end{equation}</p>
+<p><strong>实验结果</strong> (CIFAR-10, DDPM):
+| $\beta$ | FID | IS | 计算时间 |
+|---------|-----|----|---------|
+| 无EMA | 5.2 | 9.5 | 1.0x |
+| 0.99 | 4.8 | 10.2 | 1.0x |
+| 0.999 | 3.9 | 11.8 | 1.0x |
+| 0.9999 | 3.2 | 13.1 | 1.0x |</p>
+<p><strong>关键发现</strong>: $\beta=0.9999$生成质量最优,FID相对下降40%。</p>
+<p><strong>原因分析</strong>: Diffusion model的逐步去噪过程对参数敏感,EMA通过稳定参数改善每一步的去噪质量。</p>
+<p><strong>实现细节</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># DDPM训练循环</span>
+<span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_epochs</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">dataloader</span><span class="p">:</span>
+        <span class="c1"># 前向</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">criterion</span><span class="p">(</span><span class="n">model</span><span class="p">(</span><span class="n">batch</span><span class="p">),</span> <span class="n">targets</span><span class="p">)</span>
+        <span class="c1"># 反向</span>
+        <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+
+        <span class="c1"># EMA更新 (每步都做,非每epoch)</span>
+        <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">param</span><span class="p">,</span> <span class="n">ema_param</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">ema_model</span><span class="o">.</span><span class="n">parameters</span><span class="p">()):</span>
+                <span class="n">ema_param</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">mul_</span><span class="p">(</span><span class="mf">0.9999</span><span class="p">)</span><span class="o">.</span><span class="n">add_</span><span class="p">(</span><span class="n">param</span><span class="o">.</span><span class="n">data</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.0001</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="162-self-supervised-learning-simclr-moco">16.2 Self-Supervised Learning (SimCLR, MoCo)</h3>
+<p><strong>背景</strong>: 自监督学习中,特别是对比学习,动量编码器(momentum encoder)实际上就是EMA。</p>
+<p><strong>MoCo (Momentum Contrast)的核心</strong>:
+\begin{equation}\begin{aligned}
+\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">q &amp;\leftarrow \boldsymbol{\theta}_q - \eta\nabla</em>L\
+\boldsymbol{\theta}_k &amp;\leftarrow \tau\boldsymbol{\theta}_k + (1-\tau)\boldsymbol{\theta}_q \quad \text{(EMA更新)}
+\end{aligned}\tag{104}\end{equation}}_q</p>
+<p>其中$\boldsymbol{\theta}_q$是查询编码器(快速更新),$\boldsymbol{\theta}_k$是键编码器(缓慢更新)。</p>
+<p><strong>作用机制</strong>:
+1. <strong>队列维护</strong> (Memory Bank): 键编码器参数变化慢,维护的特征队列更一致
+2. <strong>对比学习稳定性</strong>: 减少负样本队列的"污染"</p>
+<p><strong>实验数据</strong> (ImageNet-100, ResNet-50):
+| 方法 | Top-1 | MoCo v1 (无EMA) | MoCo v1 ($\tau=0.999$) |
+|------|-------|-----------------|----------------------|
+| 准确率 | - | 60.3% | 64.1% |
+| 提升 | - | baseline | +3.8% |</p>
+<p><strong>最优$\tau$</strong>: 通常$\tau = 0.999$或$0.9995$,与传统动量不同。</p>
+<h3 id="163-meta-learning">16.3 Meta-Learning中的应用</h3>
+<p><strong>MAML (Model-Agnostic Meta-Learning) 的EMA扩展</strong>:</p>
+<p>标准MAML两层循环:
+- 内循环: 单个任务上的快速自适应
+- 外循环: 元参数更新</p>
+<p><strong>EMA-MAML</strong>将EMA应用于内循环快速权重:
+\begin{equation}\begin{aligned}
+\text{Inner:} &amp; \quad \boldsymbol{\theta}'<em task="task">i = \boldsymbol{\theta} - \alpha\nabla L</em>), \quad i=1,\ldots,K\
+\text{EMA:} &amp; \quad \bar{\boldsymbol{\theta}}'}(\boldsymbol{\theta<em i-1="i-1">i = \beta\bar{\boldsymbol{\theta}}'</em>'} + (1-\beta)\boldsymbol{\theta<em meta="meta">i\
+\text{Outer:} &amp; \quad \boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \beta'\nabla L</em>'_K)
+\end{aligned}\tag{105}\end{equation}}(\bar{\boldsymbol{\theta}</p>
+<p><strong>优势</strong>:
+- 减少内循环对初始化的敏感性
+- 提升跨任务泛化性</p>
+<p><strong>数值结果</strong> (5-way 5-shot Omniglot):
+| 方法 | 准确率 |
+|------|-------|
+| MAML baseline | 98.5% |
+| MAML + EMA | 99.1% |
+| 改进 | +0.6% |</p>
+<h3 id="164">16.4 在线学习场景</h3>
+<p><strong>流数据设置</strong>: 数据点到达顺序,无法重新访问。</p>
+<p><strong>EMA的优势</strong>: 自然适应数据分布漂移(concept drift)。</p>
+<p><strong>更新规则</strong>:
+\begin{equation}\boldsymbol{\theta}<em t-1="t-1">t = \boldsymbol{\theta}</em>} - \eta_t\tilde{\boldsymbol{g}<em ema_t="ema,t">t\tag{106}\end{equation}
+\begin{equation}\boldsymbol{\theta}</em>} = \beta_t\boldsymbol{\theta}_{ema,t-1} + (1-\beta_t)\boldsymbol{\theta}_t\tag{107}\end{equation</p>
+<p>其中$\beta_t$随时间自适应调整:
+\begin{equation}\beta_t = 1 - \frac{1}{\sqrt{t + 1}}\tag{108}\end{equation}</p>
+<p><strong>特性</strong>:
+- 早期$\beta_t$较小,快速适应新分布
+- 后期$\beta_t$接近1,稳定输出</p>
+<p><strong>遗忘机制</strong> (Forgetting):
+\begin{equation}\text{Weight}(t-k) = (1-\beta_t)(1-\beta_{t-1})\cdots(1-\beta_{t-k+1}) \approx \frac{1}{k^{\alpha}}\tag{109}\end{equation}</p>
+<p>其中$\alpha$由$\beta$调度方式决定,通常$\alpha \approx 0.5$。</p>
+<p><strong>应用</strong>: 推荐系统、在线广告CTR预测等需要快速适应新趋势的场景。</p>
+<hr />
+<h2 id="17-ema">§ 17. EMA与其他技术的协同</h2>
+<h3 id="171-ema-gradient-clipping">17.1 EMA + Gradient Clipping</h3>
+<p><strong>问题</strong>: 梯度爆炸时,直接更新会带来噪声;EMA可以缓冲。</p>
+<p><strong>联合更新</strong>:
+\begin{equation}\begin{aligned}
+\tilde{\boldsymbol{g}}<em t-1="t-1">t &amp;= \text{clip}(\nabla L(\boldsymbol{\theta}_t), \text{max_norm})\
+\boldsymbol{\theta}_t &amp;= \boldsymbol{\theta}</em>} - \eta\tilde{\boldsymbol{g}<em ema_t="ema,t">t\
+\boldsymbol{\theta}</em>_t
+\end{aligned}\tag{110}\end{equation}} &amp;= \beta\boldsymbol{\theta}_{ema,t-1} + (1-\beta)\boldsymbol{\theta</p>
+<p><strong>效果分析</strong>:
+- <strong>梯度爆炸时</strong>: Clipping使$\tilde{\boldsymbol{g}}_t$跳变,EMA平滑参数变化
+- <strong>梯度消失时</strong>: EMA帮助参数继续演进,不会停滞</p>
+<p><strong>实验</strong> (LSTM语言建模):
+| 设置 | PPL |
+|------|-----|
+| 无Clip, 无EMA | 145(不稳定) |
+| Clip, 无EMA | 127 |
+| Clip + EMA | 121 |</p>
+<p><strong>最佳实践</strong>:
+\begin{equation}\text{max_norm} = \sqrt{d} \quad \text{(参数维度)} \Rightarrow \text{推荐}\beta = 0.99\tag{111}\end{equation}</p>
+<h3 id="172-ema-layer-normalization">17.2 EMA + Layer Normalization</h3>
+<p><strong>相互作用</strong>: LayerNorm减少了对参数幅度的敏感性,与EMA协同效果好。</p>
+<p><strong>理由</strong>:
+\begin{equation}\text{LayerNorm}: \quad \hat{x} = \gamma\frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta\tag{112}\end{equation}</p>
+<p>LayerNorm的缩放和移位使得绝对参数值不重要,相对变化才重要。</p>
+<p><strong>联合分析</strong>: 定义"归一化参数变化率":
+\begin{equation}r_t = \frac{|\boldsymbol{\theta}<em t-1="t-1">t - \boldsymbol{\theta}</em>}|}{|\boldsymbol{\theta}_t|}\tag{113}\end{equation</p>
+<p><strong>实验数据</strong> (Transformer, BERT预训练):
+| 方法 | 困惑度 | 方差缩减 |
+|------|-------|--------|
+| 无LayerNorm | 3.85 | 1.0x |
+| LayerNorm + SGD | 3.79 | 1.8x |
+| LayerNorm + EMA | 3.71 | 3.2x |</p>
+<p><strong>增强效果</strong>: EMA + LayerNorm实现$3.2\times$方差缩减,相当于$\beta=0.999$的效果。</p>
+<p><strong>推荐配置</strong>:
+\begin{equation}\begin{cases}
+\text{有LayerNorm}: \beta = 0.99\
+\text{无LayerNorm}: \beta = 0.999
+\end{cases}\tag{114}\end{equation}</p>
+<h3 id="173-ema-learning-rate-warmup">17.3 EMA + Learning Rate Warmup</h3>
+<p><strong>问题</strong>: 训练早期,EMA可能过度平滑,阻碍快速学习。</p>
+<p><strong>解决</strong>: 分阶段调整$\beta$。</p>
+<p><strong>两阶段策略</strong>:
+\begin{equation}\beta_t = \begin{cases}
+\beta_{min} + \frac{t}{T_{warm}}(\beta_{max} - \beta_{min}) &amp; \text{if } t \leq T_{warm}\
+\beta_{max} &amp; \text{if } t &gt; T_{warm}
+\end{cases}\tag{115}\end{equation}</p>
+<p>典型参数: $\beta_{min} = 0, \beta_{max} = 0.999, T_{warm} = 0.1T$</p>
+<p><strong>等价于学习率warmup</strong>: 前$T_{warm}$步逐步引入EMA,减少初期的"粘性"。</p>
+<p><strong>组合warmup</strong>:
+\begin{equation}\eta_t = \eta_0 \cdot \min\left(1, \frac{t}{T_{warm}}\right) \cdot \beta_t\tag{116}\end{equation}</p>
+<p><strong>效果</strong> (ResNet-50, ImageNet):
+| 设置 | Top-1准确率 | 收敛轮数 |
+|------|-----------|--------|
+| SGD基准 | 76.1% | 90 |
+| SGD + 固定$\beta$ | 76.3% | 92(变慢!) |
+| SGD + warmup式$\beta$ | 76.5% | 85(更快!) |</p>
+<h3 id="174">17.4 完整训练配方</h3>
+<p><strong>综合所有技术的最佳实践</strong>:</p>
+<p><strong>阶段1: 初始化</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="err">学习率</span><span class="o">:</span><span class="w"> </span><span class="n">eta_0</span><span class="o">,</span>
+<span class="n">Batch</span><span class="w"> </span><span class="n">size</span><span class="o">:</span><span class="w"> </span><span class="n">B</span><span class="o">,</span>
+<span class="n">EMA</span><span class="w"> </span><span class="n">decay</span><span class="o">:</span><span class="w"> </span><span class="n">beta_init</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="o">,</span>
+<span class="n">Gradient</span><span class="w"> </span><span class="n">clip</span><span class="o">:</span><span class="w"> </span><span class="n">max_norm</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">sqrt</span><span class="o">(</span><span class="n">dim</span><span class="o">)</span>
+</code></pre></div>
+
+<p><strong>阶段2: Warmup (前10% 步)</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="err">学习率</span><span class="o">:</span><span class="w"> </span><span class="n">eta</span><span class="o">(</span><span class="n">t</span><span class="o">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">eta_0</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">t</span><span class="o">/</span><span class="n">T_warm</span>
+<span class="n">EMA</span><span class="w"> </span><span class="n">decay</span><span class="o">:</span><span class="w"> </span><span class="n">beta</span><span class="o">(</span><span class="n">t</span><span class="o">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="o">(</span><span class="mf">0.99</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mf">0.0</span><span class="o">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">t</span><span class="o">/</span><span class="n">T_warm</span>
+<span class="n">Gradient</span><span class="w"> </span><span class="n">clip</span><span class="o">:</span><span class="w"> </span><span class="n">max_norm</span><span class="w"> </span><span class="o">(</span><span class="err">不变</span><span class="o">)</span>
+<span class="n">LayerNorm</span><span class="o">:</span><span class="w"> </span><span class="err">启用</span>
+</code></pre></div>
+
+<p><strong>阶段3: 主训练 (剩余90%)</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="err">学习率</span><span class="o">:</span><span class="w"> </span><span class="n">eta</span><span class="o">(</span><span class="n">t</span><span class="o">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">eta_0</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">cosine_decay</span><span class="o">(</span><span class="n">t</span><span class="o">-</span><span class="n">T_warm</span><span class="o">)</span>
+<span class="n">EMA</span><span class="w"> </span><span class="n">decay</span><span class="o">:</span><span class="w"> </span><span class="n">beta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.99</span><span class="w"> </span><span class="o">(</span><span class="err">或</span><span class="mf">0.999</span><span class="o">)</span>
+<span class="n">Gradient</span><span class="w"> </span><span class="n">clip</span><span class="o">:</span><span class="w"> </span><span class="n">max_norm</span><span class="w"> </span><span class="o">(</span><span class="err">或</span><span class="n">adaptive</span><span class="o">)</span>
+<span class="n">LayerNorm</span><span class="o">:</span><span class="w"> </span><span class="err">启用</span>
+</code></pre></div>
+
+<p><strong>阶段4: 评估</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="err">使用</span><span class="n">EMA参数</span><span class="o">:</span><span class="w"> </span><span class="n">theta_ema</span>
+<span class="n">Dropout</span><span class="o">:</span><span class="w"> </span><span class="err">关闭</span>
+<span class="n">BatchNorm</span><span class="o">:</span><span class="w"> </span><span class="err">使用训练统计</span><span class="w"> </span><span class="o">(</span><span class="err">如果</span><span class="n">BN存在</span><span class="o">)</span>
+</code></pre></div>
+
+<p><strong>代码框架</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">TrainingLoop</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">optimizer</span><span class="p">,</span> <span class="n">ema_decay</span><span class="o">=</span><span class="mf">0.999</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">model</span> <span class="o">=</span> <span class="n">model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">optimizer</span> <span class="o">=</span> <span class="n">optimizer</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ema_model</span> <span class="o">=</span> <span class="n">EMA</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">decay</span><span class="o">=</span><span class="n">ema_decay</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">train_step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">batch</span><span class="p">,</span> <span class="n">step</span><span class="p">,</span> <span class="n">total_steps</span><span class="p">):</span>
+        <span class="c1"># 计算学习率</span>
+        <span class="n">warmup_steps</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="mf">0.1</span> <span class="o">*</span> <span class="n">total_steps</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">step</span> <span class="o">&lt;</span> <span class="n">warmup_steps</span><span class="p">:</span>
+            <span class="n">lr</span> <span class="o">=</span> <span class="n">lr_base</span> <span class="o">*</span> <span class="p">(</span><span class="n">step</span> <span class="o">/</span> <span class="n">warmup_steps</span><span class="p">)</span>
+            <span class="n">beta</span> <span class="o">=</span> <span class="mf">0.99</span> <span class="o">*</span> <span class="p">(</span><span class="n">step</span> <span class="o">/</span> <span class="n">warmup_steps</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">lr</span> <span class="o">=</span> <span class="n">lr_base</span> <span class="o">*</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">cos</span><span class="p">(</span><span class="n">pi</span><span class="o">*</span><span class="p">(</span><span class="n">step</span><span class="o">-</span><span class="n">warmup_steps</span><span class="p">)</span><span class="o">/</span><span class="p">(</span><span class="n">total_steps</span><span class="o">-</span><span class="n">warmup_steps</span><span class="p">)))</span>
+            <span class="n">beta</span> <span class="o">=</span> <span class="mf">0.999</span>
+
+        <span class="c1"># 更新优化器学习率</span>
+        <span class="k">for</span> <span class="n">param_group</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizer</span><span class="o">.</span><span class="n">param_groups</span><span class="p">:</span>
+            <span class="n">param_group</span><span class="p">[</span><span class="s1">&#39;lr&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">lr</span>
+
+        <span class="c1"># 前向+反向</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
+        <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+        <span class="c1"># 梯度裁剪</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">clip_grad_norm_</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">max_norm</span><span class="o">=</span><span class="n">sqrt</span><span class="p">(</span><span class="n">param_dim</span><span class="p">))</span>
+
+        <span class="c1"># 优化器步</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+
+        <span class="c1"># EMA更新(带动态decay)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ema_model</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">decay</span><span class="o">=</span><span class="n">beta</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">evaluate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val_loader</span><span class="p">):</span>
+        <span class="c1"># 切换到EMA参数</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ema_model</span><span class="o">.</span><span class="n">apply_shadow</span><span class="p">()</span>
+
+        <span class="c1"># 评估</span>
+        <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+            <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">val_loader</span><span class="p">:</span>
+                <span class="n">predictions</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">model</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
+                <span class="c1"># 计算指标</span>
+
+        <span class="c1"># 切换回训练参数</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ema_model</span><span class="o">.</span><span class="n">restore</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>超参数快速查表</strong>:
+| 任务 | Batch Size | Learning Rate | EMA Decay | Warmup |
+|------|-----------|---------------|-----------|--------|
+| ImageNet分类 | 256 | 0.1 | 0.99 | 5 epochs |
+| BERT预训练 | 256 | 1e-4 | 0.999 | 10k步 |
+| Diffusion Model | 128 | 1e-4 | 0.9999 | 1k步 |
+| ViT微调 | 512 | 5e-5 | 0.999 | 1% steps |</p>
+<p><strong>关键要点</strong>:
+1. <strong>Warmup阶段不要用大$\beta$</strong> (用0~0.99线性增长)
+2. <strong>主训练阶段固定$\beta$</strong> (根据任务选择)
+3. <strong>评估时务必用EMA参数</strong>
+4. <strong>大batch size用小$\beta$</strong>, 小batch size用大$\beta$
+5. <strong>生成模型用最大$\beta$</strong> (0.9999+)</p>
+        </div>
+    </div>
+</body>
+</html>

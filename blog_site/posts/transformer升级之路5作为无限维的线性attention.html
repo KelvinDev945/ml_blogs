@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer升级之路：5、作为无限维的线性Attention</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>Transformer升级之路：5、作为无限维的线性Attention</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 11.5 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8601">https://spaces.ac.cn/archives/8601</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在<a href="/archives/7921">《Performer：用随机投影将Attention的复杂度线性化》</a>中我们了解到Google提出的Performer模型，它提出了一种随机投影方案，可以将标准Attention转化为线性Attention，并保持一定的近似。理论上来说，只要投影的维度足够大，那么可以足够近似标准Attention。换句话说，标准Attention可以视作一个无限维的线性Attention。</p>
+<p>本文将介绍笔者构思的另外两种将标准Attention转换为无限维线性Attention的思路，不同于Performer的随机投影，笔者构思的这两种方案都是确定性的，并且能比较方便地感知近似程度。</p>
+<h2 id="_1">简要介绍</h2>
+<p>关于标准Attention和线性Attention，这里就不多做介绍了，还不了解的读者可以参考笔者之前的文章<a href="/archives/7546">《线性Attention的探索：Attention必须有个Softmax吗？》</a>和<a href="/archives/8338">《Transformer升级之路：3、从Performer到线性Attention》</a>。简单来说，标准Attention的计算方式为<br />
+\begin{equation}a_{i,j}=\frac{e^{\boldsymbol{q}<em i_j="i,j">i\cdot \boldsymbol{k}_j}}{\sum\limits_j e^{\boldsymbol{q}_i\cdot \boldsymbol{k}_j}}\end{equation}<br />
+而线性Attention的计算方式为<br />
+\begin{equation}a</em>}=\frac{\phi(\boldsymbol{q}_i)\cdot \varphi(\boldsymbol{k}_j)}{\sum\limits_j \phi(\boldsymbol{q}_i)\cdot \varphi(\boldsymbol{k}_j)}\end{equation<br />
+所以说，要将标准Attention（近似地）变换为线性Attention，那么一般情况下就要找到变换$\phi,\varphi$，使得有近似<br />
+\begin{equation}\phi(\boldsymbol{q})\cdot \varphi(\boldsymbol{k})\approx e^{\boldsymbol{q}\cdot \boldsymbol{k}}\end{equation}<br />
+这时候$e^{\boldsymbol{q}\cdot \boldsymbol{k}}$也就是核方法中的“核函数”。</p>
+<h2 id="_2">随机投影</h2>
+<p>Performer找到了第一个比较实用的随机投影变换方案，本质上来说，它基于以下积分：<br />
+\begin{equation}\begin{aligned}<br />
+e^{\boldsymbol{q}\cdot \boldsymbol{k}} =&amp;\,\frac{1}{(2\pi)^{d/2}}\int e^{-\Vert\boldsymbol{\omega}-\boldsymbol{q}-\boldsymbol{k}\Vert^2 / 2 + \boldsymbol{q}\cdot \boldsymbol{k}}d\boldsymbol{\omega}\\\<br />
+=&amp;\,\frac{1}{(2\pi)^{d/2}}\int e^{-\Vert\boldsymbol{\omega}\Vert^2 / 2}\times e^{\boldsymbol{\omega}\cdot \boldsymbol{q}-\Vert \boldsymbol{q}\Vert^2 / 2} \times e^{\boldsymbol{\omega}\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2}d\boldsymbol{\omega}<br />
+\\\<br />
+\end{aligned}\end{equation}<br />
+得到<br />
+\begin{equation}\begin{aligned}<br />
+e^{\boldsymbol{q}\cdot \boldsymbol{k}}&amp;=\mathbb{E}<em _phi_boldsymbol_q="\phi(\boldsymbol{q">{\boldsymbol{\omega}\sim \mathcal{N}(\boldsymbol{\omega};0,\boldsymbol{1}_d)}\left[e^{\boldsymbol{\omega}\cdot \boldsymbol{q}-\Vert \boldsymbol{q}\Vert^2 / 2} \times e^{\boldsymbol{\omega}\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2}\right]\\\[6pt]<br />
+&amp;\approx\underbrace{\frac{1}{\sqrt{m}}\begin{pmatrix}e^{\boldsymbol{\omega}_1\cdot \boldsymbol{q}-\Vert \boldsymbol{q}\Vert^2 / 2} \\\<br />
+e^{\boldsymbol{\omega}_2\cdot \boldsymbol{q}-\Vert \boldsymbol{q}\Vert^2 / 2}\\\<br />
+\vdots\\\<br />
+e^{\boldsymbol{\omega}_m\cdot \boldsymbol{q}-\Vert \boldsymbol{q}\Vert^2 / 2} \end{pmatrix}}</em>})<br />
+\cdot \underbrace{\frac{1}{\sqrt{m}}\begin{pmatrix}e^{\boldsymbol{\omega}<em _varphi_boldsymbol_k="\varphi(\boldsymbol{k">1\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2} \\\<br />
+e^{\boldsymbol{\omega}_2\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2}\\\<br />
+\vdots\\\<br />
+e^{\boldsymbol{\omega}_m\cdot \boldsymbol{k}-\Vert \boldsymbol{k}\Vert^2 / 2} \end{pmatrix}}</em>})<br />
+\end{aligned}\end{equation}<br />
+其中$\boldsymbol{\omega}_1,\boldsymbol{\omega}_2,\cdots,\boldsymbol{\omega}_m\sim \mathcal{N}(\boldsymbol{\omega};0,\boldsymbol{1}_d)$。这样我们就通过随机投影的思想，将两个$d$维向量的内积指数，近似地转化为了两个$m$维向量的内积，并且$m\to\infty$时，两者理论上是相等的。</p>
+<p>上述随机投影的方案还是比较巧妙的，不容易想到。下面介绍笔者构思的两种方案，相对来说更容易理解一些，尤其是对于熟悉核函数的读者来说，可能扫一眼就能理解了。</p>
+<h2 id="_3">泰勒展开</h2>
+<p>笔者的第一个思路，是基于泰勒展开的：<br />
+\begin{equation}e^{\boldsymbol{q}\cdot \boldsymbol{k}} = \sum_{m=0}^{\infty} \frac{(\boldsymbol{q}\cdot \boldsymbol{k})^m}{m!}\end{equation}<br />
+截断到前$n+1$项，那么就得到关于$\boldsymbol{q}\cdot \boldsymbol{k}$的一个$n$次多项式：<br />
+\begin{equation}e^{\boldsymbol{q}\cdot \boldsymbol{k}} \approx 1 + \boldsymbol{q}\cdot \boldsymbol{k} + \frac{1}{2}(\boldsymbol{q}\cdot \boldsymbol{k})^2 + \cdots + \frac{1}{n!}(\boldsymbol{q}\cdot \boldsymbol{k})^n\end{equation}<br />
+这其实就是一个“多项式核函数”，注意到我们有：<br />
+\begin{equation}\begin{aligned}<br />
+(\boldsymbol{q}\cdot \boldsymbol{k})^m =&amp;\, \left(\sum_i q_i k_i\right)^m = \left(\sum_{i_1} q_{i_1} k_{i_1}\right)\cdots\left(\sum_{i_m} q_{i_m} k_{i_m}\right) \\\<br />
+=&amp;\, \sum_{i_1,\cdots,i_m} (q_{i_1}\cdots q_{i_m}) (k_{i_1}\cdots k_{i_m})<br />
+\end{aligned}\end{equation}<br />
+如果我们将$q_{i_1}\cdots q_{i_m},k_{i_1}\cdots k_{i_m}$分别看成一个$d^m$维的大向量，那么$(\boldsymbol{q}\cdot \boldsymbol{k})^m$就是这两个大向量的内积。事实上，由若干个向量得到“大向量”的这步运算，我们称为向量的“<a href="https://en.wikipedia.org/wiki/Outer_product">外积</a>”，也叫“张量积”，一般也记为$\otimes$。此时<br />
+\begin{equation}<br />
+\frac{1}{m!}(\boldsymbol{q}\cdot \boldsymbol{k})^m = \frac{1}{m!}\underbrace{(\boldsymbol{q}\otimes\cdots\otimes\boldsymbol{q})}<em m_text_个="m\text{个">{m\text{个}\boldsymbol{q}}\cdot\underbrace{(\boldsymbol{k}\otimes\cdots\otimes\boldsymbol{k})}</em>\right)}\boldsymbol{k}} = \left(\frac{\otimes^m\boldsymbol{q}}{\sqrt{m!}}\right)\cdot\left(\frac{\otimes^m\boldsymbol{k}}{\sqrt{m!}<br />
+\end{equation}<br />
+这里$\otimes^m\boldsymbol{q},\otimes^m\boldsymbol{k}$是$m$个$\boldsymbol{q},\boldsymbol{k}$连着外积（外积的$m$次幂）的简写。利用这个结果，我们有<br />
+\begin{equation}<br />
+e^{\boldsymbol{q}\cdot \boldsymbol{k}}\approx \sum_{m=0}^n \left(\frac{\otimes^m\boldsymbol{q}}{\sqrt{m!}}\right)\cdot\left(\frac{\otimes^m\boldsymbol{k}}{\sqrt{m!}}\right) =\underbrace{\begin{pmatrix} 1 \\\<br />
+\boldsymbol{q}\\\<br />
+\frac{\otimes^2\boldsymbol{q}}{\sqrt{2}} \\\<br />
+\vdots\\\<br />
+\frac{\otimes^n\boldsymbol{q}}{\sqrt{n!}}\end{pmatrix}}<em _varphi_boldsymbol_k="\varphi(\boldsymbol{k">{\phi(\boldsymbol{q})}<br />
+\cdot \underbrace{\begin{pmatrix} 1 \\\<br />
+\boldsymbol{k}\\\<br />
+\frac{\otimes^2\boldsymbol{k}}{\sqrt{2}} \\\<br />
+\vdots\\\<br />
+\frac{\otimes^n\boldsymbol{k}}{\sqrt{n!}}\end{pmatrix}}</em>})<br />
+\end{equation}<br />
+这就完成了标准Attention到线性Attention的转换。</p>
+<h2 id="_4">指数定义</h2>
+<p>相比Performer的随机投影，上述基于泰勒展开的思路应该说更好理解。不过还有一种比泰勒展开更简单直接的思路，那就是利用自然指数的定义式：<br />
+\begin{equation}e^x = \lim_{n\to\infty} \left(1+\frac{x}{n}\right)^n\end{equation}<br />
+因此，选取适当的$n$，我们就有<br />
+\begin{equation}e^{\boldsymbol{q}\cdot \boldsymbol{k}} \approx \left(1+\frac{{\boldsymbol{q}\cdot \boldsymbol{k}}}{n}\right)^n = \left(\begin{pmatrix} 1 \\\ \frac{\boldsymbol{q}}{\sqrt{n}}\end{pmatrix} \cdot \begin{pmatrix}1 \\\ \frac{\boldsymbol{k}}{\sqrt{n}}\end{pmatrix}\right)^n \end{equation}<br />
+结合前一节的多项式核函数的转化结果，我们有<br />
+\begin{equation}e^{\boldsymbol{q}\cdot \boldsymbol{k}} \approx \underbrace{\left(\otimes^n\begin{pmatrix} 1 \\\ \frac{\boldsymbol{q}}{\sqrt{n}}\end{pmatrix}\right)}<em _varphi_boldsymbol_k="\varphi(\boldsymbol{k">{\phi(\boldsymbol{q})} \cdot \underbrace{\left(\otimes^n\begin{pmatrix}1 \\\ \frac{\boldsymbol{k}}{\sqrt{n}}\end{pmatrix}\right)}</em>})}\end{equation<br />
+这可能是将标准Attention转换为线性Attention的最简单直接的方案。</p>
+<h2 id="_5">结果分析</h2>
+<p>要说实用价值，后两个确定性的方案远不如Performer的随机投影方案，因为随机投影的输出维度可以比较灵活地控制，而两个确定性的方案输出纬度则是$d^n$级别的，这个通常都远远大于序列长度本身了，所以用它们来做线性Attention效率基本比标准的Attention还差。</p>
+<p>不过，从理论上来讲，后两种方案提供了更为简明便捷的思路，让我们将标准Attention跟无限维的线性Attention等价起来。这种等价性通常能帮助我们更好地理解Attention机制，其中最直接的便是关于Attention的秩的理解。</p>
+<p>做过线性Attention研究的读者应该知道，如果用线性Attention做双向注意力任务（比如MLM），那么效果下降会很明显，这是因为线性Attention的$\phi(\boldsymbol{Q}),\varphi(\boldsymbol{K})\in\mathbb{R}^{n\times d}$（$d$是每个head的head_size），一般有$n \gg d$，所以$\phi(\boldsymbol{Q})\varphi(\boldsymbol{K})^{\top}$得到的$n\times n$的Attention矩阵的秩顶多为$d$。这就是线性Attention的低秩问题，低秩限制了线性Attention的表达能力。</p>
+<p>相反，前述介绍的三种变换，都告诉我们标准Attention可以视为无限维的线性Attention，所以标准Attention的秩理论上就不受限于$d$，因此同样参数量的标准Attention表现往往表现得比线性Attention好。在<a href="/archives/8338">《Transformer升级之路：3、从Performer到线性Attention》</a>中我们也说过，如果要将标准Attention切换为线型Attention，那么$d$也要相应地进行放大，才能要效果保持一定程度上的近似。</p>
+<h2 id="_6">文章小结</h2>
+<p>本文介绍了三种将标准Attention视为无限维线性Attention的理解，这些不同的视角能让我们将标准Attention与线性Attention联系起来，从多个角度更全面地理解Attention机制。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8601">https://spaces.ac.cn/archives/8601</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Aug. 06, 2021). 《Transformer升级之路：5、作为无限维的线性Attention 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8601">https://spaces.ac.cn/archives/8601</a></p>
+<p>@online{kexuefm-8601,<br />
+title={Transformer升级之路：5、作为无限维的线性Attention},<br />
+author={苏剑林},<br />
+year={2021},<br />
+month={Aug},<br />
+url={\url{https://spaces.ac.cn/archives/8601}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

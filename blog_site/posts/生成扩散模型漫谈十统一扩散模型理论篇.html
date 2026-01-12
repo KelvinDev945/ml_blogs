@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成扩散模型漫谈（十）：统一扩散模型（理论篇）</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>生成扩散模型漫谈（十）：统一扩散模型（理论篇）</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 48.3 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9262">https://spaces.ac.cn/archives/9262</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>老读者也许会发现，相比之前的更新频率，这篇文章可谓是“姗姗来迟”，因为这篇文章“想得太多”了。</p>
+<p>通过前面九篇文章，我们已经对生成扩散模型做了一个相对全面的介绍。虽然理论内容很多，但我们可以发现，前面介绍的扩散模型处理的都是连续型对象，并且都是基于正态噪声来构建前向过程。而“想得太多”的本文，则希望能够构建一个能突破以上限制的扩散模型统一框架（Unified Diffusion Model，UDM）：</p>
+<blockquote>
+<p>1、不限对象类型（可以是连续型$\boldsymbol{x}$，也可以是离散型的$\boldsymbol{x}$）；</p>
+<p>2、不限前向过程（可以用加噪、模糊、遮掩、删减等各种变换构建前向过程）；</p>
+<p>3、不限时间类型（可以是离散型的$t$，也可以是连续型的$t$）；</p>
+<p>4、包含已有结果（可以推出前面的DDPM、DDIM、SDE、ODE等结果）。</p>
+</blockquote>
+<p>这是不是太过“异想天开”了？有没有那么理想的框架？本文就来尝试一下。</p>
+<h2 id="_1">前向过程</h2>
+<p>从前面的一系列介绍中，我们知道构建一个扩散模型包含“前向过程”、“反向过程”、“训练目标”三个部分，这一节我们来分析“前向过程”。</p>
+<p>在最初的<a href="/archives/9119">DDPM</a>中，我们是通过$p(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>)$来描述前向过程的；后来，随着<a href="/archives/9181">DDIM</a>等工作的发表，我们逐渐意识到，扩散模型的训练目标和生成过程，都跟$p(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>})$没直接联系，反而跟$p(\boldsymbol{x<em t-1="t-1">t|\boldsymbol{x}_0)$的联系更为直接，而从$p(\boldsymbol{x}_t|\boldsymbol{x}</em>_0)$视为前向过程。})$推导$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$往往也比较困难。因此，一个更为实用的操作就是直接以$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$为出发点，也就是将$p(\boldsymbol{x}_t|\boldsymbol{x</p>
+<p>$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$的最直接作用，就是用来构建扩散模型的训练数据，因此$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$的最基本要求是便于采样。为此，我们可以通过重参数<br />
+\begin{equation}\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})\label{eq:re-param}\end{equation}<br />
+其中$\boldsymbol{\mathcal{F}}$是关于$t,\boldsymbol{x}_0,\boldsymbol{\varepsilon}$的确定性函数，$\boldsymbol{\varepsilon}$是采样自某个标准分布$q(\boldsymbol{\varepsilon})$的随机变量，常见选择是标准正态分布，但其他分布通常也是可行的。可以想像，该形式包含了足够丰富的$\boldsymbol{x}_0$到$\boldsymbol{x}_t$的变换，它对$\boldsymbol{x}_0$、$\boldsymbol{x}_t$的数据类型也没有约束。一般情况下，唯一的限制是$t$越小，$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})$所包含的$\boldsymbol{x}_0$的信息越完整，换言之用$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})$重构$\boldsymbol{x}_0$越容易，反之$t$越大重构就越困难，直到某个上界$T$时，$\boldsymbol{\mathcal{F}}_T(\boldsymbol{x}_0,\boldsymbol{\varepsilon})$所包含的$\boldsymbol{x}_0$的信息几乎消失，重构几乎不能完成。</p>
+<h2 id="_2">反向过程</h2>
+<p>扩散模型的反向过程是通过多步迭代来逐渐生成逼真的数据，其关键就是概率分布$p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t)$。一般地，我们有<br />
+\begin{equation}p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t) = \int p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0) p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0\label{eq:p-factor}\end{equation}<br />
+如果$\boldsymbol{x}_0$是离散型数据，将积分改为求和即可。$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)$的基本要求也是便于采样，所以我们要求$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0)$和$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$也要便于采样，这样一来，我们就可以通过下述流程完成$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)$的采样：<br />
+\begin{equation}\hat{\boldsymbol{x}}_0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)\quad \&amp; \quad \boldsymbol{x}</em>}\sim p(\boldsymbol{x<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0=\hat{\boldsymbol{x}}_0) \quad \Rightarrow \quad \boldsymbol{x}</em>}\sim p(\boldsymbol{x<em t-1="t-1">{t-1}|\boldsymbol{x}_t)\end{equation}<br />
+从这个分解来看，每一步$\boldsymbol{x}_t\to \boldsymbol{x}</em>$的采样，实际上包含了两个子步骤：</p>
+<blockquote>
+<p>1、预估：由$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$对$\boldsymbol{x}_0$做一个简单的“预估”；</p>
+<p>2、修正：由$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$整合预估结果，将估值推前一小步。</p>
+</blockquote>
+<p>所以，扩散模型的反向过程就是一个反复的“预估-修正”过程，通过不断地整合$\boldsymbol{x}<em t-1="t-1">t\to \boldsymbol{x}_0$的预估结果，得到逐步推进的修正序列$\boldsymbol{x}_T\to\cdots\to\boldsymbol{x}_t\to \boldsymbol{x}</em>_0$，将原本难以一步到位的生成分解为了多个步骤来完成。}\to\cdots\to \boldsymbol{x</p>
+<h2 id="_3">训练目标</h2>
+<p>当然，目前的反向过程还只是“纸上谈兵”，因为对于$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$和$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$我们还一无所知。这一节我们先来讨论$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$。</p>
+<p>很明显，$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$就是用$\boldsymbol{x}_t$来预测$\boldsymbol{x}_0$的概率模型，我们需要用一个“方便采样且容易计算”的分布去估计它。当$\boldsymbol{x}_0$是连续型数据时，我们的选择并不多，通常就是均值可训练的正态分布<br />
+\begin{equation}p(\boldsymbol{x}_0|\boldsymbol{x}_t) \approx q(\boldsymbol{x}_0|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{x}_0;\boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t),\bar{\sigma}_t^2 \boldsymbol{I})\label{eq:normal}\end{equation}<br />
+为了降低训练难度，我们一般不将方差$\bar{\sigma}_t^2$视为可训练参数，而是用<a href="/archives/9245">《生成扩散模型漫谈（七）：最优扩散方差估计（上）》</a>的方式去事后估计它。另一方面，当$\boldsymbol{x}_0$是离散型数据时，我们可以用自回归或者非自回归的语言模型（Seq2Seq）来建模，离散型的概率建模和采样相对来说都更加容易些。</p>
+<p>有了近似分布$q(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">0|\boldsymbol{x}_t)$的具体形式后，训练目标就很简单了，比较自然的选择是交叉熵：<br />
+\begin{equation}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim \tilde{p}(\boldsymbol{x}_0),\boldsymbol{x}_t\sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)}[-\log q(\boldsymbol{x}_0|\boldsymbol{x}_t)] = \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim \tilde{p}(\boldsymbol{x}_0),\boldsymbol{\varepsilon}\sim q(\boldsymbol{\varepsilon})}[-\log q(\boldsymbol{x}_0|\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon}))]\end{equation}<br />
+这就解决了$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$的估计和训练目标的设计问题。如果$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$是式$\eqref{eq:normal}$的标准正态分布，那么省去常数后的结果就是<br />
+\begin{equation}\mathbb{E}</em>}_0\sim \tilde{p}(\boldsymbol{x}_0),\boldsymbol{\varepsilon}\sim q(\boldsymbol{\varepsilon})}\left[\frac{1}{2\bar{\sigma}_t^2}\Vert\boldsymbol{x}_0 - \boldsymbol{\mathcal{G}}_t(\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon}))\Vert^2\right]\end{equation</p>
+<h2 id="_4">条件概率</h2>
+<p>现在就剩下$p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$了，它是给定$\boldsymbol{x}_t, \boldsymbol{x}_0$来预测$\boldsymbol{x}</em>$的概率。这个概率分布也有一定的设计空间，但前提是满足边缘分布的恒等式<br />
+\begin{equation}\int p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)p(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x}_t= p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">0)\label{eq:margin}\end{equation}<br />
+很显然，满足这个等式的一个最简单选择是直接取<br />
+\begin{equation}p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0) = p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">0)\end{equation}<br />
+即让$p(\boldsymbol{x}</em>_t$无关。这样的扩散模型，可以由下面两个图描述（以$T=5$为例）：  }|\boldsymbol{x}_t, \boldsymbol{x}_0)$跟$\boldsymbol{x</p>
+<p><a href="/usr/uploads/2022/09/2096401240.png" title="点击查看原图"><img alt="前向过程和训练目标示意图" src="/usr/uploads/2022/09/2096401240.png" /></a></p>
+<p>前向过程和训练目标示意图</p>
+<p><a href="/usr/uploads/2022/09/429962088.png" title="点击查看原图"><img alt="最简单选择下的反向过程" src="/usr/uploads/2022/09/429962088.png" /></a></p>
+<p>最简单选择下的反向过程</p>
+<p>这个极简的选择在理论上没有问题，然而实际上的效果通常不会太好，因此此时$\boldsymbol{x}<em t-1="t-1">{t-1}$完全依赖于$\boldsymbol{x}_0$，而$\boldsymbol{x}_0$本来代表的是原始真实样本，在反向过程中我们则只能通过近似分布$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$来近似采样，而$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$通常是不够准确的，因此误差会持续累积。另外，$p(\boldsymbol{x}</em>_0$信息，从而使得生成效果变差。}|\boldsymbol{x}_0)$在采样过程中会带有噪声，这个噪声可能会严重破坏刚刚预估出来的$\hat{\boldsymbol{x}</p>
+<p>不过很幸运，大多数情况下，我们都可以基于$p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">0)$这个简单的选择来衍生出一个新的结果。根据式$\eqref{eq:re-param}$，我们知道<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{x}</em>} \sim p(\boldsymbol{x<em t-1="t-1">{t-1}|\boldsymbol{x}_0)\quad\Leftrightarrow&amp;\,\quad\boldsymbol{x}</em>} = \boldsymbol{\mathcal{F}<em t-1="t-1">{t-1}(\boldsymbol{x}_0,\boldsymbol{\varepsilon}) \\\<br />
+\boldsymbol{x}_t \sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)\quad\Leftrightarrow&amp;\,\quad\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})<br />
+\end{aligned}\end{equation}<br />
+假定$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})$关于$\boldsymbol{\varepsilon}$是可逆的，那么可以解出$\boldsymbol{\varepsilon} = \boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0,\boldsymbol{x}_t)$，此时可以用解出来的这个$\boldsymbol{\varepsilon}$替换掉$\boldsymbol{\mathcal{F}}</em>}(\boldsymbol{x<em t-1="t-1">0,\boldsymbol{\varepsilon})$中的$\boldsymbol{\varepsilon}$，得到<br />
+\begin{equation}\boldsymbol{x}</em>} = \boldsymbol{\mathcal{F}<em t-1="t-1">{t-1}(\boldsymbol{x}_0,\boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0,\boldsymbol{x}_t))\end{equation}<br />
+这就相当于<br />
+\begin{equation}p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0) = \delta\big(\boldsymbol{x}</em>} - \boldsymbol{\mathcal{F}<em t-1="t-1">{t-1}(\boldsymbol{x}_0,\boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0,\boldsymbol{x}_t))\big)\end{equation}<br />
+是一个同时依赖于$\boldsymbol{x}_t, \boldsymbol{x}_0$的$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0)$设计，$\boldsymbol{x}_t$分摊了$\boldsymbol{x}</em>_0$的部分依赖，并且消除了噪声，使得每一步生成的“进展”可以稳定地累积下来，因此用这个设计的反向过程往往有更好的效果。}$对$\boldsymbol{x</p>
+<p>此外，如果是$q(\boldsymbol{\varepsilon})$是标准正态分布，那么还可以得到更一般的结果，因为由正态分布的叠加性，我们可以得到<br />
+\begin{equation}\boldsymbol{x}<em t-1="t-1">{t-1} = \boldsymbol{\mathcal{F}}</em>}(\boldsymbol{x<em t-1="t-1">0,\boldsymbol{\varepsilon})\quad\Leftrightarrow\quad\boldsymbol{x}</em>} = \boldsymbol{\mathcal{F}<em t-1="t-1">{t-1}(\boldsymbol{x}_0,\sqrt{1 - \tilde{\sigma}_t^2}\boldsymbol{\varepsilon}_1 + \tilde{\sigma}_t \boldsymbol{\varepsilon}_2)\end{equation}<br />
+这样一来，由$\boldsymbol{x}_0,\boldsymbol{x}_t$解出来的$\boldsymbol{\varepsilon}$可以只用来替换$\boldsymbol{\varepsilon}_1$或$\boldsymbol{\varepsilon}_2$中的一个，最终得到的$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0)$的采样过程就是<br />
+\begin{equation}\quad\boldsymbol{x}</em>} = \boldsymbol{\mathcal{F}}_{t-1}(\boldsymbol{x}_0,\sqrt{1 - \tilde{\sigma}_t^2}\boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0,\boldsymbol{x}_t) + \tilde{\sigma}_t \boldsymbol{\varepsilon})\end{equation</p>
+<h2 id="_5">思考分析</h2>
+<p>至此，统一扩散模型UDM的理论框架已经构建完毕，下一篇文章我们会通过一些具体例子介绍如何从UDM框架推出已有的扩散模型结果，以及进一步得到一些新的结果，这一节我们来对全文的推理做一个思考分析。</p>
+<p>看完全文，相信不少读者是比较懵的，因为本文的结果是建立在笔者前面对扩散模型的所有理解基础上总结出来的一个统一框架，总体的技术不算很难，但是逻辑上并不容易捋清楚。首先，本文的目标是“设计一个统一的扩散模型理论框架”，这个框架能够完成本文开头罗列出来的目标。“设计”的关键是把握住“自由”和“约束”，有一些部分是可以灵活选择的，有一些部分则是带有约束的，不能乱来的。</p>
+<p>如果读者已经对现有生成扩散模型比较熟悉，想必就能领悟到扩散模型的本质思想就是“从破坏中学习建设”，因此“破坏”的方式理论上是可以随意选择的，“建设”则是需要学习的。当然，“破坏”的方式实际上也不是毫无约束，一般来说必须是“渐进式破坏”，这样我们才能学会“渐进式建设”。这样一来，我们就构建了式$\eqref{eq:re-param}$的破坏过程（前向过程），$t$用来描述破坏的进度，$\mathcal{F}$可以用来表示任意破坏方式，对原始数据$\boldsymbol{x}_0$也没有特别限制，至于$\boldsymbol{\varepsilon}$则用来描述破坏过程中可能存在的随机因素。这样，我们就建立了一个最一般的破坏过程。</p>
+<p>至于建设，我们首先给出了分解式$\eqref{eq:p-factor}$，这是概率论本身给出的一个恒等式，我们可以将它理解为一个约束，也可以理解为是一个引导。怎么知道要往式$\eqref{eq:p-factor}$想呢？事后来看，前向过程是一个$\boldsymbol{x}_0\to \boldsymbol{x}_t$的过程，所以反向过程就应该尽量与$\boldsymbol{x}_t\to \boldsymbol{x}_0$联系起来，因此能联想到式$\eqref{eq:p-factor}$。</p>
+<p>分解式$\eqref{eq:p-factor}$包含两个部分，其中$p(\boldsymbol{x}<em t-1="t-1">0|\boldsymbol{x}_t)$已经很明确了，就是用$\boldsymbol{x}_t$来预测$\boldsymbol{x}_0$的概率，这个部分显然已经没有什么化简空间了，只能直接用模型来建模；另一部分$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0)$则是属于“自由设计”的范畴，它要求的话便于采样，其中的“约束”则是由一个恒等式$\eqref{eq:margin}$，这也是概率论本身给出的。至于后面的在这个约束之下去设计$p(\boldsymbol{x}</em>_0)$的过程，确实有些技巧性，这部分没有什么捷径，笔者也是结合已有的扩散模型工作思考了很久，才把这个过程捋清楚的。}|\boldsymbol{x}_t, \boldsymbol{x</p>
+<p>总的来说，设计一个模型的时候，要时刻知道自己要什么（“自由”），这个想要的东西有什么限制（“约束”），在明确“自由”与“约束”的前提下，尽量借鉴已有的工作和所学的理论基础，不断往目标凑近。</p>
+<h2 id="_6">文章小结</h2>
+<p>本文构建了一个新的扩散模型理论框架（Unified Diffusion Model，UDM），理论上它能够包含现有的生活扩散模型结果，并且允许更一般的扩散方式和数据类型。具体的例子我们下一篇文章再介绍。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9262">https://spaces.ac.cn/archives/9262</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Sep. 14, 2022). 《 生成扩散模型漫谈（十）：统一扩散模型（理论篇） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9262">https://spaces.ac.cn/archives/9262</a></p>
+<p>@online{kexuefm-9262,<br />
+title={ 生成扩散模型漫谈（十）：统一扩散模型（理论篇）},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Sep},<br />
+url={\url{https://spaces.ac.cn/archives/9262}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释</h2>
+<p>本节将对统一扩散模型（Unified Diffusion Model, UDM）的理论框架进行详细的数学推导。UDM框架的核心思想是将扩散模型从"基于高斯噪声的连续数据生成"推广到"任意变换、任意数据类型"的统一框架。</p>
+<h3 id="1">1. 核心概念与数学框架</h3>
+<h4 id="11">1.1 重参数化技巧的一般形式</h4>
+<p>在传统DDPM中，前向过程定义为：</p>
+<p>$
+\boldsymbol{x}_t = \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{1}
+$</p>
+<p>这只是一个特例。UDM将其推广为一般形式：</p>
+<p>$
+\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}), \quad \boldsymbol{\varepsilon} \sim q(\boldsymbol{\varepsilon}) \tag{2}
+$</p>
+<p>其中：
+- $\boldsymbol{\mathcal{F}}_t: \mathcal{X} \times \mathcal{E} \to \mathcal{X}$ 是确定性变换函数
+- $t \in [0, T]$ 是扩散时间（可离散可连续）
+- $\boldsymbol{x}_0 \in \mathcal{X}$ 是原始数据（可连续可离散）
+- $\boldsymbol{\varepsilon} \in \mathcal{E}$ 是随机扰动（不限于高斯）
+- $q(\boldsymbol{\varepsilon})$ 是易于采样的先验分布</p>
+<p><strong>关键性质</strong>：
+1. <strong>渐进性</strong>：$t$ 越小，$\boldsymbol{\mathcal{F}}_t$ 保留 $\boldsymbol{x}_0$ 的信息越多
+2. <strong>终态无关性</strong>：当 $t=T$ 时，$\boldsymbol{\mathcal{F}}_T(\boldsymbol{x}_0, \boldsymbol{\varepsilon}) \approx g(\boldsymbol{\varepsilon})$，与 $\boldsymbol{x}_0$ 近似独立</p>
+<h4 id="12">1.2 前向过程的条件分布</h4>
+<p>由式 (2) 可得前向条件分布：</p>
+<p>$
+p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \int \delta(\boldsymbol{x}_t - \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon})) q(\boldsymbol{\varepsilon}) d\boldsymbol{\varepsilon} \tag{3}
+$</p>
+<p>这个积分形式表明，$\boldsymbol{x}_t$ 的分布是通过 $\boldsymbol{\mathcal{F}}_t$ 对噪声分布 $q(\boldsymbol{\varepsilon})$ 的推前（push-forward）得到的。</p>
+<p><strong>例子</strong>：对于传统DDPM，$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}) = \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}$，因此：</p>
+<p>$
+p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0, (1-\bar{\alpha}_t)\boldsymbol{I}) \tag{4}
+$</p>
+<h4 id="13">1.3 边缘分布与数据分布</h4>
+<p>通过对 $\boldsymbol{x}_0$ 求边缘化，可得 $\boldsymbol{x}_t$ 的边缘分布：</p>
+<p>$
+p(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t) = \int p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0) d\boldsymbol{x}_0 = \mathbb{E}</em>
+$}_0 \sim p(\boldsymbol{x}_0), \boldsymbol{\varepsilon} \sim q(\boldsymbol{\varepsilon})}[\delta(\boldsymbol{x}_t - \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}))] \tag{5</p>
+<p>当 $t=T$ 时，由终态无关性，我们有：</p>
+<p>$
+p(\boldsymbol{x}<em _text_prior="\text{prior">T) \approx p</em>
+$}}(\boldsymbol{x}_T) = \int g(\boldsymbol{\varepsilon}) q(\boldsymbol{\varepsilon}) d\boldsymbol{\varepsilon} \tag{6</p>
+<p>这个先验分布 $p_{\text{prior}}$ 应该是易于采样的（通常就是 $q(\boldsymbol{\varepsilon})$ 本身）。</p>
+<h3 id="2">2. 反向过程的理论推导</h3>
+<h4 id="21">2.1 贝叶斯分解的必然性</h4>
+<p>反向过程的目标是从 $\boldsymbol{x}<em t-1="t-1">t$ 生成 $\boldsymbol{x}</em>$。根据概率论基本定理，我们有：</p>
+<p>$
+p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t) = \int p(\boldsymbol{x}</em>}, \boldsymbol{x<em t-1="t-1">0|\boldsymbol{x}_t) d\boldsymbol{x}_0 = \int p(\boldsymbol{x}</em>
+$}|\boldsymbol{x}_t, \boldsymbol{x}_0) p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0 \tag{7</p>
+<p>这个分解不是"选择"，而是概率论的<strong>必然结果</strong>。</p>
+<p><strong>证明</strong>：由条件概率定义：</p>
+<p>$
+\begin{aligned}
+p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t) &amp;= \frac{p(\boldsymbol{x}</em>}, \boldsymbol{x<em t-1="t-1">t)}{p(\boldsymbol{x}_t)} \
+&amp;= \frac{\int p(\boldsymbol{x}</em>}, \boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0) d\boldsymbol{x}_0}{p(\boldsymbol{x}_t)} \
+&amp;= \int \frac{p(\boldsymbol{x}</em>}, \boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0)}{p(\boldsymbol{x}_t, \boldsymbol{x}_0)} \cdot \frac{p(\boldsymbol{x}_t, \boldsymbol{x}_0)}{p(\boldsymbol{x}_t)} d\boldsymbol{x}_0 \
+&amp;= \int p(\boldsymbol{x}</em>_0
+\end{aligned} \tag{8}
+$}|\boldsymbol{x}_t, \boldsymbol{x}_0) p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x</p>
+<h4 id="22-">2.2 预估-修正的两阶段解释</h4>
+<p>从式 (7) 可以看出，反向采样可以分解为两个子步骤：</p>
+<p><strong>步骤1（预估）</strong>：从后验分布 $p(\boldsymbol{x}_0|\boldsymbol{x}_t)$ 中采样 $\hat{\boldsymbol{x}}_0$</p>
+<p>$
+\hat{\boldsymbol{x}}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t) \tag{9}
+$</p>
+<p>根据贝叶斯定理：</p>
+<p>$
+p(\boldsymbol{x}_0|\boldsymbol{x}_t) = \frac{p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0)}{p(\boldsymbol{x}_t)} \propto p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0) \tag{10}
+$</p>
+<p>但这个后验分布通常难以直接计算和采样，因此需要用神经网络 $q(\boldsymbol{x}_0|\boldsymbol{x}_t)$ 来近似。</p>
+<p><strong>步骤2（修正）</strong>：给定预估的 $\hat{\boldsymbol{x}}<em t-1="t-1">0$，从 $p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \hat{\boldsymbol{x}}_0)$ 中采样 $\boldsymbol{x}</em>$</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} \sim p(\boldsymbol{x}</em>
+$}|\boldsymbol{x}_t, \boldsymbol{x}_0 = \hat{\boldsymbol{x}}_0) \tag{11</p>
+<p>这个修正步骤利用了 $\boldsymbol{x}_t$ 的信息来"纠正"预估结果。</p>
+<p><strong>数学验证</strong>：通过蒙特卡洛采样，我们有：</p>
+<p>$
+\begin{aligned}
+\mathbb{E}<em t-1="t-1">{p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)}[f(\boldsymbol{x}</em>})] &amp;= \int f(\boldsymbol{x<em t-1="t-1">{t-1}) p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t) d\boldsymbol{x}</em> \
+&amp;= \int f(\boldsymbol{x}<em t-1="t-1">{t-1}) \int p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0) p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0 d\boldsymbol{x}</em> \
+&amp;\approx \frac{1}{N}\sum_{i=1}^N \int f(\boldsymbol{x}<em t-1="t-1">{t-1}) p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \hat{\boldsymbol{x}}_0^{(i)}) d\boldsymbol{x}</em>
+\end{aligned} \tag{12}
+$</p>
+<p>其中 $\hat{\boldsymbol{x}}_0^{(i)} \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)$。当 $N=1$ 时，这就是我们的两阶段采样过程。</p>
+<h4 id="23">2.3 后验分布的神经网络逼近</h4>
+<p>对于连续数据，我们用高斯分布来逼近后验：</p>
+<p>$
+p(\boldsymbol{x}_0|\boldsymbol{x}_t) \approx q(\boldsymbol{x}_0|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{x}_0; \boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t), \bar{\sigma}_t^2 \boldsymbol{I}) \tag{13}
+$</p>
+<p>其中 $\boldsymbol{\mathcal{G}}_t: \mathcal{X} \to \mathcal{X}$ 是由神经网络参数化的预测函数。</p>
+<p><strong>为什么选择高斯分布？</strong></p>
+<ol>
+<li><strong>计算便利性</strong>：高斯分布有解析形式，易于计算和采样</li>
+<li><strong>最大熵原理</strong>：在给定均值和方差约束下，高斯分布具有最大熵</li>
+<li><strong>中心极限定理</strong>：多个独立随机变量的和趋向于高斯分布</li>
+</ol>
+<p>对于离散数据（如文本），可以用分类分布：</p>
+<p>$
+q(\boldsymbol{x}<em i="1">0|\boldsymbol{x}_t) = \prod</em>
+$}^L \text{Categorical}(x_0^{(i)}; \boldsymbol{\pi}_{t,i}(\boldsymbol{x}_t)) \tag{14</p>
+<p>其中 $L$ 是序列长度，$\boldsymbol{\pi}_{t,i}$ 是第 $i$ 个位置的概率向量。</p>
+<h3 id="3">3. 训练目标的详细推导</h3>
+<h4 id="31">3.1 交叉熵损失的推导</h4>
+<p>训练目标是最小化预测分布 $q(\boldsymbol{x}_0|\boldsymbol{x}_t)$ 与真实后验 $p(\boldsymbol{x}_0|\boldsymbol{x}_t)$ 之间的KL散度：</p>
+<p>$
+\begin{aligned}
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">{\text{KL}} &amp;= \mathbb{E}</em><em _text_KL="\text{KL">t \sim p(\boldsymbol{x}_t)}[D</em>}}(p(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">0|\boldsymbol{x}_t) | q(\boldsymbol{x}_0|\boldsymbol{x}_t))] \
+&amp;= \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\int p(\boldsymbol{x}_0|\boldsymbol{x}_t) \log \frac{p(\boldsymbol{x}_0|\boldsymbol{x}_t)}{q(\boldsymbol{x}_0|\boldsymbol{x}_t)} d\boldsymbol{x}_0\right] \
+&amp;= \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\int p(\boldsymbol{x}_0|\boldsymbol{x}_t) \log p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0\right] - \mathbb{E}</em>_0\right]
+\end{aligned} \tag{15}
+$}_t}\left[\int p(\boldsymbol{x}_0|\boldsymbol{x}_t) \log q(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x</p>
+<p>第一项与参数无关，因此优化等价于最小化交叉熵：</p>
+<p>$
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">{\text{CE}} = -\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\int p(\boldsymbol{x}_0|\boldsymbol{x}_t) \log q(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0\right] = -\mathbb{E}</em>
+$}_t, \boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\log q(\boldsymbol{x}_0|\boldsymbol{x}_t)] \tag{16</p>
+<h4 id="32">3.2 从联合分布到独立采样</h4>
+<p>利用链式法则，我们可以将期望改写为：</p>
+<p>$
+\begin{aligned}
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">{\text{CE}} &amp;= -\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t, \boldsymbol{x}_0 \sim p(\boldsymbol{x}_0, \boldsymbol{x}_t)}[\log q(\boldsymbol{x}_0|\boldsymbol{x}_t)] \
+&amp;= -\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0 \sim p(\boldsymbol{x}_0)}\left[\mathbb{E}</em>_t)]\right]
+\end{aligned} \tag{17}
+$}_t \sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)}[\log q(\boldsymbol{x}_0|\boldsymbol{x</p>
+<p>进一步利用重参数化 (2)，我们有：</p>
+<p>$
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">{\text{CE}} = -\mathbb{E}</em>
+$}_0 \sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\varepsilon} \sim q(\boldsymbol{\varepsilon})}[\log q(\boldsymbol{x}_0|\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}))] \tag{18</p>
+<p>其中 $\tilde{p}(\boldsymbol{x}_0)$ 是训练数据分布。这就是我们实际使用的训练目标。</p>
+<h4 id="33-mse">3.3 高斯逼近下的MSE损失</h4>
+<p>当 $q(\boldsymbol{x}_0|\boldsymbol{x}_t)$ 是高斯分布 (13) 时，负对数似然为：</p>
+<p>$
+\begin{aligned}
+-\log q(\boldsymbol{x}_0|\boldsymbol{x}_t) &amp;= -\log \mathcal{N}(\boldsymbol{x}_0; \boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t), \bar{\sigma}_t^2 \boldsymbol{I}) \
+&amp;= \frac{d}{2}\log(2\pi\bar{\sigma}_t^2) + \frac{1}{2\bar{\sigma}_t^2}|\boldsymbol{x}_0 - \boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t)|^2
+\end{aligned} \tag{19}
+$</p>
+<p>忽略常数项，训练目标简化为MSE损失：</p>
+<p>$
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">{\text{MSE}} = \mathbb{E}</em>
+$}_0 \sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\varepsilon} \sim q(\boldsymbol{\varepsilon})}\left[\frac{1}{2\bar{\sigma}_t^2}|\boldsymbol{x}_0 - \boldsymbol{\mathcal{G}}_t(\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}))|^2\right] \tag{20</p>
+<p><strong>方差选择的影响</strong>：
+- 若 $\bar{\sigma}_t^2$ 视为常数，则它只影响损失的尺度，不影响最优解
+- 若 $\bar{\sigma}_t^2 \propto t$，则早期时刻的损失权重更大
+- 实践中常设 $\bar{\sigma}_t^2 = 1$ 或用Analytic-DPM方法估计</p>
+<h4 id="34">3.4 与噪声预测的等价性</h4>
+<p>在DDPM设定下，我们可以将 $\boldsymbol{x}_0$ 预测转换为噪声预测。由 $\boldsymbol{x}_t = \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}$，解出：</p>
+<p>$
+\boldsymbol{x}_0 = \frac{\boldsymbol{x}_t - \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}}{\sqrt{\bar{\alpha}_t}} \tag{21}
+$</p>
+<p>因此，预测 $\boldsymbol{x}_0$ 等价于预测 $\boldsymbol{\varepsilon}$：</p>
+<p>$
+\boldsymbol{\mathcal{G}}<em>t(\boldsymbol{x}_t) = \frac{\boldsymbol{x}_t - \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}</em>\theta(\boldsymbol{x}_t, t)}{\sqrt{\bar{\alpha}_t}} \tag{22}
+$</p>
+<p>将此代入 (20) 并化简，可得DDPM的噪声预测损失：</p>
+<p>$
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">{\text{noise}} = \mathbb{E}</em><em>0, \boldsymbol{\varepsilon}, t}\left[\frac{1-\bar{\alpha}_t}{2\bar{\sigma}_t^2\bar{\alpha}_t}|\boldsymbol{\varepsilon} - \boldsymbol{\varepsilon}</em>\theta(\boldsymbol{x}_t, t)|^2\right] \tag{23}
+$</p>
+<p>DDPM简化版本设权重为1：</p>
+<p>$
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">{\text{simple}} = \mathbb{E}</em><em>0, \boldsymbol{\varepsilon}, t}[|\boldsymbol{\varepsilon} - \boldsymbol{\varepsilon}</em>\theta(\boldsymbol{x}_t, t)|^2] \tag{24}
+$</p>
+<h3 id="4">4. 条件概率的设计理论</h3>
+<h4 id="41">4.1 边缘分布约束</h4>
+<p>$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$ 的设计必须满足边缘分布恒等式：</p>
+<p>$
+\int p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) p(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x}_t = p(\boldsymbol{x}</em>
+$}|\boldsymbol{x}_0) \tag{25</p>
+<p><strong>证明</strong>：由全概率公式：</p>
+<p>$
+\begin{aligned}
+p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_0) &amp;= \int p(\boldsymbol{x}</em>}, \boldsymbol{x<em t-1="t-1">t|\boldsymbol{x}_0) d\boldsymbol{x}_t \
+&amp;= \int p(\boldsymbol{x}</em>_t
+\end{aligned} \tag{26}
+$}|\boldsymbol{x}_t, \boldsymbol{x}_0) p(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x</p>
+<p>这个约束是<strong>必须</strong>满足的，否则整个概率模型是不一致的。</p>
+<h4 id="42-boldsymbolx_t">4.2 最简设计：独立于 $\boldsymbol{x}_t$</h4>
+<p>最直接的满足约束的方法是设：</p>
+<p>$
+p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = p(\boldsymbol{x}</em>
+$}|\boldsymbol{x}_0) \tag{27</p>
+<p>即 $\boldsymbol{x}_{t-1}$ 在给定 $\boldsymbol{x}_0$ 时与 $\boldsymbol{x}_t$ 条件独立。验证约束：</p>
+<p>$
+\int p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_0) p(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x}_t = p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">0) \int p(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x}_t = p(\boldsymbol{x}</em>
+$}|\boldsymbol{x}_0) \tag{28</p>
+<p><strong>采样过程</strong>：在反向过程中，我们先预测 $\hat{\boldsymbol{x}}<em t-1="t-1">0 \sim q(\boldsymbol{x}_0|\boldsymbol{x}_t)$，然后从 $p(\boldsymbol{x}</em>_0)$ 采样。}|\hat{\boldsymbol{x}</p>
+<p>利用重参数化 (2)：</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} = \boldsymbol{\mathcal{F}}</em>
+$}(\hat{\boldsymbol{x}}_0, \boldsymbol{\varepsilon}), \quad \boldsymbol{\varepsilon} \sim q(\boldsymbol{\varepsilon}) \tag{29</p>
+<p><strong>缺点分析</strong>：</p>
+<ol>
+<li><strong>误差累积</strong>：$\hat{\boldsymbol{x}}<em t-1="t-1">0$ 的预测误差会通过 $\boldsymbol{\mathcal{F}}</em>$}$ 直接传播到 $\boldsymbol{x}_{t-1</li>
+<li><strong>噪声破坏</strong>：新采样的 $\boldsymbol{\varepsilon}$ 可能会破坏 $\hat{\boldsymbol{x}}_0$ 中已有的正确信息</li>
+<li><strong>未利用 $\boldsymbol{x}_t$</strong>：当前观测 $\boldsymbol{x}_t$ 包含的信息被完全忽略</li>
+</ol>
+<h4 id="43">4.3 改进设计：基于可逆性的确定性映射</h4>
+<p>假设 $\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \cdot)$ 关于 $\boldsymbol{\varepsilon}$ 是可逆的，即存在逆映射：</p>
+<p>$
+\boldsymbol{\varepsilon} = \boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0, \boldsymbol{x}_t) \tag{30}
+$</p>
+<p>则从 $\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon})$ 和已知的 $\boldsymbol{x}_0, \boldsymbol{x}_t$ 可以反解出 $\boldsymbol{\varepsilon}$。</p>
+<p><strong>关键思想</strong>：用反解的 $\boldsymbol{\varepsilon}$ 替换 $\boldsymbol{x}_{t-1}$ 采样中的随机噪声，得到：</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} = \boldsymbol{\mathcal{F}}</em>}(\boldsymbol{x<em t-1="t-1" t_to="t\to">0, \boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0, \boldsymbol{x}_t)) \equiv \boldsymbol{\Phi}</em>
+$}(\boldsymbol{x}_0, \boldsymbol{x}_t) \tag{31</p>
+<p>这是一个<strong>确定性</strong>映射！对应的条件分布为狄拉克delta函数：</p>
+<p>$
+p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \delta(\boldsymbol{x}</em>
+$} - \boldsymbol{\Phi}_{t\to t-1}(\boldsymbol{x}_0, \boldsymbol{x}_t)) \tag{32</p>
+<p><strong>验证边缘约束</strong>：</p>
+<p>$
+\begin{aligned}
+\int p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) p(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x}_t
+&amp;= \int \delta(\boldsymbol{x}</em>_t
+\end{aligned} \tag{33}
+$} - \boldsymbol{\Phi}_{t\to t-1}(\boldsymbol{x}_0, \boldsymbol{x}_t)) p(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x</p>
+<p>利用 $\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon})$，作变量替换 $\boldsymbol{x}_t \to \boldsymbol{\varepsilon}$：</p>
+<p>$
+\begin{aligned}
+&amp;= \int \delta(\boldsymbol{x}<em t-1="t-1">{t-1} - \boldsymbol{\mathcal{F}}</em>}(\boldsymbol{x<em t-1="t-1">0, \boldsymbol{\varepsilon})) q(\boldsymbol{\varepsilon}) \left|\det\frac{\partial \boldsymbol{\mathcal{F}}_t}{\partial \boldsymbol{\varepsilon}}\right| d\boldsymbol{\varepsilon} \
+&amp;= p(\boldsymbol{x}</em>_0) \quad \checkmark
+\end{aligned} \tag{34}
+$}|\boldsymbol{x</p>
+<p><strong>优势分析</strong>：</p>
+<ol>
+<li><strong>无新噪声</strong>：不引入新的随机性，避免破坏已预测的信息</li>
+<li><strong>利用 $\boldsymbol{x}_t$</strong>：通过 $\boldsymbol{\mathcal{F}}_t^{-1}$ 提取 $\boldsymbol{x}_t$ 中的有用信息</li>
+<li><strong>误差校正</strong>：$\boldsymbol{x}_t$ 提供的约束可以部分纠正 $\hat{\boldsymbol{x}}_0$ 的误差</li>
+</ol>
+<h4 id="44-ddpm">4.4 DDPM设定下的验证</h4>
+<p>对于DDPM，$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}) = \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}$，逆映射为：</p>
+<p>$
+\boldsymbol{\varepsilon} = \frac{\boldsymbol{x}_t - \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0}{\sqrt{1-\bar{\alpha}_t}} \tag{35}
+$</p>
+<p>代入 $\boldsymbol{\mathcal{F}}_{t-1}$：</p>
+<p>$
+\begin{aligned}
+\boldsymbol{x}<em t-1="t-1">{t-1} &amp;= \sqrt{\bar{\alpha}</em>}}\boldsymbol{x<em t-1="t-1">0 + \sqrt{1-\bar{\alpha}</em>}} \cdot \frac{\boldsymbol{x<em t-1="t-1">t - \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0}{\sqrt{1-\bar{\alpha}_t}} \
+&amp;= \sqrt{\bar{\alpha}</em>}}\boldsymbol{x<em t-1="t-1">0 + \sqrt{\frac{1-\bar{\alpha}</em>_0)
+\end{aligned} \tag{36}
+$}}{1-\bar{\alpha}_t}}(\boldsymbol{x}_t - \sqrt{\bar{\alpha}_t}\boldsymbol{x</p>
+<p>这正是DDIM的确定性采样公式！（对应 $\eta=0$ 的情况）</p>
+<h4 id="45">4.5 一般化设计：插值噪声</h4>
+<p>对于高斯噪声 $\boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$，利用正态分布的可加性：</p>
+<p>$
+\boldsymbol{\varepsilon} \stackrel{d}{=} \sqrt{1-\tilde{\sigma}_t^2} \cdot \boldsymbol{\varepsilon}_1 + \tilde{\sigma}_t \cdot \boldsymbol{\varepsilon}_2, \quad \boldsymbol{\varepsilon}_1, \boldsymbol{\varepsilon}_2 \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \text{ i.i.d.} \tag{37}
+$</p>
+<p>其中 $\tilde{\sigma}_t \in [0, 1]$ 是可调参数。我们可以选择：</p>
+<ul>
+<li>用 $\boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0, \boldsymbol{x}_t)$ 替换 $\boldsymbol{\varepsilon}_1$（"确定性"部分）</li>
+<li>重新采样 $\boldsymbol{\varepsilon}_2 \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$（"随机性"部分）</li>
+</ul>
+<p>得到插值采样公式：</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} = \boldsymbol{\mathcal{F}}</em>
+$}(\boldsymbol{x}_0, \sqrt{1-\tilde{\sigma}_t^2} \cdot \boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0, \boldsymbol{x}_t) + \tilde{\sigma}_t \cdot \boldsymbol{\varepsilon}_2) \tag{38</p>
+<p>对于DDPM，这对应：</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} = \sqrt{\bar{\alpha}</em>}}\boldsymbol{x<em t-1="t-1">0 + \sqrt{1-\bar{\alpha}</em>
+$}} \left(\sqrt{1-\tilde{\sigma}_t^2} \cdot \frac{\boldsymbol{x}_t - \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0}{\sqrt{1-\bar{\alpha}_t}} + \tilde{\sigma}_t \cdot \boldsymbol{\varepsilon}_2\right) \tag{39</p>
+<p>这正是DDIM的一般形式，其中 $\tilde{\sigma}<em t-1="t-1">t = \eta\sqrt{(1-\bar{\alpha}</em>})/(1-\bar{\alpha<em t-1="t-1">t)}\sqrt{1-\bar{\alpha}_t/\bar{\alpha}</em>$。}</p>
+<p><strong>参数选择的影响</strong>：
+- $\tilde{\sigma}<em t-1="t-1">t = 0$：完全确定性（DDIM）
+- $\tilde{\sigma}_t = \sqrt{(1-\bar{\alpha}</em>})/(1-\bar{\alpha<em t-1="t-1">t)}\sqrt{1-\bar{\alpha}_t/\bar{\alpha}</em>$：随机性（DDPM）
+- 中间值：确定性与随机性的折中}</p>
+<h3 id="5-udm">5. UDM框架的统一性分析</h3>
+<h4 id="51-ddpm">5.1 包含DDPM</h4>
+<p><strong>前向过程</strong>：</p>
+<p>$
+\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}) = \sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{40}
+$</p>
+<p><strong>后验逼近</strong>：</p>
+<p>$
+q(\boldsymbol{x}<em>0|\boldsymbol{x}_t) = \mathcal{N}\left(\boldsymbol{x}_0; \frac{\boldsymbol{x}_t - \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}</em>\theta(\boldsymbol{x}_t, t)}{\sqrt{\bar{\alpha}_t}}, \sigma_t^2 \boldsymbol{I}\right) \tag{41}
+$</p>
+<p><strong>条件分布</strong>：DDPM原论文推导的后验为：</p>
+<p>$
+p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}</em>
+$}; \tilde{\boldsymbol{\mu}}_t(\boldsymbol{x}_t, \boldsymbol{x}_0), \tilde{\beta}_t \boldsymbol{I}) \tag{42</p>
+<p>其中：</p>
+<p>$
+\tilde{\boldsymbol{\mu}}<em t-1="t-1">t = \frac{\sqrt{\bar{\alpha}</em>}}\beta_t}{1-\bar{\alpha<em t-1="t-1">t}\boldsymbol{x}_0 + \frac{\sqrt{\alpha_t}(1-\bar{\alpha}</em>})}{1-\bar{\alpha<em t-1="t-1">t}\boldsymbol{x}_t, \quad \tilde{\beta}_t = \frac{1-\bar{\alpha}</em>
+$}}{1-\bar{\alpha}_t}\beta_t \tag{43</p>
+<p>这也满足边缘约束 (25)。</p>
+<h4 id="52-ddim">5.2 包含DDIM</h4>
+<p>DDIM使用确定性映射 (32)，对应UDM的可逆设计。DDIM的ODE采样：</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} = \sqrt{\bar{\alpha}</em>}}\underbrace{\left(\frac{\boldsymbol{x<em>t - \sqrt{1-\bar{\alpha}_t}\boldsymbol{\varepsilon}</em>\theta}{\sqrt{\bar{\alpha}<em _hat_boldsymbol_x="\hat{\boldsymbol{x">t}}\right)}</em>}<em t-1="t-1">0} + \sqrt{1-\bar{\alpha}</em>
+$}}\boldsymbol{\varepsilon}_\theta \tag{44</p>
+<p>可以写成UDM形式：</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} = \boldsymbol{\mathcal{F}}</em>
+$}\left(\hat{\boldsymbol{x}}_0, \frac{\boldsymbol{x}_t - \sqrt{\bar{\alpha}_t}\hat{\boldsymbol{x}}_0}{\sqrt{1-\bar{\alpha}_t}}\right) \tag{45</p>
+<h4 id="53-score-based-sde">5.3 包含Score-based SDE</h4>
+<p>连续时间情况下，令 $\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}) = \alpha_t \boldsymbol{x}_0 + \sigma_t \boldsymbol{\varepsilon}$，当 $\Delta t \to 0$ 时：</p>
+<p>$
+d\boldsymbol{x} = \frac{d\alpha_t}{\alpha_t}\boldsymbol{x} dt + \sqrt{\frac{d\sigma_t^2}{dt} - \frac{2\sigma_t^2 d\alpha_t}{\alpha_t dt}} d\boldsymbol{w} \tag{46}
+$</p>
+<p>这正是VE-SDE或VP-SDE的形式。反向SDE为：</p>
+<p>$
+d\boldsymbol{x} = \left[\frac{d\alpha_t}{\alpha_t}\boldsymbol{x} - \left(\frac{d\sigma_t^2}{dt} - \frac{2\sigma_t^2 d\alpha_t}{\alpha_t dt}\right)\nabla_{\boldsymbol{x}}\log p_t(\boldsymbol{x})\right] dt + \sqrt{\frac{d\sigma_t^2}{dt} - \frac{2\sigma_t^2 d\alpha_t}{\alpha_t dt}} d\bar{\boldsymbol{w}} \tag{47}
+$</p>
+<p>其中 $\nabla_{\boldsymbol{x}}\log p_t(\boldsymbol{x})$ 由 $\boldsymbol{\mathcal{G}}_t$ 逼近。</p>
+<h3 id="6-udm">6. 多角度理解UDM框架</h3>
+<h4 id="61">6.1 信息论视角</h4>
+<p>从信息论角度，扩散过程可以理解为<strong>信息逐步丢失</strong>的过程：</p>
+<p>$
+I(\boldsymbol{x}_0; \boldsymbol{x}_t) = H(\boldsymbol{x}_0) - H(\boldsymbol{x}_0|\boldsymbol{x}_t) \tag{48}
+$</p>
+<p>其中 $I$ 是互信息，$H$ 是熵。随着 $t$ 增大：</p>
+<ul>
+<li>$I(\boldsymbol{x}_0; \boldsymbol{x}_t)$ 递减（信息丢失）</li>
+<li>$H(\boldsymbol{x}_0|\boldsymbol{x}_t)$ 递增（不确定性增大）</li>
+</ul>
+<p>反向过程则是<strong>信息逐步恢复</strong>：通过预测 $p(\boldsymbol{x}<em t-1="t-1">0|\boldsymbol{x}_t)$ 和修正 $p(\boldsymbol{x}</em>}|\boldsymbol{x<em t_="t'">t, \boldsymbol{x}_0)$，逐步减少 $H(\boldsymbol{x}_0|\boldsymbol{x}</em>)$（$t' &lt; t$）。</p>
+<h4 id="62">6.2 函数逼近视角</h4>
+<p>扩散模型可以看作学习一系列<strong>逆映射</strong>：</p>
+<p>$
+\boldsymbol{\mathcal{G}}_t: \boldsymbol{x}_t \mapsto \hat{\boldsymbol{x}}_0 \tag{49}
+$</p>
+<p>训练目标是使 $\boldsymbol{\mathcal{G}}_t \circ \boldsymbol{\mathcal{F}}_t \approx \text{id}$（恒等映射）：</p>
+<p>$
+|\boldsymbol{\mathcal{G}}_t(\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon})) - \boldsymbol{x}_0|^2 \to \min \tag{50}
+$</p>
+<p>这类似于<strong>自编码器</strong>的重构目标，但有两个关键区别：</p>
+<ol>
+<li>编码器 $\boldsymbol{\mathcal{F}}_t$ 是固定的（非学习的）</li>
+<li>对每个时间步 $t$ 都学习一个解码器 $\boldsymbol{\mathcal{G}}_t$</li>
+</ol>
+<h4 id="63">6.3 动力系统视角</h4>
+<p>连续时间UDM定义了一个<strong>时间反转的动力系统</strong>：</p>
+<p>$
+\frac{d\boldsymbol{x}}{dt} = \boldsymbol{v}_t(\boldsymbol{x}) \tag{51}
+$</p>
+<p>其中速度场 $\boldsymbol{v}_t$ 由预测-修正机制定义：</p>
+<p>$
+\boldsymbol{v}<em _boldsymbol_x="\boldsymbol{x">t(\boldsymbol{x}_t) = \mathbb{E}</em><em t-dt="t-dt" t_to="t\to">0 \sim q(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\frac{\partial}{\partial t}\boldsymbol{\Phi}</em>
+$}(\boldsymbol{x}_0, \boldsymbol{x}_t)\right] \tag{52</p>
+<p>这个动力系统的<strong>不变性质</strong>：
+- 轨迹 $\boldsymbol{x}_T \to \boldsymbol{x}_0$ 在分布意义下收敛到数据分布
+- 能量函数 $-\log p_t(\boldsymbol{x}_t)$ 沿轨迹递减</p>
+<h4 id="64">6.4 优化视角</h4>
+<p>每一步采样 $\boldsymbol{x}<em t-1="t-1">t \to \boldsymbol{x}</em>$ 可以看作<strong>近似后验推断</strong>：</p>
+<p>$
+\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">{t-1}^* = \arg\max</em><em t-1="t-1">{t-1}} \log p(\boldsymbol{x}</em>
+$}|\boldsymbol{x}_t) \tag{53</p>
+<p>预测-修正分解近似求解这个优化问题：</p>
+<p>$
+\begin{aligned}
+\hat{\boldsymbol{x}}<em _boldsymbol_x="\boldsymbol{x">0 &amp;= \arg\max</em><em t-1="t-1">0} \log q(\boldsymbol{x}_0|\boldsymbol{x}_t) \quad &amp;\text{（预测：近似MAP估计）} \
+\boldsymbol{x}</em>
+\end{aligned} \tag{54}
+$} &amp;= \mathbb{E}[\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \hat{\boldsymbol{x}}_0] \quad &amp;\text{（修正：条件期望）</p>
+<h3 id="7">7. 实例应用与算法实现</h3>
+<h4 id="71-cold-diffusion">7.1 Cold Diffusion实例</h4>
+<p>Cold Diffusion使用<strong>确定性降质</strong>（如模糊）而非随机噪声：</p>
+<p>$
+\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}) = \text{Blur}_t(\boldsymbol{x}_0), \quad t \in [0, 1] \tag{55}
+$</p>
+<p>其中 $\text{Blur}_t$ 是高斯模糊，$\varepsilon$ 实际上不起作用（可以省略）。</p>
+<p><strong>逆映射</strong>：由于没有随机性，$\boldsymbol{\mathcal{F}}_t$ 不可逆。但我们可以用去模糊网络 $\boldsymbol{\mathcal{G}}_t$ 学习逆映射。</p>
+<p><strong>采样公式</strong>：使用最简设计 (27)：</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} = \text{Blur}</em>
+$}(\hat{\boldsymbol{x}}_0), \quad \hat{\boldsymbol{x}}_0 = \boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t) \tag{56</p>
+<p><strong>训练算法</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="err">输入</span><span class="o">:</span><span class="w"> </span><span class="err">数据集</span><span class="w"> </span><span class="o">{</span><span class="n">x_0</span><span class="o">^(</span><span class="n">i</span><span class="o">)},</span><span class="w"> </span><span class="err">模糊算子</span><span class="w"> </span><span class="n">Blur_t</span>
+<span class="err">初始化</span><span class="o">:</span><span class="w"> </span><span class="err">去模糊网络</span><span class="w"> </span><span class="n">G_θ</span>
+<span class="k">for</span><span class="w"> </span><span class="n">epoch</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="o">,</span><span class="w"> </span><span class="mi">2</span><span class="o">,</span><span class="w"> </span><span class="o">...</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="err">采样</span><span class="w"> </span><span class="n">x_0</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="err">训练数据</span>
+<span class="w">    </span><span class="err">采样</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">Uniform</span><span class="o">[</span><span class="mi">0</span><span class="o">,</span><span class="w"> </span><span class="mi">1</span><span class="o">]</span>
+<span class="w">    </span><span class="err">计算</span><span class="w"> </span><span class="n">x_t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Blur_t</span><span class="o">(</span><span class="n">x_0</span><span class="o">)</span>
+<span class="w">    </span><span class="err">预测</span><span class="w"> </span><span class="n">x</span><span class="err">̂</span><span class="n">_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">G_θ</span><span class="o">(</span><span class="n">x_t</span><span class="o">,</span><span class="w"> </span><span class="n">t</span><span class="o">)</span>
+<span class="w">    </span><span class="err">损失</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">||</span><span class="n">x_0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">x</span><span class="err">̂</span><span class="n">_0</span><span class="o">||</span><span class="err">²</span>
+<span class="w">    </span><span class="err">更新</span><span class="w"> </span><span class="err">θ</span><span class="w"> </span><span class="err">使</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="err">最小</span>
+<span class="n">end</span><span class="w"> </span><span class="k">for</span>
+</code></pre></div>
+
+<h4 id="72-mask-based">7.2 离散扩散实例（Mask-based）</h4>
+<p>对于文本数据，使用<strong>掩码</strong>作为降质：</p>
+<p>$
+\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}) = \boldsymbol{m}_t \odot \boldsymbol{x}_0 + (1 - \boldsymbol{m}_t) \odot [\text{MASK}] \tag{57}
+$</p>
+<p>其中 $\boldsymbol{m}_t \in {0, 1}^L$ 是二值掩码，$\boldsymbol{m}_t$ 中1的比例为 $1-t/T$。</p>
+<p><strong>后验逼近</strong>：使用自回归或非自回归语言模型：</p>
+<p>$
+q(\boldsymbol{x}<em i="1">0|\boldsymbol{x}_t) = \prod</em>}^L q(x_0^{(i)}|\boldsymbol{x<em i="1">t) = \prod</em>
+$}^L \text{Softmax}(\boldsymbol{W}_t \boldsymbol{h}_i(\boldsymbol{x}_t)) \tag{58</p>
+<p><strong>采样公式</strong>：</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} = \boldsymbol{m}</em>} \odot \hat{\boldsymbol{x}<em t-1="t-1">0 + (1 - \boldsymbol{m}</em>
+$}) \odot [\text{MASK}] \tag{59</p>
+<p>其中 $\hat{\boldsymbol{x}}_0 \sim q(\boldsymbol{x}_0|\boldsymbol{x}_t)$。</p>
+<h4 id="73-udm">7.3 通用UDM采样算法</h4>
+<div class="codehilite"><pre><span></span><code><span class="err">算法</span><span class="o">:</span><span class="w"> </span><span class="n">UDM通用采样</span>
+<span class="err">输入</span><span class="o">:</span><span class="w"> </span><span class="err">变换</span><span class="w"> </span><span class="n">F_t</span><span class="o">,</span><span class="w"> </span><span class="err">逆变换</span><span class="w"> </span><span class="n">F_t</span><span class="o">^{-</span><span class="mi">1</span><span class="o">},</span><span class="w"> </span><span class="err">预测网络</span><span class="w"> </span><span class="n">G_θ</span><span class="o">,</span><span class="w"> </span><span class="err">初始</span><span class="w"> </span><span class="n">x_T</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">p_prior</span>
+<span class="err">输出</span><span class="o">:</span><span class="w"> </span><span class="err">生成样本</span><span class="w"> </span><span class="n">x_0</span>
+
+<span class="k">for</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">T</span><span class="o">,</span><span class="w"> </span><span class="n">T</span><span class="o">-</span><span class="mi">1</span><span class="o">,</span><span class="w"> </span><span class="o">...,</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">步骤</span><span class="mi">1</span><span class="o">:</span><span class="w"> </span><span class="err">预测原始数据</span>
+<span class="w">    </span><span class="n">x</span><span class="err">̂</span><span class="n">_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">G_θ</span><span class="o">(</span><span class="n">x_t</span><span class="o">,</span><span class="w"> </span><span class="n">t</span><span class="o">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="err">从</span><span class="w"> </span><span class="n">q</span><span class="o">(</span><span class="n">x_0</span><span class="o">|</span><span class="n">x_t</span><span class="o">)</span><span class="w"> </span><span class="err">采样（或取均值）</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">步骤</span><span class="mi">2</span><span class="n">a</span><span class="o">:</span><span class="w"> </span><span class="err">确定性修正（如果</span><span class="w"> </span><span class="n">F_t</span><span class="w"> </span><span class="err">可逆）</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">F_t</span><span class="w"> </span><span class="err">可逆</span><span class="w"> </span><span class="n">then</span>
+<span class="w">        </span><span class="err">ε</span><span class="n">_recon</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">F_t</span><span class="o">^{-</span><span class="mi">1</span><span class="o">}(</span><span class="n">x</span><span class="err">̂</span><span class="n">_0</span><span class="o">,</span><span class="w"> </span><span class="n">x_t</span><span class="o">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="err">反解噪声</span>
+<span class="w">        </span><span class="n">x_</span><span class="o">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="o">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">F_</span><span class="o">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="o">}(</span><span class="n">x</span><span class="err">̂</span><span class="n">_0</span><span class="o">,</span><span class="w"> </span><span class="err">ε</span><span class="n">_recon</span><span class="o">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="err">确定性映射</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">步骤</span><span class="mi">2</span><span class="n">b</span><span class="o">:</span><span class="w"> </span><span class="err">随机修正（如果</span><span class="w"> </span><span class="n">F_t</span><span class="w"> </span><span class="err">不可逆或需要随机性）</span>
+<span class="w">    </span><span class="k">else</span>
+<span class="w">        </span><span class="n">x_</span><span class="o">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="o">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">F_</span><span class="o">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="o">}(</span><span class="n">x</span><span class="err">̂</span><span class="n">_0</span><span class="o">,</span><span class="w"> </span><span class="err">ε</span><span class="n">_new</span><span class="o">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="err">ε</span><span class="n">_new</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">q</span><span class="o">(</span><span class="err">ε</span><span class="o">)</span>
+<span class="w">    </span><span class="n">end</span><span class="w"> </span><span class="k">if</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">步骤</span><span class="mi">2</span><span class="n">c</span><span class="o">:</span><span class="w"> </span><span class="err">混合修正（</span><span class="n">DDIM泛化</span><span class="err">，仅限高斯噪声）</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="err">使用插值</span><span class="w"> </span><span class="n">then</span>
+<span class="w">        </span><span class="err">ε</span><span class="n">_recon</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">F_t</span><span class="o">^{-</span><span class="mi">1</span><span class="o">}(</span><span class="n">x</span><span class="err">̂</span><span class="n">_0</span><span class="o">,</span><span class="w"> </span><span class="n">x_t</span><span class="o">)</span>
+<span class="w">        </span><span class="err">ε</span><span class="n">_new</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">N</span><span class="o">(</span><span class="mi">0</span><span class="o">,</span><span class="w"> </span><span class="n">I</span><span class="o">)</span>
+<span class="w">        </span><span class="err">ε</span><span class="n">_mixed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">√</span><span class="o">(</span><span class="mi">1</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="err">σ̃</span><span class="n">_t²</span><span class="o">)</span><span class="w"> </span><span class="err">·</span><span class="w"> </span><span class="err">ε</span><span class="n">_recon</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="err">σ̃</span><span class="n">_t</span><span class="w"> </span><span class="err">·</span><span class="w"> </span><span class="err">ε</span><span class="n">_new</span>
+<span class="w">        </span><span class="n">x_</span><span class="o">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="o">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">F_</span><span class="o">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="o">}(</span><span class="n">x</span><span class="err">̂</span><span class="n">_0</span><span class="o">,</span><span class="w"> </span><span class="err">ε</span><span class="n">_mixed</span><span class="o">)</span>
+<span class="w">    </span><span class="n">end</span><span class="w"> </span><span class="k">if</span>
+<span class="n">end</span><span class="w"> </span><span class="k">for</span>
+
+<span class="k">return</span><span class="w"> </span><span class="n">x_0</span>
+</code></pre></div>
+
+<h3 id="8">8. 理论性质与收敛性分析</h3>
+<h4 id="81">8.1 近似误差的传播</h4>
+<p>设预测误差为 $\boldsymbol{e}_t = \hat{\boldsymbol{x}}_0 - \boldsymbol{x}_0$，则：</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} - \boldsymbol{x}</em>}^* = \boldsymbol{\mathcal{F}<em t-1="t-1">{t-1}(\hat{\boldsymbol{x}}_0, \boldsymbol{\varepsilon}) - \boldsymbol{\mathcal{F}}</em>}(\boldsymbol{x<em t-1="t-1">0, \boldsymbol{\varepsilon}) \approx \frac{\partial \boldsymbol{\mathcal{F}}</em>}}{\partial \boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">0}\bigg|</em>
+$}_0} \boldsymbol{e}_t \tag{60</p>
+<p>误差放大系数为 $\left|\frac{\partial \boldsymbol{\mathcal{F}}_{t-1}}{\partial \boldsymbol{x}_0}\right|$。</p>
+<p>对于DDPM，$\frac{\partial \boldsymbol{\mathcal{F}}<em t-1="t-1">{t-1}}{\partial \boldsymbol{x}_0} = \sqrt{\bar{\alpha}</em>$，因此：}} \boldsymbol{I</p>
+<p>$
+|\boldsymbol{x}<em t-1="t-1">{t-1} - \boldsymbol{x}</em>
+$}^*| \lesssim \sqrt{\bar{\alpha}_{t-1}} |\boldsymbol{e}_t| \tag{61</p>
+<p>由于 $\bar{\alpha}_{t-1} &lt; 1$，误差会被<strong>衰减</strong>，这有助于稳定性。</p>
+<h4 id="82">8.2 确定性采样的优势</h4>
+<p>使用确定性映射 (32) 时，误差传播变为：</p>
+<p>$
+\boldsymbol{x}<em t-1="t-1">{t-1} - \boldsymbol{x}</em>^<em> = \boldsymbol{\Phi}<em t-1="t-1" t_to="t\to">{t\to t-1}(\hat{\boldsymbol{x}}_0, \boldsymbol{x}_t) - \boldsymbol{\Phi}</em>_t^}(\boldsymbol{x}_0, \boldsymbol{x</em>) \tag{62}
+$</p>
+<p>由于 $\boldsymbol{x}_t$ 提供了额外的约束，$\boldsymbol{\Phi}$ 可以部分补偿 $\hat{\boldsymbol{x}}_0$ 的误差。</p>
+<p><strong>直觉</strong>：如果 $\hat{\boldsymbol{x}}_0$ 在某个方向上有误差，但 $\boldsymbol{x}_t$ 恰好反映了真实的噪声模式，那么通过 $\boldsymbol{\mathcal{F}}_t^{-1}$ 反解可以"纠正"这个误差。</p>
+<h4 id="83">8.3 收敛性定理（简化版）</h4>
+<p><strong>定理</strong>：假设 $\boldsymbol{\mathcal{G}}_t$ 满足：</p>
+<p>$
+\mathbb{E}_{\boldsymbol{x}_0, \boldsymbol{\varepsilon}}[|\boldsymbol{\mathcal{G}}_t(\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon})) - \boldsymbol{x}_0|^2] \leq \delta_t^2 \tag{63}
+$</p>
+<p>则生成分布 $p_{\text{gen}}(\boldsymbol{x}<em _text_data="\text{data">0)$ 与真实分布 $p</em>_0)$ 的2-Wasserstein距离满足：}}(\boldsymbol{x</p>
+<p>$
+W_2(p_{\text{gen}}, p_{\text{data}}) \leq C \sum_{t=1}^T \gamma_t \delta_t \tag{64}
+$</p>
+<p>其中 $\gamma_t = \left|\frac{\partial \boldsymbol{\mathcal{F}}_t}{\partial \boldsymbol{x}_0}\right|$，$C$ 是常数。</p>
+<p><strong>推论</strong>：当预测误差 $\delta_t$ 足够小且步数 $T$ 适中时，生成分布接近真实分布。</p>
+<h3 id="9">9. 总结与理论启示</h3>
+<h4 id="91-udm">9.1 UDM框架的核心贡献</h4>
+<ol>
+<li><strong>统一性</strong>：将DDPM、DDIM、Score SDE、Cold Diffusion等统一到一个框架</li>
+<li><strong>灵活性</strong>：支持任意变换 $\boldsymbol{\mathcal{F}}_t$、任意数据类型、任意噪声分布</li>
+<li><strong>模块化</strong>：清晰分离前向过程、后验逼近、条件设计三个组件</li>
+<li><strong>理论指导</strong>：提供边缘约束 (25) 作为设计准则</li>
+</ol>
+<h4 id="92">9.2 设计哲学</h4>
+<p>扩散模型的本质是<strong>"从破坏中学习建设"</strong>：</p>
+<ul>
+<li><strong>破坏（前向）</strong>：渐进式信息丢失，$\boldsymbol{x}_0 \to \boldsymbol{x}_T$</li>
+<li><strong>建设（反向）</strong>：渐进式信息恢复，$\boldsymbol{x}_T \to \boldsymbol{x}_0$</li>
+</ul>
+<p>关键是平衡<strong>自由</strong>与<strong>约束</strong>：</p>
+<ul>
+<li><strong>自由</strong>：选择 $\boldsymbol{\mathcal{F}}_t$、$q(\boldsymbol{\varepsilon})$、$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$ 的形式</li>
+<li><strong>约束</strong>：满足边缘分布恒等式 (25)、易于采样、计算高效</li>
+</ul>
+<h4 id="93">9.3 未来研究方向</h4>
+<ol>
+<li><strong>最优 $\boldsymbol{\mathcal{F}}_t$ 设计</strong>：什么样的变换能最快收敛？</li>
+<li><strong>自适应步长</strong>：如何根据 $\boldsymbol{x}_t$ 动态调整时间步？</li>
+<li><strong>多模态统一</strong>：如何在同一框架处理图像+文本+音频？</li>
+<li><strong>理论保证</strong>：在什么条件下能保证生成质量？</li>
+</ol>
+<h4 id="94">9.4 数学之美</h4>
+<p>UDM框架展示了数学建模的魅力：</p>
+<ul>
+<li><strong>抽象与具体</strong>：从具体的DDPM抽象出一般的 $\boldsymbol{\mathcal{F}}_t$</li>
+<li><strong>约束与自由</strong>：在概率恒等式约束下探索设计空间</li>
+<li><strong>分析与综合</strong>：通过分解 (7) 简化复杂问题</li>
+</ul>
+<p>正如本文所言：</p>
+<blockquote>
+<p>设计一个模型的时候，要时刻知道自己要什么（"自由"），这个想要的东西有什么限制（"约束"），在明确"自由"与"约束"的前提下，尽量借鉴已有的工作和所学的理论基础，不断往目标凑近。</p>
+</blockquote>
+<p>这不仅适用于扩散模型，也是所有科学研究的普遍方法论。</p>
+<hr />
+<p><strong>推导完成</strong>：本文详细推导了UDM框架的所有核心理论，包括重参数化、贝叶斯分解、训练目标、边缘约束、确定性采样等，并从信息论、动力系统、优化等多角度理解其本质。通过DDPM、DDIM、Cold Diffusion等实例验证了框架的统一性和灵活性。</p>
+        </div>
+    </div>
+</body>
+</html>

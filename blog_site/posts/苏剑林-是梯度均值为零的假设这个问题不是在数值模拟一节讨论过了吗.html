@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>为什么Adam的Update RMS是0.2？</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>为什么Adam的Update RMS是0.2？</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 13.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/11267">https://spaces.ac.cn/archives/11267</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>众所周知，我们很早就开始尝试将Muon用于大规模LLM的训练。特别地，在<a href="/archives/10739">《Muon续集：为什么我们选择尝试Muon？》</a>中，我们提出了“Match Adam Update RMS”的技巧，以便快速从Adam迁移到Muon上，这个技巧同样用到了Kimi K2的训练中。该技巧是指将Muon的Update RMS统一成0.2，这使得我们复用Adam的学习率和权重衰减率。</p>
+<p>这一技巧的背后，是我们观察到Adam的Update RMS约等于0.2，并且这一现象是稳定且可复现的。这便引发了一个有趣的问题：为什么Adam的Update RMS是0.2？我们可以从理论上解释它吗？</p>
+<h2 id="_1">问题引入</h2>
+<p>首先描述一下现象：从实验中我们观察到，大致上在Warmup结束、模型进入正式训练后，Adam的Update RMS几乎都保持在0.2～0.3之间，并且不同尺寸的模型也呈现出相似的规律。这些模型的共同点是都用Adam训练，参数是$\beta_1=0.9,\beta_2=0.95$。由于共性很明显，所以这大概率不是巧合，因此笔者尝试分析背后的原理。</p>
+<p>然后我们回顾一下Adam优化器的形式：<br />
+\begin{equation}\text{Adam}\color{skyblue}{\text{W}}:=\left\{\begin{aligned}<br />
+&amp;\boldsymbol{m}<em t-1="t-1">t = \beta_1 \boldsymbol{m}</em>} + \left(1 - \beta_1\right) \boldsymbol{g<em t-1="t-1">t\\\<br />
+&amp;\boldsymbol{v}_t = \beta_2 \boldsymbol{v}</em>} + \left(1 - \beta_2\right) \boldsymbol{g<em t-1="t-1">t^2\\\<br />
+&amp;\hat{\boldsymbol{m}}_t = \boldsymbol{m}_t\left/\left(1 - \beta_1^t\right)\right.\\\<br />
+&amp;\hat{\boldsymbol{v}}_t = \boldsymbol{v}_t\left/\left(1 - \beta_2^t\right)\right.\\\<br />
+&amp;\boldsymbol{u}_t =\hat{\boldsymbol{m}}_t\left/\left(\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon\right)\right.\\\<br />
+&amp;\boldsymbol{\theta}_t = \boldsymbol{\theta}</em>} - \eta_t (\boldsymbol{u<em t-1="t-1">t \color{skyblue}{ + \lambda_t \boldsymbol{\theta}</em>)}<br />
+\end{aligned}\right.\end{equation}<br />
+注意：本文所有向量的乘除法，包括平方，默认都是指Hadamard积/商，即Element-wise的乘/除。</p>
+<p>我们要做的事情，就是证明$\Vert\boldsymbol{u}<em RMS="RMS">t\Vert</em>$。}\approx 0.2$，至少在$\beta_1=0.9,\beta_2=0.95$这组设置下如此。我们假设$\epsilon$足够小，以至于可以忽略它，并且我们考虑$t\to \infty$的稳态，那么$\beta_1^t$、$\beta_2^t$都足够接近于零，所以不用区分$\boldsymbol{m}_t$和$\hat{\boldsymbol{m}}_t$、$\boldsymbol{v}_t$和$\hat{\boldsymbol{v}}_t$，由此有$\boldsymbol{u}_t =\boldsymbol{m}_t/\sqrt{\boldsymbol{v}_t</p>
+<p>对于$\boldsymbol{m}<em i="1">t,\boldsymbol{v}_t$，我们可以得到展开式<br />
+\begin{equation}\boldsymbol{m}_t = (1 - \beta_1)\sum</em>}^t \beta_1^{t-i}\boldsymbol{g<em i="1">i,\qquad \boldsymbol{v}_t = (1 - \beta_2)\sum</em>}^t \beta_2^{t-i}\boldsymbol{g}_i^2\end{equation</p>
+<h2 id="_2">数值模拟</h2>
+<p>如果我们假设$\boldsymbol{g}<em RMS="RMS">1,\boldsymbol{g}_2,\cdots,\boldsymbol{g}_t$都是从同一个分布采样出来的，那么我们就可以直接用数值模拟的方法估计$\Vert\boldsymbol{u}_t\Vert</em>)$进行尝试，参考代码如下：}$。事不宜迟，让我们从最简单的标准正态分布$\mathcal{N}(\boldsymbol{0},\boldsymbol{I</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="n">N</span><span class="p">,</span> <span class="n">T</span> <span class="o">=</span> <span class="mi">10000</span><span class="p">,</span> <span class="mi">2000</span>
+<span class="n">beta1</span><span class="p">,</span> <span class="n">beta2</span> <span class="o">=</span> <span class="mf">0.9</span><span class="p">,</span> <span class="mf">0.95</span>
+<span class="n">m</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span>
+<span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">T</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+    <span class="n">g</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">N</span><span class="p">)</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">beta1</span> <span class="o">*</span> <span class="n">m</span> <span class="o">+</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">beta1</span><span class="p">)</span> <span class="o">*</span> <span class="n">g</span>
+    <span class="n">v</span> <span class="o">=</span> <span class="n">beta2</span> <span class="o">*</span> <span class="n">v</span> <span class="o">+</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">beta2</span><span class="p">)</span> <span class="o">*</span> <span class="n">g</span><span class="o">**</span><span class="mi">2</span>
+    <span class="n">u</span> <span class="o">=</span> <span class="n">m</span> <span class="o">/</span> <span class="n">v</span><span class="o">**</span><span class="mf">0.5</span>
+
+<span class="n">rms</span> <span class="o">=</span> <span class="p">(</span><span class="n">u</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span><span class="o">**</span><span class="mf">0.5</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">rms</span><span class="p">)</span>
+</code></pre></div>
+
+<p>大家猜猜结果是多少？答案大概是0.225，居然跟实验结果惊人地相似！这反过来表明我们的模拟假设跟实际情况还是很吻合的。可能有读者觉得不对，$\boldsymbol{g}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})$不是纯噪声了吗，这还能吻合？实际训练当然不可能是纯噪声，只能说单次梯度的信噪比小得可怜，因此可以用纯噪声来模拟。</p>
+<p>读者可以自行折腾一下上述参考代码，观察Update RMS的影响变量，大体结论是：Update RMS跟$\beta_1$正相关，跟$\beta_2$似乎关系不大，如果$\boldsymbol{g}$的分布具有非零均值（相当于增大梯度的信噪比），那么Update RMS也会变大。</p>
+<h2 id="_3">平均近似</h2>
+<p>这一节笔者尝试从理论方面推导上述模拟结果的一个近似解析解。首先，我们从RMS的定义可知，要求$\Vert\boldsymbol{u}<em RMS="RMS">t\Vert</em>}$，需要先求$\boldsymbol{u<em i="1">t^2 = \boldsymbol{m}_t^2/\boldsymbol{v}_t$。笔者的想法是，用$\boldsymbol{u}_t^2$的期望作为它的近似，并进一步转化为平均场近似：<br />
+\begin{equation}\mathbb{E}[\boldsymbol{u}_t^2] = \mathbb{E}\left[\frac{\boldsymbol{m}_t^2}{\boldsymbol{v}_t}\right] \approx \frac{\mathbb{E}[\boldsymbol{m}_t^2]}{\mathbb{E}[\boldsymbol{v}_t]}\end{equation}<br />
+可能会有读者质疑最后一步近似的合理性。笔者的建议是，先不管这些细枝末节，就好比上一节假设$\boldsymbol{g}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})$一样，先算了再说，如果结果合理那么过程必然一定程度上也是合理的。现在我们分别算分子、分母，这次我们一般地设$\mathbb{E}[\boldsymbol{g}]=\boldsymbol{\mu},\mathbb{E}[\boldsymbol{g}^2]=\boldsymbol{\mu}^2 + \boldsymbol{\sigma}^2 $，其中分母比较简单<br />
+\begin{equation}\begin{aligned}<br />
+\mathbb{E}[\boldsymbol{v}_t] =&amp;\, (1 - \beta_2)\sum</em>}^t \beta_2^{t-i}\mathbb{E}[\boldsymbol{g<em i="1">i^2] \\\<br />
+=&amp;\, (1 - \beta_2)\sum</em>^2) \\\}^t \beta_2^{t-i}(\boldsymbol{\mu}^2 + \boldsymbol{\sigma<br />
+=&amp;\, (1 - \beta_2^t) (\boldsymbol{\mu}^2 + \boldsymbol{\sigma}^2) \\\[5pt]<br />
+\approx &amp;\, \boldsymbol{\mu}^2 + \boldsymbol{\sigma}^2 \qquad(t\to\infty)<br />
+\end{aligned}\end{equation}<br />
+至于分子，可以直接展开平方计算，也可以稍微偷懒一下：我们要求的是$\boldsymbol{m}<em i="1">t$的二阶矩$\mathbb{E}[\boldsymbol{m}_t^2]$，它又等于$\mathbb{E}[\boldsymbol{m}_t]^2 + \mathbb{V}ar[\boldsymbol{m}_t]$。$\mathbb{E}[\boldsymbol{m}_t]$的计算跟$\mathbb{E}[\boldsymbol{m}_t]$类似，结果是$(1 - \beta_1^t)\boldsymbol{\mu}\approx\boldsymbol{\mu}$；至于方差，它具有平方可加性，因此<br />
+\begin{equation}\mathbb{V}ar[\boldsymbol{m}_t] = (1 - \beta_1)^2\sum</em>}^t \beta_1^{2(t-i)}\boldsymbol{\sigma}^2 = \frac{(1 - \beta_1)^2 (1 - \beta_1^{2t})}{1 - \beta_1^2}\boldsymbol{\sigma}^2\approx \frac{1 - \beta_1}{1 + \beta_1}\boldsymbol{\sigma}^2\qquad (t\to\infty)\end{equation<br />
+所以<br />
+\begin{equation}\mathbb{E}[\boldsymbol{u}_t^2]\approx \frac{\boldsymbol{\mu}^2 + \frac{1 - \beta_1}{1 + \beta_1}\boldsymbol{\sigma}^2}{\boldsymbol{\mu}^2 + \boldsymbol{\sigma}^2}\end{equation}</p>
+<h2 id="_4">结果分析</h2>
+<p>由于$\mathbb{E}[\boldsymbol{u}<em RMS="RMS">t^2]$已经是平方后的向量，所以为了估计$\Vert\boldsymbol{u}_t\Vert</em>$，我们只需要对各个分量求平均然后开平方。求平均这一步，我们不妨再来一次平均场近似（分子分母分别求平均），最终将得到<br />
+\begin{equation}\Vert\boldsymbol{u}<em RMS="RMS">t\Vert</em>} \approx \sqrt{\frac{\Vert\boldsymbol{\mu}\Vert^2 + \frac{1 - \beta_1}{1 + \beta_1}\Vert\boldsymbol{\sigma}\Vert^2}{\Vert\boldsymbol{\mu}\Vert^2 + \Vert\boldsymbol{\sigma}\Vert^2}} = \sqrt{\frac{\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2 + \frac{1 - \beta_1}{1 + \beta_1}}{\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2 + 1}}\label{eq:mean-field}\end{equation<br />
+它有两个影响因子：一是$\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2$，这可以看成是梯度的信噪比（SNR）；二是$\beta_1$，这是Adam的超参数之一。特别地，结果不依赖于$\beta_2$，这跟前面的模拟结果吻合。那么这个式子究竟近似得好不好呢？我们不妨考虑最简单的特例$\boldsymbol{\mu}=\boldsymbol{0}$，此时<br />
+\begin{equation}\Vert\boldsymbol{u}<em RMS="RMS">t\Vert</em>} \approx \sqrt{\frac{1 - \beta_1}{1 + \beta_1}}\end{equation<br />
+代入$\beta_1=0.9$，结果是$0.2294\cdots$，跟模拟结果和实践表现居然都很吻合！进一步地，它跟模拟结果的多个对比如下：  </p>
+<p><a href="/usr/uploads/2025/09/1430078993.svg" title="点击查看原图"><img alt="模拟结果与平均场近似（不同beta1、beta2）" src="/usr/uploads/2025/09/1430078993.svg" /></a></p>
+<p>模拟结果与平均场近似（不同beta1、beta2）</p>
+<p>应该说，整体的近似程度还是不错的，特别是$\beta_2 \geq 0.9$之后，结果几乎跟平均场近似重合了（经 <a href="https://x.com/EIFY/status/1965888629814988984">@EIFY</a> 提醒，论文<a href="https://papers.cool/arxiv/2305.17212">《Rotational Equilibrium: How Weight Decay Balances Learning Across Neural Networks》</a>也曾得到过相同的计算结果）。</p>
+<p>至于考虑SNR的比较结果如下：  </p>
+<p><a href="/usr/uploads/2025/09/1584329510.svg" title="点击查看原图"><img alt="模拟结果与平均场近似（不同beta1、SNR）" src="/usr/uploads/2025/09/1584329510.svg" /></a></p>
+<p>模拟结果与平均场近似（不同beta1、SNR）</p>
+<p>当信噪比增大时，平均场近似的误差开始变大，不过仍旧能预测一个整体趋势。事实上，实际训练中梯度的信噪比很少机会能有接近1这么大，因此依然可以认为平均场是一个良好近似。</p>
+<h2 id="_5">反向预测</h2>
+<p>如果我们已经接受平均场近似$\eqref{eq:mean-field}$，那么可以反过来用它估算梯度的信噪比：<br />
+\begin{equation}\frac{\Vert\boldsymbol{\mu}\Vert^2}{\Vert\boldsymbol{\sigma}\Vert^2} \approx \frac{\Vert\boldsymbol{u}<em RMS="RMS">t\Vert</em>}^2 - \frac{1 - \beta_1}{1 + \beta_1}}{1 - \Vert\boldsymbol{u<em RMS="RMS">t\Vert</em>}^2}\end{equation<br />
+在实际训练中，$\beta_1$是给定的，$\Vert\boldsymbol{u}<em RMS="RMS">t\Vert</em>$（也就是Adam的Update RMS）也是可以直接估算的，所以上式是可计算的。当然，这个式子只对Adam适用，有没有更一般的估计思路呢？还真有！别忘了前面我们估计得到<br />
+\begin{equation}\mathbb{E}[\boldsymbol{m}<em RMS="RMS">t^2]\approx \boldsymbol{\mu}^2 + \frac{1 - \beta_1}{1 + \beta_1}\boldsymbol{\sigma}^2\end{equation}<br />
+那么对它的分量求和然后开平方，我们认为它会是$\Vert\boldsymbol{m}_t\Vert$的一个近似：<br />
+\begin{equation}\Vert\boldsymbol{m}_t\Vert\approx \sqrt{\Vert\boldsymbol{\mu}\Vert^2 + \frac{1 - \beta_1}{1 + \beta_1}\Vert\boldsymbol{\sigma}\Vert^2}\end{equation}<br />
+至于二阶矩是$\mathbb{E}[\boldsymbol{v}_t]\approx \boldsymbol{\mu}^2 + \boldsymbol{\sigma}^2$，而像Muon之类的优化器并没有二阶矩可用，但是我们留意到二阶矩的结果是跟$\beta_2$无关的，所以我们不妨考虑一个最简单的特例——$\beta_2=0$——此时$\boldsymbol{v}_t=\boldsymbol{g}_t^2$。当然这可能有点勉强，但估算嘛肯定是怎么方便怎么来。这个“近似”意味着成立$\Vert\boldsymbol{g}_t\Vert^2\approx \Vert\boldsymbol{\mu}\Vert^2 + \Vert\boldsymbol{\sigma}\Vert^2$，于是我们有<br />
+\begin{equation}\frac{\Vert\boldsymbol{m}_t\Vert}{\Vert\boldsymbol{g}_t\Vert}\approx \sqrt{\frac{\Vert\boldsymbol{\mu}\Vert^2 + \frac{1 - \beta_1}{1 + \beta_1}\Vert\boldsymbol{\sigma}\Vert^2}{\Vert\boldsymbol{\mu}\Vert^2 + \Vert\boldsymbol{\sigma}\Vert^2}}\end{equation}<br />
+右端的形式跟式$\eqref{eq:mean-field}$如出一辙，所以我们可以写出<br />
+\begin{equation}\frac{\Vert\boldsymbol{\mu}\Vert^2}{\Vert\boldsymbol{\sigma}\Vert^2} \approx \frac{\Vert\boldsymbol{m}_t\Vert^2/\Vert\boldsymbol{g}_t\Vert^2 - \frac{1 - \beta_1}{1 + \beta_1}}{1 - \Vert\boldsymbol{m}_t\Vert^2/\Vert\boldsymbol{g}_t\Vert^2}\end{equation}<br />
+也就是用$\Vert\boldsymbol{m}_t\Vert/\Vert\boldsymbol{g}_t\Vert$替代$\Vert\boldsymbol{u}_t\Vert</em>\Vert^2$属于跨优化轨迹的统计量，我们总得有些跨轨迹的统计信息，才有可能去估计它。}$，这就给出了一种带动量优化器通用的估计$\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2$的思路。可能还有读者想问动量都没有咋办？这就真没有办法了，因为这里的$\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma</p>
+<h2 id="_6">文章小结</h2>
+<p>本文主要从模拟实验和理论近似两个角度探讨了Adam的Update RMS，它可以作为我们在Muon优化器中将Update RMS对齐到0.2的理论依据之一。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/11267">https://spaces.ac.cn/archives/11267</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Sep. 02, 2025). 《为什么Adam的Update RMS是0.2？ 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/11267">https://spaces.ac.cn/archives/11267</a></p>
+<p>@online{kexuefm-11267,<br />
+title={为什么Adam的Update RMS是0.2？},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={Sep},<br />
+url={\url{https://spaces.ac.cn/archives/11267}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

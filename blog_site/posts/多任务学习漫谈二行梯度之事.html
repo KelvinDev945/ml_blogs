@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多任务学习漫谈（二）：行梯度之事</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>多任务学习漫谈（二）：行梯度之事</h1>
+            <div class="meta">📅 最后更新: 2026-01-05 | 📄 大小: 65.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8896">https://spaces.ac.cn/archives/8896</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在<a href="/archives/8870">《多任务学习漫谈（一）：以损失之名》</a>中，我们从损失函数的角度初步探讨了多任务学习问题，最终发现如果想要结果同时具有缩放不变性和平移不变性，那么用梯度的模长倒数作为任务的权重是一个比较简单的选择。我们继而分析了，该设计等价于将每个任务的梯度单独进行归一化后再相加，这意味着多任务的“战场”从损失函数转移到了梯度之上：看似在设计损失函数，实则在设计更好的梯度，所谓“以损失之名，行梯度之事”。</p>
+<p>那么，更好的梯度有什么标准呢？如何设计出更好的梯度呢？本文我们就从梯度的视角来理解多任务学习，试图直接从设计梯度的思路出发构建多任务学习算法。</p>
+<h2 id="_1">整体思路</h2>
+<p>我们知道，对于单任务学习，常用的优化方法就是梯度下降，那么它是怎么推导的呢？同样的思路能不能直接用于多任务学习呢？这便是这一节要回答的问题。</p>
+<h3 id="_2">下降方向</h3>
+<p>其实第一个问题，我们在<a href="/archives/6261">《从动力学角度看优化算法（三）：一个更整体的视角》</a>就回答过。假设损失函数为$\mathcal{L}$，当前参数为$\boldsymbol{\theta}$，我们希望设计一个参数增量$\Delta\boldsymbol{\theta}$，它使得损失函数更小，即$\mathcal{L}(\boldsymbol{\theta}+\Delta\boldsymbol{\theta}) &lt; \mathcal{L}(\boldsymbol{\theta})$。为此，我们考虑一阶展开：<br />
+\begin{equation}\mathcal{L}(\boldsymbol{\theta}+\Delta\boldsymbol{\theta})\approx \mathcal{L}(\boldsymbol{\theta}) + \langle \nabla_{\boldsymbol{\theta}}\mathcal{L}, \Delta\boldsymbol{\theta}\rangle \label{eq:approx-1}\end{equation}<br />
+假设这个近似的精度已经足够，那么$\mathcal{L}(\boldsymbol{\theta}+\Delta\boldsymbol{\theta}) &lt; \mathcal{L}(\boldsymbol{\theta})$意味着$\langle \nabla_{\boldsymbol{\theta}}\mathcal{L}, \Delta\boldsymbol{\theta}\rangle &lt; 0$，即更新量与梯度的夹角至少大于90度，而其中最自然的选择就是<br />
+\begin{equation}\Delta\boldsymbol{\theta} = -\eta \nabla_{\boldsymbol{\theta}}\mathcal{L}\end{equation}<br />
+这便是梯度下降，即更新量取梯度的反方向，其中$\eta &gt; 0$即为学习率。</p>
+<h3 id="_3">无一例外</h3>
+<p>回到多任务学习上，如果假设每个任务都同等重要，那么我们可以将这个假设理解为每一步更新的时候$\mathcal{L}_1,\mathcal{L}_2,\cdots,\mathcal{L}_n$都下降或保持不变。如果参数到达$\boldsymbol{\theta}^<em>$后，不管再怎么变化，都会导致某个$\mathcal{L}_i$上升，那么就说$\boldsymbol{\theta}^</em>$是帕累托最优解（Pareto Optimality）。说白了，帕累托最优意味着我们不能通过牺牲某个任务来换取另一个任务的提升，意味着任务之间没有相互“内卷”。</p>
+<p>假设近似$\eqref{eq:approx-1}$依然成立，那么寻找帕累托最优意味着我们要寻找$\Delta\boldsymbol{\theta}$满足<br />
+\begin{equation}\left\{\begin{aligned}<br />
+&amp;\langle \nabla_{\boldsymbol{\theta}}\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">1, \Delta\boldsymbol{\theta}\rangle \leq 0\\\<br />
+&amp;\langle \nabla</em>}}\mathcal{L<em _boldsymbol_theta="\boldsymbol{\theta">2, \Delta\boldsymbol{\theta}\rangle \leq 0\\\<br />
+&amp;\quad \vdots \\\<br />
+&amp;\langle \nabla</em>\rangle \leq 0\\\}}\mathcal{L}_n, \Delta\boldsymbol{\theta<br />
+\end{aligned}\right.\end{equation}<br />
+注意到它存在平凡解$\Delta\boldsymbol{\theta}=\boldsymbol{0}$，所以上述不等式组的可行域肯定非空，我们主要关心可行域中是否存在非零解：如果有，则找出来作为更新方向；如果没有，则有可能已经达到了帕累托最优（必要不充分），我们称此时的状态为帕累托稳定点（Pareto Stationary）。</p>
+<h2 id="_4">求解算法</h2>
+<p>方便起见，我们记$\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">i=\nabla</em>\rangle \geq 0$，也就是说，双任务学习时，前面说的梯度归一化可以达到帕累托稳定点。}}\mathcal{L}_i$，我们寻求一个向量$\boldsymbol{u}$，使得对所有的$i$都满足$\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle \geq 0$，那么我们就可以像单任务梯度下降那样取$\Delta\boldsymbol{\theta}=-\eta\boldsymbol{u}$作为更新量。如果任务数只有两个，可以验证$\boldsymbol{u}=\boldsymbol{g}_1/\Vert\boldsymbol{g}_1\Vert + \boldsymbol{g}_2/\Vert\boldsymbol{g}_2\Vert$自动满足$\langle \boldsymbol{g}_1, \boldsymbol{u}\rangle \geq 0$和$\langle \boldsymbol{g}_2, \boldsymbol{u</p>
+<p>当任务数大于2时，问题开始变得有点复杂了，这里介绍两种求解方法，其中第一种思路是笔者自己给出的推导结果，第二种思路则是<a href="https://papers.cool/arxiv/1810.04650">《Multi-Task Learning as Multi-Objective Optimization》</a>给出的“标准答案”。</p>
+<h3 id="_5">问题转化</h3>
+<p>首先我们对问题进行进一步的转化。留意到<br />
+\begin{equation}\forall i, \langle \boldsymbol{g}<em _boldsymbol_u="\boldsymbol{u">i, \boldsymbol{u}\rangle \geq 0\quad\Leftrightarrow\quad \min_i \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle \geq 0\label{eq:q-0}\end{equation}<br />
+所以我们只需要尽量最大化最小的那个$\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle$，就能找出理想的$\boldsymbol{u}$，即问题变成了<br />
+\begin{equation}\max</em>}}\min_i \langle \boldsymbol{g<em _boldsymbol_u="\boldsymbol{u">i, \boldsymbol{u}\rangle \end{equation}<br />
+不过这有点危险，因为一旦真的存在非零的$\boldsymbol{u}$使得$\min\limits_i \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle &gt; 0$，那么让$\boldsymbol{u}$的模长趋于正无穷，那么最大值便会趋于正无穷。所以为了结果的稳定性，我们需要加个正则项，考虑<br />
+\begin{equation}\max</em>}}\min_i \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle - \frac{1}{2}\Vert \boldsymbol{u}\Vert^2\label{eq:q-1}\end{equation<br />
+这样无穷大模长的$\boldsymbol{u}$就不可能是最优解了。注意到代入$\boldsymbol{u}=0$后有$\min\limits_i \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle - \frac{1}{2}\Vert \boldsymbol{u}\Vert^2=0$，所以假设对$\boldsymbol{u}$取$\max$的最优解为$\boldsymbol{u}^<em>$，那么必然有<br />
+\begin{equation}\min_i \langle \boldsymbol{g}_i, \boldsymbol{u}^</em>\rangle - \frac{1}{2}\Vert \boldsymbol{u}^<em>\Vert^2\geq 0\quad\Leftrightarrow\quad \min_i \langle \boldsymbol{g}_i, \boldsymbol{u}^</em>\rangle \geq \frac{1}{2}\Vert \boldsymbol{u}^*\Vert^2\geq 0\end{equation}<br />
+所以问题$\eqref{eq:q-1}$的解必然是满足条件$\eqref{eq:q-0}$的解，并且如果是非零解，那么其反方向必然是使得所有任务损失都下降的方向。</p>
+<h3 id="_6">光滑近似</h3>
+<p>现在介绍问题$\eqref{eq:q-1}$的第一种求解方案，它假设读者像笔者一样不熟悉min-max问题的求解，那么我们可以将第一步的$\min$用光滑近似代替（参考<a href="/archives/3290">《寻求一个光滑的最大值函数》</a>），即<br />
+\begin{equation}\min_i \langle \boldsymbol{g}<em _boldsymbol_u="\boldsymbol{u">i, \boldsymbol{u}\rangle \approx -\frac{1}{\lambda}\log\sum_i e^{-\lambda \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle}\,\,\big(\text{对于足够大的}\lambda\big)\end{equation}<br />
+于是我们就可以先求解<br />
+\begin{equation}\max</em>}}-\frac{1}{\lambda}\log\sum_i e^{-\lambda \langle \boldsymbol{g<em _tau="\tau">i, \boldsymbol{u}\rangle} - \frac{1}{2}\Vert \boldsymbol{u}\Vert^2\end{equation}<br />
+然后再让$\lambda\to\infty$。这样我们就将问题转化为了单个函数的无约束最大化问题，直接求梯度然后让梯度为零得到<br />
+\begin{equation}\frac{\sum\limits_i e^{-\lambda \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle} \boldsymbol{g}_i}{\sum\limits_i e^{-\lambda \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle}} = \boldsymbol{u}\end{equation}<br />
+假设各个$\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle$的差距大于$\mathcal{O}(1/\lambda)$量级，那么当$\lambda\to\infty$时，上式实际上是<br />
+\begin{equation}\boldsymbol{u} = \boldsymbol{g}</em>},\quad \tau = \mathop{\text{argmin}<em _tau="\tau">i \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle\end{equation}<br />
+然而，如果直接按照$\boldsymbol{u}^{(k+1)} = \boldsymbol{g}</em>},\tau = \mathop{\text{argmin}}\limits_i \langle \boldsymbol{g<em>i, \boldsymbol{u}^{(k)}\rangle$迭代，那么大概率是会振荡的，因为它要我们找到让$\langle \boldsymbol{g}_i, \boldsymbol{u}^{(k)}\rangle$最小的$\boldsymbol{g}_i$作为$\boldsymbol{u}^{(k+1)}$，假设为$\boldsymbol{u}^{(k+1)}=\boldsymbol{g}</em>{i^<em>}$，那么下一步让$\langle \boldsymbol{g}<em>i, \boldsymbol{u}^{(k+1)}\rangle=\langle \boldsymbol{g}_i, \boldsymbol{g}</em>{i^</em>}\rangle$最小的$\boldsymbol{g}<em>i$就很可能不再是$\boldsymbol{g}</em>{i^<em>}$了，反而$\boldsymbol{g}_{i^</em>}$可能是最大的那个。</p>
+<p>直观来想，上述算法虽然振荡，但应该也是围绕着最优点$\boldsymbol{u}^<em>$振荡的，所以如果我们把振荡过程中的所有结果都平均起来，就应该能得到最优点了，这意味着收敛到最优点的迭代格式是<br />
+\begin{equation}\boldsymbol{u}^{(k+1)} = \frac{k \boldsymbol{u}^{(k)} + \boldsymbol{g}_{\tau}}{k + 1},\quad \tau = \mathop{\text{argmin}}_i \langle \boldsymbol{g}_i, \boldsymbol{u}^{(k)}\rangle\label{eq:sol-1}\end{equation}<br />
+留意到每次叠加上去的都是某个$\boldsymbol{g}_i$，所以最终的$\boldsymbol{u}^</em>$必然是各个$\boldsymbol{g}_i$的加权平均，即存在$\alpha_1,\alpha_2,\cdots,\alpha_n\geq 0$且$\alpha_1 + \alpha_2 + \cdots + \alpha_n =1$，使得<br />
+\begin{equation}\boldsymbol{u}^* = \sum_i \alpha_i \boldsymbol{g}_i\end{equation}<br />
+我们也可以将$\alpha_1,\alpha_2,\cdots,\alpha_n$理解为各个$\mathcal{L}_i$的当前最优权重分配方案。</p>
+<h3 id="_7">对偶问题</h3>
+<p>光滑近似技巧的好处是比较简单直观，不需要太多的优化算法基础，不过它终究只是“非主流”思路，有颇多不严谨之处（但结果倒是对的）。下面我们来介绍基于对偶思想的“标准答案”。</p>
+<p>首先，定义$\mathbb{P}^n$为所有$n$元离散分布的集合，即<br />
+\begin{equation}\mathbb{P}^n = \left\{(\alpha_1,\alpha_2,\cdots,\alpha_n)\left|\alpha_1,\alpha_2,\cdots,\alpha_n\geq 0, \sum_i \alpha_i = 1\right.\right\}\end{equation}<br />
+那么容易检验<br />
+\begin{equation}\min_i \langle \boldsymbol{g}<em _alpha_in_mathbb_P="\alpha\in\mathbb{P">i, \boldsymbol{u}\rangle = \min</em>}^n}\left\langle \tilde{\boldsymbol{g}}(\alpha), \boldsymbol{u}\right\rangle,\quad \tilde{\boldsymbol{g}}(\alpha) = \sum_i \alpha_i \boldsymbol{g<em _boldsymbol_u="\boldsymbol{u">i\end{equation}<br />
+因此问题$\eqref{eq:q-1}$等价于<br />
+\begin{equation}\max</em>}}\min_{\alpha\in\mathbb{P}^n}\left\langle \tilde{\boldsymbol{g}}(\alpha), \boldsymbol{u}\right\rangle - \frac{1}{2}\Vert \boldsymbol{u}\Vert^2\label{eq:q-2}\end{equation<br />
+上述函数关于$\boldsymbol{u}$是凹的，关于$\alpha$是凸的，并且$\boldsymbol{u},\alpha$的可行域都是凸集（集合中任意两点的加权平均仍然在集合中），所以根据冯·诺依曼的<a href="https://en.wikipedia.org/wiki/Minimax_theorem">Minimax定理</a>，式$\eqref{eq:q-2}$的$\min$和$\max$是可以交换的，即等价于<br />
+\begin{equation}\min_{\alpha\in\mathbb{P}^n}\max_{\boldsymbol{u}}\left\langle \tilde{\boldsymbol{g}}(\alpha), \boldsymbol{u}\right\rangle - \frac{1}{2}\Vert \boldsymbol{u}\Vert^2 = \min_{\alpha\in\mathbb{P}^n}\frac{1}{2}\left\Vert\tilde{\boldsymbol{g}}(\alpha)\right\Vert^2\label{eq:q-3}\end{equation}<br />
+等号右边是因为$\max$部分只是一个无约束的二次函数最大值问题，可以直接算出$\boldsymbol{u}^* = \tilde{\boldsymbol{g}}(\alpha)$，因此最后只剩下$\min$，问题变成了求$\boldsymbol{g}_1,\boldsymbol{g}_2,\cdots,\boldsymbol{g}_n$的一个加权平均，使得其模长最小。</p>
+<p>当$n=2$时，问题的求解比较简单，相当于作三角形的高，如下图所示：  </p>
+<p><a href="/usr/uploads/2022/02/3264762797.png" title="点击查看原图"><img alt="当n=2时的求解算法及几何意义" src="/usr/uploads/2022/02/3264762797.png" /></a></p>
+<p>当n=2时的求解算法及几何意义</p>
+<p>当$n &gt; 2$时，我们可以用<a href="https://en.wikipedia.org/wiki/Frank%E2%80%93Wolfe_algorithm">Frank-Wolfe算法</a>将它转化为多个$n=2$的情形进行迭代。对于Frank-Wolfe算法，我们可以将它理解为带约束的梯度下降算法，适合于参数的可行域为凸集的情形，但展开来介绍篇幅太大，这里就不详说了，请读者自行找资料学习。简单来说，Frank-Wolfe算法先通过线性化目标，找到下一步更新的方向为$e_{\tau}$，其中$\tau = \mathop{\text{argmin}}\limits_i \langle \boldsymbol{g}<em _tau="\tau">i, \tilde{\boldsymbol{g}}(\alpha)\rangle$而$e</em>$之间进行插值搜索，找出最优者作为迭代结果。所以，它的迭代过程为}$为$\tau$位置为1的one hot向量，然后求解在$\alpha$与$e_{\tau<br />
+\begin{equation}\left\{\begin{aligned}<br />
+&amp;\tau = \mathop{\text{argmin}}<em _gamma="\gamma">i \langle \boldsymbol{g}_i, \tilde{\boldsymbol{g}}(\alpha^{(k)})\rangle\\\<br />
+&amp;\gamma = \mathop{\text{argmin}}</em>} \left\Vert\tilde{\boldsymbol{g}}((1-\gamma)\alpha^{(k)} + \gamma e_{\tau})\right\Vert^2 = \mathop{\text{argmin}<em _tau="\tau">{\gamma} \left\Vert(1-\gamma)\tilde{\boldsymbol{g}}(\alpha^{(k)}) + \gamma \boldsymbol{g}</em>\right\Vert^2\\\<br />
+&amp;\alpha^{(k+1)} = (1-\gamma)\alpha^{(k)} + \gamma e_{\tau}<br />
+\end{aligned}\right.\end{equation}<br />
+其中$\gamma$的求解，正是$n=2$的特例，用上述截图中的算法即可。如果$\gamma$不通过搜索而得，而是固定为$1/(k+1)$，那么结果则等价于$\eqref{eq:sol-1}$，这也是Frank-Wolfe算法的一个简化版本。也就是说，我们通过光滑近似得到的结果，跟简化版Frank-Wolfe算法的结果是等价的。</p>
+<h3 id="_8">去约束化</h3>
+<p>其实对于问题$\eqref{eq:q-3}$的求解，理论上我们也可以通过去约束的方式直接用梯度下降求解。比如直接设参数$\beta_1,\beta_2,\cdots,\beta_n\in\mathbb{R}$以及<br />
+\begin{equation}\alpha_i = \frac{e^{\beta_i}}{Z},\quad Z = \sum_i e^{\beta_i}\end{equation}<br />
+那么就可以转化为<br />
+\begin{equation}\min_{\beta} \frac{1}{2Z^2}\left\Vert \sum_i e^{\beta_i} \boldsymbol{g}_i\right\Vert^2\end{equation}<br />
+这是个无约束的优化问题，常规的梯度下降算法就可以求解。然而不知道为什么，笔者似乎没看到这样处理的（难道是不想调学习率？）。</p>
+<h2 id="_9">一些技巧</h2>
+<p>在前一节中，我们给出了寻找帕累托稳定点的更新方向的两种方案，它们都要求我们在每一步的训练中，都要先通过另外的多步迭代来确定每个任务的权重，然后才能更新模型参数。由此不难想象，实际计算的时候计算量还是颇大的，所以我们需要想些技巧降低计算量。</p>
+<h3 id="_10">梯度内积</h3>
+<p>可以看到，不管哪种方案，其关键步骤都有$\mathop{\text{argmin}}\limits_i \langle \boldsymbol{g}_i, \tilde{\boldsymbol{g}}(\alpha)\rangle$，这意味着我们要遍历梯度算内积。然而在深度学习场景下，模型参数量往往很大，所以梯度是一个非常大维度的向量，如果每一步迭代都要算一次内积，计算量很大。这时候我们可以利用展开式<br />
+\begin{equation}\langle \boldsymbol{g}_i, \tilde{\boldsymbol{g}}(\alpha)\rangle = \left\langle \boldsymbol{g}_i, \sum_j \alpha_j \boldsymbol{g}_j \right\rangle = \sum_j \alpha_j \langle \boldsymbol{g}_i, \boldsymbol{g}_j \rangle\end{equation}<br />
+每次迭代其实只有$\alpha$不同，所以其实在每一步训练中$\langle \boldsymbol{g}_i, \boldsymbol{g}_j \rangle$只需要计算一次存下来就行了，不用重复这种大维度向量内积的计算。</p>
+<h3 id="_11">共享编码</h3>
+<p>然而，当模型大到一定程度的时候，要把每个任务的梯度都分别算出来然后进行迭代计算是难以做到的。如果我们假设多任务的各个模型共用同一个编码器，那么我们还可以进一步近似地简化算法。</p>
+<p>具体来说，假设batch_size为$b$，第$j$个样本的编码输出为$\boldsymbol{h}<em _boldsymbol_theta="\boldsymbol{\theta">j$，那么由链式法则我们知道：<br />
+\begin{equation}\boldsymbol{g}_i = \nabla</em>}}\mathcal{L<em _boldsymbol_h="\boldsymbol{h">i = \sum_j (\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">j}\mathcal{L}_i)(\nabla</em>}}\boldsymbol{h<em _boldsymbol_h="\boldsymbol{h">j) = \underbrace{\big(\nabla</em><em _boldsymbol_h="\boldsymbol{h">1}\mathcal{L}_i , \cdots , \nabla</em><em _nabla__boldsymbol_H="\nabla_{\boldsymbol{H">b}\mathcal{L}_i\big)}</em>}}\mathcal{L<em _boldsymbol_theta="\boldsymbol{\theta">i}\underbrace{\begin{pmatrix}\nabla</em>}}\boldsymbol{h<em _boldsymbol_theta="\boldsymbol{\theta">b \\\ \vdots \\\ \nabla</em>}}\boldsymbol{h<em _nabla__boldsymbol_theta="\nabla_{\boldsymbol{\theta">b\end{pmatrix}}</em>}}\boldsymbol{H}}\end{equation<br />
+记$\boldsymbol{H} = (\boldsymbol{h}<em _boldsymbol_H="\boldsymbol{H">1,\cdots,\boldsymbol{h}_b)$，那么就得到$\boldsymbol{g}_i = (\nabla</em>}}\mathcal{L<em _boldsymbol_theta="\boldsymbol{\theta">i) (\nabla</em>)$，利用矩阵范数不等式得到}}\boldsymbol{H<br />
+\begin{equation}\left\Vert\sum_i \alpha_i \boldsymbol{g}<em _boldsymbol_H="\boldsymbol{H">i\right\Vert^2 = \left\Vert\sum_i \alpha_i (\nabla</em>}}\mathcal{L<em _boldsymbol_theta="\boldsymbol{\theta">i) (\nabla</em>}}\boldsymbol{H})\right\Vert^2 \leq \left\Vert\sum_i \alpha_i \nabla_{\boldsymbol{H}}\mathcal{L<em _boldsymbol_theta="\boldsymbol{\theta">i\right\Vert^2 \big\Vert \nabla</em>}}\boldsymbol{H}\big\Vert^2 \end{equation<br />
+不难想到，如果我们最小化$\left\Vert\sum\limits_i\alpha_i \nabla_{\boldsymbol{H}}\mathcal{L}<em _boldsymbol_H="\boldsymbol{H">i\right\Vert^2$，那么计算量就会明显减少，因为这只需要我们对最后输出的编码向量的梯度，而不需要对全部参数的梯度。而上式告诉我们，最小化$\left\Vert\sum\limits_i\alpha_i \nabla</em>$的上界，像很多难以直接优化的问题一样，我们期望最小化上界也能获得类似的结果。}}\mathcal{L}_i\right\Vert^2$实际上就是在最小化式$\eqref{eq:q-3</p>
+<p>不过，这个上界虽然效率更高，但也有其局限性，它一般只适用于每一个样本都有多种标注信息的多任务学习，不适用于不同任务的训练数据无交集的场景（即每个任务是对不同的样本进行标注的，单个样本只有一种标注信息），因为对于后者来说，各个$\nabla_{\boldsymbol{H}}\mathcal{L}_i$是相互正交的，此时任务之间没有交互，上界没有体现出任务之间的相关性，也就是过于宽松而失去意义了。</p>
+<h3 id="_12">错误证明</h3>
+<p>前面所提到的“标准答案”以及关于共享编码器时优化上界的结果，都来自论文<a href="https://papers.cool/arxiv/1810.04650">《Multi-Task Learning as Multi-Objective Optimization》</a>。接下来原论文试图证明当$\nabla_{\boldsymbol{\theta}}\boldsymbol{H}$满秩时，优化上界也能找到帕累托稳定点。但是很遗憾，原论文的证明是错误的。</p>
+<p>证明位于原论文的附录A，里边用到了一个错误的结论：</p>
+<blockquote>
+<p>如果$\boldsymbol{M}$是对称正定矩阵，那么$\boldsymbol{x}^{\top}\boldsymbol{y}\geq 0$当且仅当$\boldsymbol{x}^{\top}\boldsymbol{M}\boldsymbol{y}\geq 0$。</p>
+</blockquote>
+<p>很容易举例证明该结论是错的，比如$\boldsymbol{x}=\begin{pmatrix}1 \\\ -2\end{pmatrix},\boldsymbol{y}=\begin{pmatrix}1 \\\ 1\end{pmatrix},\boldsymbol{M}=\begin{pmatrix}3 &amp; 0\\\ 0 &amp; 1\end{pmatrix}$，此时$\boldsymbol{x}^{\top}\boldsymbol{y} &lt; 0$但$\boldsymbol{x}^{\top}\boldsymbol{M}\boldsymbol{y} &gt; 0$</p>
+<p>经过思考，笔者认为原论文中的证明是难以修复的，即原论文的推测是不成立的，换言之，即便$\nabla_{\boldsymbol{\theta}}\boldsymbol{H}$满秩，优化上界得出的更新方向未必是能使得所有任务损失都不上升的方向，从而未必能找到帕累托稳定点。至于原论文中优化上界的实验效果也不错，只能说深度学习模型参数空间太大，可供“挪腾”的空间也很大，从而上界近似也能获得不错的结果了。</p>
+<h2 id="_13">本文小结</h2>
+<p>在这篇文章中，我们从梯度的视角来理解多任务学习。在梯度视角下，多任务学习的主要工作是寻找一个尽可能与每个任务的梯度都反向的方向作为更新方向，从而使得每个任务的损失都能尽量下降，而不能通过牺牲某个任务来换取另一个任务的提升。这是任务之间无“内卷”的理想状态。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8896">https://spaces.ac.cn/archives/8896</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Feb. 08, 2022). 《多任务学习漫谈（二）：行梯度之事 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8896">https://spaces.ac.cn/archives/8896</a></p>
+<p>@online{kexuefm-8896,<br />
+title={多任务学习漫谈（二）：行梯度之事},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Feb},<br />
+url={\url{https://spaces.ac.cn/archives/8896}},<br />
+} </p>
+<hr />
+<h2 id="_14">详细数学推导与理论分析</h2>
+<h3 id="1">1. 梯度下降的数学基础</h3>
+<h4 id="11">1.1 泰勒展开与一阶近似</h4>
+<p>在优化理论中,我们假设损失函数$\mathcal{L}(\boldsymbol{\theta})$在当前点$\boldsymbol{\theta}$附近是光滑的。考虑参数的微小变化$\Delta\boldsymbol{\theta}$,我们可以对损失函数进行泰勒展开:</p>
+<p>\begin{equation}\mathcal{L}(\boldsymbol{\theta}+\Delta\boldsymbol{\theta}) = \mathcal{L}(\boldsymbol{\theta}) + \langle \nabla_{\boldsymbol{\theta}}\mathcal{L}, \Delta\boldsymbol{\theta}\rangle + \frac{1}{2}\Delta\boldsymbol{\theta}^{\top}\boldsymbol{H}\Delta\boldsymbol{\theta} + o(\Vert\Delta\boldsymbol{\theta}\Vert^2)\tag{1}\end{equation}</p>
+<p>其中:
+- $\nabla_{\boldsymbol{\theta}}\mathcal{L}$是损失函数在$\boldsymbol{\theta}$处的梯度向量
+- $\boldsymbol{H}$是Hessian矩阵,即二阶导数矩阵
+- $o(\Vert\Delta\boldsymbol{\theta}\Vert^2)$表示高阶无穷小项</p>
+<p>当$\Vert\Delta\boldsymbol{\theta}\Vert$足够小时,我们可以忽略二阶及更高阶项,得到一阶近似:</p>
+<p>\begin{equation}\mathcal{L}(\boldsymbol{\theta}+\Delta\boldsymbol{\theta})\approx \mathcal{L}(\boldsymbol{\theta}) + \langle \nabla_{\boldsymbol{\theta}}\mathcal{L}, \Delta\boldsymbol{\theta}\rangle\tag{2}\end{equation}</p>
+<p><strong>数学直觉</strong>: 这个近似告诉我们,在参数空间的局部邻域内,损失函数可以用一个线性函数来近似。梯度向量$\nabla_{\boldsymbol{\theta}}\mathcal{L}$指示了损失函数增长最快的方向。</p>
+<h4 id="12">1.2 下降方向的选择</h4>
+<p>为了使损失函数下降,即$\mathcal{L}(\boldsymbol{\theta}+\Delta\boldsymbol{\theta}) &lt; \mathcal{L}(\boldsymbol{\theta})$,根据式(2),我们需要:</p>
+<p>\begin{equation}\langle \nabla_{\boldsymbol{\theta}}\mathcal{L}, \Delta\boldsymbol{\theta}\rangle &lt; 0\tag{3}\end{equation}</p>
+<p>这意味着更新向量$\Delta\boldsymbol{\theta}$与梯度向量$\nabla_{\boldsymbol{\theta}}\mathcal{L}$的夹角必须大于90度。</p>
+<p><strong>定理1.1 (梯度下降方向的最优性)</strong>: 在所有满足$\Vert\Delta\boldsymbol{\theta}\Vert = \epsilon$的向量中,使得$\langle \nabla_{\boldsymbol{\theta}}\mathcal{L}, \Delta\boldsymbol{\theta}\rangle$最小的向量是:</p>
+<p>\begin{equation}\Delta\boldsymbol{\theta}^* = -\epsilon\frac{\nabla_{\boldsymbol{\theta}}\mathcal{L}}{\Vert\nabla_{\boldsymbol{\theta}}\mathcal{L}\Vert}\tag{4}\end{equation}</p>
+<p><strong>证明</strong>: 根据Cauchy-Schwarz不等式:</p>
+<p>\begin{equation}\langle \nabla_{\boldsymbol{\theta}}\mathcal{L}, \Delta\boldsymbol{\theta}\rangle \geq -\Vert\nabla_{\boldsymbol{\theta}}\mathcal{L}\Vert\cdot\Vert\Delta\boldsymbol{\theta}\Vert = -\epsilon\Vert\nabla_{\boldsymbol{\theta}}\mathcal{L}\Vert\tag{5}\end{equation}</p>
+<p>等号成立当且仅当$\Delta\boldsymbol{\theta}$与$\nabla_{\boldsymbol{\theta}}\mathcal{L}$反向平行,即$\Delta\boldsymbol{\theta} = -\epsilon\frac{\nabla_{\boldsymbol{\theta}}\mathcal{L}}{\Vert\nabla_{\boldsymbol{\theta}}\mathcal{L}\Vert}$。 □</p>
+<p>因此,标准梯度下降的更新规则为:</p>
+<p>\begin{equation}\Delta\boldsymbol{\theta} = -\eta \nabla_{\boldsymbol{\theta}}\mathcal{L}\tag{6}\end{equation}</p>
+<p>其中学习率$\eta &gt; 0$控制步长大小。</p>
+<h3 id="2">2. 多任务学习的帕累托最优性</h3>
+<h4 id="21">2.1 帕累托最优的定义</h4>
+<p>在多任务学习中,我们有$n$个任务,对应$n$个损失函数$\mathcal{L}_1,\mathcal{L}_2,\cdots,\mathcal{L}_n$。</p>
+<p><strong>定义2.1 (帕累托最优)</strong>: 参数$\boldsymbol{\theta}^<em>$被称为帕累托最优点,如果不存在另一个参数$\boldsymbol{\theta}$使得:
+- 对所有$i$,都有$\mathcal{L}_i(\boldsymbol{\theta}) \leq \mathcal{L}_i(\boldsymbol{\theta}^</em>)$
+- 至少存在一个$j$,使得$\mathcal{L}_j(\boldsymbol{\theta}) &lt; \mathcal{L}_j(\boldsymbol{\theta}^*)$</p>
+<p>换句话说,从帕累托最优点出发,无法在不牺牲某个任务的前提下改进其他任务。</p>
+<p><strong>定义2.2 (帕累托稳定点)</strong>: 参数$\boldsymbol{\theta}^*$被称为帕累托稳定点,如果不存在下降方向$\Delta\boldsymbol{\theta}$使得对所有$i$都有:</p>
+<p>\begin{equation}\langle \nabla_{\boldsymbol{\theta}}\mathcal{L}_i(\boldsymbol{\theta}^*), \Delta\boldsymbol{\theta}\rangle &lt; 0\tag{7}\end{equation}</p>
+<h4 id="22">2.2 帕累托稳定点的必要条件</h4>
+<p><strong>定理2.1</strong>: 如果$\boldsymbol{\theta}^*$是帕累托最优点,则它必然是帕累托稳定点。</p>
+<p><strong>证明</strong>: 用反证法。假设$\boldsymbol{\theta}^*$不是帕累托稳定点,则存在方向$\Delta\boldsymbol{\theta}$使得对所有$i$都有$\langle \nabla_{\boldsymbol{\theta}}\mathcal{L}_i, \Delta\boldsymbol{\theta}\rangle &lt; 0$。</p>
+<p>取足够小的$\epsilon &gt; 0$,令$\boldsymbol{\theta} = \boldsymbol{\theta}^* + \epsilon\Delta\boldsymbol{\theta}$,根据泰勒展开:</p>
+<p>\begin{equation}\mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">i(\boldsymbol{\theta}) = \mathcal{L}_i(\boldsymbol{\theta}^*) + \epsilon\langle \nabla</em>}}\mathcal{L}_i, \Delta\boldsymbol{\theta}\rangle + o(\epsilon)\tag{8}\end{equation</p>
+<p>当$\epsilon$足够小时,$\mathcal{L}_i(\boldsymbol{\theta}) &lt; \mathcal{L}_i(\boldsymbol{\theta}^<em>)$对所有$i$成立,这与$\boldsymbol{\theta}^</em>$是帕累托最优点矛盾。 □</p>
+<h4 id="23">2.3 共同下降方向的存在性</h4>
+<p><strong>定理2.2</strong>: 如果存在向量$\boldsymbol{u}$使得对所有$i$都有$\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle &gt; 0$,则$-\boldsymbol{u}$是所有任务的共同下降方向。</p>
+<p>这里我们记$\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">i = \nabla</em>$等价于判断当前点是否为帕累托稳定点。}}\mathcal{L}_i$。寻找这样的$\boldsymbol{u</p>
+<h3 id="3">3. 多任务优化问题的对偶形式</h3>
+<h4 id="31">3.1 问题的等价转化</h4>
+<p>寻找共同下降方向$\boldsymbol{u}$可以表述为:</p>
+<p>\begin{equation}\text{find } \boldsymbol{u} \text{ such that } \min_{i=1,\cdots,n} \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle &gt; 0\tag{9}\end{equation}</p>
+<p>为了避免$\boldsymbol{u}$趋于无穷大,我们添加正则化项,将问题转化为:</p>
+<p>\begin{equation}\max_{\boldsymbol{u}} \left(\min_{i=1,\cdots,n} \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\right)\tag{10}\end{equation}</p>
+<p><strong>引理3.1</strong>: 式(10)的最优解$\boldsymbol{u}^<em>$满足:
+\begin{equation}\min_{i=1,\cdots,n} \langle \boldsymbol{g}_i, \boldsymbol{u}^</em>\rangle = \frac{1}{2}\Vert\boldsymbol{u}^*\Vert^2\tag{11}\end{equation}</p>
+<p><strong>证明</strong>: 设$f(\boldsymbol{u}) = \min\limits_i \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2$。注意到$f(\boldsymbol{0}) = 0$。</p>
+<p>如果$\boldsymbol{u}^<em>$是最优解,则$f(\boldsymbol{u}^</em>) \geq f(\boldsymbol{0}) = 0$,即:</p>
+<p>\begin{equation}\min_i \langle \boldsymbol{g}_i, \boldsymbol{u}^<em>\rangle \geq \frac{1}{2}\Vert\boldsymbol{u}^</em>\Vert^2\tag{12}\end{equation}</p>
+<p>另一方面,对于任意$\epsilon &gt; 0$,取$\boldsymbol{u}_{\epsilon} = (1+\epsilon)\boldsymbol{u}^*$,有:</p>
+<p>\begin{equation}f(\boldsymbol{u}_{\epsilon}) = (1+\epsilon)\min_i \langle \boldsymbol{g}_i, \boldsymbol{u}^<em>\rangle - \frac{(1+\epsilon)^2}{2}\Vert\boldsymbol{u}^</em>\Vert^2\tag{13}\end{equation}</p>
+<p>由于$\boldsymbol{u}^<em>$是最优解,$f(\boldsymbol{u}_{\epsilon}) \leq f(\boldsymbol{u}^</em>)$,整理得:</p>
+<p>\begin{equation}\min_i \langle \boldsymbol{g}_i, \boldsymbol{u}^<em>\rangle \leq \frac{1+2\epsilon}{2(1+\epsilon)}\Vert\boldsymbol{u}^</em>\Vert^2\tag{14}\end{equation}</p>
+<p>令$\epsilon \to 0^+$,得到$\min\limits_i \langle \boldsymbol{g}_i, \boldsymbol{u}^<em>\rangle \leq \frac{1}{2}\Vert\boldsymbol{u}^</em>\Vert^2$。</p>
+<p>结合式(12),得证式(11)。 □</p>
+<h4 id="32">3.2 最小值的光滑近似</h4>
+<p>式(10)中的$\min$运算是不可导的,我们使用LogSumExp技巧进行光滑近似:</p>
+<p>\begin{equation}\min_i x_i \approx -\frac{1}{\lambda}\log\sum_i e^{-\lambda x_i}\quad(\lambda \to \infty)\tag{15}\end{equation}</p>
+<p><strong>引理3.2 (LogSumExp近似的误差界)</strong>: 对于任意实数序列$x_1,\cdots,x_n$,设$x_{\min} = \min\limits_i x_i$,则:</p>
+<p>\begin{equation}x_{\min} \leq -\frac{1}{\lambda}\log\sum_{i=1}^n e^{-\lambda x_i} \leq x_{\min} + \frac{\log n}{\lambda}\tag{16}\end{equation}</p>
+<p><strong>证明</strong>:
+\begin{align}
+-\frac{1}{\lambda}\log\sum_{i=1}^n e^{-\lambda x_i} &amp;= -\frac{1}{\lambda}\log\left(e^{-\lambda x_{\min}}\sum_{i=1}^n e^{-\lambda(x_i - x_{\min})}\right)\tag{17}\
+&amp;= x_{\min} - \frac{1}{\lambda}\log\sum_{i=1}^n e^{-\lambda(x_i - x_{\min})}\tag{18}
+\end{align}</p>
+<p>由于$x_i - x_{\min} \geq 0$,有$1 \leq \sum\limits_{i=1}^n e^{-\lambda(x_i - x_{\min})} \leq n$,因此:</p>
+<p>\begin{equation}0 \leq \frac{1}{\lambda}\log\sum_{i=1}^n e^{-\lambda(x_i - x_{\min})} \leq \frac{\log n}{\lambda}\tag{19}\end{equation}</p>
+<p>得证。 □</p>
+<p>代入式(10),得到光滑优化问题:</p>
+<p>\begin{equation}\max_{\boldsymbol{u}} \left(-\frac{1}{\lambda}\log\sum_i e^{-\lambda\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle} - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\right)\tag{20}\end{equation}</p>
+<h4 id="33">3.3 光滑问题的求解</h4>
+<p>对式(20)关于$\boldsymbol{u}$求导并令其为零:</p>
+<p>\begin{equation}\frac{\partial}{\partial\boldsymbol{u}}\left(-\frac{1}{\lambda}\log\sum_i e^{-\lambda\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle} - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\right) = \boldsymbol{0}\tag{21}\end{equation}</p>
+<p>计算梯度:</p>
+<p>\begin{align}
+&amp;\frac{\partial}{\partial\boldsymbol{u}}\left(-\frac{1}{\lambda}\log\sum_i e^{-\lambda\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle}\right)\tag{22}\
+&amp;= \frac{1}{\lambda}\cdot\frac{\sum_i \lambda e^{-\lambda\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle}\boldsymbol{g}_i}{\sum_i e^{-\lambda\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle}}\tag{23}\
+&amp;= \frac{\sum_i e^{-\lambda\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle}\boldsymbol{g}_i}{\sum_i e^{-\lambda\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle}}\tag{24}
+\end{align}</p>
+<p>因此最优性条件为:</p>
+<p>\begin{equation}\frac{\sum_i e^{-\lambda\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle}\boldsymbol{g}_i}{\sum_i e^{-\lambda\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle}} = \boldsymbol{u}\tag{25}\end{equation}</p>
+<p><strong>定理3.1 (迭代算法的收敛性)</strong>: 考虑迭代格式:</p>
+<p>\begin{equation}\boldsymbol{u}^{(k+1)} = \frac{k\boldsymbol{u}^{(k)} + \boldsymbol{g}_{\tau}}{k+1},\quad\tau = \mathop{\arg\min}_i \langle \boldsymbol{g}_i, \boldsymbol{u}^{(k)}\rangle\tag{26}\end{equation}</p>
+<p>当$k \to \infty$时,$\boldsymbol{u}^{(k)}$收敛到式(25)的解。</p>
+<p><strong>证明思路</strong>: 这是一个次梯度方法的应用。由于$\min\limits_i \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle$在最小值点不可导,我们使用次梯度:</p>
+<p>\begin{equation}\partial\left(\min_i \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle\right) = \text{conv}\{\boldsymbol{g}_i : i \in I(\boldsymbol{u})\}\tag{27}\end{equation}</p>
+<p>其中$I(\boldsymbol{u}) = \{i : \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle = \min\limits_j \langle \boldsymbol{g}_j, \boldsymbol{u}\rangle\}$,$\text{conv}$表示凸包。</p>
+<p>式(26)实际上是在次梯度方向上进行迭代,并通过平均来稳定振荡。 □</p>
+<h3 id="4-minimax">4. 对偶问题与Minimax定理</h3>
+<h4 id="41-minimax">4.1 Minimax问题的转化</h4>
+<p><strong>引理4.1</strong>: 设$\mathbb{P}^n = \{(\alpha_1,\cdots,\alpha_n) : \alpha_i \geq 0, \sum_i \alpha_i = 1\}$,则:</p>
+<p>\begin{equation}\min_{i=1,\cdots,n} \langle \boldsymbol{g}<em _alpha="\alpha" _in="\in" _mathbb_P="\mathbb{P">i, \boldsymbol{u}\rangle = \min</em>}^n} \left\langle \sum_i \alpha_i\boldsymbol{g}_i, \boldsymbol{u}\right\rangle\tag{28}\end{equation</p>
+<p><strong>证明</strong>:
+左边$\leq$右边是显然的,因为取$\alpha = e_j$(第$j$个分量为1的one-hot向量),右边可以达到左边的任意值。</p>
+<p>反过来,对于任意$\alpha \in \mathbb{P}^n$:</p>
+<p>\begin{equation}\left\langle \sum_i \alpha_i\boldsymbol{g}_i, \boldsymbol{u}\right\rangle = \sum_i \alpha_i\langle \boldsymbol{g}_i, \boldsymbol{u}\rangle \geq \sum_i \alpha_i \min_j \langle \boldsymbol{g}_j, \boldsymbol{u}\rangle = \min_j \langle \boldsymbol{g}_j, \boldsymbol{u}\rangle\tag{29}\end{equation}</p>
+<p>因此右边$\geq$左边。 □</p>
+<p>记$\tilde{\boldsymbol{g}}(\alpha) = \sum_i \alpha_i\boldsymbol{g}_i$,原问题可以写成:</p>
+<p>\begin{equation}\max_{\boldsymbol{u}} \min_{\alpha \in \mathbb{P}^n} \left(\langle \tilde{\boldsymbol{g}}(\alpha), \boldsymbol{u}\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\right)\tag{30}\end{equation}</p>
+<h4 id="42-minimax">4.2 冯·诺依曼Minimax定理</h4>
+<p><strong>定理4.1 (Minimax定理)</strong>: 设$f(\boldsymbol{x},\boldsymbol{y})$在凸集$X$上关于$\boldsymbol{x}$是凹函数,在凸集$Y$上关于$\boldsymbol{y}$是凸函数,且$X,Y$是紧集,则:</p>
+<p>\begin{equation}\max_{\boldsymbol{x} \in X} \min_{\boldsymbol{y} \in Y} f(\boldsymbol{x},\boldsymbol{y}) = \min_{\boldsymbol{y} \in Y} \max_{\boldsymbol{x} \in X} f(\boldsymbol{x},\boldsymbol{y})\tag{31}\end{equation}</p>
+<p>对于我们的问题,$f(\boldsymbol{u},\alpha) = \langle \tilde{\boldsymbol{g}}(\alpha), \boldsymbol{u}\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2$:
+- 关于$\boldsymbol{u}$是凹函数(二次项系数为负)
+- 关于$\alpha$是线性函数(因此既凸又凹)
+- $\mathbb{P}^n$是紧凸集</p>
+<p>因此Minimax定理适用,我们可以交换$\max$和$\min$的顺序:</p>
+<p>\begin{equation}\max_{\boldsymbol{u}} \min_{\alpha \in \mathbb{P}^n} \left(\langle \tilde{\boldsymbol{g}}(\alpha), \boldsymbol{u}\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\right) = \min_{\alpha \in \mathbb{P}^n} \max_{\boldsymbol{u}} \left(\langle \tilde{\boldsymbol{g}}(\alpha), \boldsymbol{u}\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\right)\tag{32}\end{equation}</p>
+<h4 id="43">4.3 对偶问题的显式解</h4>
+<p>对于固定的$\alpha$,内层的$\max$问题是一个无约束二次优化:</p>
+<p>\begin{equation}\max_{\boldsymbol{u}} \left(\langle \tilde{\boldsymbol{g}}(\alpha), \boldsymbol{u}\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\right)\tag{33}\end{equation}</p>
+<p>求导并令其为零:</p>
+<p>\begin{equation}\frac{\partial}{\partial\boldsymbol{u}}\left(\langle \tilde{\boldsymbol{g}}(\alpha), \boldsymbol{u}\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\right) = \tilde{\boldsymbol{g}}(\alpha) - \boldsymbol{u} = \boldsymbol{0}\tag{34}\end{equation}</p>
+<p>因此最优解为:</p>
+<p>\begin{equation}\boldsymbol{u}^*(\alpha) = \tilde{\boldsymbol{g}}(\alpha) = \sum_i \alpha_i\boldsymbol{g}_i\tag{35}\end{equation}</p>
+<p>代入目标函数:</p>
+<p>\begin{align}
+&amp;\langle \tilde{\boldsymbol{g}}(\alpha), \boldsymbol{u}^<em>(\alpha)\rangle - \frac{1}{2}\Vert\boldsymbol{u}^</em>(\alpha)\Vert^2\tag{36}\
+&amp;= \langle \tilde{\boldsymbol{g}}(\alpha), \tilde{\boldsymbol{g}}(\alpha)\rangle - \frac{1}{2}\Vert\tilde{\boldsymbol{g}}(\alpha)\Vert^2\tag{37}\
+&amp;= \frac{1}{2}\Vert\tilde{\boldsymbol{g}}(\alpha)\Vert^2\tag{38}
+\end{align}</p>
+<p>因此原问题等价于:</p>
+<p>\begin{equation}\min_{\alpha \in \mathbb{P}^n} \frac{1}{2}\left\Vert\sum_i \alpha_i\boldsymbol{g}_i\right\Vert^2\tag{39}\end{equation}</p>
+<p><strong>定理4.2 (对偶问题的几何解释)</strong>: 式(39)的目标是在所有梯度向量$\boldsymbol{g}_1,\cdots,\boldsymbol{g}_n$的凸组合中,找到模长最小的那个。</p>
+<h3 id="5-frank-wolfe">5. Frank-Wolfe算法</h3>
+<h4 id="51">5.1 算法原理</h4>
+<p>Frank-Wolfe算法是一种求解带约束优化问题的一阶方法,特别适合于可行域为凸集的情形。</p>
+<p><strong>问题形式</strong>:
+\begin{equation}\min_{\boldsymbol{x} \in \mathcal{C}} f(\boldsymbol{x})\tag{40}\end{equation}</p>
+<p>其中$f$是凸函数,$\mathcal{C}$是紧凸集。</p>
+<p><strong>算法步骤</strong>:</p>
+<p><strong>Step 1 (线性化)</strong>: 在当前点$\boldsymbol{x}^{(k)}$处将目标函数线性化:</p>
+<p>\begin{equation}f(\boldsymbol{x}) \approx f(\boldsymbol{x}^{(k)}) + \langle \nabla f(\boldsymbol{x}^{(k)}), \boldsymbol{x} - \boldsymbol{x}^{(k)}\rangle\tag{41}\end{equation}</p>
+<p><strong>Step 2 (求解线性问题)</strong>: 求解线性规划:</p>
+<p>\begin{equation}\boldsymbol{s}^{(k)} = \mathop{\arg\min}_{\boldsymbol{x} \in \mathcal{C}} \langle \nabla f(\boldsymbol{x}^{(k)}), \boldsymbol{x}\rangle\tag{42}\end{equation}</p>
+<p><strong>Step 3 (线搜索)</strong>: 在$\boldsymbol{x}^{(k)}$和$\boldsymbol{s}^{(k)}$之间进行线搜索:</p>
+<p>\begin{equation}\gamma^{(k)} = \mathop{\arg\min}_{\gamma \in [0,1]} f((1-\gamma)\boldsymbol{x}^{(k)} + \gamma\boldsymbol{s}^{(k)})\tag{43}\end{equation}</p>
+<p><strong>Step 4 (更新)</strong>:</p>
+<p>\begin{equation}\boldsymbol{x}^{(k+1)} = (1-\gamma^{(k)})\boldsymbol{x}^{(k)} + \gamma^{(k)}\boldsymbol{s}^{(k)}\tag{44}\end{equation}</p>
+<h4 id="52">5.2 应用到多任务优化</h4>
+<p>对于问题(39),我们有:
+- 目标函数: $f(\alpha) = \frac{1}{2}\Vert\tilde{\boldsymbol{g}}(\alpha)\Vert^2 = \frac{1}{2}\left\Vert\sum_i \alpha_i\boldsymbol{g}_i\right\Vert^2$
+- 可行域: $\mathcal{C} = \mathbb{P}^n$</p>
+<p><strong>梯度计算</strong>:</p>
+<p>\begin{align}
+\frac{\partial f(\alpha)}{\partial \alpha_j} &amp;= \frac{\partial}{\partial \alpha_j}\left[\frac{1}{2}\sum_{i,k} \alpha_i\alpha_k\langle\boldsymbol{g}_i,\boldsymbol{g}_k\rangle\right]\tag{45}\
+&amp;= \frac{1}{2}\sum_k \alpha_k\langle\boldsymbol{g}_j,\boldsymbol{g}_k\rangle + \frac{1}{2}\sum_i \alpha_i\langle\boldsymbol{g}_i,\boldsymbol{g}_j\rangle\tag{46}\
+&amp;= \sum_k \alpha_k\langle\boldsymbol{g}_j,\boldsymbol{g}_k\rangle\tag{47}\
+&amp;= \langle\boldsymbol{g}_j, \tilde{\boldsymbol{g}}(\alpha)\rangle\tag{48}
+\end{align}</p>
+<p><strong>线性子问题</strong>:</p>
+<p>\begin{equation}\tau = \mathop{\arg\min}_{j=1,\cdots,n} \langle\boldsymbol{g}_j, \tilde{\boldsymbol{g}}(\alpha^{(k)})\rangle\tag{49}\end{equation}</p>
+<p>对应的顶点为$\boldsymbol{s}^{(k)} = e_{\tau}$。</p>
+<p><strong>线搜索</strong>: 在$\alpha^{(k)}$和$e_{\tau}$之间搜索:</p>
+<p>\begin{equation}\gamma^{(k)} = \mathop{\arg\min}<em _tau="\tau">{\gamma \in [0,1]} \frac{1}{2}\left\Vert(1-\gamma)\tilde{\boldsymbol{g}}(\alpha^{(k)}) + \gamma\boldsymbol{g}</em>}\right\Vert^2\tag{50}\end{equation</p>
+<p>展开目标函数:</p>
+<p>\begin{align}
+&amp;\frac{1}{2}\left\Vert(1-\gamma)\tilde{\boldsymbol{g}}(\alpha^{(k)}) + \gamma\boldsymbol{g}<em _tau="\tau">{\tau}\right\Vert^2\tag{51}\
+&amp;= \frac{1}{2}\left[(1-\gamma)^2\Vert\tilde{\boldsymbol{g}}(\alpha^{(k)})\Vert^2 + 2\gamma(1-\gamma)\langle\tilde{\boldsymbol{g}}(\alpha^{(k)}), \boldsymbol{g}</em>
+\end{align}}\rangle + \gamma^2\Vert\boldsymbol{g}_{\tau}\Vert^2\right]\tag{52</p>
+<p>对$\gamma$求导:</p>
+<p>\begin{equation}\frac{d}{d\gamma} = -(1-\gamma)\Vert\tilde{\boldsymbol{g}}(\alpha^{(k)})\Vert^2 + (1-2\gamma)\langle\tilde{\boldsymbol{g}}(\alpha^{(k)}), \boldsymbol{g}<em _tau="\tau">{\tau}\rangle + \gamma\Vert\boldsymbol{g}</em>}\Vert^2 = 0\tag{53}\end{equation</p>
+<p>解得:</p>
+<p>\begin{equation}\gamma^* = \frac{\Vert\tilde{\boldsymbol{g}}(\alpha^{(k)})\Vert^2 - \langle\tilde{\boldsymbol{g}}(\alpha^{(k)}), \boldsymbol{g}<em _tau="\tau">{\tau}\rangle}{\Vert\tilde{\boldsymbol{g}}(\alpha^{(k)})\Vert^2 + \Vert\boldsymbol{g}</em>}\Vert^2 - 2\langle\tilde{\boldsymbol{g}}(\alpha^{(k)}), \boldsymbol{g}_{\tau}\rangle}\tag{54}\end{equation</p>
+<p>需要将$\gamma^*$截断到$[0,1]$内:</p>
+<p>\begin{equation}\gamma^{(k)} = \max(0, \min(1, \gamma^*))\tag{55}\end{equation}</p>
+<h4 id="53-n2">5.3 几何解释(n=2的情况)</h4>
+<p>当只有两个任务时,问题简化为在$\boldsymbol{g}_1$和$\boldsymbol{g}_2$之间找一个凸组合,使其模长最小。</p>
+<p>设$\alpha_1 = \alpha, \alpha_2 = 1-\alpha$,目标函数为:</p>
+<p>\begin{equation}f(\alpha) = \frac{1}{2}\Vert\alpha\boldsymbol{g}_1 + (1-\alpha)\boldsymbol{g}_2\Vert^2\tag{56}\end{equation}</p>
+<p>展开:</p>
+<p>\begin{align}
+f(\alpha) &amp;= \frac{1}{2}\left[\alpha^2\Vert\boldsymbol{g}_1\Vert^2 + (1-\alpha)^2\Vert\boldsymbol{g}_2\Vert^2 + 2\alpha(1-\alpha)\langle\boldsymbol{g}_1,\boldsymbol{g}_2\rangle\right]\tag{57}
+\end{align}</p>
+<p>对$\alpha$求导:</p>
+<p>\begin{equation}\frac{df}{d\alpha} = \alpha\Vert\boldsymbol{g}_1\Vert^2 - (1-\alpha)\Vert\boldsymbol{g}_2\Vert^2 + (1-2\alpha)\langle\boldsymbol{g}_1,\boldsymbol{g}_2\rangle = 0\tag{58}\end{equation}</p>
+<p>解得:</p>
+<p>\begin{equation}\alpha^* = \frac{\Vert\boldsymbol{g}_2\Vert^2 - \langle\boldsymbol{g}_1,\boldsymbol{g}_2\rangle}{\Vert\boldsymbol{g}_1\Vert^2 + \Vert\boldsymbol{g}_2\Vert^2 - 2\langle\boldsymbol{g}_1,\boldsymbol{g}_2\rangle}\tag{59}\end{equation}</p>
+<p><strong>几何意义</strong>: 最优凸组合相当于从原点向连接$\boldsymbol{g}_1$和$\boldsymbol{g}_2$的线段作垂线,垂足即为所求。</p>
+<h3 id="6">6. 梯度归一化方法</h3>
+<h4 id="61">6.1 梯度归一化的动机</h4>
+<p>从前面的分析可以看出,最优的多任务更新方向$\boldsymbol{u}^<em> = \sum_i \alpha_i^</em>\boldsymbol{g}_i$是各个任务梯度的加权平均。一个简单的想法是直接对每个梯度归一化后相加:</p>
+<p>\begin{equation}\boldsymbol{u}<em i="1">{\text{norm}} = \sum</em>}^n \frac{\boldsymbol{g}_i}{\Vert\boldsymbol{g}_i\Vert}\tag{60}\end{equation</p>
+<p><strong>定理6.1 (双任务情况的等价性)</strong>: 当$n=2$时,梯度归一化方法得到的方向与Frank-Wolfe算法得到的最优方向成正比。</p>
+<p><strong>证明</strong>: 对于$n=2$,设$\boldsymbol{u}^* = \alpha\boldsymbol{g}_1 + (1-\alpha)\boldsymbol{g}_2$,根据式(59):</p>
+<p>\begin{equation}\alpha = \frac{\Vert\boldsymbol{g}_2\Vert^2 - \langle\boldsymbol{g}_1,\boldsymbol{g}_2\rangle}{\Vert\boldsymbol{g}_1\Vert^2 + \Vert\boldsymbol{g}_2\Vert^2 - 2\langle\boldsymbol{g}_1,\boldsymbol{g}_2\rangle}\tag{61}\end{equation}</p>
+<p>我们需要证明$\boldsymbol{u}^*$与$\frac{\boldsymbol{g}_1}{\Vert\boldsymbol{g}_1\Vert} + \frac{\boldsymbol{g}_2}{\Vert\boldsymbol{g}_2\Vert}$平行,即证明两者的夹角余弦为1或-1。</p>
+<p>考虑$\langle \boldsymbol{g}<em _text_norm="\text{norm">1, \boldsymbol{u}</em>}}\rangle$和$\langle \boldsymbol{g<em _text_norm="\text{norm">2, \boldsymbol{u}</em>\rangle$:}</p>
+<p>\begin{align}
+\langle \boldsymbol{g}<em _text_norm="\text{norm">1, \boldsymbol{u}</em>}}\rangle &amp;= \Vert\boldsymbol{g<em _text_norm="\text{norm">1\Vert + \frac{\langle\boldsymbol{g}_1,\boldsymbol{g}_2\rangle}{\Vert\boldsymbol{g}_2\Vert}\tag{62}\
+\langle \boldsymbol{g}_2, \boldsymbol{u}</em>
+\end{align}}}\rangle &amp;= \frac{\langle\boldsymbol{g}_1,\boldsymbol{g}_2\rangle}{\Vert\boldsymbol{g}_1\Vert} + \Vert\boldsymbol{g}_2\Vert\tag{63</p>
+<p>如果两者都非负,则$\boldsymbol{u}_{\text{norm}}$确实是一个下降方向。 □</p>
+<h4 id="62">6.2 一般情况的近似性质</h4>
+<p>对于$n &gt; 2$的情况,梯度归一化方法不一定能得到最优解,但它提供了一个简单易实现的近似。</p>
+<p><strong>定理6.2 (梯度归一化的性质)</strong>: 设$\boldsymbol{u}<em i="1">{\text{norm}} = \sum</em>}^n \frac{\boldsymbol{g<em _text_norm="\text{norm">i}{\Vert\boldsymbol{g}_i\Vert}$,如果对所有$i,j$都有$\langle \boldsymbol{g}_i, \boldsymbol{g}_j\rangle &gt; 0$,则$\boldsymbol{u}</em>$是所有任务的共同下降方向。}</p>
+<p><strong>证明</strong>: 对于任意$i$:</p>
+<p>\begin{align}
+\langle \boldsymbol{g}<em _text_norm="\text{norm">i, \boldsymbol{u}</em>}}\rangle &amp;= \left\langle \boldsymbol{g<em j="1">i, \sum</em>}^n \frac{\boldsymbol{g<em j="1">j}{\Vert\boldsymbol{g}_j\Vert}\right\rangle\tag{64}\
+&amp;= \sum</em>\
+&amp;\geq \frac{\Vert\boldsymbol{g}_i\Vert}{\Vert\boldsymbol{g}_i\Vert} &gt; 0\tag{66}
+\end{align}}^n \frac{\langle \boldsymbol{g}_i, \boldsymbol{g}_j\rangle}{\Vert\boldsymbol{g}_j\Vert}\tag{65</p>
+<p>因此$-\boldsymbol{u}_{\text{norm}}$是下降方向。 □</p>
+<h3 id="7">7. 收敛性分析</h3>
+<h4 id="71-frank-wolfe">7.1 Frank-Wolfe算法的收敛速度</h4>
+<p><strong>定理7.1</strong>: 设$f$是$L$-光滑的凸函数,即对所有$\boldsymbol{x},\boldsymbol{y}$有:</p>
+<p>\begin{equation}\Vert\nabla f(\boldsymbol{x}) - \nabla f(\boldsymbol{y})\Vert \leq L\Vert\boldsymbol{x} - \boldsymbol{y}\Vert\tag{67}\end{equation}</p>
+<p>则Frank-Wolfe算法在$k$步迭代后满足:</p>
+<p>\begin{equation}f(\boldsymbol{x}^{(k)}) - f(\boldsymbol{x}^*) \leq \frac{2LD^2}{k+2}\tag{68}\end{equation}</p>
+<p>其中$D = \max_{\boldsymbol{x},\boldsymbol{y} \in \mathcal{C}}\Vert\boldsymbol{x} - \boldsymbol{y}\Vert$是可行域的直径。</p>
+<p><strong>证明思路</strong>:
+1. 利用凸函数的性质:$f(\boldsymbol{x}^{(k)}) - f(\boldsymbol{x}^<em>) \leq \langle \nabla f(\boldsymbol{x}^{(k)}), \boldsymbol{x}^{(k)} - \boldsymbol{x}^</em>\rangle$
+2. 利用$L$-光滑性建立递推关系
+3. 通过归纳法得到$\mathcal{O}(1/k)$的收敛速度</p>
+<h4 id="72">7.2 多任务优化的特殊性质</h4>
+<p>对于多任务优化问题$f(\alpha) = \frac{1}{2}\Vert\sum_i \alpha_i\boldsymbol{g}_i\Vert^2$:</p>
+<p><strong>Lipschitz常数</strong>:</p>
+<p>\begin{align}
+\Vert\nabla f(\alpha) - \nabla f(\beta)\Vert^2 &amp;= \sum_i \left(\langle\boldsymbol{g}_i, \tilde{\boldsymbol{g}}(\alpha)\rangle - \langle\boldsymbol{g}_i, \tilde{\boldsymbol{g}}(\beta)\rangle\right)^2\tag{69}\
+&amp;= \sum_i \left\langle\boldsymbol{g}_i, \tilde{\boldsymbol{g}}(\alpha) - \tilde{\boldsymbol{g}}(\beta)\right\rangle^2\tag{70}\
+&amp;\leq \sum_i \Vert\boldsymbol{g}_i\Vert^2 \cdot \Vert\tilde{\boldsymbol{g}}(\alpha) - \tilde{\boldsymbol{g}}(\beta)\Vert^2\tag{71}\
+&amp;= \left(\sum_i \Vert\boldsymbol{g}_i\Vert^2\right) \Vert\tilde{\boldsymbol{g}}(\alpha) - \tilde{\boldsymbol{g}}(\beta)\Vert^2\tag{72}\
+&amp;\leq \left(\sum_i \Vert\boldsymbol{g}_i\Vert^2\right) \left(\sum_i |\alpha_i - \beta_i|\Vert\boldsymbol{g}_i\Vert\right)^2\tag{73}\
+&amp;\leq \left(\sum_i \Vert\boldsymbol{g}_i\Vert^2\right)^2 \Vert\alpha - \beta\Vert^2\tag{74}
+\end{align}</p>
+<p>因此$L = \left(\sum_i \Vert\boldsymbol{g}_i\Vert^2\right)$。</p>
+<p><strong>可行域直径</strong>: $\mathbb{P}^n$的直径为$D = \sqrt{2}$(从一个顶点到另一个顶点的最大距离)。</p>
+<p>因此收敛速度估计为:</p>
+<p>\begin{equation}f(\alpha^{(k)}) - f(\alpha^*) \leq \frac{4\sum_i \Vert\boldsymbol{g}_i\Vert^2}{k+2}\tag{75}\end{equation}</p>
+<h3 id="8">8. 实践建议与数值稳定性</h3>
+<h4 id="81">8.1 梯度内积的高效计算</h4>
+<p>在深度学习中,参数维度$d$通常非常大,直接计算梯度内积$\langle \boldsymbol{g}_i, \boldsymbol{g}_j\rangle$的复杂度为$\mathcal{O}(d)$,对$n$个任务总复杂度为$\mathcal{O}(n^2d)$。</p>
+<p><strong>优化策略</strong>: 预计算Gram矩阵</p>
+<p>在每次迭代开始时,计算并存储所有梯度对的内积:</p>
+<p>\begin{equation}G_{i,j} = \langle \boldsymbol{g}_i, \boldsymbol{g}_j\rangle,\quad i,j = 1,\cdots,n\tag{76}\end{equation}</p>
+<p>总计算量为$\mathcal{O}(n^2d)$,但之后的Frank-Wolfe迭代只需$\mathcal{O}(n^2)$,不再依赖$d$。</p>
+<p>具体实现:</p>
+<div class="codehilite"><pre><span></span><code><span class="err">#</span><span class="w"> </span><span class="n">伪代码</span>
+<span class="n">G</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n</span><span class="p">,</span><span class="w"> </span><span class="n">n</span><span class="p">))</span>
+<span class="k">for</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">n</span><span class="p">)</span><span class="err">:</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="n">j</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">n</span><span class="p">)</span><span class="err">:</span>
+<span class="w">        </span><span class="n">G</span><span class="o">[</span><span class="n">i,j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">G</span><span class="o">[</span><span class="n">j,i</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">dot</span><span class="p">(</span><span class="n">grad</span><span class="o">[</span><span class="n">i</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">grad</span><span class="o">[</span><span class="n">j</span><span class="o">]</span><span class="p">)</span>
+</code></pre></div>
+
+<h4 id="82">8.2 数值稳定性考虑</h4>
+<p><strong>问题</strong>: 当某些梯度模长过小时,归一化可能导致数值不稳定。</p>
+<p><strong>解决方案</strong>: 添加小的正则化项</p>
+<p>\begin{equation}\boldsymbol{u}<em i="1">{\text{norm}} = \sum</em>}^n \frac{\boldsymbol{g}_i}{\Vert\boldsymbol{g}_i\Vert + \epsilon}\tag{77}\end{equation</p>
+<p>其中$\epsilon \approx 10^{-8}$。</p>
+<p><strong>问题</strong>: 线搜索中的除零风险</p>
+<p>在式(54)中,分母可能接近零。</p>
+<p><strong>解决方案</strong>: 添加保护</p>
+<p>\begin{equation}\gamma^* = \frac{\Vert\tilde{\boldsymbol{g}}(\alpha^{(k)})\Vert^2 - \langle\tilde{\boldsymbol{g}}(\alpha^{(k)}), \boldsymbol{g}<em _tau="\tau">{\tau}\rangle}{\max(\Vert\tilde{\boldsymbol{g}}(\alpha^{(k)})\Vert^2 + \Vert\boldsymbol{g}</em>}\Vert^2 - 2\langle\tilde{\boldsymbol{g}}(\alpha^{(k)}), \boldsymbol{g}_{\tau}\rangle, \epsilon)}\tag{78}\end{equation</p>
+<h4 id="83">8.3 共享编码器的近似方法</h4>
+<p>对于共享编码器架构,记$\boldsymbol{H} = (\boldsymbol{h}_1,\cdots,\boldsymbol{h}_B)$为批次中所有样本的编码,则:</p>
+<p>\begin{equation}\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">i = \nabla</em>}}\mathcal{L<em _boldsymbol_H="\boldsymbol{H">i = (\nabla</em>}}\mathcal{L<em _boldsymbol_theta="\boldsymbol{\theta">i)(\nabla</em>}}\boldsymbol{H})\tag{79}\end{equation</p>
+<p><strong>矩阵范数不等式</strong>:</p>
+<p>\begin{equation}\left\Vert\sum_i \alpha_i\boldsymbol{g}<em _boldsymbol_H="\boldsymbol{H">i\right\Vert^2 \leq \left\Vert\sum_i \alpha_i\nabla</em>}}\mathcal{L<em _boldsymbol_theta="\boldsymbol{\theta">i\right\Vert_F^2 \cdot \Vert\nabla</em>}}\boldsymbol{H}\Vert_2^2\tag{80}\end{equation</p>
+<p>其中$\Vert\cdot\Vert_F$是Frobenius范数,$\Vert\cdot\Vert_2$是谱范数。</p>
+<p><strong>近似优化</strong>: 最小化上界</p>
+<p>\begin{equation}\min_{\alpha \in \mathbb{P}^n} \left\Vert\sum_i \alpha_i\nabla_{\boldsymbol{H}}\mathcal{L}_i\right\Vert_F^2\tag{81}\end{equation}</p>
+<p>计算复杂度从$\mathcal{O}(n^2|\boldsymbol{\theta}|)$降低到$\mathcal{O}(n^2Bd_h)$,其中$d_h$是隐层维度,$B$是批次大小。</p>
+<p><strong>适用条件</strong>:
+- 每个样本都有多个任务标注
+- 不同任务的训练数据有重叠</p>
+<p><strong>不适用情况</strong>:
+- 不同任务使用完全不同的样本
+- 此时$\nabla_{\boldsymbol{H}}\mathcal{L}_i$之间正交,上界过于宽松</p>
+<h4 id="84">8.4 实际训练流程</h4>
+<p><strong>算法8.1 (多任务梯度优化)</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="err">输入</span><span class="o">:</span><span class="w"> </span><span class="n">n个任务的损失函数L_1</span><span class="o">,...,</span><span class="n">L_n</span><span class="o">,</span><span class="w"> </span><span class="err">初始参数θ</span><span class="n">_0</span><span class="o">,</span><span class="w"> </span><span class="err">学习率η</span><span class="o">,</span><span class="w"> </span><span class="err">最大迭代次数</span><span class="n">K</span>
+<span class="err">输出</span><span class="o">:</span><span class="w"> </span><span class="err">优化后的参数θ</span>
+
+<span class="n">For</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">K</span><span class="o">:</span>
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="mi">1</span><span class="o">.</span><span class="w"> </span><span class="err">计算各任务梯度</span>
+<span class="w">    </span><span class="n">For</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">n</span><span class="o">:</span>
+<span class="w">        </span><span class="n">g_i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">∇</span><span class="n">L_i</span><span class="o">(</span><span class="err">θ</span><span class="n">_</span><span class="o">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="o">})</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="mi">2</span><span class="o">.</span><span class="w"> </span><span class="err">计算</span><span class="n">Gram矩阵</span>
+<span class="w">    </span><span class="n">For</span><span class="w"> </span><span class="n">i</span><span class="o">,</span><span class="n">j</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">n</span><span class="o">:</span>
+<span class="w">        </span><span class="n">G</span><span class="o">[</span><span class="n">i</span><span class="o">,</span><span class="n">j</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&lt;</span><span class="n">g_i</span><span class="o">,</span><span class="w"> </span><span class="n">g_j</span><span class="o">&gt;</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="mi">3</span><span class="o">.</span><span class="w"> </span><span class="err">初始化权重</span>
+<span class="w">    </span><span class="err">α</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">(</span><span class="mi">1</span><span class="sr">/n, ..., 1/</span><span class="n">n</span><span class="o">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="err">均匀分布</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="mi">4</span><span class="o">.</span><span class="w"> </span><span class="n">Frank</span><span class="o">-</span><span class="n">Wolfe迭代</span><span class="o">(</span><span class="err">内层循环</span><span class="o">)</span>
+<span class="w">    </span><span class="n">For</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">K_inner</span><span class="o">:</span>
+<span class="w">        </span><span class="err">#</span><span class="w"> </span><span class="mf">4.1</span><span class="w"> </span><span class="err">计算当前加权梯度</span>
+<span class="w">        </span><span class="n">g_tilde</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">Σ</span><span class="w"> </span><span class="err">α</span><span class="n">_i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">g_i</span>
+
+<span class="w">        </span><span class="err">#</span><span class="w"> </span><span class="mf">4.2</span><span class="w"> </span><span class="err">找最差任务</span>
+<span class="w">        </span><span class="err">τ</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">argmin_i</span><span class="w"> </span><span class="o">&lt;</span><span class="n">g_i</span><span class="o">,</span><span class="w"> </span><span class="n">g_tilde</span><span class="o">&gt;</span>
+
+<span class="w">        </span><span class="err">#</span><span class="w"> </span><span class="mf">4.3</span><span class="w"> </span><span class="err">线搜索</span>
+<span class="w">        </span><span class="err">γ</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">optimal_step</span><span class="o">(</span><span class="err">α</span><span class="o">,</span><span class="w"> </span><span class="err">τ</span><span class="o">,</span><span class="w"> </span><span class="n">G</span><span class="o">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="err">使用式</span><span class="o">(</span><span class="mi">54</span><span class="o">)</span>
+
+<span class="w">        </span><span class="err">#</span><span class="w"> </span><span class="mf">4.4</span><span class="w"> </span><span class="err">更新权重</span>
+<span class="w">        </span><span class="err">α</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">(</span><span class="mi">1</span><span class="o">-</span><span class="err">γ</span><span class="o">)</span><span class="err">α</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="err">γ</span><span class="o">*</span><span class="n">e_τ</span>
+
+<span class="w">        </span><span class="err">#</span><span class="w"> </span><span class="mf">4.5</span><span class="w"> </span><span class="err">检查收敛</span>
+<span class="w">        </span><span class="n">If</span><span class="w"> </span><span class="o">|</span><span class="n">f</span><span class="o">(</span><span class="err">α</span><span class="o">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">f</span><span class="o">(</span><span class="err">α</span><span class="n">_old</span><span class="o">)|</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">tol</span><span class="o">:</span>
+<span class="w">            </span><span class="k">break</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="mi">5</span><span class="o">.</span><span class="w"> </span><span class="err">更新参数</span>
+<span class="w">    </span><span class="n">g_final</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">Σ</span><span class="w"> </span><span class="err">α</span><span class="n">_i</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">g_i</span>
+<span class="w">    </span><span class="err">θ</span><span class="n">_t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">θ</span><span class="n">_</span><span class="o">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="o">}</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="err">η</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">g_final</span>
+
+<span class="n">Return</span><span class="w"> </span><span class="err">θ</span><span class="n">_K</span>
+</code></pre></div>
+
+<p><strong>超参数建议</strong>:
+- $K_{\text{inner}}$: 通常5-10次足够
+- $\text{tol}$: $10^{-6}$到$10^{-4}$
+- 初始$\alpha$: 均匀分布或根据任务重要性设置</p>
+<h3 id="9">9. 理论扩展与变体</h3>
+<h4 id="91">9.1 自适应权重衰减</h4>
+<p>在长时间训练中,可以引入权重的指数移动平均:</p>
+<p>\begin{equation}\bar{\alpha}<em t-1="t-1">t = \beta\bar{\alpha}</em>} + (1-\beta)\alpha_t\tag{82}\end{equation</p>
+<p>其中$\beta \in (0,1)$是衰减系数(如0.9)。这样可以平滑权重的变化,避免剧烈震荡。</p>
+<h4 id="92">9.2 温度缩放</h4>
+<p>类似于Softmax中的温度参数,可以引入温度$\tau$来控制权重分布的平滑度:</p>
+<p>\begin{equation}\min_{\alpha \in \mathbb{P}^n} \frac{1}{2}\left\Vert\sum_i \alpha_i\boldsymbol{g}_i\right\Vert^2 + \tau H(\alpha)\tag{83}\end{equation}</p>
+<p>其中$H(\alpha) = -\sum_i \alpha_i\log\alpha_i$是熵。</p>
+<ul>
+<li>当$\tau = 0$时,退化为原问题</li>
+<li>当$\tau \to \infty$时,趋向于均匀分布$\alpha_i = 1/n$</li>
+</ul>
+<h4 id="93">9.3 带约束的权重优化</h4>
+<p>在某些应用中,可能希望某些任务的权重满足额外约束:</p>
+<p>\begin{equation}\min_{\alpha \in \mathbb{P}^n} \frac{1}{2}\left\Vert\sum_i \alpha_i\boldsymbol{g}_i\right\Vert^2, \quad \text{s.t. } \alpha_i \geq \underline{\alpha}_i, \, i=1,\cdots,n\tag{84}\end{equation}</p>
+<p>其中$\underline{\alpha}_i &gt; 0$是任务$i$的最小权重,保证每个任务都得到一定的关注。</p>
+<p>可以使用投影梯度法求解:</p>
+<p>\begin{equation}\alpha^{(k+1)} = \Pi_{\mathcal{C}}\left(\alpha^{(k)} - \eta_k\nabla f(\alpha^{(k)})\right)\tag{85}\end{equation}</p>
+<p>其中$\mathcal{C} = \{\alpha : \sum_i\alpha_i=1, \alpha_i \geq \underline{\alpha}<em _mathcal_C="\mathcal{C">i\}$,$\Pi</em>$的投影。}}$是到集合$\mathcal{C</p>
+<h3 id="10">10. 与其他多任务学习方法的比较</h3>
+<h4 id="101">10.1 固定权重方法</h4>
+<p><strong>方法</strong>: $\boldsymbol{g} = \sum_i w_i\boldsymbol{g}_i$,其中$w_i$固定。</p>
+<p><strong>优点</strong>: 简单,计算高效
+<strong>缺点</strong>: 需要人工调整权重,无法自适应</p>
+<p><strong>理论联系</strong>: 可以视为本文方法在$\alpha$固定时的特例。</p>
+<h4 id="102-gradnorm">10.2 动态权重方法(如GradNorm)</h4>
+<p><strong>方法</strong>: 根据训练过程中的相对损失调整权重:</p>
+<p>\begin{equation}w_i \propto \frac{L_i}{\sum_j L_j}\tag{86}\end{equation}</p>
+<p><strong>优点</strong>: 自适应,平衡不同任务的学习速度
+<strong>缺点</strong>: 以损失为导向,未必保证帕累托最优</p>
+<p><strong>理论联系</strong>: 可以视为一种启发式方法,与本文的梯度视角不同。</p>
+<h4 id="103-uncertainty-weighting">10.3 不确定性加权(Uncertainty Weighting)</h4>
+<p><strong>方法</strong>: 利用任务的预测不确定性$\sigma_i^2$来加权:</p>
+<p>\begin{equation}\mathcal{L}_{\text{total}} = \sum_i \frac{1}{2\sigma_i^2}\mathcal{L}_i + \log\sigma_i\tag{87}\end{equation}</p>
+<p><strong>优点</strong>: 有贝叶斯理论支撑,可学习权重
+<strong>缺点</strong>: 引入额外参数,可能过拟合</p>
+<p><strong>理论联系</strong>: 从概率角度出发,与本文的几何/优化角度互补。</p>
+<h3 id="11_1">11. 数学直觉与几何理解</h3>
+<h4 id="111">11.1 梯度空间的几何</h4>
+<p><strong>直觉</strong>: 在参数空间中,每个任务的梯度$\boldsymbol{g}_i$定义了一个方向。我们的目标是找到一个"折衷"方向,使得沿着这个方向前进时,所有任务的损失都下降。</p>
+<p><strong>几何图像</strong>:
+- 每个梯度$\boldsymbol{g}_i$是一个箭头
+- 帕累托稳定点对应于这些箭头的凸包包含原点的情况
+- 最优权重$\alpha^*$对应于凸包中距离原点最近的点</p>
+<h4 id="112">11.2 凸优化的对偶性</h4>
+<p><strong>原问题</strong>: 找到同时满足所有约束的方向$\boldsymbol{u}$</p>
+<p>\begin{equation}\max_{\boldsymbol{u}} \min_i \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\tag{88}\end{equation}</p>
+<p><strong>对偶问题</strong>: 找到梯度的最小加权组合</p>
+<p>\begin{equation}\min_{\alpha \in \mathbb{P}^n} \frac{1}{2}\left\Vert\sum_i \alpha_i\boldsymbol{g}_i\right\Vert^2\tag{89}\end{equation}</p>
+<p><strong>强对偶性</strong>: 两个问题的最优值相等,且最优解满足$\boldsymbol{u}^<em> = \sum_i \alpha_i^</em>\boldsymbol{g}_i$。</p>
+<h4 id="113">11.3 为什么梯度归一化有效</h4>
+<p>当所有梯度的模长相似时,归一化后的平均$\frac{1}{n}\sum_i\frac{\boldsymbol{g}_i}{\Vert\boldsymbol{g}_i\Vert}$接近于最优加权平均。</p>
+<p><strong>定理11.1</strong>: 如果$\Vert\boldsymbol{g}_i\Vert = c$(常数)对所有$i$成立,则:</p>
+<p>\begin{equation}\mathop{\arg\min}<em _alpha="\alpha" _in="\in" _mathbb_P="\mathbb{P">{\alpha \in \mathbb{P}^n} \left\Vert\sum_i \alpha_i\boldsymbol{g}_i\right\Vert^2 = \mathop{\arg\min}</em>}^n} \left\Vert\sum_i \alpha_i\frac{\boldsymbol{g}_i}{\Vert\boldsymbol{g}_i\Vert}\right\Vert^2\tag{90}\end{equation</p>
+<p>因此在这种情况下,归一化不改变最优解。</p>
+<h3 id="12_1">12. 总结与展望</h3>
+<h4 id="121">12.1 本文的主要贡献</h4>
+<ol>
+<li><strong>理论框架</strong>: 建立了多任务学习中梯度视角的完整理论框架</li>
+<li><strong>算法设计</strong>: 提出了基于Frank-Wolfe的实用算法</li>
+<li><strong>收敛性保证</strong>: 证明了$\mathcal{O}(1/k)$的收敛速度</li>
+<li><strong>实践指导</strong>: 提供了高效实现和数值稳定性建议</li>
+</ol>
+<h4 id="122">12.2 开放问题</h4>
+<ol>
+<li>对于非凸损失函数,帕累托稳定点的性质?</li>
+<li>大规模问题中Frank-Wolfe的加速方法?</li>
+<li>动态任务场景下的在线多任务学习?</li>
+<li>理论保证下的近似方法?</li>
+</ol>
+<h4 id="123">12.3 未来研究方向</h4>
+<ul>
+<li>结合二阶信息(Hessian)的多任务优化</li>
+<li>分布式/联邦学习场景下的多任务协同</li>
+<li>元学习与多任务学习的融合</li>
+<li>针对特定领域(如NLP、CV)的专门化方法</li>
+</ul>
+<hr />
+<h2 id="_15">深入推导部分</h2>
+<h3 id="13-minimax">13. Minimax定理的深入理解</h3>
+<p><strong>定理13.1 (von Neumann Minimax定理)</strong></p>
+<p>设$X \subseteq \mathbb{R}^m$和$Y \subseteq \mathbb{R}^n$都是非空凸紧集，$f: X \times Y \to \mathbb{R}$满足：
+- 对每个固定的$y \in Y$，$f(\cdot, y)$是凸函数
+- 对每个固定的$x \in X$，$f(x, \cdot)$是凹函数</p>
+<p>则：
+\begin{equation}
+\max_{y \in Y} \min_{x \in X} f(x, y) = \min_{x \in X} \max_{y \in Y} f(x, y)
+\tag{91}
+\end{equation}</p>
+<p><strong>证明要点</strong>：</p>
+<p>定义函数：
+\begin{equation}
+\begin{aligned}
+\phi(x) &amp;= \max_{y \in Y} f(x, y) \
+\psi(y) &amp;= \min_{x \in X} f(x, y)
+\end{aligned}
+\tag{92}
+\end{equation}</p>
+<p>需要证明$\max_y \psi(y) = \min_x \phi(x)$。</p>
+<p><strong>步骤1</strong>：证明$\max_y \psi(y) \leq \min_x \phi(x)$（弱对偶性）</p>
+<p>对任意$x \in X, y \in Y$：
+\begin{equation}
+\psi(y) = \min_{x' \in X} f(x', y) \leq f(x, y) \leq \max_{y' \in Y} f(x, y') = \phi(x)
+\tag{93}
+\end{equation}</p>
+<p>因此：
+\begin{equation}
+\max_y \psi(y) \leq \psi(y) \leq \phi(x) \implies \max_y \psi(y) \leq \min_x \phi(x)
+\tag{94}
+\end{equation}</p>
+<p><strong>步骤2</strong>：证明$\max_y \psi(y) \geq \min_x \phi(x)$（强对偶性）</p>
+<p>利用分离超平面定理和Sion's Minimax定理。设：
+\begin{equation}
+\mathcal{A} = {(f(x, y_1), \ldots, f(x, y_n)) : x \in X} \subseteq \mathbb{R}^n
+\tag{95}
+\end{equation}</p>
+<p>因为$f(\cdot, y_i)$是凸函数且$X$是凸集，所以$\mathcal{A}$是凸集。$\square$</p>
+<p><strong>应用到多任务学习</strong>：</p>
+<p>我们的问题是：
+\begin{equation}
+\max_{\boldsymbol{u}} \min_{\alpha \in \mathbb{P}^n} \langle \sum_i \alpha_i \boldsymbol{g}_i, \boldsymbol{u} \rangle - \frac{1}{2}|\boldsymbol{u}|^2
+\tag{96}
+\end{equation}</p>
+<p>验证条件：
+- $\mathbb{P}^n$是单纯形，是紧凸集 ✓
+- $\mathbb{R}^d$不紧，但加入约束$|\boldsymbol{u}| \leq R$后紧 ✓
+- 关于$\boldsymbol{u}$是凹的（二次负项）✓
+- 关于$\alpha$是凸的（线性）✓</p>
+<p>因此Minimax定理适用。</p>
+<h3 id="14-frank-wolfe">14. Frank-Wolfe算法的完整分析</h3>
+<p><strong>算法框架</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+&amp;\text{输入: } \boldsymbol{g}_1, \ldots, \boldsymbol{g}_n \
+&amp;\text{初始化: } \alpha^{(0)} = (1/n, \ldots, 1/n) \
+&amp;\text{for } k = 0, 1, 2, \ldots: \
+&amp;\quad \boldsymbol{u}^{(k)} = \sum_i \alpha_i^{(k)} \boldsymbol{g}_i \
+&amp;\quad i^<em> = \mathop{\arg\min}<em>i \langle \boldsymbol{g}_i, \boldsymbol{u}^{(k)} \rangle \
+&amp;\quad \boldsymbol{s}^{(k)} = \boldsymbol{e}</em>{i^</em>} \quad \text{(one-hot向量)} \
+&amp;\quad \gamma^{(k)} = \frac{2}{k+2} \
+&amp;\quad \alpha^{(k+1)} = (1-\gamma^{(k)}) \alpha^{(k)} + \gamma^{(k)} \boldsymbol{s}^{(k)}
+\end{aligned}
+\tag{97}
+\end{equation}</p>
+<p><strong>定理14.1 (收敛速度)</strong></p>
+<p>设目标函数$f(\alpha) = \frac{1}{2}|\sum_i \alpha_i \boldsymbol{g}_i|^2$，$\alpha^<em>$是最优解。则：
+\begin{equation}
+f(\alpha^{(k)}) - f(\alpha^</em>) \leq \frac{2C}{k+1}
+\tag{98}
+\end{equation}</p>
+<p>其中$C = \max_i |\boldsymbol{g}_i|^2$。</p>
+<p><strong>证明</strong>：</p>
+<p>定义gap函数：
+\begin{equation}
+g_k = f(\alpha^{(k)}) - \min_{\alpha \in \mathbb{P}^n} f(\alpha)
+\tag{99}
+\end{equation}</p>
+<p><strong>引理14.1</strong>：对所有$k$：
+\begin{equation}
+g_{k+1} \leq \left(1 - \gamma_k\right) g_k + \frac{\gamma_k^2}{2} C
+\tag{100}
+\end{equation}</p>
+<p><strong>证明引理14.1</strong>：</p>
+<p>根据凸函数的性质：
+\begin{equation}
+\begin{aligned}
+f(\alpha^{(k+1)}) &amp;= f\left((1-\gamma_k)\alpha^{(k)} + \gamma_k \boldsymbol{s}^{(k)}\right) \
+&amp;\leq (1-\gamma_k) f(\alpha^{(k)}) + \gamma_k f(\boldsymbol{s}^{(k)}) \
+&amp;\quad + \frac{(1-\gamma_k)\gamma_k}{2} L |\alpha^{(k)} - \boldsymbol{s}^{(k)}|^2
+\end{aligned}
+\tag{101}
+\end{equation}</p>
+<p>其中$L$是Lipschitz常数。由于$|\boldsymbol{g}_i| \leq \sqrt{C}$，有$L \leq C$。</p>
+<p>进一步：
+\begin{equation}
+f(\boldsymbol{s}^{(k)}) = \frac{1}{2}|\boldsymbol{g}_{i^*}|^2 \leq \frac{C}{2}
+\tag{102}
+\end{equation}</p>
+<p>且：
+\begin{equation}
+|\alpha^{(k)} - \boldsymbol{s}^{(k)}|^2 \leq 2
+\tag{103}
+\end{equation}</p>
+<p>综合得到引理结论。$\square$</p>
+<p><strong>证明主定理</strong>：</p>
+<p>使用归纳法。假设对所有$j &lt; k$有$g_j \leq \frac{2C}{j+1}$。</p>
+<p>代入引理14.1：
+\begin{equation}
+\begin{aligned}
+g_{k+1} &amp;\leq \left(1 - \frac{2}{k+2}\right) \frac{2C}{k+1} + \frac{1}{2}\left(\frac{2}{k+2}\right)^2 C \
+&amp;= \frac{2C}{k+1} \cdot \frac{k}{k+2} + \frac{2C}{(k+2)^2} \
+&amp;= \frac{2Ck}{(k+1)(k+2)} + \frac{2C}{(k+2)^2} \
+&amp;= \frac{2C[k(k+2) + (k+1)]}{(k+1)(k+2)^2} \
+&amp;= \frac{2C(k^2 + 3k + 1)}{(k+1)(k+2)^2} \
+&amp;\leq \frac{2C}{k+2}
+\end{aligned}
+\tag{104}
+\end{equation}</p>
+<p>最后一步用到$k^2 + 3k + 1 \leq (k+1)(k+2)$。$\square$</p>
+<p><strong>推论14.1</strong>：要达到精度$\epsilon$，需要迭代次数$K = \mathcal{O}(1/\epsilon)$。</p>
+<h3 id="15">15. 投影梯度下降的对比分析</h3>
+<p><strong>投影梯度下降算法</strong>：</p>
+<p>\begin{equation}
+\alpha^{(k+1)} = \Pi_{\mathbb{P}^n}\left(\alpha^{(k)} - \eta \nabla f(\alpha^{(k)})\right)
+\tag{105}
+\end{equation}</p>
+<p>其中$\Pi_{\mathbb{P}^n}$是到单纯形的投影算子。</p>
+<p><strong>梯度计算</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+f(\alpha) &amp;= \frac{1}{2}\left|\sum_i \alpha_i \boldsymbol{g}_i\right|^2 \
+&amp;= \frac{1}{2} \sum_i \sum_j \alpha_i \alpha_j \langle \boldsymbol{g}_i, \boldsymbol{g}_j \rangle \
+&amp;= \frac{1}{2} \boldsymbol{\alpha}^T G \boldsymbol{\alpha}
+\end{aligned}
+\tag{106}
+\end{equation}</p>
+<p>其中$G_{ij} = \langle \boldsymbol{g}_i, \boldsymbol{g}_j \rangle$是Gram矩阵。</p>
+<p>梯度为：
+\begin{equation}
+\nabla f(\alpha) = G\boldsymbol{\alpha} = \begin{pmatrix}
+\langle \boldsymbol{g}_1, \boldsymbol{u}^{(k)} \rangle \
+\vdots \
+\langle \boldsymbol{g}_n, \boldsymbol{u}^{(k)} \rangle
+\end{pmatrix}
+\tag{107}
+\end{equation}</p>
+<p><strong>单纯形投影</strong>：</p>
+<p>问题：
+\begin{equation}
+\Pi_{\mathbb{P}^n}(\boldsymbol{v}) = \mathop{\arg\min}_{\alpha \in \mathbb{P}^n} |\boldsymbol{\alpha} - \boldsymbol{v}|^2
+\tag{108}
+\end{equation}</p>
+<p>Lagrangian：
+\begin{equation}
+\mathcal{L}(\boldsymbol{\alpha}, \lambda, \boldsymbol{\mu}) = \frac{1}{2}|\boldsymbol{\alpha} - \boldsymbol{v}|^2 + \lambda\left(\sum_i \alpha_i - 1\right) - \sum_i \mu_i \alpha_i
+\tag{109}
+\end{equation}</p>
+<p>KKT条件：
+\begin{equation}
+\begin{aligned}
+\alpha_i - v_i + \lambda - \mu_i &amp;= 0 \
+\mu_i \alpha_i &amp;= 0 \
+\mu_i &amp;\geq 0 \
+\alpha_i &amp;\geq 0
+\end{aligned}
+\tag{110}
+\end{equation}</p>
+<p>解得：
+\begin{equation}
+\alpha_i = \max(v_i - \lambda, 0)
+\tag{111}
+\end{equation}</p>
+<p>其中$\lambda$通过二分搜索找到，使得$\sum_i \max(v_i - \lambda, 0) = 1$。</p>
+<p><strong>算法复杂度对比</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>算法</th>
+<th>每次迭代</th>
+<th>收敛速度</th>
+<th>投影开销</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Frank-Wolfe</td>
+<td>$O(nd)$</td>
+<td>$O(1/k)$</td>
+<td>无投影</td>
+</tr>
+<tr>
+<td>投影梯度下降</td>
+<td>$O(nd + n\log n)$</td>
+<td>$O(1/k^2)$</td>
+<td>$O(n\log n)$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>定理15.1 (投影梯度收敛)</strong>：</p>
+<p>若$f$是$L$-光滑的，学习率$\eta = 1/L$，则：
+\begin{equation}
+f(\alpha^{(k)}) - f(\alpha^<em>) \leq \frac{L|\alpha^{(0)} - \alpha^</em>|^2}{2k}
+\tag{112}
+\end{equation}</p>
+<p>这比Frank-Wolfe快一个$k$的因子，但需要投影开销。</p>
+<h3 id="16">16. 帕累托稳定点的几何性质</h3>
+<p><strong>定义16.1 (法锥)</strong></p>
+<p>对于凸集$\mathcal{C} \subseteq \mathbb{R}^d$和点$x \in \mathcal{C}$，法锥定义为：
+\begin{equation}
+N_{\mathcal{C}}(x) = {\boldsymbol{v} : \langle \boldsymbol{v}, y - x \rangle \leq 0, \forall y \in \mathcal{C}}
+\tag{113}
+\end{equation}</p>
+<p><strong>定理16.1 (帕累托稳定性刻画)</strong></p>
+<p>$\theta^<em>$是帕累托稳定点当且仅当：
+\begin{equation}
+0 \in \text{conv}{\nabla \mathcal{L}_1(\theta^</em>), \ldots, \nabla \mathcal{L}_n(\theta^*)}
+\tag{114}
+\end{equation}</p>
+<p>其中$\text{conv}$表示凸包。</p>
+<p><strong>证明</strong>：</p>
+<p>$(\Rightarrow)$ 若$\theta^*$是帕累托稳定点，则不存在$\boldsymbol{u}$使得$\langle \boldsymbol{g}_i, \boldsymbol{u} \rangle &lt; 0$对所有$i$成立。</p>
+<p>根据Farkas引理，这等价于$0 \in \text{conv}{\boldsymbol{g}_1, \ldots, \boldsymbol{g}_n}$。</p>
+<p>$(\Leftarrow)$ 若$0 = \sum_i \alpha_i \boldsymbol{g}_i$（$\alpha_i \geq 0, \sum_i \alpha_i = 1$），则对任意方向$\boldsymbol{u}$：
+\begin{equation}
+\sum_i \alpha_i \langle \boldsymbol{g}_i, \boldsymbol{u} \rangle = \langle 0, \boldsymbol{u} \rangle = 0
+\tag{115}
+\end{equation}</p>
+<p>至少存在某个$j$使得$\langle \boldsymbol{g}_j, \boldsymbol{u} \rangle \geq 0$，即不是所有任务都能下降。$\square$</p>
+<p><strong>几何直观</strong>：</p>
+<p>在二维情况（两个任务），梯度空间中：
+- 若$\boldsymbol{g}_1, \boldsymbol{g}_2$夹角$&lt; 180°$：存在共同下降方向
+- 若$\boldsymbol{g}_1, \boldsymbol{g}_2$夹角$= 180°$：帕累托稳定点（$\boldsymbol{g}_1 = -\boldsymbol{g}_2$）
+- 原点在凸包内$\Leftrightarrow$帕累托稳定点</p>
+<p><strong>数值例子</strong>：</p>
+<p>三个梯度：
+\begin{equation}
+\boldsymbol{g}_1 = (1, 0), \quad \boldsymbol{g}_2 = (0, 1), \quad \boldsymbol{g}_3 = (-1, -1)
+\tag{116}
+\end{equation}</p>
+<p>凸包：$\text{conv}{\boldsymbol{g}_1, \boldsymbol{g}_2, \boldsymbol{g}_3}$包含原点，因为：
+\begin{equation}
+0 = \frac{1}{3}\boldsymbol{g}_1 + \frac{1}{3}\boldsymbol{g}_2 + \frac{1}{3}\boldsymbol{g}_3 = \frac{1}{3}[(1,0) + (0,1) + (-1,-1)] = (0, 0)
+\tag{117}
+\end{equation}</p>
+<p>因此这是帕累托稳定点。</p>
+<h3 id="17">17. 非凸情况的局部分析</h3>
+<p><strong>问题</strong>：当$\mathcal{L}_i$不是凸函数时，帕累托稳定点的性质如何？</p>
+<p><strong>定义17.1 (局部帕累托稳定点)</strong></p>
+<p>$\theta^<em>$是局部帕累托稳定点，若存在邻域$\mathcal{N}(\theta^</em>)$使得对所有$\theta \in \mathcal{N}(\theta^<em>)$，不存在$i$使得$\mathcal{L}_i(\theta) &lt; \mathcal{L}_i(\theta^</em>)$对所有$i$成立。</p>
+<p><strong>定理17.1 (一阶必要条件)</strong></p>
+<p>若$\theta^<em>$是局部帕累托稳定点，则：
+\begin{equation}
+0 \in \text{conv}{\nabla \mathcal{L}_1(\theta^</em>), \ldots, \nabla \mathcal{L}_n(\theta^*)}
+\tag{118}
+\end{equation}</p>
+<p>证明与凸情况相同。$\square$</p>
+<p><strong>定理17.2 (二阶充分条件)</strong></p>
+<p>设$0 = \sum_i \alpha_i^<em> \nabla \mathcal{L}_i(\theta^</em>)$，定义Hessian加权和：
+\begin{equation}
+H = \sum_i \alpha_i^<em> \nabla^2 \mathcal{L}_i(\theta^</em>)
+\tag{119}
+\end{equation}</p>
+<p>若$H \succ 0$（正定），则$\theta^*$是局部帕累托稳定点。</p>
+<p><strong>证明要点</strong>：</p>
+<p>对任意方向$\boldsymbol{d}$，二阶展开：
+\begin{equation}
+\mathcal{L}_i(\theta^<em> + t\boldsymbol{d}) \approx \mathcal{L}_i(\theta^</em>) + t\langle \nabla \mathcal{L}_i(\theta^<em>), \boldsymbol{d} \rangle + \frac{t^2}{2}\langle \boldsymbol{d}, \nabla^2\mathcal{L}_i(\theta^</em>) \boldsymbol{d} \rangle
+\tag{120}
+\end{equation}</p>
+<p>加权求和：
+\begin{equation}
+\sum_i \alpha_i^<em> \mathcal{L}_i(\theta^</em> + t\boldsymbol{d}) \approx \sum_i \alpha_i^<em> \mathcal{L}_i(\theta^</em>) + \frac{t^2}{2}\langle \boldsymbol{d}, H\boldsymbol{d} \rangle
+\tag{121}
+\end{equation}</p>
+<p>因为$H \succ 0$，加权损失严格增加，因此至少一个$\mathcal{L}_i$增加。$\square$</p>
+<h3 id="18">18. 实践中的数值稳定性技巧</h3>
+<p><strong>问题1：梯度接近零</strong></p>
+<p>当某个$|\boldsymbol{g}_i| \approx 0$时，归一化$\boldsymbol{g}_i/|\boldsymbol{g}_i|$不稳定。</p>
+<p><strong>解决方案</strong>：</p>
+<p>\begin{equation}
+\hat{\boldsymbol{g}}_i = \frac{\boldsymbol{g}_i}{\max(|\boldsymbol{g}_i|, \epsilon)}
+\tag{122}
+\end{equation}</p>
+<p>其中$\epsilon = 10^{-8}$。</p>
+<p><strong>问题2：梯度量级差异巨大</strong></p>
+<p>若$|\boldsymbol{g}_1| = 10^6 |\boldsymbol{g}_2|$，Frank-Wolfe可能偏向$\boldsymbol{g}_1$。</p>
+<p><strong>解决方案</strong>：预归一化</p>
+<p>\begin{equation}
+\tilde{\boldsymbol{g}}<em _alpha="\alpha">i = \frac{\boldsymbol{g}_i}{|\boldsymbol{g}_i|}, \quad \text{然后求解} \quad \min</em>_i\right|^2
+\tag{123}
+\end{equation}} \left|\sum_i \alpha_i \tilde{\boldsymbol{g}</p>
+<p><strong>问题3：数值精度问题</strong></p>
+<p>计算$\langle \boldsymbol{g}_i, \boldsymbol{u} \rangle$时，浮点误差累积。</p>
+<p><strong>解决方案</strong>：Kahan求和</p>
+<p>\begin{equation}
+\begin{aligned}
+&amp;s = 0, \quad c = 0 \
+&amp;\text{for } i = 1 \text{ to } d: \
+&amp;\quad y = g_i \cdot u_i - c \
+&amp;\quad t = s + y \
+&amp;\quad c = (t - s) - y \
+&amp;\quad s = t
+\end{aligned}
+\tag{124}
+\end{equation}</p>
+<p><strong>完</strong></p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>bert4keras在手，baseline我有：CLUE基准代码</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>bert4keras在手，baseline我有：CLUE基准代码</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 33.5 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8739">https://spaces.ac.cn/archives/8739</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p><a href="https://www.cluebenchmarks.com/">CLUE（Chinese GLUE）</a>是中文自然语言处理的一个评价基准，目前也已经得到了较多团队的认可。CLUE官方Github提供了tensorflow和pytorch的baseline，但并不易读，而且也不方便调试。事实上，不管是tensorflow还是pytorch，不管是CLUE还是GLUE，笔者认为能找到的baseline代码，都很难称得上人性化，试图去理解它们是一件相当痛苦的事情。</p>
+<p>所以，笔者决定基于bert4keras实现一套CLUE的baseline。经过一段时间的测试，基本上复现了官方宣称的基准成绩，并且有些任务还更优。最重要的是，所有代码尽量保持了清晰易读的特点，真·“Deep Learning for Humans”。</p>
+<blockquote>
+<p><strong>代码链接：<a href="https://github.com/bojone/CLUE-bert4keras">https://github.com/bojone/CLUE-bert4keras</a></strong></p>
+</blockquote>
+<h2 id="_1">代码简介</h2>
+<p>下面简单介绍一下该代码中各个任务baseline的构建思路。在阅读文章和代码之前，请读者自行先观察一下每个任务的数据格式，这里不对任务数据进行详细介绍。</p>
+<h3 id="_2">文本分类</h3>
+<p>首先是IFLYTEK和TNEWS两个任务，它们是普通的文本分类问题，所以做法很简单，就是常规的“[CLS]+句子+[SEP]“传入到BERT中，然后取出[CLS]的hidden向量做分类就行。</p>
+<p><a href="/usr/uploads/2021/10/2443583123.png" title="点击查看原图"><img alt="文本分类模型示意图" src="/usr/uploads/2021/10/2443583123.png" /></a></p>
+<p>文本分类模型示意图</p>
+<p>另外，代词消歧任务WSC也可以转化为单文本分类任务，原任务是判断一个句子中的两个片段（其中一个是代词）是否指代同一个对象，baseline的做法是在文本中用不同的符号标记出这两个片段，然后就直接将这个标记后的文本传入BERT进行二分类。</p>
+<h3 id="_3">文本匹配</h3>
+<p>接下来，AFQMC、CMNLI、OCNLI是三个文本匹配任务。所谓文本匹配，简单理解就是句子对的分类任务，比如相似匹配是判断两个句子是否相似；自然语言推理是判断两个句子之间的逻辑关系（蕴含、中立、矛盾）等。在预训练时代，句子匹配任务的标准做法就是将两个句子用[SEP]连接起来，然后当成单文本分类任务来做。</p>
+<p><a href="/usr/uploads/2021/10/2054208383.png" title="点击查看原图"><img alt="文本匹配模型示意图" src="/usr/uploads/2021/10/2054208383.png" /></a></p>
+<p>文本匹配模型示意图</p>
+<p>需要指出的是，在原始的BERT中，两个句子的SegmentID（原始代码叫做token type id）是不一样的，但这里考虑到像RoBERTa这样的模型没有NSP任务，编号为1的SegmentID可能没有被预训练过，所以这里的实现中SegmentID都是用全0。实验结果显示，这样处理并不会降低文本匹配的效果。</p>
+<p>类似地，CSL这个任务，是判断摘要描述与所给的4个关键词是否匹配，我们将4个关键词用分号“；”连接起来，作为一个句子对待，这样也就转换成了常规的文本匹配问题了。</p>
+<h3 id="_4">阅读理解</h3>
+<p>阅读理解是指CMRC2018任务，这是一个格式跟SQUAD一样的抽取式阅读理解任务，一个段落会配有多个问题，每个问题必然有答案并且答案是段落的一个片段。一般的做法是将问题与段落用[SEP]拼接之后传入到BERT中，然后用两个全连接层分别预测首尾的位置。这样做的问题是割裂了首尾之间的联系，而且使得训练和预测的行为不一致。</p>
+<p>这里的baseline使用GlobalPointer作为输出结构，它将首尾组合作为一个整体来进行分类，具体细节可以看<a href="/archives/8373">《GlobalPointer：用统一的方式处理嵌套和非嵌套NER》</a>。使用GlobalPointer能使得训练和预测的行为完全一致，并明显提高解码速度。</p>
+<p><a href="/usr/uploads/2021/10/3426268563.png" title="点击查看原图"><img alt="抽取式阅读理解模型示意图" src="/usr/uploads/2021/10/3426268563.png" /></a></p>
+<p>抽取式阅读理解模型示意图</p>
+<p>此外，不管是SQUAD还是CMRC2018，段落长度多数是明显超过512的，并且有些问题的答案确实在比较后的位置，直接截断前面的部分可能就没有答案了。如果用NEZHA、RoFormer这样的模型，可以直接处理超过512的文本，但像BERT这样的模型就不好处理。为了保持代码的通用性，这里沿用了BERT原始basleine的滑窗设计，即以128为步长将段落分割为多个子段落，每个段落逐一与问题组合传入到模型中。这样分割之后，那么就允许某些段落对于问题来说是“无答案”的，这时候直接将答案指向[CLS]位置$(0,0)$。在预测阶段，长段落也是用同样的方法进行分割，然后逐一回答同一个问题，最后取分数最高的答案。</p>
+<h3 id="_5">单项选择</h3>
+<p>这里的单项选择指的是C3任务，它也算是一种阅读理解任务，同样是一个段落提了多个问题，问题的答案是4个所给的候选答案之一，但不一定是段落中的片段。这种多项选择的baseline做法可能会出乎很多人的意料，它相当于转化为文本匹配问题，将每个候选答案与段落、问题进行匹配，然后预测时取分数最高的那个。</p>
+<p><a href="/usr/uploads/2021/10/1400908642.png" title="点击查看原图"><img alt="单项选择模型示意图" src="/usr/uploads/2021/10/1400908642.png" /></a></p>
+<p>单项选择模型示意图</p>
+<p>这样一来，原来的一个问题就需要拆分为4个样本来处理，需要预测4次才能做出答案，大大增加了计算量。但让人惊奇的是，这种做法是基本是所有直观想到的baseline中效果最好的，比将所有候选答案拼在一起然后做4分类要好得多。英文领域类似的任务是<a href="https://dataset.org/dream/">DREAM</a>，其榜单上的模型基本上都是这个思路的变种。</p>
+<h3 id="_6">成语理解</h3>
+<p>成语阅读理解任务CHID，本质上也是一个单项选择阅读理解问题，但它形式上复杂不少，所以单独拿出来介绍。</p>
+<p>具体来说，CHID的每个样本有10个候选成语，以及由若干道题目，每道题目有若干个空位，我们就是要决定这些空位最适合填入哪个候选成语。如果每道题只有一个空位，那么就直接套用上一节的单项选择做法就行了；但这里每道题是可能有多个空位的，而用单项选择的做法，每次只能识别一个空位，所以我们用[unused0]代替我们要识别的空位，而没被识别的空位（如果有的话）直接用4个[MASK]代替，比如：</p>
+<blockquote>
+<p>[CLS] “这其实是个荒唐的闹剧，苹果发现iPad大陆商标的拥有人不属于台湾唯冠而是深圳唯冠后，开始着急了并 [unused1] 。”肖才元表示。事实上，两个戏剧性的因素让该案更显得 [MASK] [MASK] [MASK] [MASK] 。苹果在香港法院提起的诉讼案件中，所提交的材料显示，IPADL公司实为苹果公司律师操作下成立的具有特殊目的的，旨在用于收购唯冠手中i－Pad商标权的公司。 [SEP] 一锤定音 [SEP]</p>
+</blockquote>
+<p>也就是说，一道有多个空位的题目将会被拆开为多道小题，而按照前述单项选择的做法，每道小题都需要跟候选答案拼接来预测，所以每道小题的计算成本都相当于普通分类的10个样本了，这确实有点费劲，但为了效果没办法了。为了达到更大的batch_size效果，通常需要用到梯度累积。另外，有些题目还是比较长的，我们仍然需要截断，截断的方式是以当前要识别的空位为中心，尽量向左向右都延伸同样的距离。</p>
+<p>最后，根据题目的设计，每个样本有若干道题目，每道题目的每个空位都共用10个候选成语，但每个空位的答案是不会重复的。如果预测的时候每个空位直接独立地取最大值的答案，那么就可能出现重复的预测结果，与问题设计相违背。</p>
+<p>为了使得预测结果不重复，我们需要用到“匈牙利算法”：假设有$m$个空位，每个空位有$n &gt; m$个候选答案，那么我们将得到$m\times n$的打分句子，我们要为每个空位选择不一样的答案，并且使得总分最大，这在数学上被称为“指派问题”，标准解法就是“匈牙利算法”，我们直接用<code>scipy.optimize.linear_sum_assignment</code>求解就行了。这样的后处理算法比直接逐项取最大（可能导致重复答案）能提升6%左右的准确率。</p>
+<h3 id="_7">实体识别</h3>
+<p>最后一个任务是CLUENER，常规的非嵌套命名实体识别任务。常见的baseline是BERT+Softmax或者BERT+CRF，这里用的则是BERT+GlobalPointer，同样可以参考<a href="/archives/8373">《GlobalPointer：用统一的方式处理嵌套和非嵌套NER》</a>。当GlobalPointer用于NER时，可以统一处理嵌套和非嵌套情况。笔者的多次实验显示，在非嵌套情形，GlobalPointer完全可以取得跟CRF相媲美的效果，并且训练和预测速度都更快。所以用GlobalPointer作为NER的baseline是顺理成章的。</p>
+<h2 id="_8">效果对比</h2>
+<p>在CLUE的测试集上，各任务效果比较如下表，其中标$<em _text_-our="\text{-our">{\text{-old}}$的是从CLUE官方找到的结果，标$</em>$的是本套代码的复现结果。这里的BERT和RoBERTa都是base版，BERT是Google最开始放出的中文BERT，RoBERTa是哈工大开源的RoBERTa_wwm_ext，large版本有算力有时间再测～}</p>
+<p>$$\begin{array}{c}  
+\text{分类任务} \\\  
+{\begin{array}{c|ccccccc}  
+\hline  
+& \text{IFLYTEK} & \text{TNEWS} & \text{AFQMC} & \text{CMNLI} & \text{OCNLI} & \text{WSC} & \text{CSL} \\\  
+\hline  
+\text{BERT}_{\text{-old}} & 60.29 & 57.42 & 73.70 & 79.69 & 72.20 & 74.60 & 80.36\\\  
+\text{BERT}_{\text{-our}} & 61.19 & 56.29 & 73.37 & 79.37 & 71.73 & 73.85 & 84.03 \\\  
+\hline  
+\text{RoBERTa}_{\text{-old}} & 60.31 & \text{-} & 74.04 & 80.51 & \text{-} & \text{-} & 81.00\\\  
+\text{RoBERTa}_{\text{-our}} & 61.12 & 58.35 & 73.61 & 80.81 & 74.27 & 82.28 & 85.33\\\  
+\hline  
+\end{array}}  
+\end{array}$$</p>
+<p>$$\begin{array}{c}  
+\text{阅读理解和NER任务} \\\  
+{\begin{array}{c|cccc}  
+\hline  
+& \text{CMRC2018} & \text{C3} & \text{CHID} & \text{CLUENER} \\\  
+\hline  
+\text{BERT}_{\text{-old}} & 71.60 & 64.50 & 82.04 & 78.82\\\  
+\text{BERT}_{\text{-our}} & 72.10 & 61.33 & 85.13 & 78.68\\\  
+\hline  
+\text{RoBERTa}_{\text{-old}} & 75.20 & 66.50 & 83.62 & \text{-}\\\  
+\text{RoBERTa}_{\text{-our}} & 75.40 & 67.11 & 86.04 & 79.38\\\  
+\hline  
+\end{array}}  
+\end{array}$$</p>
+<p>注：这里TNEWS和WSC为空，是因为它们后来更新了测试集，但是官方Github并没有及时更新它们在RoBERTa上的测试结果；而OCNLI和CLUENER为空则是因为官方只测了BERT base和RoBERTa large的结果，RoBERTa base的结果也没有给出。</p>
+<h2 id="_9">文章小结</h2>
+<p>本文分享了笔者基于bert4keras构建的CLUE评测基准代码，以及简单介绍了每类任务的建模思路。该套baseline代码有着简单清晰、易于迁移的特点，并且基本能达到CLUE官方宣称的基准成绩，部分任务还更优，因此算是上是及格的基准代码了。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8739">https://spaces.ac.cn/archives/8739</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Oct. 31, 2021). 《bert4keras在手，baseline我有：CLUE基准代码 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8739">https://spaces.ac.cn/archives/8739</a></p>
+<p>@online{kexuefm-8739,<br />
+title={bert4keras在手，baseline我有：CLUE基准代码},<br />
+author={苏剑林},<br />
+year={2021},<br />
+month={Oct},<br />
+url={\url{https://spaces.ac.cn/archives/8739}},<br />
+} </p>
+<hr />
+<h2 id="_10">公式推导与注释</h2>
+<h3 id="bert">一、语言模型与BERT的数学基础</h3>
+<h4 id="11">1.1 自回归语言模型</h4>
+<p><strong>定义</strong>: 自回归语言模型通过链式法则分解联合概率
+$$P(x_1, x_2, \ldots, x_T) = \prod_{t=1}^T P(x_t | x_1, \ldots, x_{t-1}) \tag{1}$$</p>
+<p><strong>数学直觉</strong>: 将序列生成问题分解为逐步预测问题，每一步只依赖历史信息。</p>
+<p><strong>对数似然目标函数</strong>:
+$$\mathcal{L}_{\text{AR}} = -\sum_{t=1}^T \log P_\theta(x_t | x_{<t}) \tag{2}$$</p>
+<p>其中$x_{&lt;t} = (x_1, \ldots, x_{t-1})$表示$t$时刻之前的所有token。</p>
+<p><strong>推导注释</strong>: 最大似然估计等价于最小化负对数似然，这是语言模型训练的基础。</p>
+<h4 id="12-bertmlm">1.2 BERT的掩码语言模型(MLM)</h4>
+<p><strong>核心思想</strong>: 不同于自回归模型，BERT采用<strong>双向</strong>编码，通过掩码机制进行预训练。</p>
+<p><strong>掩码策略</strong>: 给定输入序列$\mathbf{x} = (x_1, \ldots, x_T)$，随机选择15%的位置集合$\mathcal{M}$进行掩码：
+- 80%的概率替换为[MASK]
+- 10%的概率替换为随机token
+- 10%的概率保持不变</p>
+<p><strong>MLM目标函数</strong>:
+$$\mathcal{L}_{\text{MLM}} = -\mathbb{E}_{\mathbf{x} \sim \mathcal{D}} \sum_{i \in \mathcal{M}} \log P_\theta(x_i | \mathbf{x}_{\setminus \mathcal{M}}) \tag{3}$$</p>
+<p>其中$\mathbf{x}_{\setminus \mathcal{M}}$表示被掩码的输入序列。</p>
+<p><strong>理论优势分析</strong>:</p>
+<p>$$\begin{aligned}
+\text{自回归模型} &: P(x_t | x_1, \ldots, x_{t-1}) \quad \text{(单向)} \tag{4} \\
+\text{BERT} &: P(x_t | x_1, \ldots, x_{t-1}, x_{t+1}, \ldots, x_T) \quad \text{(双向)} \tag{5}
+\end{aligned}$$</p>
+<p><strong>信息论分析</strong>: 设$H(\cdot)$为熵，则双向上下文提供更多信息：
+$$H(X_t | X_{<t}) \geq H(X_t | X_{<t}, X_{>t}) \tag{6}$$</p>
+<p>不等式表明双向条件下的不确定性更低，预测更准确。</p>
+<h4 id="13-nsp">1.3 下一句预测(NSP)</h4>
+<p><strong>任务定义</strong>: 判断两个句子$A$和$B$是否在原文中连续出现。</p>
+<p><strong>数学形式化</strong>: 设$(s_A, s_B)$为句子对，$y \in {0, 1}$为标签：
+$$P(y = 1 | s_A, s_B) = \sigma(\mathbf{w}^\top \mathbf{h}_{[CLS]} + b) \tag{7}$$</p>
+<p>其中$\mathbf{h}_{[CLS]}$是[CLS] token的隐藏表示，$\sigma$是sigmoid函数。</p>
+<p><strong>联合训练目标</strong>:
+$$\mathcal{L}_{\text{BERT}} = \mathcal{L}_{\text{MLM}} + \mathcal{L}_{\text{NSP}} \tag{8}$$</p>
+<p><strong>注</strong>: 后续研究(如RoBERTa)发现NSP任务可能不是必需的，但在原始BERT中起到辅助作用。</p>
+<h3 id="transformer">二、Transformer架构的数学原理</h3>
+<h4 id="21-self-attention">2.1 自注意力机制(Self-Attention)</h4>
+<p><strong>基本形式</strong>: 给定输入序列的表示$\mathbf{X} \in \mathbb{R}^{T \times d}$，计算：</p>
+<p>$$\begin{aligned}
+\mathbf{Q} &= \mathbf{X} \mathbf{W}_Q, \quad \mathbf{K} = \mathbf{X} \mathbf{W}_K, \quad \mathbf{V} = \mathbf{X} \mathbf{W}_V \tag{9} \\
+\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) &= \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}}\right) \mathbf{V} \tag{10}
+\end{aligned}$$</p>
+<p><strong>缩放因子$\sqrt{d_k}$的理论推导</strong>:</p>
+<p>假设$\mathbf{Q}$和$\mathbf{K}$的元素是独立同分布的随机变量，均值为0，方差为1。</p>
+<p>设$q_i, k_j$是$\mathbf{Q}$和$\mathbf{K}$中的元素，则点积：
+$$q \cdot k = \sum_{i=1}^{d_k} q_i k_i \tag{11}$$</p>
+<p><strong>期望和方差</strong>:
+$$\begin{aligned}
+\mathbb{E}[q \cdot k] &= \sum_{i=1}^{d_k} \mathbb{E}[q_i]\mathbb{E}[k_i] = 0 \tag{12} \\
+\text{Var}(q \cdot k) &= \sum_{i=1}^{d_k} \text{Var}(q_i k_i) = d_k \tag{13}
+\end{aligned}$$</p>
+<p><strong>结论</strong>: 点积的标准差为$\sqrt{d_k}$。为了保持方差为1，需要除以$\sqrt{d_k}$。</p>
+<p><strong>softmax稳定性</strong>: 当输入过大时，softmax会产生极端的概率分布：
+$$\lim_{x \to \infty} \text{softmax}([x, 0, 0, \ldots]) = [1, 0, 0, \ldots] \tag{14}$$</p>
+<p>这会导致梯度消失。缩放避免了这个问题。</p>
+<h4 id="22-multi-head-attention">2.2 多头注意力(Multi-Head Attention)</h4>
+<p><strong>定义</strong>: 并行运行$h$个注意力头：
+$$\begin{aligned}
+\text{head}_i &= \text{Attention}(\mathbf{X}\mathbf{W}_Q^i, \mathbf{X}\mathbf{W}_K^i, \mathbf{X}\mathbf{W}_V^i) \tag{15} \\
+\text{MultiHead}(\mathbf{X}) &= \text{Concat}(\text{head}_1, \ldots, \text{head}_h) \mathbf{W}_O \tag{16}
+\end{aligned}$$</p>
+<p><strong>参数维度分析</strong>:
+- 每个头的维度: $d_k = d_v = d_{\text{model}} / h$
+- 总参数量与单头相同: $4d_{\text{model}}^2$</p>
+<p><strong>理论优势</strong>: 多头机制允许模型在不同的表示子空间中捕获不同的依赖关系。</p>
+<p><strong>信息论视角</strong>: 设$I(\cdot; \cdot)$为互信息，则：
+$$I(X; Y_{\text{multi-head}}) \geq I(X; Y_{\text{single-head}}) \tag{17}$$</p>
+<p>多头提供了更丰富的特征表示。</p>
+<h4 id="23-positional-encoding">2.3 位置编码(Positional Encoding)</h4>
+<p><strong>必要性</strong>: 自注意力是置换不变的(permutation-invariant)，需要位置信息。</p>
+<p><strong>原始BERT使用的正弦位置编码</strong>:
+$$\begin{aligned}
+PE_{(pos, 2i)} &= \sin\left(\frac{pos}{10000^{2i/d_{\text{model}}}}\right) \tag{18} \\
+PE_{(pos, 2i+1)} &= \cos\left(\frac{pos}{10000^{2i/d_{\text{model}}}}\right) \tag{19}
+\end{aligned}$$</p>
+<p><strong>理论性质</strong>:
+1. <strong>线性关系</strong>: 对于任意固定的偏移$k$，$PE_{pos+k}$可以表示为$PE_{pos}$的线性函数
+2. <strong>周期性</strong>: 不同频率的正弦函数编码不同尺度的位置信息</p>
+<p><strong>相对位置表示</strong>: 设$\omega_i = 1/10000^{2i/d}$，则：
+$$\begin{pmatrix} \sin(\omega_i(pos+k)) \\ \cos(\omega_i(pos+k)) \end{pmatrix} = \begin{pmatrix} \cos(\omega_i k) & \sin(\omega_i k) \\ -\sin(\omega_i k) & \cos(\omega_i k) \end{pmatrix} \begin{pmatrix} \sin(\omega_i pos) \\ \cos(\omega_i pos) \end{pmatrix} \tag{20}$$</p>
+<p>这保证了相对位置关系可以通过线性变换学习。</p>
+<h3 id="bert_1">三、BERT分类任务的数学建模</h3>
+<h4 id="31">3.1 文本分类任务</h4>
+<p><strong>输入表示</strong>: 输入序列$\mathbf{x} = ([CLS], x_1, \ldots, x_T, [SEP])$</p>
+<p><strong>BERT编码</strong>: 经过BERT编码器后得到隐藏状态序列：
+$$\mathbf{H} = (\mathbf{h}_{[CLS]}, \mathbf{h}_1, \ldots, \mathbf{h}_T, \mathbf{h}_{[SEP]}) \in \mathbb{R}^{(T+2) \times d} \tag{21}$$</p>
+<p><strong>分类预测</strong>: 使用[CLS]的表示进行分类：
+$$\begin{aligned}
+\mathbf{z} &= \mathbf{W} \mathbf{h}_{[CLS]} + \mathbf{b} \in \mathbb{R}^C \tag{22} \\
+P(y = c | \mathbf{x}) &= \frac{\exp(z_c)}{\sum_{c'=1}^C \exp(z_{c'})} \tag{23}
+\end{aligned}$$</p>
+<p>其中$C$是类别数。</p>
+<p><strong>交叉熵损失</strong>:
+$$\mathcal{L}_{\text{cls}} = -\sum_{c=1}^C y_c \log P(y = c | \mathbf{x}) \tag{24}$$</p>
+<p><strong>为什么使用[CLS]</strong>: [CLS]没有对应具体的输入token，因此可以聚合全局信息。</p>
+<p><strong>理论分析</strong>: 在自注意力机制下，[CLS]的表示为：
+$$\mathbf{h}_{[CLS]} = \sum_{i=0}^{T+1} \alpha_i \mathbf{v}_i \tag{25}$$</p>
+<p>其中$\alpha_i$是注意力权重，这是一个全局加权平均。</p>
+<h4 id="32">3.2 文本匹配任务</h4>
+<p><strong>输入形式</strong>: $\mathbf{x} = ([CLS], s_A, [SEP], s_B, [SEP])$</p>
+<p><strong>句子对表示</strong>: BERT通过位置ID区分两个句子：
+$$\begin{aligned}
+\mathbf{h}_i &= \text{BERT}(x_i, \text{seg}_i, \text{pos}_i) \tag{26}
+\end{aligned}$$</p>
+<p>其中$\text{seg}_i \in {0, 1}$是句子段ID。</p>
+<p><strong>匹配分数计算</strong>:
+$$\text{score}(s_A, s_B) = \sigma(\mathbf{w}^\top \mathbf{h}_{[CLS]} + b) \tag{27}$$</p>
+<p><strong>对比</strong>: 传统双塔模型分别编码：
+$$\text{score}(s_A, s_B) = \text{sim}(f(s_A), f(s_B)) \tag{28}$$</p>
+<p>BERT的交互式编码能捕获更细粒度的语义关系。</p>
+<p><strong>信息论优势</strong>: 设$I_{\text{BERT}}$和$I_{\text{dual}}$分别为两种方法的互信息：
+$$I(s_A; s_B | \text{joint encoding}) \geq I(s_A; s_B | \text{separate encoding}) \tag{29}$$</p>
+<h3 id="globalpointer">四、GlobalPointer的数学原理</h3>
+<h4 id="41">4.1 传统序列标注方法的局限性</h4>
+<p><strong>BIO标注</strong>: 将span抽取转化为token级分类
+- 问题: 无法有效处理嵌套实体
+- 损失: $\mathcal{L} = -\sum_{t=1}^T \log P(y_t | \mathbf{x})$ (独立假设)</p>
+<p><strong>CRF</strong>: 建模标签序列的依赖
+$$P(\mathbf{y} | \mathbf{x}) = \frac{\exp(\text{score}(\mathbf{x}, \mathbf{y}))}{\sum_{\mathbf{y}'} \exp(\text{score}(\mathbf{x}, \mathbf{y}'))} \tag{30}$$</p>
+<p>其中：
+$$\text{score}(\mathbf{x}, \mathbf{y}) = \sum_{t=1}^T \psi(y_{t-1}, y_t, \mathbf{x}, t) \tag{31}$$</p>
+<p><strong>局限</strong>: 仍然无法处理嵌套和不连续的span。</p>
+<h4 id="42-globalpointer">4.2 GlobalPointer的核心思想</h4>
+<p><strong>直接建模span</strong>: 将实体抽取视为span的分类问题。</p>
+<p><strong>span表示</strong>: 对于span $(i, j)$（从位置$i$到$j$），计算分数：
+$$s(i, j) = \mathbf{q}_i^\top \mathbf{k}_j \tag{32}$$</p>
+<p>其中$\mathbf{q}_i, \mathbf{k}_j$是位置$i$和$j$的查询和键表示。</p>
+<p><strong>多头GlobalPointer</strong>: 为每个实体类型$c$定义独立的注意力头：
+$$s_c(i, j) = \mathbf{q}_{c,i}^\top \mathbf{k}_{c,j} \tag{33}$$</p>
+<p><strong>旋转位置编码(RoPE)增强</strong>:
+$$\begin{aligned}
+\mathbf{q}_{c,i} &= R_{\theta, i} (\mathbf{W}_{q,c} \mathbf{h}_i) \tag{34} \\
+\mathbf{k}_{c,j} &= R_{\theta, j} (\mathbf{W}_{k,c} \mathbf{h}_j) \tag{35}
+\end{aligned}$$</p>
+<p>其中$R_{\theta, i}$是旋转矩阵：
+$$R_{\theta, i} = \begin{pmatrix}
+\cos(i\theta_1) & -\sin(i\theta_1) & 0 & 0 & \cdots \\
+\sin(i\theta_1) & \cos(i\theta_1) & 0 & 0 & \cdots \\
+0 & 0 & \cos(i\theta_2) & -\sin(i\theta_2) & \cdots \\
+0 & 0 & \sin(i\theta_2) & \cos(i\theta_2) & \cdots \\
+\vdots & \vdots & \vdots & \vdots & \ddots
+\end{pmatrix} \tag{36}$$</p>
+<p><strong>位置相对性</strong>: 旋转位置编码保证：
+$$\mathbf{q}_{c,i}^\top \mathbf{k}_{c,j} \text{ 只依赖于 } j - i \tag{37}$$</p>
+<p><strong>证明</strong>:
+$$\begin{aligned}
+\mathbf{q}_{c,i}^\top \mathbf{k}_{c,j} &= (R_{\theta,i} \mathbf{q})^\top (R_{\theta,j} \mathbf{k}) \\
+&= \mathbf{q}^\top R_{\theta,i}^\top R_{\theta,j} \mathbf{k} \\
+&= \mathbf{q}^\top R_{\theta, j-i} \mathbf{k} \tag{38}
+\end{aligned}$$</p>
+<h4 id="43-globalpointer">4.3 GlobalPointer的损失函数</h4>
+<p><strong>二分类形式</strong>: 对每个可能的span $(i, j)$判断是否为实体：
+$$P(y_{ij}^c = 1 | \mathbf{x}) = \sigma(s_c(i, j)) \tag{39}$$</p>
+<p><strong>多标签损失</strong>:
+$$\mathcal{L}_{\text{GP}} = -\sum_{c=1}^C \sum_{i \leq j} \left[ y_{ij}^c \log \sigma(s_c(i,j)) + (1-y_{ij}^c) \log(1-\sigma(s_c(i,j))) \right] \tag{40}$$</p>
+<p><strong>Circle Loss变体</strong>: 为了更好地区分正负样本：
+$$\mathcal{L}_{\text{circle}} = \log\left(1 + \sum_{(i,j) \in \mathcal{P}} \sum_{(k,l) \in \mathcal{N}} \exp(s_c(k,l) - s_c(i,j))\right) \tag{41}$$</p>
+<p>其中$\mathcal{P}$是正样本集合，$\mathcal{N}$是负样本集合。</p>
+<h3 id="_11">五、阅读理解任务的数学建模</h3>
+<h4 id="51">5.1 抽取式阅读理解</h4>
+<p><strong>任务定义</strong>: 给定问题$q$和段落$p$，抽取答案span $(s, e)$。</p>
+<p><strong>传统方法</strong>: 分别预测起始和结束位置：
+$$\begin{aligned}
+P_{\text{start}}(i | q, p) &= \frac{\exp(\mathbf{w}_s^\top \mathbf{h}_i)}{\sum_j \exp(\mathbf{w}_s^\top \mathbf{h}_j)} \tag{42} \\
+P_{\text{end}}(j | q, p) &= \frac{\exp(\mathbf{w}_e^\top \mathbf{h}_j)}{\sum_k \exp(\mathbf{w}_e^\top \mathbf{h}_k)} \tag{43}
+\end{aligned}$$</p>
+<p><strong>问题</strong>: 独立预测导致训练和推理不一致。</p>
+<p><strong>训练</strong>: 最大化$P_{\text{start}}(s) \cdot P_{\text{end}}(e)$</p>
+<p><strong>推理</strong>: 选择$\arg\max_{i \leq j} [P_{\text{start}}(i) \cdot P_{\text{end}}(j)]$</p>
+<h4 id="52-globalpointer">5.2 使用GlobalPointer的联合预测</h4>
+<p><strong>联合span分数</strong>:
+$$s(i, j) = \mathbf{q}_i^\top \mathbf{k}_j, \quad i \leq j \tag{44}$$</p>
+<p><strong>归一化</strong>:
+$$P(s, e | q, p) = \frac{\exp(s(s, e))}{\sum_{i \leq j} \exp(s(i, j))} \tag{45}$$</p>
+<p><strong>训练和推理一致</strong>: 都是最大化$P(s, e | q, p)$。</p>
+<p><strong>理论优势</strong>:
+1. <strong>联合建模</strong>: 考虑起始和结束位置的相互依赖
+2. <strong>位置感知</strong>: RoPE编码保证对span长度的建模
+3. <strong>快速解码</strong>: 只需一次前向传播</p>
+<h3 id="_12">六、多项选择任务的理论分析</h3>
+<h4 id="61">6.1 问题形式化</h4>
+<p><strong>输入</strong>: 上下文$c$，问题$q$，候选答案${a_1, \ldots, a_K}$</p>
+<p><strong>目标</strong>: 选择正确答案$a^*$</p>
+<h4 id="62">6.2 转化为匹配问题</h4>
+<p><strong>方法</strong>: 为每个候选构造输入：
+$$\mathbf{x}_k = [CLS] + c + [SEP] + q + [SEP] + a_k + [SEP] \tag{46}$$</p>
+<p><strong>匹配分数</strong>:
+$$s_k = f_\theta(\mathbf{x}_k) = \mathbf{w}^\top \mathbf{h}_{[CLS]}^{(k)} \tag{47}$$</p>
+<p><strong>预测分布</strong>:
+$$P(a = a_k) = \frac{\exp(s_k)}{\sum_{k'=1}^K \exp(s_{k'})} \tag{48}$$</p>
+<h4 id="63">6.3 为什么这种方法有效？</h4>
+<p><strong>理论解释</strong>: 深度交互编码</p>
+<p>传统方法（先分别编码再交互）:
+$$s_k = \text{sim}(f(c, q), f(a_k)) \tag{49}$$</p>
+<p>BERT方法（联合编码）:
+$$s_k = f([c; q; a_k]) \tag{50}$$</p>
+<p><strong>信息论分析</strong>: 联合编码能捕获三元组之间的高阶交互：
+$$I(c, q; a_k | \text{joint}) \geq I(c, q; a_k | \text{separate}) \tag{51}$$</p>
+<p><strong>复杂度分析</strong>:
+- 前向传播次数: $K$次（$K$是候选数）
+- 总计算量: $O(K \cdot T^2 \cdot d)$，其中$T$是序列长度</p>
+<p><strong>缓解策略</strong>:
+1. 梯度累积
+2. 减少batch size
+3. 使用更小的模型作为初筛</p>
+<h3 id="chid">七、成语理解任务(CHID)的数学建模</h3>
+<h4 id="71">7.1 任务复杂性</h4>
+<p><strong>输入</strong>:
+- 上下文: $c$（包含多个空位$#_1, #_2, \ldots, #_m$）
+- 候选成语: ${i_1, \ldots, i_n}$（$n &gt; m$）</p>
+<p><strong>目标</strong>: 为每个空位选择不同的成语</p>
+<h4 id="72">7.2 分解为子问题</h4>
+<p><strong>单空位建模</strong>: 对于空位$#_k$，用[unused0]标记，其他用[MASK]:
+$$c_k = [CLS] + c(\#_k \to [unused0], \#_{j \neq k} \to [MASK]^4) + [SEP] \tag{52}$$</p>
+<p><strong>候选拼接</strong>:
+$$\mathbf{x}_{k,i} = c_k + [SEP] + \text{idiom}_i + [SEP] \tag{53}$$</p>
+<p><strong>匹配分数矩阵</strong>: $\mathbf{S} \in \mathbb{R}^{m \times n}$
+$$S_{ki} = f_\theta(\mathbf{x}_{k,i}) \tag{54}$$</p>
+<h4 id="73">7.3 匈牙利算法求解指派问题</h4>
+<p><strong>约束</strong>: 每个空位选择不同的成语</p>
+<p><strong>优化问题</strong>:
+$$\max_{\pi} \sum_{k=1}^m S_{k, \pi(k)} \tag{55}$$</p>
+<p>其中$\pi: [m] \to [n]$是一个单射(注入)函数。</p>
+<p><strong>等价最小化问题</strong>:
+$$\min_{\pi} \sum_{k=1}^m (-S_{k, \pi(k)}) = \min_{\pi} \sum_{k=1}^m C_{k, \pi(k)} \tag{56}$$</p>
+<p>定义代价矩阵$C_{ki} = -S_{ki}$。</p>
+<p><strong>匈牙利算法</strong>:
+1. 行简化: $C_{ki} \gets C_{ki} - \min_j C_{kj}$
+2. 列简化: $C_{ki} \gets C_{ki} - \min_j C_{ji}$
+3. 寻找最小覆盖线
+4. 迭代直到找到完美匹配</p>
+<p><strong>时间复杂度</strong>: $O(m^3)$或$O(m^2 n)$</p>
+<p><strong>实现</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">linear_sum_assignment</span>
+<span class="n">row_ind</span><span class="p">,</span> <span class="n">col_ind</span> <span class="o">=</span> <span class="n">linear_sum_assignment</span><span class="p">(</span><span class="n">cost_matrix</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>效果提升</strong>: 相比独立最大化，匈牙利算法带来约6%的准确率提升。</p>
+<h3 id="_13">八、训练技巧与优化策略</h3>
+<h4 id="81">8.1 学习率调度</h4>
+<p><strong>Warmup策略</strong>: 线性增加学习率
+$$\eta_t = \begin{cases}
+\eta_{\max} \cdot \frac{t}{T_{\text{warmup}}} & t \leq T_{\text{warmup}} \\
+\eta_{\max} \cdot \frac{T_{\max} - t}{T_{\max} - T_{\text{warmup}}} & t > T_{\text{warmup}}
+\end{cases} \tag{57}$$</p>
+<p><strong>理论解释</strong>: 避免初始阶段的大梯度破坏预训练权重。</p>
+<p><strong>梯度范数分析</strong>: 在微调初期，梯度范数较大：
+$$\|\nabla \mathcal{L}\|_2 \approx \mathcal{O}(1/\sqrt{\eta}) \tag{58}$$</p>
+<p>小学习率避免参数更新过大。</p>
+<h4 id="82">8.2 梯度裁剪</h4>
+<p><strong>全局范数裁剪</strong>:
+$$\mathbf{g} \gets \begin{cases}
+\mathbf{g} & \|\mathbf{g}\| \leq \theta \\
+\frac{\theta}{\|\mathbf{g}\|} \mathbf{g} & \|\mathbf{g}\| > \theta
+\end{cases} \tag{59}$$</p>
+<p><strong>理论</strong>: 保证更新方向，限制更新幅度。</p>
+<h4 id="83-label-smoothing">8.3 标签平滑(Label Smoothing)</h4>
+<p><strong>硬标签</strong>: $y_i = 1$ if $i = c$, else $y_i = 0$</p>
+<p><strong>软标签</strong>:
+$$\tilde{y}_i = \begin{cases}
+1 - \epsilon + \frac{\epsilon}{K} & i = c \\
+\frac{\epsilon}{K} & i \neq c
+\end{cases} \tag{60}$$</p>
+<p><strong>熵分析</strong>:
+$$H(\tilde{y}) = -(1-\epsilon)\log(1-\epsilon+\epsilon/K) - (K-1)\frac{\epsilon}{K}\log\frac{\epsilon}{K} > 0 \tag{61}$$</p>
+<p>增加熵防止过拟合，提高泛化能力。</p>
+<h3 id="-">九、预训练-微调的理论分析</h3>
+<h4 id="91">9.1 迁移学习的数学框架</h4>
+<p><strong>源域</strong>: $\mathcal{D}_s = {(\mathbf{x}_i^s, y_i^s)}$（预训练数据）
+<strong>目标域</strong>: $\mathcal{D}_t = {(\mathbf{x}_i^t, y_i^t)}$（下游任务数据）</p>
+<p><strong>假设</strong>: $P_s(\mathbf{x}) \neq P_t(\mathbf{x})$ 但存在共享的语义表示空间</p>
+<p><strong>表示学习</strong>: 预训练学习映射$f_\theta: \mathcal{X} \to \mathcal{H}$</p>
+<p><strong>微调</strong>: 学习任务特定函数$g_\phi: \mathcal{H} \to \mathcal{Y}$</p>
+<p><strong>联合优化</strong>:
+$$\min_{\theta, \phi} \mathbb{E}_{(\mathbf{x}, y) \sim \mathcal{D}_t} \mathcal{L}(g_\phi(f_\theta(\mathbf{x})), y) + \lambda \|\theta - \theta_0\|^2 \tag{62}$$</p>
+<p>其中$\theta_0$是预训练参数，$\lambda$控制正则化强度。</p>
+<h4 id="92">9.2 为什么预训练有效？</h4>
+<p><strong>PAC学习理论</strong>: 设$\mathcal{H}$是假设空间，VC维为$d$。样本复杂度：
+$$m = O\left(\frac{d + \log(1/\delta)}{\epsilon}\right) \tag{63}$$</p>
+<p><strong>预训练的作用</strong>: 缩小假设空间$\mathcal{H}$，降低VC维$d$，从而减少所需样本数。</p>
+<p><strong>信息瓶颈理论</strong>: 预训练学习压缩表示$\mathbf{h} = f(\mathbf{x})$，满足：
+$$\min I(\mathbf{X}; \mathbf{H}) \quad \text{s.t.} \quad I(\mathbf{H}; Y) \geq I_{\min} \tag{64}$$</p>
+<h4 id="93">9.3 微调的收敛性分析</h4>
+<p><strong>假设</strong>: 损失函数$\mathcal{L}$是$L$-smooth和$\mu$-strongly convex</p>
+<p><strong>定理</strong>: 使用学习率$\eta &lt; 1/L$，微调$T$步后：
+$$\mathbb{E}[\|\theta_T - \theta^*\|^2] \leq (1 - \mu\eta)^T \|\theta_0 - \theta^*\|^2 + \frac{\eta \sigma^2}{\mu} \tag{65}$$</p>
+<p>其中$\sigma^2$是梯度方差。</p>
+<p><strong>结论</strong>: 好的初始化$\theta_0$（接近最优$\theta^*$）加速收敛。</p>
+<h3 id="_14">十、具体计算示例</h3>
+<h4 id="101-bert-base">10.1 BERT-base参数量计算</h4>
+<p><strong>模型配置</strong>:
+- 层数: $L = 12$
+- 隐藏维度: $d = 768$
+- 注意力头数: $h = 12$
+- 中间层维度: $d_{\text{ffn}} = 3072$
+- 词表大小: $V = 21128$</p>
+<p><strong>Embedding层</strong>:
+$$P_{\text{emb}} = V \cdot d + T_{\max} \cdot d + 2 \cdot d = 21128 \times 768 + 512 \times 768 + 2 \times 768 \approx 16.7M \tag{66}$$</p>
+<p><strong>单个Transformer层</strong>:
+$$\begin{aligned}
+P_{\text{attn}} &= 4 \times (d \times d) = 4 \times 768^2 = 2.36M \tag{67} \\
+P_{\text{ffn}} &= 2 \times (d \times d_{\text{ffn}}) = 2 \times 768 \times 3072 = 4.72M \tag{68} \\
+P_{\text{layer}} &= P_{\text{attn}} + P_{\text{ffn}} = 7.08M \tag{69}
+\end{aligned}$$</p>
+<p><strong>总参数量</strong>:
+$$P_{\text{total}} = P_{\text{emb}} + L \times P_{\text{layer}} = 16.7M + 12 \times 7.08M \approx 102M \tag{70}$$</p>
+<p>与官方的110M接近（差异来自bias和LayerNorm参数）。</p>
+<h4 id="102">10.2 单个样本的计算复杂度</h4>
+<p><strong>输入</strong>: 序列长度$T = 128$</p>
+<p><strong>Self-Attention</strong>:
+- QKV投影: $O(T \cdot d^2) = O(128 \times 768^2) \approx 75M$
+- 注意力矩阵: $O(T^2 \cdot d) = O(128^2 \times 768) \approx 12.5M$
+- 总计: $O(T \cdot d^2 + T^2 \cdot d)$</p>
+<p><strong>Feed-Forward</strong>:
+$$O(2 \times T \times d \times d_{\text{ffn}}) = O(2 \times 128 \times 768 \times 3072) \approx 604M \tag{71}$$</p>
+<p><strong>单层总FLOPs</strong>: 约680M</p>
+<p><strong>12层总FLOPs</strong>: 约8.2B (billion)</p>
+<h4 id="103">10.3 训练时间估算</h4>
+<p><strong>设定</strong>:
+- GPU: V100 (125 TFLOPS FP16)
+- Batch size: 32
+- 序列长度: 128
+- 训练步数: 1M</p>
+<p><strong>单步时间</strong>:
+$$t_{\text{step}} = \frac{\text{batch\_size} \times \text{FLOPs}}{\text{GPU\_throughput}} = \frac{32 \times 8.2B}{125T} \approx 2.1 \text{ms} \tag{72}$$</p>
+<p><strong>总训练时间</strong> (仅前向):
+$$T_{\text{train}} = 1M \times 2.1 \text{ms} \approx 35 \text{minutes} \tag{73}$$</p>
+<p>考虑反向传播（约2倍前向）和通信开销，实际约2-3小时。</p>
+<h3 id="_15">十一、性能优化与工程技巧</h3>
+<h4 id="111">11.1 混合精度训练</h4>
+<p><strong>FP16表示范围</strong>: $[6 \times 10^{-8}, 65504]$</p>
+<p><strong>Loss Scaling</strong>: 避免梯度下溢
+$$\mathcal{L}' = s \cdot \mathcal{L}, \quad \nabla_\theta \mathcal{L} = \frac{1}{s} \nabla_\theta \mathcal{L}' \tag{74}$$</p>
+<p><strong>动态Loss Scaling算法</strong>:</p>
+<div class="codehilite"><pre><span></span><code>if overflow detected:
+    s = s / 2
+else if N steps without overflow:
+    s = s * 2
+</code></pre></div>
+
+<p><strong>理论</strong>: 保持梯度在FP16有效范围$[2^{-24}, 2^{15}]$内。</p>
+<h4 id="112">11.2 梯度累积</h4>
+<p><strong>目标</strong>: 模拟大batch size$B_{\text{eff}}$，实际使用小batch size$B_{\text{actual}}$</p>
+<p><strong>算法</strong>:
+$$\begin{aligned}
+&\text{for } i = 1 \text{ to } K: \\
+&\quad \mathbf{g}_i = \nabla_\theta \mathcal{L}(\mathcal{B}_i) \\
+&\mathbf{g} = \frac{1}{K} \sum_{i=1}^K \mathbf{g}_i \\
+&\theta \gets \theta - \eta \mathbf{g}
+\end{aligned} \tag{75}$$</p>
+<p>其中$B_{\text{eff}} = K \times B_{\text{actual}}$。</p>
+<p><strong>等价性证明</strong>:
+$$\mathbb{E}[\mathbf{g}] = \mathbb{E}\left[\frac{1}{K} \sum_{i=1}^K \nabla \mathcal{L}(\mathcal{B}_i)\right] = \nabla \mathcal{L}(\mathcal{D}) \tag{76}$$</p>
+<p>与真实大batch的期望梯度相同。</p>
+<h3 id="_16">十二、实践建议与超参数选择</h3>
+<h4 id="121">12.1 学习率选择</h4>
+<p><strong>经验法则</strong>: 对于Adam优化器：
+$$\eta \in [10^{-5}, 5 \times 10^{-5}] \tag{77}$$</p>
+<p><strong>理论依据</strong>: 预训练权重已接近最优，需要小步调整</p>
+<p><strong>自适应策略</strong>: 使用学习率范围测试(LR Range Test)
+$$\eta_{\text{optimal}} = \arg\max_\eta \left\{ \eta : \frac{d\mathcal{L}}{d\eta} < 0 \right\} \tag{78}$$</p>
+<h4 id="122-batch-size">12.2 Batch Size选择</h4>
+<p><strong>内存约束</strong>:
+$$\text{Memory} \approx P_{\text{model}} \times (4 + 12 \times B \times T) \text{ bytes} \tag{79}$$</p>
+<p>其中因子4来自FP32参数，12来自激活值和梯度。</p>
+<p><strong>临界Batch Size</strong>: 超过此值收益递减
+$$B_{\text{critical}} \approx \frac{\epsilon}{\text{noise\_scale}^2} \tag{80}$$</p>
+<p><strong>实践建议</strong>:
+- BERT-base: 16-32
+- BERT-large: 8-16</p>
+<h4 id="123">12.3 正则化技巧</h4>
+<p><strong>Dropout</strong>: 在注意力和FFN层应用
+$$\mathbf{h}' = \text{Dropout}(\mathbf{h}, p) = \frac{1}{1-p} \mathbf{h} \odot \mathbf{m}, \quad \mathbf{m} \sim \text{Bernoulli}(1-p) \tag{81}$$</p>
+<p><strong>Weight Decay</strong>: L2正则化
+$$\mathcal{L}_{\text{reg}} = \mathcal{L} + \frac{\lambda}{2} \sum_i \theta_i^2 \tag{82}$$</p>
+<p><strong>推荐值</strong>: $\lambda \in [0.01, 0.1]$</p>
+<h3 id="_17">总结</h3>
+<p>本节详细推导了BERT及其在CLUE基准任务上的数学原理，包括：</p>
+<ol>
+<li><strong>理论基础</strong>: 从自回归模型到双向编码，从自注意力到多头机制</li>
+<li><strong>任务建模</strong>: 文本分类、匹配、阅读理解、多项选择、成语理解</li>
+<li><strong>优化技巧</strong>: 学习率调度、梯度裁剪、混合精度、梯度累积</li>
+<li><strong>理论分析</strong>: 信息论、PAC学习、收敛性分析</li>
+<li><strong>工程实践</strong>: 参数量计算、时间估算、超参数选择</li>
+</ol>
+<p>这些推导揭示了BERT强大性能背后的数学原理，为实践提供了理论指导。</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer升级之路：20、MLA好在哪里?（上）</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>Transformer升级之路：20、MLA好在哪里?（上）</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 34.2 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10907">https://spaces.ac.cn/archives/10907</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>自从DeepSeek爆火后，它所提的Attention变体MLA（<strong>M</strong> ulti-head <strong>L</strong> atent <strong>A</strong> ttention）也愈发受到关注。MLA通过巧妙的设计实现了MHA与MQA的自由切换，使得模型可以根据训练和推理的不同特性（Compute-Bound or Memory-Bound）选择最佳的形式，尽可能地达到效率最大化。</p>
+<p>诚然，MLA很有效，但也有观点认为它不够优雅，所以寻找MLA替代品的努力一直存在，包括我们也有在尝试。然而，经过一段时间的实验，我们发现很多KV Cache相同甚至更大的Attention变体，最终效果都不如MLA。这不得不让我们开始反思：MLA的出色表现背后的关键原因究竟是什么？</p>
+<p>接下来，本文将详细介绍笔者围绕这一问题的思考过程以及相关实验结果。</p>
+<h2 id="_1">观察</h2>
+<p>MLA提出自<a href="https://papers.cool/arxiv/2405.04434">DeepSeek-V2</a>，本文假设读者已经熟悉MLA，至少了解之前的博客<a href="/archives/10091">《缓存与效果的极限拉扯：从MHA、MQA、GQA到MLA》</a>所介绍的内容，因此MLA自身的细节将不会过多展开。</p>
+<p>MLA的主要特点如下：</p>
+<blockquote>
+<p>1、MLA在训练阶段是一个qk_head_dims=(128+64)、v_head_dims=128的MHA；</p>
+<p>2、MLA在解码阶段是一个qk_head_dims=(512+64)、v_head_dims=512、KV-Shared的MQA；</p>
+<p>3、MLA的[qc, qr]、[kc, kr]拼接，可以理解为一种<a href="/archives/10122#%E9%83%A8%E5%88%86%E6%97%8B%E8%BD%AC">Partial RoPE</a>。</p>
+</blockquote>
+<h2 id="_2">猜测</h2>
+<p>MHA、GQA常用的head_dims是128，而对于MLA来说，不管是从训练看的128+64，还是从推理看的512+64，都要大于128，再结合<a href="/archives/7325">《突破瓶颈，打造更强大的Transformer》</a>的经验，我们有：</p>
+<blockquote>
+<p><strong>猜测1</strong> ： 增大head_dims是MLA好的关键之一。</p>
+</blockquote>
+<p>另外，KV-Shared这个特性，可以在同等KV Cache大小下，增大GQA的head_dims或者num_groups，所以有：</p>
+<blockquote>
+<p><strong>猜测2</strong> ： KV-Shared是MLA好的关键之一。</p>
+</blockquote>
+<p>最后，此前有一些理论和实验显示Partial RoPE可能会对效果有正面帮助（参考<a href="/archives/10122#%E9%83%A8%E5%88%86%E6%97%8B%E8%BD%AC">《Transformer升级之路：18、RoPE的底数选择原则》</a>），所以有</p>
+<blockquote>
+<p><strong>猜测3</strong> ： Partial RoPE是MLA好的关键之一。</p>
+</blockquote>
+<h2 id="_3">实验</h2>
+<p>现在我们通过实验逐一检验以上猜测。</p>
+<h3 id="_4">设置</h3>
+<p>所有实验公共部分的超参数如下：</p>
+<blockquote>
+<p>1、类似LLAMA3的Dense模型；</p>
+<p>2、hidden_size=2048，num_layers=12，num_heads=16；</p>
+<p>3、优化器是<a href="/archives/10592">Muon</a>，Attention部分per head更新；</p>
+<p>4、训练长度为4096，总tokens数为16B，总训练步数为16k；</p>
+<p>5、所有实验都是只改变Attention，所以参数量不会严格对齐。</p>
+</blockquote>
+<h3 id="part-i">Part I</h3>
+<p>MLA的KV Cache大小是512+64，约等于GQA2-128（第一个数字是num_groups，第二个数字是head_dims），所以对比的baseline为GQA2-128和GQA1-256。为了验证Partial RoPE，我们增加了GQA1-256-PR，具体做法是将Q、K的256 dims分成192+64两部分，在64上加RoPE，192不加。</p>
+<p>结果如下：<br />
+$$\begin{array}{c|ccc}  
+\hline  
+& \text{Params} & \text{Loss} & \text{Cache} \\\  
+\hline  
+\text{MLA} & 894M & 2.721 & 576 \\\  
+\text{GQA2-128} & 842M & 2.75 & 512 \\\  
+\text{GQA1-256} & 943M & 2.72 & 512 \\\  
+\text{GQA1-256-PR} & 943M & 2.711 & 512 \\\  
+\hline  
+\end{array}$$</p>
+<p>即<br />
+$$\text{GQA2-128} < \text{MLA} \lesssim \text{GQA1-256} < \text{GQA1-256-PR}$$<br />
+初步验证了增大head_dims和Partial RoPE的作用。这样看来，MLA的设计中，RoPE和NoPE拼接这部分看似无奈的设计，极有可能是它效果优异的关键原因！原论文声称MLA甚至优于MHA，大概率也是因为所对比的MHA的head_dims只有128。</p>
+<h3 id="part-ii">Part II</h3>
+<p>为了进一步验证增大head_dims的作用，我们另外跑了MHA、GQA2-192、MLA-256三个实验，MHA是head_dims=128的常规MHA，GQA2-192是直接增大GQA2的head_dims到192，MLA-256是将MLA的128+64提升到192+64，对照如下</p>
+<p>$$\begin{array}{c|ccc}  
+\hline  
+& \text{Params} & \text{Loss} & \text{Cache} \\\  
+\hline  
+\text{MHA} & 931M & 2.721 & 4096 \\\  
+\text{MLA} & 894M & 2.721 & 576 \\\  
+\text{MLA-256} & 989M & 2.705 & 576 \\\  
+\text{GQA2-128} & 842M & 2.75 & 512 \\\  
+\text{GQA2-192} & 899M & 2.729 & 768 \\\  
+\text{GQA1-256} & 943M & 2.72 & 512 \\\  
+\text{GQA1-256-PR} & 943M & 2.711 & 512 \\\  
+\hline  
+\end{array}$$</p>
+<p>可以看到，MHA总参数量更多，KV Cache更是7倍于MLA，但Loss才堪堪追平MLA，这跟DeepSeek-V2里边的结论接近。此外，GQA2-192优于GQA2-128，但不如GQA1-256；MLA的head_dims升到(192+64)后，相比(128+64)也还能进一步提升效果。这些现象都表明，增加head_dims远比增加num_groups更有效。</p>
+<h3 id="part-iii">Part III</h3>
+<p>接下来我们验证KV-Shared，即K、V共享全部或大部分dims。这里我们主要考虑的替代品是head_dims不超过256的GQA，并且控制KV Cache的总大小跟MLA接近，所以当KV-Shared时，我们可以至多可以考虑GQA2-256。</p>
+<p>由于KV-Shared跟RoPE不完全兼容，参考MLA的做法，我们将256分成192+64两部分，其中</p>
+<blockquote>
+<p>1、192部分不加RoPE，在K、V间共享；</p>
+<p>2、64部分加RoPE，只用于K；</p>
+<p>3、V另外再投影64 dims，concat到共享的192 dims上去。</p>
+</blockquote>
+<p>这样一来，K、V的head_dims都是256，KV Cache总大小是(192+64+64)*2=640，略大于MLA的512+64=576，这个版本我们简记为“GQA2-(192+64)-S1”，其实“S1”是“Shared-1”的缩写。</p>
+<h3 id="part-iv">Part IV</h3>
+<p>另外一种KV-Shared的方案是：</p>
+<blockquote>
+<p>1、192部分不加RoPE，在K、V间共享；</p>
+<p>2、64部分加RoPE，同样在K、V间共享；</p>
+<p>3、做Attention，由于V带RoPE，此时是绝对位置编码效果；</p>
+<p>4、为了保证相对位置编码，将输出分成192+64两部分，64部分再加一次逆向RoPE。</p>
+</blockquote>
+<p>这种做法是K、V完全共享，KV Cache大小是(192+64)*2=512，略小于MLA。这个版本我们称为“GQA2-(192+64)-S2”，“S2”是“Shared-2”的缩写，背后的原理是笔者新提出的VO-RoPE，参考<a href="/archives/10862">《Transformer升级之路：19、第二类旋转位置编码》</a>。</p>
+<h3 id="part-v">Part V</h3>
+<p>另外，根据同样思路补了几个GQA4和GQA1的实验。所有实验结果汇总如下：<br />
+$$\begin{array}{c|ccc|c}  
+\hline  
+& \text{Params} & \text{Loss} & \text{Cache} & \text{备注} \\\  
+\hline  
+\text{MLA} & 894M & 2.721 & 576 & \\\  
+\text{MLA-256} & 989M & 2.705 & 576 & \\\  
+\text{GQA2-(192+64)-S1} & 946M & 2.714 & 640 & \\\  
+\text{GQA2-(192+64)-S2} & 943M & 2.708 & 512 & \text{引入VO-RoPE} \\\  
+\text{GQA4-(64+64)-S2} & 842M & 2.738 & 512 & \\\  
+\text{GQA4-(128+64)-S2} & 899M & 2.713 & 768 & \text{KV Cache最大} \\\  
+\text{GQA1-(512+64)-S3} & 1171M & 2.677 & 576 & \text{head_dims最大} \\\  
+\hline  
+\end{array}$$</p>
+<p>这里“GQA1-(512+64)-S3”是按照MLA的推理形式实现的MQA，形式介乎S1与S2之间，它的主要特点是head_dims大。</p>
+<p>结果解读：</p>
+<blockquote>
+<p>1、KV-Shared的GQA自带Partial RoPE；</p>
+<p>2、KV-Shared的GQA2-256，也能超过MLA；</p>
+<p>3、VO-RoPE的引入，似乎有利于效果（S1 ≲ S2）；</p>
+<p>4、同等KV Cache下，head_dims越大越好；</p>
+<p>5、GQA2-(192+64)-S2 略微超过 GQA1-256-PR；</p>
+<p>6、GQA4-(128+64)-S2 的KV Cache最大，但效果不是最优，再次表明head_dims更关键。</p>
+</blockquote>
+<p>关于KV-Shared，还有两点观察：</p>
+<blockquote>
+<p>1、训练过程中，GQA1-256-PR前期是明显领先GQA2-(192+64)-S2，但后期被追平甚至略微反先，猜测GQA1-256-PR可能有后劲不足的嫌疑；</p>
+<p>2、如果没有KV-Shared，GQA顶多是GQA1-256，也就是说head_dims顶天了256，但有KV-Shared的话，GQA可以做到GQA1-512-S，单纯从head_dims看，KV-Shared天花板更高。</p>
+</blockquote>
+<h3 id="part-vi">Part VI</h3>
+<p>由于没有严格对齐参数量，可能读者会有“到底是增加参数量还是增加head_dims更本质”的疑虑，所以这里补充几个对齐参数量的实验。</p>
+<p>这里考虑的对齐参数量的方式有三种：</p>
+<blockquote>
+<p>1、<strong>double-heads</strong> ：以“GQA2-128 vs GQA1-256”为例，将GQA2-128的num_heads翻倍，可以让GQA2-128的参数量跟GQA1-256相同；</p>
+<p>2、<strong>缩减MLP</strong> ：缩小MLP（SwiGLU）的intermediate_size，也可以使得GQA1-256的参数量跟GQA2-128大致相同；</p>
+<p>3、<strong>Q &amp;O LoRA</strong>：GQA的主要参数量来自Query和Output的投影矩阵，对这两个矩阵改用LoRA，也可以降低GQA1-256的参数量。</p>
+</blockquote>
+<p>实验结果如下：<br />
+$$\begin{array}{c|ccc|ccc}  
+\hline  
+& \text{Params} & \text{Loss} & \text{Cache} & \text{num_heads} & \text{intermediate_size} & \text{qo_lora} \\\  
+\hline  
+\text{MLA} & 894M & 2.721 & 576 & 16 & 5456 & \text{No}\\\  
+\hline  
+\text{GQA2-128} & 842M & 2.75 & 512 & 16 & 5456 & \text{No}\\\  
+\text{GQA1-256} & 943M & 2.72 & 512 & 16 & 5456 & \text{No}\\\  
+\hline  
+\text{GQA2-128} & 943M & 2.723 & 512 & \color{red}{32} & 5456 & \text{No} \\\  
+\text{GQA1-256} & 843M & 2.747 & 512 & 16 & \color{red}{4096} & \text{No} \\\  
+\text{GQA1-256} & 842M & 2.726 & 512 & 16 & 5456 & \color{red}{\text{Yes}} \\\  
+\hline  
+\text{GQA4-(64+64)-S2} & 842M & 2.738 & 512 & 16 & 5456 & \text{No} \\\  
+\text{GQA2-(192+64)-S2} & 943M & 2.708 & 512 & 16 & 5456 & \text{No} \\\  
+\hline  
+\text{GQA4-(64+64)-S2} & 943M & 2.711 & 512 & \color{red}{32} & 5456 & \text{No} \\\  
+\text{GQA2-(192+64)-S2} & 843M & 2.733 & 512 & 16 & \color{red}{4096} & \text{No} \\\  
+\text{GQA2-(192+64)-S2} & 842M & 2.708 & 512 & 16 & 5456 & \color{red}{\text{Yes}} \\\  
+\hline  
+\end{array}$$</p>
+<p>结果主要分三块：</p>
+<blockquote>
+<p>1、heads翻倍相比head_dims翻倍，loss稳定差0.003左右；</p>
+<p>2、缩小MLP比head_dims减半，loss稳定优0.004左右；</p>
+<p>3、Q&amp;O LoRA性能损失最小，可以实现head_dims翻倍但参数量不增，且loss明显降。</p>
+</blockquote>
+<p>结论：如果从增加参数量角度看，增大head_dims可能是效果增益较大的方向，配合Q&amp;O LoRA可以实现参数量几乎不增，但收益仍相当。</p>
+<h2 id="_5">小结</h2>
+<p>初步结论是：</p>
+<blockquote>
+<p>1、增大head_dims收益最大；</p>
+<p>2、Partial RoPE对Loss也有一定帮助；</p>
+<p>3、KV-Shared应该也有一定作用。</p>
+</blockquote>
+<p>这样看来，此前我们一直在head_dims=128下找MLA的替代品，感觉是起点就先天不足了，难怪一直比不上MLA。要想追平MLA，head_dims应该要192起步了，并辅以Partial RoPE。至于KV-Shared，也可能有用，但应该还需要更大规模的验证。</p>
+<h2 id="_6">意义</h2>
+<p>其实这里边的意义，就看我们换掉MLA的决心有多强。</p>
+<p>假设 GQA2-(192+64)-S2 可以替代MLA，但MLA也可以升到256，目前看来 GQA2-(192+64)-S2 比不上 MLA-256 。那么换掉MLA的唯二好处是：</p>
+<blockquote>
+<p>1、结构更简单，可以方便加QK-Norm；</p>
+<p>2、解码阶段的head_dims由512+64变成了256，同时num_groups变为2，可以TP。</p>
+</blockquote>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10907">https://spaces.ac.cn/archives/10907</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 04, 2025). 《Transformer升级之路：20、MLA好在哪里?（上） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10907">https://spaces.ac.cn/archives/10907</a></p>
+<p>@online{kexuefm-10907,<br />
+title={Transformer升级之路：20、MLA好在哪里?（上）},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/10907}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释</h2>
+<h3 id="1-mla">1. MLA的数学定义与基本结构</h3>
+<p><strong>推导1.1：标准Multi-Head Attention（MHA）的数学表述</strong></p>
+<p>对于标准的MHA，给定输入$\boldsymbol{x}_i \in \mathbb{R}^d$，每个head $s \in {1, 2, \ldots, h}$计算：
+$$
+\boldsymbol{q}_i^{(s)} = \boldsymbol{x}_i \boldsymbol{W}_q^{(s)}, \quad \boldsymbol{W}_q^{(s)} \in \mathbb{R}^{d \times d_k}
+$$
+$$
+\boldsymbol{k}_i^{(s)} = \boldsymbol{x}_i \boldsymbol{W}_k^{(s)}, \quad \boldsymbol{W}_k^{(s)} \in \mathbb{R}^{d \times d_k}
+$$
+$$
+\boldsymbol{v}_i^{(s)} = \boldsymbol{x}_i \boldsymbol{W}_v^{(s)}, \quad \boldsymbol{W}_v^{(s)} \in \mathbb{R}^{d \times d_v}
+$$</p>
+<p>注意力输出：
+$$
+\boldsymbol{o}_i^{(s)} = \sum_{j \leq i} \frac{\exp(\boldsymbol{q}_i^{(s)} \cdot \boldsymbol{k}_j^{(s)})}{\sum_{j' \leq i} \exp(\boldsymbol{q}_i^{(s)} \cdot \boldsymbol{k}_{j'}^{(s)})} \boldsymbol{v}_j^{(s)}
+$$</p>
+<p>最终拼接：
+$$
+\boldsymbol{o}_i = [\boldsymbol{o}_i^{(1)}, \boldsymbol{o}_i^{(2)}, \ldots, \boldsymbol{o}_i^{(h)}] \boldsymbol{W}_o
+$$</p>
+<p><strong>推导1.2：MLA的双重投影结构</strong></p>
+<p>MLA引入中间表示$\boldsymbol{c}_i \in \mathbb{R}^{d_c}$（latent compression）：
+$$
+\boldsymbol{c}_i = \boldsymbol{x}_i \boldsymbol{W}_c, \quad \boldsymbol{W}_c \in \mathbb{R}^{d \times d_c}
+$$</p>
+<p>然后从$\boldsymbol{c}_i$生成每个head的K和V：
+$$
+\boldsymbol{k}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_k^{(s)}, \quad \boldsymbol{W}_k^{(s)} \in \mathbb{R}^{d_c \times d_k}
+$$
+$$
+\boldsymbol{v}_i^{(s)} = \boldsymbol{c}_i \boldsymbol{W}_v^{(s)}, \quad \boldsymbol{W}_v^{(s)} \in \mathbb{R}^{d_c \times d_v}
+$$</p>
+<p>而Q仍然直接从$\boldsymbol{x}_i$生成：
+$$
+\boldsymbol{q}_i^{(s)} = \boldsymbol{x}_i \boldsymbol{W}_q^{(s)}, \quad \boldsymbol{W}_q^{(s)} \in \mathbb{R}^{d \times d_k}
+$$</p>
+<p><strong>推导1.3：MLA的参数量分析</strong></p>
+<p>MHA的参数量：
+$$
+P_{\text{MHA}} = h \cdot d \cdot (d_k + d_k + d_v) + h \cdot d_v \cdot d = h \cdot d \cdot (2d_k + d_v + d_v)
+$$</p>
+<p>简化为（假设$d_k = d_v = d_h$）：
+$$
+P_{\text{MHA}} = 4h \cdot d \cdot d_h
+$$</p>
+<p>MLA的参数量：
+$$
+P_{\text{MLA}} = d \cdot d_c + h \cdot d_c \cdot (d_k + d_v) + h \cdot d \cdot d_k + h \cdot d_v \cdot d
+$$</p>
+<p>整理得：
+$$
+P_{\text{MLA}} = d \cdot d_c + h \cdot d_c \cdot (d_k + d_v) + h \cdot d \cdot (d_k + d_v)
+$$</p>
+<h3 id="2">2. 低秩分解的理论基础</h3>
+<p><strong>推导2.1：K和V矩阵的低秩表示</strong></p>
+<p>将所有位置的K向量堆叠成矩阵$\boldsymbol{K}^{(s)} \in \mathbb{R}^{n \times d_k}$：
+$$
+\boldsymbol{K}^{(s)} = \begin{bmatrix} \boldsymbol{k}_1^{(s)} \\ \boldsymbol{k}_2^{(s)} \\ \vdots \\ \boldsymbol{k}_n^{(s)} \end{bmatrix} = \begin{bmatrix} \boldsymbol{x}_1 \boldsymbol{W}_c \boldsymbol{W}_k^{(s)} \\ \boldsymbol{x}_2 \boldsymbol{W}_c \boldsymbol{W}_k^{(s)} \\ \vdots \\ \boldsymbol{x}_n \boldsymbol{W}_c \boldsymbol{W}_k^{(s)} \end{bmatrix}
+$$</p>
+<p>可以分解为：
+$$
+\boldsymbol{K}^{(s)} = \boldsymbol{C} \boldsymbol{W}_k^{(s)}
+$$</p>
+<p>其中$\boldsymbol{C} = [\boldsymbol{c}_1, \boldsymbol{c}_2, \ldots, \boldsymbol{c}_n]^{\top} \in \mathbb{R}^{n \times d_c}$。</p>
+<p><strong>推导2.2：秩的上界分析</strong></p>
+<p>矩阵$\boldsymbol{K}^{(s)}$的秩满足：
+$$
+\text{rank}(\boldsymbol{K}^{(s)}) = \text{rank}(\boldsymbol{C} \boldsymbol{W}_k^{(s)}) \leq \min(\text{rank}(\boldsymbol{C}), \text{rank}(\boldsymbol{W}_k^{(s)}))
+$$</p>
+<p>由于$\boldsymbol{C} \in \mathbb{R}^{n \times d_c}$和$\boldsymbol{W}_k^{(s)} \in \mathbb{R}^{d_c \times d_k}$：
+$$
+\text{rank}(\boldsymbol{K}^{(s)}) \leq \min(n, d_c, d_k)
+$$</p>
+<p>对于长序列，$n \gg d_c$，所以：
+$$
+\text{rank}(\boldsymbol{K}^{(s)}) \leq d_c
+$$</p>
+<p>这意味着MLA强制K矩阵是低秩的，秩不超过$d_c$。</p>
+<p><strong>推导2.3：低秩分解的误差界</strong></p>
+<p>假设MHA的K矩阵$\boldsymbol{K}_{\text{full}}^{(s)}$可以用SVD分解：
+$$
+\boldsymbol{K}_{\text{full}}^{(s)} = \boldsymbol{U} \boldsymbol{\Sigma} \boldsymbol{V}^{\top} = \sum_{i=1}^r \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top}
+$$</p>
+<p>其中$\sigma_1 \geq \sigma_2 \geq \cdots \geq \sigma_r &gt; 0$是奇异值。</p>
+<p>MLA使用秩$d_c$的近似：
+$$
+\boldsymbol{K}_{\text{MLA}}^{(s)} \approx \sum_{i=1}^{d_c} \sigma_i \boldsymbol{u}_i \boldsymbol{v}_i^{\top}
+$$</p>
+<p>Frobenius范数意义下的近似误差：
+$$
+\|\boldsymbol{K}_{\text{full}}^{(s)} - \boldsymbol{K}_{\text{MLA}}^{(s)}\|_F = \sqrt{\sum_{i=d_c+1}^r \sigma_i^2}
+$$</p>
+<p>如果奇异值快速衰减（$\sigma_i \sim i^{-\alpha}$，$\alpha &gt; 1$），则低秩近似误差很小。</p>
+<h3 id="3-kv-cache">3. KV Cache压缩的数学原理</h3>
+<p><strong>推导3.1：标准MHA的KV Cache大小</strong></p>
+<p>对于序列长度$n$，MHA需要缓存每个head的K和V：
+$$
+\text{Cache}_{\text{MHA}} = n \cdot h \cdot (d_k + d_v)
+$$</p>
+<p>对于$h=16$，$d_k = d_v = 128$：
+$$
+\text{Cache}_{\text{MHA}} = n \cdot 16 \cdot 256 = 4096n
+$$</p>
+<p><strong>推导3.2：MLA的KV Cache大小</strong></p>
+<p>MLA只需要缓存压缩表示$\boldsymbol{c}_i$和RoPE部分$\boldsymbol{k}_r^{(s)}$。</p>
+<p>设$\boldsymbol{c}<em c_k="c,k">i \in \mathbb{R}^{d</em>}}$（K的压缩维度）和$\boldsymbol{c<em c_v="c,v">i^v \in \mathbb{R}^{d</em>$（V的压缩维度），以及RoPE维度$d_r$：
+$$
+\text{Cache}_{\text{MLA}} = n \cdot (d_{c,k} + d_{c,v} + h \cdot d_r)
+$$}</p>
+<p>对于DeepSeek-V2的配置（$d_{c,k} = 512$，$d_{c,v} = 512$，$d_r = 64$，$h = 16$）：
+$$
+\text{Cache}_{\text{MLA}} = n \cdot (512 + 512 + 16 \times 64) = n \cdot 2048
+$$</p>
+<p>但实际上K和V可以共享大部分：
+$$
+\text{Cache}_{\text{MLA}} = n \cdot (512 + 64) = 576n
+$$</p>
+<p><strong>推导3.3：压缩比的计算</strong></p>
+<p>压缩比定义为：
+$$
+\rho = \frac{\text{Cache}_{\text{MLA}}}{\text{Cache}_{\text{MHA}}} = \frac{576n}{4096n} = \frac{576}{4096} \approx 0.14
+$$</p>
+<p>即MLA将KV Cache压缩到原来的14%，约7倍的压缩。</p>
+<h3 id="4">4. 注意力矩阵的秩分析</h3>
+<p><strong>推导4.1：注意力矩阵的定义</strong></p>
+<p>对于第$s$个head，注意力矩阵$\boldsymbol{A}^{(s)} \in \mathbb{R}^{n \times n}$定义为：
+$$
+A_{ij}^{(s)} = \frac{\exp(\boldsymbol{q}_i^{(s)} \cdot \boldsymbol{k}_j^{(s)})}{\sum_{j' \leq i} \exp(\boldsymbol{q}_i^{(s)} \cdot \boldsymbol{k}_{j'}^{(s)})}
+$$</p>
+<p>未归一化的注意力分数矩阵：
+$$
+\boldsymbol{S}^{(s)} = \boldsymbol{Q}^{(s)} (\boldsymbol{K}^{(s)})^{\top}
+$$</p>
+<p>其中$\boldsymbol{Q}^{(s)}, \boldsymbol{K}^{(s)} \in \mathbb{R}^{n \times d_k}$。</p>
+<p><strong>推导4.2：MLA注意力矩阵的秩界</strong></p>
+<p>对于MLA，$\boldsymbol{K}^{(s)} = \boldsymbol{C} \boldsymbol{W}_k^{(s)}$，因此：
+$$
+\boldsymbol{S}^{(s)} = \boldsymbol{Q}^{(s)} (\boldsymbol{C} \boldsymbol{W}_k^{(s)})^{\top} = \boldsymbol{Q}^{(s)} (\boldsymbol{W}_k^{(s)})^{\top} \boldsymbol{C}^{\top}
+$$</p>
+<p>注意力分数矩阵的秩：
+$$
+\text{rank}(\boldsymbol{S}^{(s)}) \leq \min(\text{rank}(\boldsymbol{Q}^{(s)}), \text{rank}(\boldsymbol{C}), d_k)
+$$</p>
+<p>由于$\boldsymbol{C} \in \mathbb{R}^{n \times d_c}$：
+$$
+\text{rank}(\boldsymbol{S}^{(s)}) \leq \min(n, d_c, d_k)
+$$</p>
+<p>当$n \gg d_c$时：
+$$
+\text{rank}(\boldsymbol{S}^{(s)}) \leq d_c
+$$</p>
+<p><strong>推导4.3：低秩注意力的表达能力</strong></p>
+<p>虽然注意力矩阵是低秩的，但这不一定限制表达能力。考虑输出：
+$$
+\boldsymbol{O}^{(s)} = \boldsymbol{A}^{(s)} \boldsymbol{V}^{(s)}
+$$</p>
+<p>如果$\boldsymbol{V}^{(s)} = \boldsymbol{C} \boldsymbol{W}_v^{(s)}$也是低秩的：
+$$
+\boldsymbol{O}^{(s)} = \boldsymbol{A}^{(s)} \boldsymbol{C} \boldsymbol{W}_v^{(s)}
+$$</p>
+<p>即使$\boldsymbol{A}^{(s)}$是低秩的，$\boldsymbol{A}^{(s)} \boldsymbol{C}$可以恢复丰富的表示，因为$\boldsymbol{C}$包含了所有位置的压缩信息。</p>
+<h3 id="5">5. 参数效率与表达能力的权衡</h3>
+<p><strong>推导5.1：有效参数量的分析</strong></p>
+<p>定义有效参数量为影响前向传播的独立参数数量。</p>
+<p>对于MHA：
+- Q投影：$h \cdot d \cdot d_k$
+- K投影：$h \cdot d \cdot d_k$
+- V投影：$h \cdot d \cdot d_v$
+- O投影：$h \cdot d_v \cdot d$</p>
+<p>总计：$P_{\text{MHA}} = h \cdot d \cdot (2d_k + d_v) + h \cdot d_v \cdot d$</p>
+<p>对于MLA：
+- 压缩投影：$d \cdot d_c$
+- Q投影：$h \cdot d \cdot d_k$
+- K投影（从压缩）：$h \cdot d_c \cdot d_k$
+- V投影（从压缩）：$h \cdot d_c \cdot d_v$
+- O投影：$h \cdot d_v \cdot d$</p>
+<p>总计：$P_{\text{MLA}} = d \cdot d_c + h \cdot d \cdot d_k + h \cdot d_c \cdot (d_k + d_v) + h \cdot d_v \cdot d$</p>
+<p><strong>推导5.2：参数效率比</strong></p>
+<p>假设$d_k = d_v = d_h$，比较MLA和MHA在相同KV Cache下的参数量。</p>
+<p>设MHA使用GQA，$g$个groups，则：
+$$
+P_{\text{GQA}} = h \cdot d \cdot d_h + g \cdot d \cdot 2d_h + h \cdot d_h \cdot d
+$$</p>
+<p>对于$g=2$，$d_h=128$：
+$$
+P_{\text{GQA}} = 16 \cdot d \cdot 128 + 2 \cdot d \cdot 256 + 16 \cdot 128 \cdot d = (2048 + 512 + 2048)d = 4608d
+$$</p>
+<p>对于MLA（$d_c = 512$，$d_h = 128 + 64 = 192$）：
+$$
+P_{\text{MLA}} = d \cdot 512 + 16 \cdot d \cdot 128 + 16 \cdot 512 \cdot 192 + 16 \cdot 192 \cdot d
+$$
+$$
+= 512d + 2048d + 1,572,864 + 3072d = 5632d + 1,572,864
+$$</p>
+<p>当$d = 2048$时：
+$$
+P_{\text{MLA}} \approx 11.5M + 1.57M = 13.07M
+$$
+$$
+P_{\text{GQA}} = 4608 \times 2048 = 9.44M
+$$</p>
+<p>所以MLA参数量稍多，但提供了更大的head_dims。</p>
+<p><strong>推导5.3：表达能力的量化</strong></p>
+<p>定义表达能力为模型能够表示的函数空间的维度。对于线性变换：</p>
+<p>MHA的表达能力受限于：
+$$
+\mathcal{C}_{\text{MHA}} \sim \mathcal{O}(h \cdot d_h \cdot d)
+$$</p>
+<p>MLA的表达能力：
+$$
+\mathcal{C}_{\text{MLA}} \sim \mathcal{O}(d_c \cdot d + h \cdot d_c \cdot d_h)
+$$</p>
+<p>当$d_c$足够大时，MLA可以达到接近MHA的表达能力，同时享受压缩的KV Cache。</p>
+<h3 id="6">6. 计算复杂度的严格分析</h3>
+<p><strong>推导6.1：训练阶段的计算复杂度</strong></p>
+<p>对于序列长度$n$，MHA的计算分为几个步骤：</p>
+<ol>
+<li>
+<p><strong>QKV投影</strong>：
+$$
+\mathcal{O}_{\text{QKV}} = n \cdot h \cdot d \cdot (d_k + d_k + d_v)
+$$</p>
+</li>
+<li>
+<p><strong>注意力分数计算</strong>：
+$$
+\mathcal{O}_{\text{score}} = n^2 \cdot h \cdot d_k
+$$</p>
+</li>
+<li>
+<p><strong>注意力加权求和</strong>：
+$$
+\mathcal{O}_{\text{weighted}} = n^2 \cdot h \cdot d_v
+$$</p>
+</li>
+<li>
+<p><strong>输出投影</strong>：
+$$
+\mathcal{O}_{\text{output}} = n \cdot h \cdot d_v \cdot d
+$$</p>
+</li>
+</ol>
+<p>总计（忽略常数）：
+$$
+\mathcal{O}_{\text{MHA}} = n \cdot h \cdot d \cdot d_h + n^2 \cdot h \cdot d_h
+$$</p>
+<p><strong>推导6.2：MLA训练阶段的计算复杂度</strong></p>
+<ol>
+<li>
+<p><strong>压缩投影</strong>：
+$$
+\mathcal{O}_{\text{compress}} = n \cdot d \cdot d_c
+$$</p>
+</li>
+<li>
+<p><strong>Q投影</strong>：
+$$
+\mathcal{O}_{\text{Q}} = n \cdot h \cdot d \cdot d_k
+$$</p>
+</li>
+<li>
+<p><strong>KV投影（从压缩）</strong>：
+$$
+\mathcal{O}_{\text{KV}} = n \cdot h \cdot d_c \cdot (d_k + d_v)
+$$</p>
+</li>
+<li>
+<p><strong>注意力计算</strong>（与MHA相同）：
+$$
+\mathcal{O}_{\text{attn}} = n^2 \cdot h \cdot d_k + n^2 \cdot h \cdot d_v
+$$</p>
+</li>
+<li>
+<p><strong>输出投影</strong>：
+$$
+\mathcal{O}_{\text{output}} = n \cdot h \cdot d_v \cdot d
+$$</p>
+</li>
+</ol>
+<p>总计：
+$$
+\mathcal{O}_{\text{MLA}} = n \cdot d \cdot d_c + n \cdot h \cdot d \cdot d_k + n \cdot h \cdot d_c \cdot (d_k + d_v) + n^2 \cdot h \cdot (d_k + d_v)
+$$</p>
+<p><strong>推导6.3：Decoding阶段的计算复杂度</strong></p>
+<p>Decoding时，每步只生成一个token，利用KV Cache。</p>
+<p>MHA的单步计算：
+$$
+\mathcal{O}_{\text{MHA,decode}} = h \cdot d \cdot d_k + n \cdot h \cdot d_k + n \cdot h \cdot d_v + h \cdot d_v \cdot d
+$$</p>
+<p>简化为：
+$$
+\mathcal{O}_{\text{MHA,decode}} = h \cdot d \cdot d_h + n \cdot h \cdot d_h
+$$</p>
+<p>MLA的单步计算：
+$$
+\mathcal{O}_{\text{MLA,decode}} = d \cdot d_c + h \cdot d \cdot d_k + n \cdot h \cdot d_k + n \cdot h \cdot d_v + h \cdot d_v \cdot d
+$$</p>
+<p>由于MLA的KV Cache更小（$d_c$维而非$h \cdot d_h$维），访存更少，实际速度更快。</p>
+<h3 id="7-head_dims">7. head_dims的影响分析</h3>
+<p><strong>推导7.1：head_dims与模型容量</strong></p>
+<p>对于固定的总维度$d = h \cdot d_h$，可以选择：
+- 更多的heads（大$h$，小$d_h$）
+- 更大的head_dims（小$h$，大$d_h$）</p>
+<p>模型的表达能力与参数量相关：
+$$
+P = h \cdot d \cdot d_h = d \cdot d
+$$</p>
+<p>参数量相同，但分配不同。</p>
+<p><strong>推导7.2：head_dims与注意力多样性</strong></p>
+<p>每个head学习不同的注意力模式。设head $s$的注意力熵为：
+$$
+H^{(s)} = -\sum_{j=1}^n A_{ij}^{(s)} \log A_{ij}^{(s)}
+$$</p>
+<p>总的注意力多样性：
+$$
+H_{\text{total}} = \sum_{s=1}^h H^{(s)}
+$$</p>
+<p>更多的heads（大$h$）可以提供更多样的注意力模式，但每个head的容量（$d_h$）更小。</p>
+<p><strong>推导7.3：head_dims与梯度流</strong></p>
+<p>在反向传播中，梯度通过每个head传播。设损失$\mathcal{L}$对输出$\boldsymbol{o}_i$的梯度为$\frac{\partial \mathcal{L}}{\partial \boldsymbol{o}_i}$。</p>
+<p>对于MHA：
+$$
+\frac{\partial \mathcal{L}}{\partial \boldsymbol{q}_i^{(s)}} = \sum_{j} \frac{\partial \mathcal{L}}{\partial A_{ij}^{(s)}} \frac{\partial A_{ij}^{(s)}}{\partial \boldsymbol{q}_i^{(s)}}
+$$</p>
+<p>梯度的方差与$d_h$相关。更大的$d_h$提供更稳定的梯度，有助于训练。</p>
+<h3 id="8-partial-rope">8. Partial RoPE的数学机制</h3>
+<p><strong>推导8.1：Partial RoPE的分解</strong></p>
+<p>将Q和K分为两部分：
+$$
+\boldsymbol{q}_i^{(s)} = [\boldsymbol{q}_{i,c}^{(s)}, \boldsymbol{q}_{i,r}^{(s)}]
+$$
+$$
+\boldsymbol{k}_j^{(s)} = [\boldsymbol{k}_{j,c}^{(s)}, \boldsymbol{k}_{j,r}^{(s)}]
+$$</p>
+<p>其中$\boldsymbol{q}<em c="c">{i,c}^{(s)} \in \mathbb{R}^{d</em>$（rotary，加RoPE）。}}$（content，不加RoPE），$\boldsymbol{q}_{i,r}^{(s)} \in \mathbb{R}^{d_r</p>
+<p><strong>推导8.2：注意力分数的分解</strong></p>
+<p>注意力分数：
+$$
+\boldsymbol{q}_i^{(s)} \cdot \boldsymbol{k}_j^{(s)} = \boldsymbol{q}_{i,c}^{(s)} \cdot \boldsymbol{k}_{j,c}^{(s)} + (\boldsymbol{\mathcal{R}}_{i-j} \boldsymbol{q}_{i,r}^{(s)}) \cdot \boldsymbol{k}_{j,r}^{(s)}
+$$</p>
+<p>第一项是纯内容相似度，第二项包含相对位置信息。</p>
+<p><strong>推导8.3：Partial RoPE的优势</strong></p>
+<p>从期望的角度：
+$$
+\mathbb{E}[\boldsymbol{q}_i^{(s)} \cdot \boldsymbol{k}_j^{(s)}] = \mathbb{E}[\boldsymbol{q}_{i,c}^{(s)} \cdot \boldsymbol{k}_{j,c}^{(s)}] + \mathbb{E}[(\boldsymbol{\mathcal{R}}_{i-j} \boldsymbol{q}_{i,r}^{(s)}) \cdot \boldsymbol{k}_{j,r}^{(s)}]
+$$</p>
+<p>第一项不受位置影响，完全基于语义；第二项受位置调制。这种分离使得模型可以灵活平衡语义和位置信息。</p>
+<h3 id="9-kv-shared">9. KV Shared的理论分析</h3>
+<p><strong>推导9.1：KV共享的数学表示</strong></p>
+<p>完全KV共享意味着：
+$$
+\boldsymbol{k}_i = \boldsymbol{v}_i = \boldsymbol{c}_i
+$$</p>
+<p>注意力计算变为：
+$$
+\boldsymbol{o}_i^{(s)} = \sum_{j \leq i} \frac{\exp(\boldsymbol{q}_i^{(s)} \cdot \boldsymbol{c}_j)}{\sum_{j' \leq i} \exp(\boldsymbol{q}_i^{(s)} \cdot \boldsymbol{c}_{j'})} \boldsymbol{c}_j
+$$</p>
+<p><strong>推导9.2：KV共享的秩分析</strong></p>
+<p>当K和V共享时，它们的秩相同：
+$$
+\text{rank}(\boldsymbol{K}) = \text{rank}(\boldsymbol{V}) = \text{rank}(\boldsymbol{C}) \leq d_c
+$$</p>
+<p>这进一步压缩了表示，但也限制了灵活性。</p>
+<p><strong>推导9.3：部分KV共享</strong></p>
+<p>MLA采用部分共享：content部分共享，RoPE部分独立：
+$$
+\boldsymbol{k}_i = [\boldsymbol{c}_i, \boldsymbol{k}_{i,r}], \quad \boldsymbol{v}_i = [\boldsymbol{c}_i, \boldsymbol{v}_{i,r}]
+$$</p>
+<p>KV Cache大小：
+$$
+\text{Cache} = n \cdot (d_c + d_{k,r} + d_{v,r})
+$$</p>
+<p>这在压缩和灵活性之间取得平衡。</p>
+<h3 id="10-gqamla">10. GQA与MLA的理论对比</h3>
+<p><strong>推导10.1：GQA的数学形式</strong></p>
+<p>Grouped Query Attention将$h$个heads分成$g$个groups，每组共享K和V：
+$$
+\boldsymbol{k}_i^{(g)} = \boldsymbol{x}_i \boldsymbol{W}_k^{(g)}, \quad g = 1, 2, \ldots, g
+$$</p>
+<p>Head $s$属于group $g(s)$，使用$\boldsymbol{k}_i^{(g(s))}$。</p>
+<p><strong>推导10.2：GQA的KV Cache</strong></p>
+<p>KV Cache大小：
+$$
+\text{Cache}_{\text{GQA}} = n \cdot g \cdot (d_k + d_v)
+$$</p>
+<p>对于$g=2$，$d_k = d_v = 128$：
+$$
+\text{Cache}_{\text{GQA}} = n \cdot 2 \cdot 256 = 512n
+$$</p>
+<p>这与MLA的Cache大小接近。</p>
+<p><strong>推导10.3：GQA vs MLA的表达能力</strong></p>
+<p>GQA的表达能力受限于group内共享。每个group学习一个K/V表示，所有该组的heads使用相同的K/V。</p>
+<p>MLA虽然也共享（通过$\boldsymbol{c}_i$），但每个head从$\boldsymbol{c}_i$独立投影得到$\boldsymbol{k}_i^{(s)}$和$\boldsymbol{v}_i^{(s)}$，提供了更大的灵活性。</p>
+<p>形式上，GQA可以看作MLA的特例：
+$$
+\boldsymbol{W}_k^{(s_1)} = \boldsymbol{W}_k^{(s_2)}, \quad \forall s_1, s_2 \in \text{same group}
+$$</p>
+<p>但MLA不强制这种约束，允许每个head学习不同的投影。</p>
+<h3 id="11">11. 实验结果的理论解释</h3>
+<p><strong>推导11.1：增大head_dims的效果</strong></p>
+<p>从实验看，GQA1-256优于GQA2-128。理论解释：</p>
+<p>更大的$d_h$意味着每个head有更大的表示空间。对于复杂的注意力模式，需要足够的维度来捕捉。</p>
+<p>信息瓶颈理论：head的信息容量为$\mathcal{I} \sim d_h$。更大的$d_h$减少信息损失。</p>
+<p><strong>推导11.2：Partial RoPE的提升</strong></p>
+<p>实验显示GQA1-256-PR优于GQA1-256。从推导8.2，Partial RoPE提供了content和position的解耦：
+$$
+\text{score} = \text{content\_sim} + \text{position\_bias}
+$$</p>
+<p>这种解耦使得模型可以独立优化两者，提升了学习效率。</p>
+<p><strong>推导11.3：KV Shared的作用</strong></p>
+<p>实验中GQA2-(192+64)-S2超过GQA1-256-PR，说明KV共享在某些情况下有益。</p>
+<p>理论上，KV共享相当于施加了额外的正则化：
+$$
+\boldsymbol{k}_i \approx \boldsymbol{v}_i
+$$</p>
+<p>这减少了参数冗余，可能提升泛化能力。</p>
+<h3 id="12-qo-lora">12. Q&amp;O LoRA的数学原理</h3>
+<p><strong>推导12.1：LoRA的低秩分解</strong></p>
+<p>对于权重矩阵$\boldsymbol{W} \in \mathbb{R}^{d_1 \times d_2}$，LoRA用低秩分解替代：
+$$
+\boldsymbol{W} = \boldsymbol{W}_0 + \boldsymbol{A} \boldsymbol{B}
+$$</p>
+<p>其中$\boldsymbol{A} \in \mathbb{R}^{d_1 \times r}$，$\boldsymbol{B} \in \mathbb{R}^{r \times d_2}$，$r \ll \min(d_1, d_2)$。</p>
+<p><strong>推导12.2：参数量的减少</strong></p>
+<p>原始参数量：$P_0 = d_1 \cdot d_2$</p>
+<p>LoRA参数量：$P_{\text{LoRA}} = d_1 \cdot r + r \cdot d_2 = r(d_1 + d_2)$</p>
+<p>减少量：
+$$
+\Delta P = d_1 \cdot d_2 - r(d_1 + d_2)
+$$</p>
+<p>对于$d_1 = d_2 = d$，$r = d/8$：
+$$
+\Delta P = d^2 - \frac{d}{8}(d + d) = d^2 - \frac{d^2}{4} = \frac{3d^2}{4}
+$$</p>
+<p>参数量减少75%。</p>
+<p><strong>推导12.3：表达能力的保持</strong></p>
+<p>虽然参数量减少，但如果原始矩阵本身接近低秩，LoRA可以很好地近似：
+$$
+\|\boldsymbol{W} - \boldsymbol{A}\boldsymbol{B}\|_F \approx \sum_{i=r+1}^{\min(d_1,d_2)} \sigma_i
+$$</p>
+<p>如果$\sigma_{r+1}, \sigma_{r+2}, \ldots$很小，近似误差可忽略。</p>
+<h3 id="13-head_dimsnum_heads">13. head_dims与num_heads的权衡</h3>
+<p><strong>推导13.1：固定总维度下的分配</strong></p>
+<p>给定总维度$D = h \cdot d_h$，可以选择不同的$(h, d_h)$组合。</p>
+<p>例如$D = 2048$：
+- $(h=16, d_h=128)$：标准配置
+- $(h=8, d_h=256)$：更大head_dims
+- $(h=32, d_h=64)$：更多heads</p>
+<p><strong>推导13.2：参数量分析</strong></p>
+<p>Q投影参数量：$P_Q = h \cdot d \cdot d_h = d \cdot D$（与分配无关）</p>
+<p>但K、V投影参数量受group数影响：
+$$
+P_{KV} = g \cdot d \cdot (d_k + d_v)
+$$</p>
+<p>对于MQA（$g=1$）：$P_{KV} = d \cdot 2d_h$</p>
+<p>对于GQA（$g=h/2$）：$P_{KV} = \frac{h}{2} \cdot d \cdot 2d_h = h \cdot d \cdot d_h$</p>
+<p><strong>推导13.3：实验验证</strong></p>
+<p>实验结果：
+- GQA2-128（32 heads）：loss = 2.723
+- GQA2-128（16 heads）：loss = 2.75</p>
+<p>更多heads反而略差，支持了"head_dims更重要"的结论。</p>
+<h3 id="14-mlp">14. MLP缩减的影响</h3>
+<p><strong>推导14.1：MLP的参数量</strong></p>
+<p>标准Transformer的MLP：
+$$
+\boldsymbol{h}_{\text{MLP}} = \text{SwiGLU}(\boldsymbol{h} \boldsymbol{W}_1) \boldsymbol{W}_2
+$$</p>
+<p>参数量：
+$$
+P_{\text{MLP}} = d \cdot d_{\text{inter}} + d_{\text{inter}} \cdot d = 2d \cdot d_{\text{inter}}
+$$</p>
+<p>（SwiGLU需要两个$d \times d_{\text{inter}}$矩阵，合并计算）</p>
+<p><strong>推导14.2：缩减MLP的影响</strong></p>
+<p>将$d_{\text{inter}}$从5456降到4096：
+$$
+\Delta P = 2d \cdot (5456 - 4096) = 2d \cdot 1360 = 2720d
+$$</p>
+<p>对于$d=2048$：
+$$
+\Delta P = 2720 \times 2048 \approx 5.57M
+$$</p>
+<p>这与GQA1-256和GQA2-128的参数量差接近。</p>
+<p><strong>推导14.3：缩减MLP vs 缩减head_dims</strong></p>
+<p>实验显示：
+- GQA1-256（缩小MLP）：loss = 2.747
+- GQA2-128（标准MLP）：loss = 2.75</p>
+<p>缩小MLP比缩小head_dims更伤效果，说明MLP对容量更关键。</p>
+<h3 id="15-vs">15. 训练阶段vs推理阶段的复杂度对比</h3>
+<p><strong>推导15.1：训练阶段的瓶颈</strong></p>
+<p>训练时，主要计算量在：
+$$
+\mathcal{O}_{\text{train}} = n^2 \cdot h \cdot d_h
+$$</p>
+<p>这是注意力矩阵计算的复杂度，与序列长度$n$的平方成正比。</p>
+<p>对于$n=4096$，$h=16$，$d_h=128$：
+$$
+\mathcal{O}_{\text{train}} \sim 4096^2 \times 16 \times 128 \approx 3.4 \times 10^{10}
+$$</p>
+<p><strong>推导15.2：推理阶段的瓶颈</strong></p>
+<p>推理时使用KV Cache，每步计算：
+$$
+\mathcal{O}_{\text{decode}} = n \cdot h \cdot d_h
+$$</p>
+<p>但主要瓶颈是内存带宽，需要加载Cache：
+$$
+\text{Memory\_access} = n \cdot h \cdot (d_k + d_v)
+$$</p>
+<p>对于$n=4096$，MHA的内存访问：
+$$
+4096 \times 16 \times 256 \approx 16.8M \text{ 参数}
+$$</p>
+<p>MLA的内存访问：
+$$
+4096 \times 576 \approx 2.4M \text{ 参数}
+$$</p>
+<p>节省约7倍。</p>
+<p><strong>推导15.3：MLA的双重优化</strong></p>
+<p>MLA通过双重投影：
+- 训练时：保持$d_h$较小（128），控制$\mathcal{O}_{\text{train}}$
+- 推理时：KV Cache压缩到576维，优化内存访问</p>
+<p>实现了训练和推理的双重优化。</p>
+<h3 id="16">16. 长序列建模的挑战</h3>
+<p><strong>推导16.1：长序列的复杂度爆炸</strong></p>
+<p>对于序列长度$n=32K$：
+$$
+\mathcal{O}_{\text{train}} = (32K)^2 \times h \times d_h \approx 1.07 \times 10^9 \times h \times d_h
+$$</p>
+<p>相比$n=4K$，计算量增加64倍。</p>
+<p><strong>推导16.2：KV Cache的内存压力</strong></p>
+<p>对于$n=32K$，MHA的KV Cache：
+$$
+32K \times 16 \times 256 \approx 134M \text{ 参数}
+$$</p>
+<p>以float16存储，约268MB每个样本。在批处理和多层情况下，内存需求巨大。</p>
+<p><strong>推导16.3：MLA的长序列优势</strong></p>
+<p>MLA的KV Cache：
+$$
+32K \times 576 \approx 18.4M \text{ 参数}
+$$</p>
+<p>约37MB每个样本，是MHA的$\frac{18.4}{134} \approx 14\%$。</p>
+<p>这使得MLA可以在相同内存下处理更长的序列或更大的批次。</p>
+<h3 id="17">17. 总结与理论启示</h3>
+<p><strong>推导17.1：MLA的核心数学思想</strong></p>
+<p>MLA本质上是一个低秩分解的Attention机制：
+$$
+\boldsymbol{K} = \boldsymbol{C} \boldsymbol{W}_k, \quad \boldsymbol{V} = \boldsymbol{C} \boldsymbol{W}_v
+$$</p>
+<p>通过共享压缩表示$\boldsymbol{C}$，实现了参数和Cache的压缩，同时保持了表达能力。</p>
+<p><strong>推导17.2：关键设计选择的理论基础</strong></p>
+<ol>
+<li><strong>增大head_dims</strong>：提供足够的表示空间，避免信息瓶颈</li>
+<li><strong>Partial RoPE</strong>：解耦content和position，提升学习效率</li>
+<li><strong>KV Shared</strong>：施加正则化约束，减少冗余，提升泛化</li>
+</ol>
+<p>这些设计不是孤立的，而是相互配合，共同实现了MLA的优异性能。</p>
+<p><strong>推导17.3：未来研究方向</strong></p>
+<p>从数学角度，MLA还有改进空间：</p>
+<ol>
+<li><strong>动态秩分配</strong>：根据不同层或不同位置，动态调整$d_c$</li>
+<li><strong>非线性压缩</strong>：用非线性函数替代线性投影$\boldsymbol{W}_c$</li>
+<li><strong>自适应head_dims</strong>：不同heads使用不同的$d_h$</li>
+</ol>
+<p>这些方向值得进一步探索。</p>
+        </div>
+    </div>
+</body>
+</html>

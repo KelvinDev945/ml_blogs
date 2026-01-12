@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>让MathJax的数学公式随窗口大小自动缩放</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>让MathJax的数学公式随窗口大小自动缩放</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 7.0 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10474">https://spaces.ac.cn/archives/10474</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>随着MathJax的出现和流行，在网页上显示数学公式便逐渐有了标准答案。然而，MathJax（包括其竞品KaTeX）只是负责将网页LaTeX代码转化为数学公式，对于自适应分辨率方面依然没有太好的办法。像本站一些数学文章，因为是在PC端排版好的，所以在PC端浏览效果尚可，但转到手机上看就可能有点难以入目了。</p>
+<p>经过测试，笔者得到了一个方案，让MathJax的数学公式也能像图片一样，随着窗口大小而自适应缩放，从而尽量保证移动端的显示效果，在此跟大家分享一波。</p>
+<h2 id="_1">背景思路</h2>
+<p>这个问题的起源是，即便在PC端进行排版，有时候也会遇到一些单行公式的长度超出了网页宽度，但又不大好换行的情况，这时候一个解决方案是用HTML代码手动调整一下公式的字体大小，比如</p>
+<div class="codehilite"><pre><span></span><code><span class="nt">&lt;span</span><span class="w"> </span><span class="na">style=</span><span class="s">&quot;font-size:90%&quot;</span><span class="nt">&gt;</span>
+<span class="w">    </span>\begin{equation}一个超长的数学公式\end{equation}
+<span class="nt">&lt;/span&gt;</span>
+</code></pre></div>
+
+<p>这样就将数学公式大小调整为原来的90%，基本能解决大部分问题，但手动调整终究是有点麻烦，90%这个数字需要人工调试几次才能得到最优值，并且只能适应单一宽度。前几天突然意识到一个问题：为什么数学公式不能像图片一样设置一个max-width来自动缩放大小呢？比如下面的图片代码</p>
+<div class="codehilite"><pre><span></span><code><span class="o">&lt;</span><span class="nt">img</span><span class="w"> </span><span class="nt">style</span><span class="o">=</span><span class="s2">&quot;width:400;max-width:100%&quot;</span><span class="w"> </span><span class="nt">src</span><span class="o">=</span><span class="s2">&quot;https://example.com/test.jpg&quot;</span><span class="o">&gt;</span>
+</code></pre></div>
+
+<p>实现的效果就是图片大小在不超过上级元素的前提下尽可能接近400px。测试了一翻，MathJax的数学公式是文本的block，没有现成的方法可以实现类似图片的max-width缩放特性，但我们可以通过JS来计算公式超出上级元素宽度的比例，然后自动给数学公式设置font-size来实现同样的效果。</p>
+<h2 id="_2">代码参考</h2>
+<p>首先给出最终的参考答案，用如下的代码替换掉原本MathJax配置代码：</p>
+<div class="codehilite"><pre><span></span><code><span class="p">&lt;</span><span class="nx">script</span><span class="w"> </span><span class="k">type</span><span class="p">=</span><span class="s">&quot;text/x-mathjax-config&quot;</span><span class="p">&gt;</span>
+<span class="w">    </span><span class="nx">MathJax</span><span class="p">.</span><span class="nx">Hub</span><span class="p">.</span><span class="nx">Config</span><span class="p">({</span>
+<span class="w">        </span><span class="nx">tex2jax</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nx">inlineMath</span><span class="p">:</span><span class="w"> </span><span class="p">[[</span><span class="sc">&#39;$&#39;</span><span class="p">,</span><span class="sc">&#39;$&#39;</span><span class="p">],</span><span class="w"> </span><span class="p">[</span><span class="err">&#39;\\</span><span class="p">(</span><span class="sc">&#39;,&#39;</span><span class="err">\\</span><span class="p">)</span><span class="err">&#39;</span><span class="p">]]},</span>
+<span class="w">        </span><span class="nx">TeX</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nx">equationNumbers</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nx">autoNumber</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s">&quot;AMS&quot;</span><span class="p">],</span><span class="w"> </span><span class="nx">useLabelIds</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">},</span><span class="w"> </span><span class="nx">extensions</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s">&quot;AMSmath.js&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;AMSsymbols.js&quot;</span><span class="p">,</span><span class="w"> </span><span class="s">&quot;extpfeil.js&quot;</span><span class="p">]},</span>
+<span class="w">        </span><span class="s">&quot;HTML-CSS&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nx">noReflows</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nx">availableFonts</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s">&quot;tex&quot;</span><span class="p">],</span><span class="w"> </span><span class="nx">styles</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="s">&quot;.MathJax_Display&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nx">margin</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1em 0em 0.7em;&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">display</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;inline-block!important;&quot;</span><span class="p">}}},</span>
+<span class="w">        </span><span class="s">&quot;CommonHTML&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nx">noReflows</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nx">availableFonts</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s">&quot;tex&quot;</span><span class="p">],</span><span class="w"> </span><span class="nx">styles</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="s">&quot;.MJXc-display&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nx">margin</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1em 0em 0.7em;&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">display</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;inline-block!important;&quot;</span><span class="p">}}},</span>
+<span class="w">        </span><span class="s">&quot;SVG&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nx">noReflows</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nx">availableFonts</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s">&quot;tex&quot;</span><span class="p">],</span><span class="w"> </span><span class="nx">styles</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="s">&quot;.MathJax_SVG_Display&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nx">margin</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1em 0em 0.7em;&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">display</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;inline-block!important;&quot;</span><span class="p">}}}</span>
+<span class="w">    </span><span class="p">});</span>
+<span class="w">    </span><span class="nx">MathJax</span><span class="p">.</span><span class="nx">Hub</span><span class="p">.</span><span class="nx">Queue</span><span class="p">(</span><span class="nx">function</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nx">document</span><span class="p">.</span><span class="nx">querySelectorAll</span><span class="p">(</span><span class="err">&#39;</span><span class="nx">span</span><span class="p">[</span><span class="nx">id</span><span class="o">^=</span><span class="s">&quot;MathJax-Element&quot;</span><span class="p">]</span><span class="err">&#39;</span><span class="p">).</span><span class="nx">forEach</span><span class="p">(</span><span class="nx">function</span><span class="p">(</span><span class="nx">e</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">parentWidth</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">parentNode</span><span class="p">.</span><span class="nx">offsetWidth</span><span class="p">;</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">parentNode</span><span class="p">.</span><span class="nx">className</span><span class="p">.</span><span class="nx">endsWith</span><span class="p">(</span><span class="err">&#39;</span><span class="nx">isplay</span><span class="err">&#39;</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nx">parentWidth</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">parentNode</span><span class="p">.</span><span class="nx">parentNode</span><span class="p">.</span><span class="nx">offsetWidth</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">offsetWidth</span><span class="w"> </span><span class="p">&gt;</span><span class="w"> </span><span class="nx">parentWidth</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="nx">e</span><span class="p">.</span><span class="nx">style</span><span class="p">.</span><span class="nx">fontSize</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="nx">parentWidth</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">100</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="nx">e</span><span class="p">.</span><span class="nx">offsetWidth</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="sc">&#39;%&#39;</span><span class="p">;</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">});</span>
+<span class="w">    </span><span class="p">});</span>
+<span class="p">&lt;</span><span class="o">/</span><span class="nx">script</span><span class="p">&gt;</span>
+</code></pre></div>
+
+<p>相比在<a href="/archives/10320">《让MathJax更好地兼容谷歌翻译和延时加载》</a>提到的配置代码，它有两个关键变化。首先是去掉了配置项<code>{linebreaks: {automatic: true, width: "95% container"}</code>，这个配置项的作用是自动换行，原本用意就是提高对分辨率的自适应能力，但实际上用途不大，很多写好的数学公式如果自动换行的话反而不好看了，所以去掉自动换行才能保证数学公式在不同宽度下的一致性。</p>
+<p>接下来的关键改动就是<code>MathJax.Hub.Queue</code>部分了，这是公式渲染完毕后执行的函数，它首先找到所有id以“MathJax-Element”开头的span，这就是所有的数学公式，然后通过<code>e.offsetWidth</code>获取它的宽度，以及通过<code>e.parentNode.offsetWidth</code>或<code>e.parentNode.parentNode.offsetWidth</code>获取它的上级宽度，根据这个结果计算和设置font-size要缩小的比例。</p>
+<p>什么时候用<code>e.parentNode.offsetWidth</code>或<code>e.parentNode.parentNode.offsetWidth</code>呢？数学公式分“行内公式”和“单行公式”，“行内公式”就直接用前者而“单行公式”则用后者。在代码上，“单行公式”多嵌套了一层div，所以祖父节点才是上级元素，而div的class以Display或display结束，所以就加了个<code>e.parentNode.className.endsWith('isplay')</code>的判据。</p>
+<p>以上就是参考代码的所有原理。</p>
+<h2 id="_3">文章小结</h2>
+<p>本文分享了一种让MathJax公式自动随着窗口大小而缩放的方案，能够尽可能兼容移动端设备的窄屏浏览需求。经过调整之后，即便在小屏幕下也能显示出跟PC端一样的数学公式——除了可能有点费眼睛，但用来应应急总是可以的。</p>
+<p><a href="/usr/uploads/2024/10/4189716394.png" title="点击查看原图"><img alt="修改后的窄屏显示效果" src="/usr/uploads/2024/10/4189716394.png" /></a></p>
+<p>修改后的窄屏显示效果</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10474">https://spaces.ac.cn/archives/10474</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Oct. 15, 2024). 《让MathJax的数学公式随窗口大小自动缩放 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10474">https://spaces.ac.cn/archives/10474</a></p>
+<p>@online{kexuefm-10474,<br />
+title={让MathJax的数学公式随窗口大小自动缩放},<br />
+author={苏剑林},<br />
+year={2024},<br />
+month={Oct},<br />
+url={\url{https://spaces.ac.cn/archives/10474}},<br />
+} </p>
+<hr />
+<h2 id="_4">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

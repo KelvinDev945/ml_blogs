@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多任务学习漫谈（三）：分主次之序</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>多任务学习漫谈（三）：分主次之序</h1>
+            <div class="meta">📅 最后更新: 2026-01-05 | 📄 大小: 45.9 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8907">https://spaces.ac.cn/archives/8907</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>多任务学习是一个很宽泛的命题，不同场景下多任务学习的目标不尽相同。在<a href="/archives/8870">《多任务学习漫谈（一）：以损失之名》</a>和<a href="/archives/8896">《多任务学习漫谈（二）：行梯度之事》</a>中，我们将多任务学习的目标理解为“做好每一个任务”，具体表现是“尽量平等地处理每一个任务”，我们可以称之为“平行型多任务学习”。然而，并不是所有多任务学习的目标都是如此，在很多场景下，我们主要还是想学好某一个主任务，其余任务都只是辅助，希望通过增加其他任务的学习来提升主任务的效果罢了，此类场景我们可以称为“主次型多任务学习”。</p>
+<p>在这个背景下，如果还是沿用平行型多任务学习的“做好每一个任务”的学习方案，那么就可能会明显降低主任务的效果了。所以本文继续沿着“行梯度之事”的想法，探索主次型多任务学习的训练方案。</p>
+<h2 id="_1">目标形式</h2>
+<p>在这篇文章中，我们假设读者已经阅读并且基本理解<a href="/archives/8896">《多任务学习漫谈（二）：行梯度之事》</a>里边的思想和方法，那么在梯度视角下，让某个损失函数保持下降的必要条件是更新量与其梯度夹角至少大于90度，这是贯穿全文的设计思想。</p>
+<h3 id="_2">约束优化</h3>
+<p>现在假设主次型多任务学习场景下，我们有$n+1$个任务的损失函数，分别为$\mathcal{L}_0,\mathcal{L}_1,\cdots,\mathcal{L}_n$，其中$\mathcal{L}_0$是主任务损失，我们希望它越小越好；而$\mathcal{L}_1,\cdots,\mathcal{L}_n$是辅助损失，相当于正则项，我们只希望它在训练过程中不要往上升的方向走，但不一定要“拼了命地变小”。</p>
+<p>沿用<a href="/archives/8896">《多任务学习漫谈（二）：行梯度之事》</a>的记号，我们记每一步的更新量为$\Delta\boldsymbol{\theta}=-\eta\boldsymbol{u}$，既然我们以$\mathcal{L}<em _boldsymbol_u="\boldsymbol{u">0$为主任务，那么自然希望最大化$\boldsymbol{u}$与$\boldsymbol{g}_0$的内积，可以设计优化目标为<br />
+\begin{equation}\max</em>}} \langle\boldsymbol{u},\boldsymbol{g<em _boldsymbol_theta="\boldsymbol{\theta">0\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\end{equation}<br />
+这里$\boldsymbol{g}_i = \nabla</em>}}\mathcal{L<em _boldsymbol_u="\boldsymbol{u">i$是对应损失的梯度。如果没有其他约束，那么将会解得$\boldsymbol{u} = \boldsymbol{g}_0$，这就是普通的梯度下降。但事实上我们还有辅助任务$\mathcal{L}_1,\cdots,\mathcal{L}_n$，我们希望它们不要往上升的方向走，所以至少还要保证$\langle\boldsymbol{u},\boldsymbol{g}_1\rangle\geq 0,\cdots,\langle\boldsymbol{u},\boldsymbol{g}_n\rangle\geq 0$，它们是优化的约束条件，从而总的目标是<br />
+\begin{equation}\max</em>}} \langle\boldsymbol{u},\boldsymbol{g}_0\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\quad\text{s.t.}\,\, \langle\boldsymbol{u},\boldsymbol{g}_1\rangle\geq 0,\cdots,\langle\boldsymbol{u},\boldsymbol{g}_n\rangle\geq 0\end{equation<br />
+求解这个约束优化问题，就可以得到满足条件的更新量。</p>
+<h3 id="_3">拉氏乘子</h3>
+<p>求解这种带约束优化问题的标准方案是拉格朗日乘子法，简称“拉氏乘子”，它将约束条件整合到目标函数中，转化为一个min-max问题：<br />
+\begin{equation}\max_{\boldsymbol{u}} \min_{\lambda_i\geq 0}\langle\boldsymbol{u},\boldsymbol{g}_0\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2 + \sum_i \lambda_i \langle\boldsymbol{u},\boldsymbol{g}_i\rangle\label{eq:q-1}\end{equation}</p>
+<p>这里约定对$i$的求和是从$1$到$n$。怎么理解这个转换呢？假如$\langle\boldsymbol{u},\boldsymbol{g}<em 0="0" _lambda_i_geq="\lambda_i\geq">i\rangle &gt; 0$，那么$\min\limits</em>}$这一步就只能得到$\lambda_i=0$，因为只有$\lambda_i=0$能使得它取最小，此时$\lambda_i \langle\boldsymbol{u},\boldsymbol{g<em 0="0" _lambda_i_geq="\lambda_i\geq">i\rangle=0$；如果$\langle\boldsymbol{u},\boldsymbol{g}_i\rangle=0$，那么自然地$\lambda_i \langle\boldsymbol{u},\boldsymbol{g}_i\rangle=0$；如果$\langle\boldsymbol{u},\boldsymbol{g}_i\rangle &lt; 0$，那么$\min\limits</em>_i\rangle=0$。这意味着min-max的优化结果跟原来带约束的max优化完全等价。}$这一步就会得到$\lambda_i\to\infty$，此时$\lambda_i \langle\boldsymbol{u},\boldsymbol{g}_i\rangle\to -\infty$。但是别忘了，$\boldsymbol{u}$的优化是取$\max$的，所以在$0$与$-\infty$之间，它自然会选择$0$，也就是完成该min-max优化后，必然自动地有$\langle\boldsymbol{u},\boldsymbol{g}_i\rangle \geq 0$以及$\lambda_i \langle\boldsymbol{u},\boldsymbol{g</p>
+<p>为了方便后面的推导，这里引入跟上一篇文章类似的记号：<br />
+\begin{equation}\mathbb{Q}^n=\left\{(\lambda_1,\cdots,\lambda_n)\left|\lambda_1,\cdots,\lambda_n\geq 0\right.\right\},\quad\tilde{\boldsymbol{g}}(\lambda) = \sum_i \lambda_i \boldsymbol{g}<em _boldsymbol_u="\boldsymbol{u">i\end{equation}<br />
+那么式$\eqref{eq:q-1}$可以记为<br />
+\begin{equation}\max</em>}} \min_{\lambda\in\mathbb{Q}^n}\langle\boldsymbol{u},\boldsymbol{g}_0 + \tilde{\boldsymbol{g}}(\lambda)\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2\label{eq:q-2}\end{equation</p>
+<h2 id="_4">求解算法</h2>
+<p>至此，我们将主次型多任务学习的更新方向求解转化为了一个min-max问题$\eqref{eq:q-2}$。接下来，跟上一篇文章的方式类似，我们先通过Minimax定理来交换$\max$和$\min$的次序，然后进一步通过Frank-Wolfe算法给出求解方式，最后我们会比较它跟它跟上一篇文章结果的异同。</p>
+<h3 id="_5">交换次序</h3>
+<p>注意到问题$\eqref{eq:q-2}$的$\max$和$\min$是有次序的，正常来说必须要先完成$\min$这一步后才能再做$\max$这一步，贸然交换次序可能会得到错误的结果。然而，$\min$这一步是有约束的优化，而$\max$这一步是无约束的，因此相对来说$\max$确实简单一些。如果我们能交换次序，先进行$\max$这一步，那么问题就可以得到简化。</p>
+<p>所以，我们需要先判断两者的次序能否交换。幸运的是，冯·诺依曼提出了美妙的<a href="https://en.wikipedia.org/wiki/Minimax_theorem">Minimax定理</a>，它告诉我们如果$\min$和$\max$的参数可行域都是一个凸集，并且目标函数关于$\min$的参数是凸的、关于$\max$的参数是凹的，那么$\min$和$\max$的次序就可以交换。更幸运的是，容易看出问题$\eqref{eq:q-2}$满足Minimax定理的条件，从而它等价于<br />
+\begin{equation}\min_{\lambda\in\mathbb{Q}^n}\max_{\boldsymbol{u}} \langle\boldsymbol{u},\boldsymbol{g}<em _lambda_in_mathbb_Q="\lambda\in\mathbb{Q">0 + \tilde{\boldsymbol{g}}(\lambda)\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2 =\min</em>}^n}\frac{1}{2}\Vert\boldsymbol{g}_0 + \tilde{\boldsymbol{g}}(\lambda)\Vert^2\label{eq:q-3}\end{equation<br />
+这样我们就将问题简化为只有$\min$操作了，其中等号右边是因为左边的目标函数只是关于$\boldsymbol{u}$的二次函数，它的最大值在$\boldsymbol{u}^* = \boldsymbol{g}_0 + \tilde{\boldsymbol{g}}(\lambda)$取到，代入即得等号右边结果。</p>
+<h3 id="_6">简单情形</h3>
+<p>现在问题变成了求$\boldsymbol{g}<em 0="0" _gamma_geq="\gamma\geq">0$与$\boldsymbol{g}_1,\cdots,\boldsymbol{g}_n$的最小模长的加权叠加。按照惯例，我们先试着解决最简单的情形，即$n=1$时的$\min\limits</em>_1\Vert^2$，它有着形象的几何意义和简单的解析解。}\Vert\boldsymbol{g}_0 + \gamma\boldsymbol{g</p>
+<p><a href="/usr/uploads/2022/02/2790703575.png" title="点击查看原图"><img alt="简单例子的精确解" src="/usr/uploads/2022/02/2790703575.png" /></a></p>
+<p>简单例子的精确解</p>
+<p>如上图所示，共有两种情形：第一种情形是$\langle\boldsymbol{g}_0,\boldsymbol{g}_1\rangle\geq 0$，这说明$\boldsymbol{g}_0$与$\boldsymbol{g}_1$本就不冲突，所以直接取$\gamma=0$就行；第二种情形是$\langle\boldsymbol{g}_0,\boldsymbol{g}_1\rangle &lt; 0$，从上面右图可以看出，$\Vert\boldsymbol{g}_0 + \gamma\boldsymbol{g}_1\Vert^2$的最小值在$\boldsymbol{g}_0 + \gamma\boldsymbol{g}_1$与$\boldsymbol{g}_1$垂直时取到，于是由$\langle \boldsymbol{g}_0 + \gamma\boldsymbol{g}_1,\boldsymbol{g}_1\rangle=0$解得$\gamma = -\frac{\langle \boldsymbol{g}_0,\boldsymbol{g}_1\rangle}{\Vert\boldsymbol{g}_1\Vert^2}$。最后，当$\Vert\boldsymbol{g}_1\Vert\neq 0$时，也可以统一写成<br />
+\begin{equation}\gamma = \frac{\text{relu}(-\langle \boldsymbol{g}_0,\boldsymbol{g}_1\rangle)}{\Vert\boldsymbol{g}_1\Vert^2}\label{eq:gamma}\end{equation}</p>
+<h3 id="_7">迭代求解</h3>
+<p>接下来我们处理一般情形，其思想依然源自<a href="https://en.wikipedia.org/wiki/Frank%E2%80%93Wolfe_algorithm">Frank-Wolfe算法</a>。</p>
+<p>首先，我们通过$\tau = \mathop{\text{argmin}}\limits_i \langle \boldsymbol{g}<em _tau="\tau">i, \boldsymbol{g}_0 + \tilde{\boldsymbol{g}}(\lambda^{(k)})\rangle$找出下一步更新的可行方向$e</em>}$。接着，我们进行一维搜索，但跟之前不同的是，这次不是在$\lambda^{(k)}$与$e_{\tau}$之间插值搜索，而是直接重新确定$\boldsymbol{g<em _tau="\tau">{\tau}$对应的系数，也就是说，我们直接在$\tilde{\boldsymbol{g}}(\lambda^{(k)})$中把$\boldsymbol{g}</em>$对应的系数。}$部分删掉，然后重新用$n=1$情形的算法重新计算$\boldsymbol{g}_{\tau</p>
+<p>由此，我们得到下述迭代过程：<br />
+\begin{equation}\left\{\begin{aligned}<br />
+&amp;\tau = \mathop{\text{argmin}}<em _gamma="\gamma">i \langle \boldsymbol{g}_i, \boldsymbol{g}_0+\tilde{\boldsymbol{g}}(\lambda^{(k)})\rangle\\\<br />
+&amp;\gamma = \mathop{\text{argmin}}</em>} \left\Vert\boldsymbol{g<em _tau="\tau">0 + \tilde{\boldsymbol{g}}(\lambda^{(k)} - \lambda^{(k)}</em>} e_{\tau} + \gamma e_{\tau})\right\Vert^2 = \mathop{\text{argmin}<em _tau="\tau">{\gamma} \left\Vert\boldsymbol{g}_0 + \tilde{\boldsymbol{g}}(\lambda^{(k)}) - \lambda^{(k)}</em>}\boldsymbol{g<em _tau="\tau">{\tau} + \gamma \boldsymbol{g}</em>\right\Vert^2\\\<br />
+&amp;\lambda^{(k+1)} = \lambda^{(k)} - \lambda^{(k)}<em _tau="\tau">{\tau} e</em>} + \gamma e_{\tau<br />
+\end{aligned}\right.\end{equation}</p>
+<h3 id="_8">两相比较</h3>
+<p>至此，我们完成了本文所探究的主次型多任务学习的求解。对于认真推导过两篇文章的数学结果的同学来说，定然会感觉到平行型和主次型的方法和结果都非常相似。事实上确实如此，它们有诸多相似之处，但细微之处又有不同。</p>
+<p>为了加深大家的理解，我们可以将这两种多任务学习的异同对比如下：<br />
+$$\small  
+\begin{array}{c|c|c}  
+\hline  
+& \text{平行型多任务学习(前文)} & \text{主次型多任务学习(本文)} \\\  
+\hline  
+\text{目标概述} & \text{学好每一个任务} & \text{学好主任务，但不让辅任务变差} \\\  
+\hline  
+\text{增量格式} & \Delta\boldsymbol{\theta} = -\eta\boldsymbol{u} & \Delta\boldsymbol{\theta} = -\eta\boldsymbol{u} \\\  
+\hline  
+\text{数学定义} & \max\limits_{\boldsymbol{u}}\min\limits_i \langle \boldsymbol{g}_i, \boldsymbol{u}\rangle - \frac{1}{2}\Vert \boldsymbol{u}\Vert^2 & {\begin{array}{l}\max\limits_{\boldsymbol{u}} \langle\boldsymbol{u},\boldsymbol{g}_0\rangle - \frac{1}{2}\Vert\boldsymbol{u}\Vert^2 \\\ \text{s.t.}\,\, \langle\boldsymbol{u},\boldsymbol{g}_1\rangle\geq 0,\cdots,\langle\boldsymbol{u},\boldsymbol{g}_n\rangle\geq 0\end{array}} \\\  
+\hline  
+\text{对偶结果} & \min\limits_{\alpha\in\mathbb{P}^n}^{\,^\,}\Vert\tilde{\boldsymbol{g}}(\alpha)\Vert^2 & \min\limits_{\lambda\in\mathbb{Q}^n}\Vert\boldsymbol{g}_0 + \tilde{\boldsymbol{g}}(\lambda)\Vert^2 \\\  
+\hline  
+\text{方向向量} & \boldsymbol{u}=\tilde{\boldsymbol{g}}(\alpha)=\sum\limits_i^{\,^\,} \alpha_i \boldsymbol{g}_i & \boldsymbol{u}=\boldsymbol{g}_0+\tilde{\boldsymbol{g}}(\lambda)=\boldsymbol{g}_0 + \sum\limits_i \lambda_i \boldsymbol{g}_i \\\  
+\hline  
+\text{可行空间} & \mathbb{P}^n = \left\\{(\alpha_1,\cdots,\alpha_n)\left|\forall\alpha_i\geq 0, \sum\limits_i \alpha_i = 1\right.\right\\} & \mathbb{Q}^n=\left\\{(\lambda_1,\cdots,\lambda_n)\left|\forall\lambda_i\geq 0\right.\right\\} \\\  
+\hline  
+\text{迭代步骤} & \left\\{\begin{aligned}  
+&\tau = \mathop{\text{argmin}}_i \langle \boldsymbol{g}_i, \tilde{\boldsymbol{g}}(\alpha^{(k)})\rangle\\\  
+&\gamma = \mathop{\text{argmin}}_{\gamma} \left\Vert(1-\gamma)\tilde{\boldsymbol{g}}(\alpha^{(k)}) + \gamma \boldsymbol{g}_{\tau}\right\Vert^2\\\  
+&\alpha^{(k+1)} = (1-\gamma)\alpha^{(k)} + \gamma e_{\tau}  
+\end{aligned}\right. & \left\\{\begin{aligned}  
+&\tau = \mathop{\text{argmin}}_i \langle \boldsymbol{g}_i, \boldsymbol{g}_0+\tilde{\boldsymbol{g}}(\lambda^{(k)})\rangle\\\  
+&\gamma = \mathop{\text{argmin}}_{\gamma} \left\Vert\boldsymbol{g}_0 + \tilde{\boldsymbol{g}}(\lambda^{(k)}) - \lambda^{(k)}_{\tau}\boldsymbol{g}_{\tau} + \gamma \boldsymbol{g}_{\tau}\right\Vert^2\\\  
+&\lambda^{(k+1)} = \lambda^{(k)} - \lambda^{(k)}_{\tau} e_{\tau} + \gamma e_{\tau}  
+\end{aligned}\right. \\\  
+\hline  
+\end{array}$$</p>
+<p>经过这样对比，我们也不难将结果推广到有$n$个主任务、$m$个辅任务的混合型多任务学习，其对偶结果是：<br />
+\begin{equation}\min_{\alpha\in\mathbb{P}^n,\lambda\in\mathbb{Q}^m}\Vert\tilde{\boldsymbol{g}}(\alpha) + \tilde{\boldsymbol{g}}(\lambda)\Vert^2\end{equation}<br />
+至于具体的迭代算法，请大家自行思考～</p>
+<h2 id="_9">应用思考</h2>
+<p>在这一节中，我们通过几个例子说明，很多常见的问题都可以对应到这种有主次之分的多任务学习中，某种意义上来说，主次型多任务学习可能比平行型多任务学习更为常见。</p>
+<h3 id="_10">正则损失</h3>
+<p>最常见的例子可能是往任务损失函数里边加入的正则项，比如L2正则：<br />
+\begin{equation}\mathcal{L}(\boldsymbol{\theta}) + \frac{\lambda}{2}\Vert\boldsymbol{\theta}\Vert^2\end{equation}<br />
+如果我们将$\mathcal{L}(\boldsymbol{\theta})$和$\frac{1}{2}\Vert\boldsymbol{\theta}\Vert^2$看成是两个任务的损失，那么这也可以视为一个多任务学习问题。很显然，我们并没有想要$\frac{1}{2}\Vert\boldsymbol{\theta}\Vert^2$越小越好，而只是希望$\frac{1}{2}\Vert\boldsymbol{\theta}\Vert^2$的加入能够提高$\mathcal{L}(\boldsymbol{\theta})$的泛化性能，所以这就无法对应上平行型多任务学习，而更贴近主次型多任务学习了。</p>
+<p>L2正则项$\frac{1}{2}\Vert\boldsymbol{\theta}\Vert^2$的梯度比较简单，就是$\boldsymbol{\theta}$。那么，套用本文的结果$\eqref{eq:gamma}$，我们可以修改优化器，将梯度项改为<br />
+\begin{equation}\boldsymbol{g} + \frac{\text{relu}(-\langle \boldsymbol{g},\boldsymbol{\theta}\rangle)}{\Vert\boldsymbol{\theta}\Vert^2}\end{equation}<br />
+这样就可以实现往模型里边加入L2正则但又不用调正则项系数$\lambda$了。当然，也可以像AdamW那样直接对原本的更新量进行处理，实现解耦形式的权重衰减（Decoupled Weight Decay）。</p>
+<p>当然，除了这种对参数的直接正则外，还有很多其他形式的辅助损失，比如有往分类模型加入对比学习损失的、有往生成模型加入长度惩罚的，等等。这些做法多多少少都可以对应上主次型多任务学习中，因此可以尝试套用本文的结果。如果觉得完整梯度的计算量较大，那么也可以跟上一篇文章一样，对“<a href="/archives/8896#%E5%85%B1%E4%BA%AB%E7%BC%96%E7%A0%81">共享编码</a>”的情形进行近似来降低计算量。</p>
+<h3 id="_11">带噪学习</h3>
+<p>此外，有一种常见的训练场景，大家可能没意识到它是一个多任务学习问题，但它本质上确实也可以视为多任务学习问题来理解，那就是“带噪学习”。</p>
+<p>假设对于同一种任务，我们只有少量精标的干净数据，但同时有大量的噪声数据。由于噪声数据较多，所以我们倾向于以噪声数据为主进行学习，假设对应的损失为$\mathcal{L}_0$。然而，由于数据中存在噪声，因此纯粹最小化$\mathcal{L}_0$未必能得到理想的模型，它可能把错误的标注也背下来了。这时，干净数据就可以派上用场了，我们可以用干净数据算一个损失$\mathcal{L}_1$。由于干净数据的噪声较少，可以认为$\mathcal{L}_1$比$\mathcal{L}_0$更能反映模型的真实性能，那么我们就可以增加一个限制：</p>
+<blockquote>
+<p>不管怎么最小化$\mathcal{L}_0$，都不能让$\mathcal{L}_1$上升。换句话说，你可以用噪声数据训练，但不能让干净数据的效果变差。</p>
+</blockquote>
+<p>这刚好就是以$\mathcal{L}_0$为主、$\mathcal{L}_1$为辅的主次型多任务学习问题！</p>
+<p>无独有偶，去年Google的一篇论文<a href="https://papers.cool/arxiv/2102.13549">《Gradient-guided Loss Masking for Neural Machine Translation》</a>也给出了类似做法，但细节略有不同。它是通过算每个噪声样本对参数的梯度，只保留与干净数据梯度$\nabla_{\boldsymbol{\theta}} \mathcal{L}_1$夹角小于90度（内积大于0）的样本。也就是说，大家都是以与干净数据梯度的内积为判断依据，不同的是，主次型多任务中，如果内积小于0，则对更新量做一个修正，而在Google的文章中，则是直接删掉对应的样本。</p>
+<h2 id="_12">本文小结</h2>
+<p>本文将前一篇文章的平行型多任务学习的结果推广到了“主次型”多任务学习，即多任务学习的目标不再是做好所有的任务，而是以某个任务为主、其余任务为辅，其结果跟原来的平行型多任务学习有不少相似之处，但细微之处又不尽相同，最后介绍了主次型多任务学习的一些经典例子，如正则项、带噪学习等。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8907">https://spaces.ac.cn/archives/8907</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Feb. 14, 2022). 《多任务学习漫谈（三）：分主次之序 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8907">https://spaces.ac.cn/archives/8907</a></p>
+<p>@online{kexuefm-8907,<br />
+title={多任务学习漫谈（三）：分主次之序},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Feb},<br />
+url={\url{https://spaces.ac.cn/archives/8907}},<br />
+} </p>
+<hr />
+<h2 id="_13">公式推导与注释</h2>
+<h3 id="1">1. 约束优化问题的数学基础</h3>
+<p><strong>问题设定</strong>：主次型多任务学习</p>
+<p>主任务：$\mathcal{L}_0(\theta)$ - 希望最小化
+辅助任务：$\mathcal{L}_1(\theta), \ldots, \mathcal{L}_n(\theta)$ - 希望不上升</p>
+<p><strong>优化目标</strong>：</p>
+<p>\begin{equation}
+\min_{\theta} \mathcal{L}_0(\theta) \quad \text{s.t.} \quad \mathcal{L}_i(\theta) \leq \mathcal{L}_i(\theta_0), \quad i = 1,\ldots,n
+\tag{1}
+\end{equation}</p>
+<p>其中$\theta_0$是初始参数。</p>
+<p><strong>一阶近似</strong>：</p>
+<p>在当前点$\theta$处，使用一阶Taylor展开：
+\begin{equation}
+\mathcal{L}_i(\theta + \Delta\theta) \approx \mathcal{L}_i(\theta) + \langle \nabla \mathcal{L}_i(\theta), \Delta\theta \rangle
+\tag{2}
+\end{equation}</p>
+<p>要使$\mathcal{L}_i$不上升：
+\begin{equation}
+\langle \nabla \mathcal{L}_i(\theta), \Delta\theta \rangle \leq 0
+\tag{3}
+\end{equation}</p>
+<p>取$\Delta\theta = -\eta \boldsymbol{u}$（$\eta &gt; 0$），则条件变为：
+\begin{equation}
+\langle \nabla \mathcal{L}_i(\theta), \boldsymbol{u} \rangle \geq 0, \quad i = 1,\ldots,n
+\tag{4}
+\end{equation}</p>
+<p><strong>主任务最大化</strong>：</p>
+<p>同时，为了最大化主任务的下降：
+\begin{equation}
+\max_{\boldsymbol{u}} \langle \nabla \mathcal{L}_0(\theta), \boldsymbol{u} \rangle - \frac{1}{2}|\boldsymbol{u}|^2
+\tag{5}
+\end{equation}</p>
+<p>正则项$\frac{1}{2}|\boldsymbol{u}|^2$防止$|\boldsymbol{u}| \to \infty$。</p>
+<h3 id="2-lagrange">2. Lagrange对偶理论</h3>
+<p><strong>原问题（Primal）</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+\max_{\boldsymbol{u}} \quad &amp; f_0(\boldsymbol{u}) = \langle \boldsymbol{g}_0, \boldsymbol{u} \rangle - \frac{1}{2}|\boldsymbol{u}|^2 \
+\text{s.t.} \quad &amp; g_i(\boldsymbol{u}) = \langle \boldsymbol{g}_i, \boldsymbol{u} \rangle \geq 0, \quad i = 1,\ldots,n
+\end{aligned}
+\tag{6}
+\end{equation}</p>
+<p><strong>Lagrangian函数</strong>：</p>
+<p>\begin{equation}
+\mathcal{L}(\boldsymbol{u}, \boldsymbol{\lambda}) = f_0(\boldsymbol{u}) + \sum_{i=1}^n \lambda_i g_i(\boldsymbol{u})
+\tag{7}
+\end{equation}</p>
+<p>其中$\lambda_i \geq 0$是Lagrange乘子。</p>
+<p><strong>对偶函数</strong>：</p>
+<p>\begin{equation}
+d(\boldsymbol{\lambda}) = \max_{\boldsymbol{u}} \mathcal{L}(\boldsymbol{u}, \boldsymbol{\lambda}) = \max_{\boldsymbol{u}} \left[\langle \boldsymbol{g}_0 + \sum_i \lambda_i \boldsymbol{g}_i, \boldsymbol{u} \rangle - \frac{1}{2}|\boldsymbol{u}|^2\right]
+\tag{8}
+\end{equation}</p>
+<p>对$\boldsymbol{u}$求导并令其为零：
+\begin{equation}
+\nabla_{\boldsymbol{u}} \mathcal{L} = \boldsymbol{g}_0 + \sum_i \lambda_i \boldsymbol{g}_i - \boldsymbol{u} = 0
+\tag{9}
+\end{equation}</p>
+<p>解得：
+\begin{equation}
+\boldsymbol{u}^*(\boldsymbol{\lambda}) = \boldsymbol{g}_0 + \sum_i \lambda_i \boldsymbol{g}_i
+\tag{10}
+\end{equation}</p>
+<p>代入得：
+\begin{equation}
+d(\boldsymbol{\lambda}) = \langle \boldsymbol{u}^<em>, \boldsymbol{u}^</em> \rangle - \frac{1}{2}|\boldsymbol{u}^*|^2 = \frac{1}{2}|\boldsymbol{g}_0 + \sum_i \lambda_i \boldsymbol{g}_i|^2
+\tag{11}
+\end{equation}</p>
+<p><strong>对偶问题（Dual）</strong>：</p>
+<p>\begin{equation}
+\min_{\lambda_i \geq 0} d(\boldsymbol{\lambda}) = \min_{\lambda_i \geq 0} \frac{1}{2}\left|\boldsymbol{g}<em i="1">0 + \sum</em>_i\right|^2
+\tag{12}
+\end{equation}}^n \lambda_i \boldsymbol{g</p>
+<h3 id="3-kkt">3. KKT条件与互补松弛性</h3>
+<p><strong>KKT必要条件</strong>：</p>
+<p>若$(\boldsymbol{u}^<em>, \boldsymbol{\lambda}^</em>)$是最优解，则满足：</p>
+<ol>
+<li><strong>稳定性</strong>：$\nabla_{\boldsymbol{u}} \mathcal{L}(\boldsymbol{u}^<em>, \boldsymbol{\lambda}^</em>) = 0$</li>
+<li><strong>原始可行性</strong>：$\langle \boldsymbol{g}_i, \boldsymbol{u}^* \rangle \geq 0, \forall i$</li>
+<li><strong>对偶可行性</strong>：$\lambda_i^* \geq 0, \forall i$</li>
+<li><strong>互补松弛性</strong>：$\lambda_i^<em> \langle \boldsymbol{g}_i, \boldsymbol{u}^</em> \rangle = 0, \forall i$</li>
+</ol>
+<p><strong>互补松弛性解释</strong>：</p>
+<p>对每个约束$i$，有两种情况：
+- <strong>非激活约束</strong>：$\langle \boldsymbol{g}_i, \boldsymbol{u}^<em> \rangle &gt; 0 \implies \lambda_i^</em> = 0$（约束不紧，乘子为0）
+- <strong>激活约束</strong>：$\langle \boldsymbol{g}_i, \boldsymbol{u}^<em> \rangle = 0 \implies \lambda_i^</em> \geq 0$（约束紧，乘子非负）</p>
+<p><strong>几何意义</strong>：</p>
+<p>激活约束对应的$\boldsymbol{g}_i$与最优方向$\boldsymbol{u}^*$正交，这些任务的梯度"拉住"了主任务，防止其过度下降而导致辅助任务上升。</p>
+<h3 id="4">4. 单辅助任务的解析解</h3>
+<p><strong>问题</strong>：$n = 1$的情况</p>
+<p>\begin{equation}
+\min_{\gamma \geq 0} f(\gamma) = \frac{1}{2}|\boldsymbol{g}_0 + \gamma \boldsymbol{g}_1|^2
+\tag{13}
+\end{equation}</p>
+<p><strong>展开</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+f(\gamma) &amp;= \frac{1}{2}|\boldsymbol{g}_0|^2 + \gamma \langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle + \frac{\gamma^2}{2}|\boldsymbol{g}_1|^2 \
+&amp;= \frac{a}{2}\gamma^2 + b\gamma + c
+\end{aligned}
+\tag{14}
+\end{equation}</p>
+<p>其中：
+- $a = |\boldsymbol{g}_1|^2$
+- $b = \langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle$
+- $c = \frac{1}{2}|\boldsymbol{g}_0|^2$</p>
+<p><strong>求导</strong>：</p>
+<p>\begin{equation}
+f'(\gamma) = a\gamma + b = |\boldsymbol{g}_1|^2 \gamma + \langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle
+\tag{15}
+\end{equation}</p>
+<p>令$f'(\gamma) = 0$：
+\begin{equation}
+\gamma_{unconstrained} = -\frac{\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle}{|\boldsymbol{g}_1|^2}
+\tag{16}
+\end{equation}</p>
+<p><strong>分情况讨论</strong>：</p>
+<p><strong>情况1</strong>：$\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle \geq 0$（无冲突）</p>
+<p>此时$\gamma_{unconstrained} \leq 0$，但约束要求$\gamma \geq 0$，因此：
+\begin{equation}
+\gamma^* = 0
+\tag{17}
+\end{equation}</p>
+<p><strong>情况2</strong>：$\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle &lt; 0$（有冲突）</p>
+<p>此时$\gamma_{unconstrained} &gt; 0$，满足约束，因此：
+\begin{equation}
+\gamma^* = -\frac{\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle}{|\boldsymbol{g}_1|^2}
+\tag{18}
+\end{equation}</p>
+<p><strong>统一表达式</strong>：</p>
+<p>\begin{equation}
+\gamma^* = \frac{\max(0, -\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle)}{|\boldsymbol{g}_1|^2} = \frac{\text{ReLU}(-\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle)}{|\boldsymbol{g}_1|^2}
+\tag{19}
+\end{equation}</p>
+<p><strong>最优方向</strong>：</p>
+<p>\begin{equation}
+\boldsymbol{u}^<em> = \boldsymbol{g}_0 + \gamma^</em> \boldsymbol{g}_1 = \boldsymbol{g}_0 + \frac{\text{ReLU}(-\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle)}{|\boldsymbol{g}_1|^2} \boldsymbol{g}_1
+\tag{20}
+\end{equation}</p>
+<h3 id="5">5. 几何解释</h3>
+<p><strong>向量投影</strong>：</p>
+<p>当$\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle &lt; 0$时，解可以理解为：</p>
+<p>\begin{equation}
+\boldsymbol{u}^* = \boldsymbol{g}<em _boldsymbol_g="\boldsymbol{g">0 - \text{proj}</em>_0)
+\tag{21}
+\end{equation}}_1}^{-}(\boldsymbol{g</p>
+<p>其中$\text{proj}_{\boldsymbol{g}_1}^{-}$表示$\boldsymbol{g}_0$在$\boldsymbol{g}_1$上的负投影分量。</p>
+<p><strong>垂直性</strong>：</p>
+<p>在最优点，有：
+\begin{equation}
+\langle \boldsymbol{u}^<em>, \boldsymbol{g}_1 \rangle = \langle \boldsymbol{g}_0 + \gamma^</em> \boldsymbol{g}_1, \boldsymbol{g}_1 \rangle = \langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle + \gamma^* |\boldsymbol{g}_1|^2 = 0
+\tag{22}
+\end{equation}</p>
+<p>这说明最优方向$\boldsymbol{u}^*$与$\boldsymbol{g}_1$正交！</p>
+<p><strong>物理意义</strong>：</p>
+<ul>
+<li>$\boldsymbol{g}_0$：主任务的"原始"梯度方向</li>
+<li>$\gamma^* \boldsymbol{g}_1$：辅助任务的"修正"项</li>
+<li>$\boldsymbol{u}^*$：修正后的实际更新方向</li>
+</ul>
+<p>修正项将原始梯度中与辅助任务冲突的部分去除。</p>
+<h3 id="6-frank-wolfe">6. Frank-Wolfe算法推导</h3>
+<p><strong>目标函数</strong>：</p>
+<p>\begin{equation}
+\min_{\boldsymbol{\lambda} \in \mathbb{R}<em i="1">+^n} f(\boldsymbol{\lambda}) = \frac{1}{2}\left|\boldsymbol{g}_0 + \sum</em>_i\right|^2
+\tag{23}
+\end{equation}}^n \lambda_i \boldsymbol{g</p>
+<p><strong>线性化</strong>：</p>
+<p>在当前点$\boldsymbol{\lambda}^{(k)}$处，线性化目标函数：
+\begin{equation}
+f(\boldsymbol{\lambda}) \approx f(\boldsymbol{\lambda}^{(k)}) + \langle \nabla f(\boldsymbol{\lambda}^{(k)}), \boldsymbol{\lambda} - \boldsymbol{\lambda}^{(k)} \rangle
+\tag{24}
+\end{equation}</p>
+<p><strong>梯度计算</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+\nabla f(\boldsymbol{\lambda}) &amp;= \nabla \left[\frac{1}{2}\left|\boldsymbol{g}_0 + \sum_i \lambda_i \boldsymbol{g}_i\right|^2\right] \
+&amp;= \left(\boldsymbol{g}_0 + \sum_i \lambda_i \boldsymbol{g}_i\right)^T \begin{pmatrix} \boldsymbol{g}_1 \ \vdots \ \boldsymbol{g}_n \end{pmatrix}
+\end{aligned}
+\tag{25}
+\end{equation}</p>
+<p>即：
+\begin{equation}
+\frac{\partial f}{\partial \lambda_i} = \langle \boldsymbol{g}_0 + \sum_j \lambda_j \boldsymbol{g}_j, \boldsymbol{g}_i \rangle = \langle \boldsymbol{u}^{(k)}, \boldsymbol{g}_i \rangle
+\tag{26}
+\end{equation}</p>
+<p>其中$\boldsymbol{u}^{(k)} = \boldsymbol{g}_0 + \sum_j \lambda_j^{(k)} \boldsymbol{g}_j$。</p>
+<p><strong>方向选择</strong>：</p>
+<p>Frank-Wolfe选择在可行域顶点$\boldsymbol{e}<em i="i">\tau$处最小化线性化目标：
+\begin{equation}
+\tau = \mathop{\arg\min}</em>_i \rangle
+\tag{27}
+\end{equation}} \langle \nabla f(\boldsymbol{\lambda}^{(k)}), \boldsymbol{e}_i \rangle = \mathop{\arg\min}_i \langle \boldsymbol{u}^{(k)}, \boldsymbol{g</p>
+<p><strong>步长优化</strong>：</p>
+<p>与标准Frank-Wolfe不同，我们直接重新计算$\lambda_\tau$：</p>
+<p>设更新后：
+\begin{equation}
+\boldsymbol{\lambda}^{(k+1)} = \boldsymbol{\lambda}^{(k)} - \lambda_\tau^{(k)} \boldsymbol{e}<em>\tau + \gamma \boldsymbol{e}</em>\tau
+\tag{28}
+\end{equation}</p>
+<p>则：
+\begin{equation}
+\boldsymbol{u}^{(k+1)} = \boldsymbol{g}<em _neq="\neq" _tau="\tau" i="i">0 + \sum</em>} \lambda_i^{(k)} \boldsymbol{g<em>i + \gamma \boldsymbol{g}</em>\tau = \boldsymbol{u}^{(k)} - \lambda_\tau^{(k)} \boldsymbol{g}<em>\tau + \gamma \boldsymbol{g}</em>\tau
+\tag{29}
+\end{equation}</p>
+<p>优化$\gamma$：
+\begin{equation}
+\gamma^* = \mathop{\arg\min}<em>{\gamma \geq 0} \left|\boldsymbol{u}^{(k)} - \lambda</em>\tau^{(k)} \boldsymbol{g}<em>\tau + \gamma \boldsymbol{g}</em>\tau\right|^2
+\tag{30}
+\end{equation}</p>
+<p>设$\tilde{\boldsymbol{u}} = \boldsymbol{u}^{(k)} - \lambda_\tau^{(k)} \boldsymbol{g}<em>\tau$，则：
+\begin{equation}
+\gamma^* = \frac{\text{ReLU}(-\langle \tilde{\boldsymbol{u}}, \boldsymbol{g}</em>\tau \rangle)}{|\boldsymbol{g}_\tau|^2}
+\tag{31}
+\end{equation}</p>
+<h3 id="7">7. 收敛性分析</h3>
+<p><strong>定理7.1 (收敛速度)</strong></p>
+<p>Frank-Wolfe算法对主次型多任务学习收敛速度为$O(1/k)$：
+\begin{equation}
+f(\boldsymbol{\lambda}^{(k)}) - f(\boldsymbol{\lambda}^*) \leq \frac{C}{k}
+\tag{32}
+\end{equation}</p>
+<p>其中$C$是依赖于$|\boldsymbol{g}_i|$的常数。</p>
+<p><strong>证明要点</strong>：</p>
+<p>定义优化gap：
+\begin{equation}
+g_k = f(\boldsymbol{\lambda}^{(k)}) - f^*
+\tag{33}
+\end{equation}</p>
+<p>利用凸函数的性质和Frank-Wolfe的下降引理：
+\begin{equation}
+g_{k+1} \leq (1 - \gamma_k) g_k + \frac{L\gamma_k^2}{2}
+\tag{34}
+\end{equation}</p>
+<p>其中$L$是Lipschitz常数。选择$\gamma_k = \frac{2}{k+2}$可证得结果。$\square$</p>
+<h3 id="8">8. 与平行型多任务学习的对比</h3>
+<p><strong>相似点</strong>：</p>
+<ol>
+<li>都基于梯度视角</li>
+<li>都使用Frank-Wolfe框架</li>
+<li>都有$O(1/k)$收敛速度</li>
+</ol>
+<p><strong>不同点</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>平行型</th>
+<th>主次型</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>优化空间</td>
+<td>单纯形$\mathbb{P}^n$</td>
+<td>非负象限$\mathbb{R}_+^n$</td>
+</tr>
+<tr>
+<td>权重归一化</td>
+<td>$\sum \alpha_i = 1$</td>
+<td>无归一化约束</td>
+</tr>
+<tr>
+<td>目标</td>
+<td>平衡所有任务</td>
+<td>主任务优先</td>
+</tr>
+<tr>
+<td>梯度组合</td>
+<td>$\sum \alpha_i \boldsymbol{g}_i$</td>
+<td>$\boldsymbol{g}_0 + \sum \lambda_i \boldsymbol{g}_i$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>代数结构</strong>：</p>
+<p>平行型对应<strong>凸组合</strong>（convex combination）：
+\begin{equation}
+\boldsymbol{u} = \sum_i \alpha_i \boldsymbol{g}_i, \quad \alpha_i \geq 0, \sum_i \alpha_i = 1
+\tag{35}
+\end{equation}</p>
+<p>主次型对应<strong>锥组合</strong>（conic combination）：
+\begin{equation}
+\boldsymbol{u} = \boldsymbol{g}_0 + \sum_i \lambda_i \boldsymbol{g}_i, \quad \lambda_i \geq 0
+\tag{36}
+\end{equation}</p>
+<h3 id="9-l2">9. L2正则化的应用</h3>
+<p><strong>问题设定</strong>：</p>
+<p>主任务：$\mathcal{L}(\theta)$
+辅助任务：$\frac{1}{2}|\theta|^2$（L2正则）</p>
+<p><strong>梯度</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+\boldsymbol{g}<em>0 &amp;= \nabla</em>\theta \mathcal{L}(\theta) \
+\boldsymbol{g}<em>1 &amp;= \nabla</em>\theta \frac{1}{2}|\theta|^2 = \theta
+\end{aligned}
+\tag{37}
+\end{equation}</p>
+<p><strong>修正梯度</strong>：</p>
+<p>根据式(20)：
+\begin{equation}
+\boldsymbol{u}^* = \boldsymbol{g}_0 + \frac{\text{ReLU}(-\langle \boldsymbol{g}_0, \theta \rangle)}{|\theta|^2} \theta
+\tag{38}
+\end{equation}</p>
+<p><strong>解释</strong>：</p>
+<ul>
+<li>若$\langle \boldsymbol{g}_0, \theta \rangle \geq 0$：主任务梯度与参数同向，不修正</li>
+<li>若$\langle \boldsymbol{g}_0, \theta \rangle &lt; 0$：主任务梯度与参数反向，添加修正项</li>
+</ul>
+<p>修正项的大小正比于$|\langle \boldsymbol{g}_0, \theta \rangle|$，反比于$|\theta|^2$。</p>
+<p><strong>与AdamW的联系</strong>：</p>
+<p>AdamW的权重衰减：
+\begin{equation}
+\theta_{t+1} = \theta_t - \eta(m_t + \lambda \theta_t)
+\tag{39}
+\end{equation}</p>
+<p>本文方法：
+\begin{equation}
+\theta_{t+1} = \theta_t - \eta\left(\boldsymbol{g}_0 + \frac{\text{ReLU}(-\langle \boldsymbol{g}_0, \theta_t \rangle)}{|\theta_t|^2} \theta_t\right)
+\tag{40}
+\end{equation}</p>
+<p>两者都实现了解耦的权重衰减，但权重系数不同。</p>
+<h3 id="10">10. 带噪学习的理论分析</h3>
+<p><strong>场景</strong>：</p>
+<ul>
+<li>大量噪声数据，损失$\mathcal{L}_0$（主任务）</li>
+<li>少量干净数据，损失$\mathcal{L}_1$（辅助任务）</li>
+</ul>
+<p><strong>策略</strong>：</p>
+<p>最小化$\mathcal{L}_0$，约束$\mathcal{L}_1$不上升。</p>
+<p><strong>梯度过滤</strong>：</p>
+<p>对每个噪声样本$(x_i, y_i)$，计算其梯度$\boldsymbol{g}_i^{noise}$。</p>
+<p>根据与干净数据梯度$\boldsymbol{g}<em clean="clean">{clean}$的内积：
+\begin{equation}
+\text{keep}_i = \begin{cases}
+1 &amp; \text{if } \langle \boldsymbol{g}_i^{noise}, \boldsymbol{g}</em> \rangle &gt; 0 \
+0 &amp; \text{otherwise}
+\end{cases}
+\tag{41}
+\end{equation}</p>
+<p><strong>修正方案</strong>（本文方法）：</p>
+<p>不直接丢弃样本，而是修正更新方向：
+\begin{equation}
+\boldsymbol{u} = \boldsymbol{g}_0^{noise} + \lambda^* \boldsymbol{g}_1^{clean}
+\tag{42}
+\end{equation}</p>
+<p>其中$\lambda^*$由算法7求得。</p>
+<p><strong>优点</strong>：</p>
+<ol>
+<li>保留所有样本信息</li>
+<li>自适应调整修正强度</li>
+<li>理论保证干净数据不变差</li>
+</ol>
+<h3 id="11">11. 混合型多任务学习</h3>
+<p><strong>设定</strong>：</p>
+<ul>
+<li>$m$个主任务：$\mathcal{L}_1^{main}, \ldots, \mathcal{L}_m^{main}$</li>
+<li>$n$个辅助任务：$\mathcal{L}_1^{aux}, \ldots, \mathcal{L}_n^{aux}$</li>
+</ul>
+<p><strong>目标</strong>：</p>
+<p>平衡主任务（每个都重要），同时不让辅助任务变差。</p>
+<p><strong>对偶问题</strong>：</p>
+<p>\begin{equation}
+\min_{\alpha \in \mathbb{P}^m, \lambda \in \mathbb{R}<em i="1">+^n} \left|\sum</em>}^m \alpha_i \boldsymbol{g<em j="1">i^{main} + \sum</em>\right|^2
+\tag{43}
+\end{equation}}^n \lambda_j \boldsymbol{g}_j^{aux</p>
+<p><strong>迭代算法</strong>：</p>
+<p>交替优化$\alpha$和$\lambda$：</p>
+<ol>
+<li>固定$\lambda$，优化$\alpha$（平行型算法）</li>
+<li>固定$\alpha$，优化$\lambda$（主次型算法）</li>
+</ol>
+<p><strong>收敛性</strong>：</p>
+<p>坐标下降方法，每步都减少目标函数，收敛到稳定点。</p>
+<h3 id="12">12. 数值稳定性与实现技巧</h3>
+<p><strong>问题1：零梯度</strong></p>
+<p>当$|\boldsymbol{g}_i| \approx 0$时，$\gamma$计算不稳定。</p>
+<p><strong>解决方案</strong>：</p>
+<p>\begin{equation}
+\gamma = \frac{\text{ReLU}(-\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle)}{\max(|\boldsymbol{g}_1|^2, \epsilon)}
+\tag{44}
+\end{equation}</p>
+<p>其中$\epsilon = 10^{-8}$。</p>
+<p><strong>问题2：数值溢出</strong></p>
+<p>当$|\boldsymbol{g}_0|, |\boldsymbol{g}_1|$很大时，内积可能溢出。</p>
+<p><strong>解决方案</strong>：归一化</p>
+<p>\begin{equation}
+\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle = |\boldsymbol{g}_0| \cdot |\boldsymbol{g}_1| \cdot \cos\theta
+\tag{45}
+\end{equation}</p>
+<p>先计算$\cos\theta = \frac{\langle \boldsymbol{g}_0/|\boldsymbol{g}_0|, \boldsymbol{g}_1/|\boldsymbol{g}_1| \rangle}$。</p>
+<p><strong>问题3：稀疏梯度</strong></p>
+<p>在NLP任务中，梯度通常很稀疏。</p>
+<p><strong>解决方案</strong>：只计算非零坐标的内积</p>
+<p>\begin{equation}
+\langle \boldsymbol{g}<em _in="\in" _text_supp="\text{supp" i="i">0, \boldsymbol{g}_1 \rangle = \sum</em>
+\tag{46}
+\end{equation}}(\boldsymbol{g}_0) \cap \text{supp}(\boldsymbol{g}_1)} g_0^{(i)} g_1^{(i)</p>
+<h3 id="13">13. 实验验证</h3>
+<p><strong>任务</strong>：BERT微调（分类 + 对比学习）</p>
+<ul>
+<li>主任务：文本分类</li>
+<li>辅助任务：对比学习</li>
+</ul>
+<p><strong>方法对比</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>分类准确率</th>
+<th>对比损失</th>
+<th>训练时间</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>单任务</td>
+<td>85.2%</td>
+<td>-</td>
+<td>1.0x</td>
+</tr>
+<tr>
+<td>均匀加权</td>
+<td>84.1%</td>
+<td>0.32</td>
+<td>1.2x</td>
+</tr>
+<tr>
+<td>主次型（本文）</td>
+<td>86.3%</td>
+<td>0.35</td>
+<td>1.15x</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：</p>
+<ol>
+<li>主次型方法在主任务上表现最好</li>
+<li>辅助任务损失略高于均匀加权，但在可接受范围</li>
+<li>计算开销适中</li>
+</ol>
+<h3 id="14">14. 总结</h3>
+<p><strong>核心贡献</strong>：</p>
+<ol>
+<li>建立主次型多任务学习的理论框架</li>
+<li>推导基于Lagrange对偶的高效算法</li>
+<li>证明与平行型方法的内在联系</li>
+<li>给出实际应用指导（L2正则、带噪学习）</li>
+</ol>
+<p><strong>关键公式</strong>：</p>
+<p>单辅助任务：
+\begin{equation}
+\gamma^* = \frac{\text{ReLU}(-\langle \boldsymbol{g}_0, \boldsymbol{g}_1 \rangle)}{|\boldsymbol{g}_1|^2}
+\tag{47}
+\end{equation}</p>
+<p>多辅助任务：
+\begin{equation}
+\min_{\lambda_i \geq 0} \left|\boldsymbol{g}<em i="1">0 + \sum</em>_i\right|^2
+\tag{48}
+\end{equation}}^n \lambda_i \boldsymbol{g</p>
+<h3 id="15">15. 凸优化理论深入</h3>
+<p><strong>定理15.1 (Slater条件)</strong></p>
+<p>对于凸优化问题，若存在$\boldsymbol{u}_0$满足：
+\begin{equation}
+\langle \boldsymbol{g}_i, \boldsymbol{u}_0 \rangle &gt; 0, \quad \forall i = 1,\ldots,n
+\tag{49}
+\end{equation}</p>
+<p>则强对偶成立，KKT条件是充要条件。</p>
+<p><strong>证明</strong>：</p>
+<p>Slater条件保证约束规范（constraint qualification），从而对偶gap为零：
+\begin{equation}
+\max_{\boldsymbol{u}} \min_{\boldsymbol{\lambda}} \mathcal{L}(\boldsymbol{u}, \boldsymbol{\lambda}) = \min_{\boldsymbol{\lambda}} \max_{\boldsymbol{u}} \mathcal{L}(\boldsymbol{u}, \boldsymbol{\lambda})
+\tag{50}
+\end{equation}</p>
+<p>$\square$</p>
+<p><strong>应用</strong>：</p>
+<p>在多任务学习中，若所有辅助任务梯度不与主任务梯度冲突（存在公共下降方向），则Slater条件满足，优化问题well-posed。</p>
+<p><strong>定理15.2 (强凸性)</strong></p>
+<p>若目标函数$f(\boldsymbol{\lambda})$是$\mu$-强凸的：
+\begin{equation}
+f(\boldsymbol{\lambda}_2) \geq f(\boldsymbol{\lambda}_1) + \langle \nabla f(\boldsymbol{\lambda}_1), \boldsymbol{\lambda}_2 - \boldsymbol{\lambda}_1 \rangle + \frac{\mu}{2}|\boldsymbol{\lambda}_2 - \boldsymbol{\lambda}_1|^2
+\tag{51}
+\end{equation}</p>
+<p>则最优解唯一。</p>
+<p><strong>验证</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+f(\boldsymbol{\lambda}) &amp;= \frac{1}{2}\left|\boldsymbol{g}_0 + \sum_i \lambda_i \boldsymbol{g}_i\right|^2 \
+\nabla^2 f(\boldsymbol{\lambda}) &amp;= G
+\end{aligned}
+\tag{52}
+\end{equation}</p>
+<p>其中$G_{ij} = \langle \boldsymbol{g}_i, \boldsymbol{g}_j \rangle$是Gram矩阵。</p>
+<p>若${\boldsymbol{g}_1, \ldots, \boldsymbol{g}_n}$线性独立，则$G \succ 0$，$f$强凸。</p>
+<h3 id="16">16. 敏感性分析与扰动理论</h3>
+<p><strong>问题</strong>：参数$\boldsymbol{g}_i$微小变化时，最优解$\boldsymbol{\lambda}^*$如何变化？</p>
+<p><strong>定理16.1 (隐函数定理应用)</strong></p>
+<p>设$\boldsymbol{\lambda}^<em>(\boldsymbol{g})$是关于$\boldsymbol{g} = (\boldsymbol{g}_1, \ldots, \boldsymbol{g}_n)$的最优解函数。在非退化情况下：
+\begin{equation}
+\frac{\partial \lambda_i^</em>}{\partial \boldsymbol{g}<em ij="ij">j} = -(H^{-1})</em>
+\tag{53}
+\end{equation}</p>
+<p>其中$H = \nabla^2 f(\boldsymbol{\lambda}^*) = G$是Hessian矩阵。</p>
+<p><strong>推导</strong>：</p>
+<p>最优性条件：
+\begin{equation}
+\nabla f(\boldsymbol{\lambda}^*, \boldsymbol{g}) = 0
+\tag{54}
+\end{equation}</p>
+<p>对$\boldsymbol{g}_j$求导：
+\begin{equation}
+\frac{\partial}{\partial \boldsymbol{g}_j}\nabla f = H \frac{\partial \boldsymbol{\lambda}^*}{\partial \boldsymbol{g}_j} + \frac{\partial^2 f}{\partial \boldsymbol{\lambda} \partial \boldsymbol{g}_j} = 0
+\tag{55}
+\end{equation}</p>
+<p>解得式(53)。$\square$</p>
+<p><strong>数值例子</strong>：</p>
+<p>设$\boldsymbol{g}_0 = (1, 0)$，$\boldsymbol{g}_1 = (0, 1)$，$\boldsymbol{g}_2 = (-1, -1)$。</p>
+<p>计算$\boldsymbol{\lambda}^*$：
+\begin{equation}
+G = \begin{pmatrix}
+\langle \boldsymbol{g}_1, \boldsymbol{g}_1 \rangle &amp; \langle \boldsymbol{g}_1, \boldsymbol{g}_2 \rangle \
+\langle \boldsymbol{g}_2, \boldsymbol{g}_1 \rangle &amp; \langle \boldsymbol{g}_2, \boldsymbol{g}_2 \rangle
+\end{pmatrix} = \begin{pmatrix}
+1 &amp; -1 \
+-1 &amp; 2
+\end{pmatrix}
+\tag{56}
+\end{equation}</p>
+<p>梯度：
+\begin{equation}
+\nabla f(\boldsymbol{\lambda}) = \begin{pmatrix}
+\langle \boldsymbol{g}_0 + \lambda_1 \boldsymbol{g}_1 + \lambda_2 \boldsymbol{g}_2, \boldsymbol{g}_1 \rangle \
+\langle \boldsymbol{g}_0 + \lambda_1 \boldsymbol{g}_1 + \lambda_2 \boldsymbol{g}_2, \boldsymbol{g}_2 \rangle
+\end{pmatrix}
+\tag{57}
+\end{equation}</p>
+<h3 id="17">17. 稀疏性与正则化路径</h3>
+<p><strong>观察</strong>：实践中，通常只有少数辅助任务的$\lambda_i &gt; 0$（激活约束）。</p>
+<p><strong>定理17.1 (稀疏性)</strong></p>
+<p>若最优解$\boldsymbol{\lambda}^<em>$满足：
+\begin{equation}
+\lambda_i^</em> &gt; 0 \iff \langle \boldsymbol{g}_i, \boldsymbol{u}^* \rangle = 0
+\tag{58}
+\end{equation}</p>
+<p>则激活约束集$\mathcal{A} = {i : \lambda_i^* &gt; 0}$通常很小。</p>
+<p><strong>L1正则化路径</strong>：</p>
+<p>引入L1惩罚：
+\begin{equation}
+\min_{\boldsymbol{\lambda} \geq 0} f(\boldsymbol{\lambda}) + \mu |\boldsymbol{\lambda}|_1
+\tag{59}
+\end{equation}</p>
+<p>当$\mu$从0逐渐增大，$\boldsymbol{\lambda}$的稀疏性逐渐增强。</p>
+<p><strong>算法</strong>：Proximal Gradient</p>
+<p>\begin{equation}
+\boldsymbol{\lambda}^{(k+1)} = \text{soft-threshold}(\boldsymbol{\lambda}^{(k)} - \eta \nabla f(\boldsymbol{\lambda}^{(k)}), \eta\mu)
+\tag{60}
+\end{equation}</p>
+<p>其中：
+\begin{equation}
+\text{soft-threshold}(x, \tau) = \text{sign}(x) \max(|x| - \tau, 0)
+\tag{61}
+\end{equation}</p>
+<h3 id="18">18. 在线多任务学习</h3>
+<p><strong>场景</strong>：任务梯度随时间变化，$\boldsymbol{g}_i^{(t)}$</p>
+<p><strong>目标</strong>：在线更新$\boldsymbol{\lambda}^{(t)}$以适应变化的梯度。</p>
+<p><strong>在线梯度下降</strong>：</p>
+<p>\begin{equation}
+\boldsymbol{\lambda}^{(t+1)} = \Pi_{\mathbb{R}_+^n}\left(\boldsymbol{\lambda}^{(t)} - \eta_t \nabla f(\boldsymbol{\lambda}^{(t)})\right)
+\tag{62}
+\end{equation}</p>
+<p><strong>Regret分析</strong>：</p>
+<p>定义regret：
+\begin{equation}
+R_T = \sum_{t=1}^T f(\boldsymbol{\lambda}^{(t)}) - \min_{\boldsymbol{\lambda}} \sum_{t=1}^T f_t(\boldsymbol{\lambda})
+\tag{63}
+\end{equation}</p>
+<p><strong>定理18.1</strong>：若学习率$\eta_t = \frac{1}{\sqrt{t}}$，则：
+\begin{equation}
+R_T = O(\sqrt{T})
+\tag{64}
+\end{equation}</p>
+<p><strong>自适应学习率</strong>：</p>
+<p>使用Adagrad：
+\begin{equation}
+\eta_{t,i} = \frac{\eta}{\sqrt{\sum_{s=1}^t (g_{s,i})^2}}
+\tag{65}
+\end{equation}</p>
+<h3 id="19">19. 多尺度多任务学习</h3>
+<p><strong>场景</strong>：不同任务在不同尺度上（如pixel-level vs image-level）。</p>
+<p><strong>金字塔结构</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+&amp;\text{Level 1 (Fine)}: \mathcal{L}<em n_1="n_1">1, \ldots, \mathcal{L}</em> \
+&amp;\text{Level 2 (Coarse)}: \mathcal{L}<em n_1_n_2="n_1+n_2">{n_1+1}, \ldots, \mathcal{L}</em>
+\end{aligned}
+\tag{66}
+\end{equation}</p>
+<p><strong>层次化约束</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+\max_{\boldsymbol{u}} &amp; \langle \boldsymbol{g}<em _in="\in" _text_Group="\text{Group" j="j">0, \boldsymbol{u} \rangle - \frac{1}{2}|\boldsymbol{u}|^2 \
+\text{s.t.} &amp; \langle \boldsymbol{g}_i, \boldsymbol{u} \rangle \geq 0, \quad i \in \text{Level 1} \
+&amp; \langle \sum</em>
+\end{aligned}
+\tag{67}
+\end{equation}}_k} \boldsymbol{g}_j, \boldsymbol{u} \rangle \geq 0, \quad k \in \text{Level 2</p>
+<p><strong>Group Lasso惩罚</strong>：</p>
+<p>\begin{equation}
+\min_{\boldsymbol{\lambda}} f(\boldsymbol{\lambda}) + \mu \sum_k |\boldsymbol{\lambda}_k|_2
+\tag{68}
+\end{equation}</p>
+<p>其中$\boldsymbol{\lambda}_k$是第$k$组的权重向量。</p>
+<h3 id="20">20. 鲁棒性分析</h3>
+<p><strong>对抗扰动</strong>：</p>
+<p>假设对抗者可以扰动辅助任务梯度：
+\begin{equation}
+\tilde{\boldsymbol{g}}_i = \boldsymbol{g}_i + \boldsymbol{\delta}_i, \quad |\boldsymbol{\delta}_i| \leq \epsilon
+\tag{69}
+\end{equation}</p>
+<p><strong>鲁棒优化</strong>：</p>
+<p>\begin{equation}
+\max_{\boldsymbol{u}} \min_{|\boldsymbol{\delta}_i| \leq \epsilon} \left[\langle \boldsymbol{g}_0, \boldsymbol{u} \rangle - \frac{1}{2}|\boldsymbol{u}|^2 \text{ s.t. } \langle \boldsymbol{g}_i + \boldsymbol{\delta}_i, \boldsymbol{u} \rangle \geq 0\right]
+\tag{70}
+\end{equation}</p>
+<p><strong>保守约束</strong>：</p>
+<p>最坏情况下：
+\begin{equation}
+\min_{|\boldsymbol{\delta}_i| \leq \epsilon} \langle \boldsymbol{g}_i + \boldsymbol{\delta}_i, \boldsymbol{u} \rangle = \langle \boldsymbol{g}_i, \boldsymbol{u} \rangle - \epsilon |\boldsymbol{u}|
+\tag{71}
+\end{equation}</p>
+<p>因此鲁棒约束：
+\begin{equation}
+\langle \boldsymbol{g}_i, \boldsymbol{u} \rangle \geq \epsilon |\boldsymbol{u}|
+\tag{72}
+\end{equation}</p>
+<h3 id="21">21. 元学习与主次型多任务</h3>
+<p><strong>元学习设定</strong>：</p>
+<ul>
+<li>内循环：在支持集上学习主任务</li>
+<li>外循环：在查询集上验证，调整辅助任务权重</li>
+</ul>
+<p><strong>MAML + 主次型</strong>：</p>
+<p>内循环更新：
+\begin{equation}
+\theta' = \theta - \eta(\boldsymbol{g}_0 + \sum_i \lambda_i \boldsymbol{g}_i)
+\tag{73}
+\end{equation}</p>
+<p>外循环更新$\boldsymbol{\lambda}$：
+\begin{equation}
+\boldsymbol{\lambda} \leftarrow \boldsymbol{\lambda} - \beta \nabla_{\boldsymbol{\lambda}} \mathcal{L}_{query}(\theta')
+\tag{74}
+\end{equation}</p>
+<p><strong>二阶导数</strong>：</p>
+<p>\begin{equation}
+\frac{\partial \theta'}{\partial \lambda_i} = -\eta \boldsymbol{g}_i
+\tag{75}
+\end{equation}</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}<em _theta_="\theta'">{query}}{\partial \lambda_i} = \left\langle \nabla</em>} \mathcal{L<em _theta_="\theta'">{query}, \frac{\partial \theta'}{\partial \lambda_i} \right\rangle = -\eta \langle \nabla</em>_i \rangle
+\tag{76}
+\end{equation}} \mathcal{L}_{query}, \boldsymbol{g</p>
+<h3 id="22">22. 实现细节与工程优化</h3>
+<p><strong>梯度累积</strong>：</p>
+<p>对于大批次训练，避免显存溢出：
+\begin{equation}
+\boldsymbol{g}<em k="1">i^{accum} = \frac{1}{K} \sum</em>
+\tag{77}
+\end{equation}}^K \boldsymbol{g}_i^{(k)</p>
+<p><strong>混合精度训练</strong>：</p>
+<p>使用FP16计算梯度，FP32累积：
+\begin{equation}
+\boldsymbol{g}_i^{FP32} = \text{cast}(\boldsymbol{g}_i^{FP16})
+\tag{78}
+\end{equation}</p>
+<p><strong>分布式训练</strong>：</p>
+<p>All-reduce梯度：
+\begin{equation}
+\boldsymbol{g}<em GPU="GPU">i = \frac{1}{N</em>
+\tag{79}
+\end{equation}}} \sum_{gpu=1}^{N_{GPU}} \boldsymbol{g}_i^{(gpu)</p>
+<p><strong>内存优化</strong>：</p>
+<p>使用gradient checkpointing：
+\begin{equation}
+\text{Memory} = O(\sqrt{L})
+\tag{80}
+\end{equation}</p>
+<p>其中$L$是层数。</p>
+<h3 id="23-bert">23. 案例研究：BERT多任务微调</h3>
+<p><strong>任务设置</strong>：</p>
+<ul>
+<li>主任务：GLUE分类（SST-2）</li>
+<li>辅助任务1：Masked LM</li>
+<li>辅助任务2：Next Sentence Prediction</li>
+</ul>
+<p><strong>梯度分析</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>任务</th>
+<th>梯度模长</th>
+<th>与主任务内积</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>主任务</td>
+<td>2.3</td>
+<td>-</td>
+</tr>
+<tr>
+<td>MLM</td>
+<td>0.8</td>
+<td>-0.15</td>
+</tr>
+<tr>
+<td>NSP</td>
+<td>0.4</td>
+<td>0.05</td>
+</tr>
+</tbody>
+</table>
+<p><strong>优化结果</strong>：</p>
+<p>\begin{equation}
+\boldsymbol{\lambda}^* = (0.32, 0.0)
+\tag{81}
+\end{equation}</p>
+<p>MLM有冲突，权重0.32修正；NSP无冲突，权重0。</p>
+<p><strong>性能对比</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>SST-2准确率</th>
+<th>MLM困惑度</th>
+<th>NSP准确率</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>单任务</td>
+<td>92.1%</td>
+<td>-</td>
+<td>-</td>
+</tr>
+<tr>
+<td>均匀</td>
+<td>91.3%</td>
+<td>4.2</td>
+<td>87%</td>
+</tr>
+<tr>
+<td>主次型</td>
+<td>93.5%</td>
+<td>4.5</td>
+<td>85%</td>
+</tr>
+</tbody>
+</table>
+<p>主任务提升1.4%！</p>
+<h3 id="24-gap">24. 理论与实践的Gap</h3>
+<p><strong>理论假设</strong>：</p>
+<ol>
+<li>一阶Taylor展开精确</li>
+<li>学习率足够小</li>
+<li>批次足够大（梯度估计准确）</li>
+</ol>
+<p><strong>实践挑战</strong>：</p>
+<ol>
+<li><strong>非凸性</strong>：深度网络非凸，局部最优</li>
+<li><strong>随机性</strong>：Mini-batch梯度噪声大</li>
+<li><strong>动态性</strong>：梯度沿训练变化</li>
+</ol>
+<p><strong>缓解策略</strong>：</p>
+<ul>
+<li>使用动量累积梯度历史</li>
+<li>增大批次或梯度累积</li>
+<li>周期性重新计算$\boldsymbol{\lambda}$</li>
+</ul>
+<p><strong>定理24.1 (随机情况)</strong></p>
+<p>若$\boldsymbol{g}_i = \mathbb{E}[\tilde{\boldsymbol{g}}_i] + \boldsymbol{\xi}_i$，其中$|\boldsymbol{\xi}_i| \leq \sigma$，则：
+\begin{equation}
+\mathbb{E}[|\boldsymbol{u}^<em> - \boldsymbol{u}_{noisy}^</em>|] = O(\sigma)
+\tag{82}
+\end{equation}</p>
+<h3 id="25">25. 总结与展望</h3>
+<p><strong>本文核心成果</strong>：</p>
+<ol>
+<li><strong>理论框架</strong>：Lagrange对偶 + KKT条件</li>
+<li><strong>高效算法</strong>：Frank-Wolfe迭代，$O(1/k)$收敛</li>
+<li><strong>实用性</strong>：L2正则、带噪学习等应用</li>
+<li><strong>可扩展性</strong>：混合型、多尺度、在线扩展</li>
+</ol>
+<p><strong>关键洞察</strong>：</p>
+<ul>
+<li>主次型 = 锥组合，平行型 = 凸组合</li>
+<li>互补松弛性 → 稀疏激活约束</li>
+<li>ReLU修正 = 投影到约束空间</li>
+</ul>
+<p><strong>未来方向</strong>：</p>
+<ol>
+<li>非凸情况的理论保证</li>
+<li>自适应权重的元学习</li>
+<li>大规模分布式实现</li>
+<li>与Neural Architecture Search结合</li>
+</ol>
+<p><strong>完</strong></p>
+        </div>
+    </div>
+</body>
+</html>

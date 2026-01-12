@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成扩散模型漫谈（十一）：统一扩散模型（应用篇）</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>生成扩散模型漫谈（十一）：统一扩散模型（应用篇）</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 42.9 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9271">https://spaces.ac.cn/archives/9271</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在<a href="/archives/9262">《生成扩散模型漫谈（十）：统一扩散模型（理论篇）》</a>中，笔者自称构建了一个统一的模型框架（Unified Diffusion Model，UDM），它允许更一般的扩散方式和数据类型。那么UDM框架究竟能否实现如期目的呢？本文通过一些具体例子来演示其一般性。</p>
+<h2 id="_1">框架回顾</h2>
+<p>首先，UDM通过选择噪声分布$q(\boldsymbol{\varepsilon})$和变换$\boldsymbol{\mathcal{F}}$来构建前向过程<br />
+\begin{equation}\boldsymbol{x}<em t-1="t-1">t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon}),\quad \boldsymbol{\varepsilon}\sim q(\boldsymbol{\varepsilon})\end{equation}<br />
+然后，通过如下的分解来实现反向过程$\boldsymbol{x}</em>}\sim p(\boldsymbol{x<em t-1="t-1">{t-1}|\boldsymbol{x}_t)$的采样<br />
+\begin{equation}\hat{\boldsymbol{x}}_0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)\quad \&amp; \quad \boldsymbol{x}</em>}\sim p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0=\hat{\boldsymbol{x}}_0)\end{equation<br />
+其中$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$就是用$\boldsymbol{x}_t$预估$\boldsymbol{x}_0$的概率，一般用简单分布$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$来近似建模，训练目标基本上就是$-\log q(\boldsymbol{x}_0|\boldsymbol{x}_t)$或其简单变体。当$\boldsymbol{x}_0$是连续型数据时，$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$一般就取条件正态分布；当$\boldsymbol{x}_0$是离散型数据时，$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$可以选择自回归模型或者非自回归模型。</p>
+<p>至于$p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$的最基准的选择就是<br />
+\begin{equation}p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0) = p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">0)\quad\Leftrightarrow\quad \boldsymbol{x}</em>}=\boldsymbol{\mathcal{F}<em t-1="t-1">{t-1}(\boldsymbol{x}_0,\boldsymbol{\varepsilon})\end{equation}<br />
+从这个基准出发，在不同的条件下可以得到不同的优化结果。当$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})$关于$\boldsymbol{\varepsilon}$是可逆的，那么可以解出$\boldsymbol{\varepsilon} = \boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0,\boldsymbol{x}_t)$，然后得到更好的确定性采样方式<br />
+\begin{equation}\boldsymbol{x}</em>} = \boldsymbol{\mathcal{F}<em t-1="t-1">{t-1}(\boldsymbol{x}_0,\boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0,\boldsymbol{x}_t))\end{equation}<br />
+更进一步，如果$q(\boldsymbol{\varepsilon})$是标准正态分布，那么可以得到<br />
+\begin{equation}\quad\boldsymbol{x}</em>} = \boldsymbol{\mathcal{F}}_{t-1}(\boldsymbol{x}_0,\sqrt{1 - \tilde{\sigma}_t^2}\boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0,\boldsymbol{x}_t) + \tilde{\sigma}_t \boldsymbol{\varepsilon})\end{equation</p>
+<h2 id="_2">热之扩散</h2>
+<p>现在这一节中，我们证明“热扩散模型”是UDM的一个特例，这里的热扩散（Hot Diffusion）指的是前面介绍的<a href="/archives/9119">DDPM</a>、<a href="/archives/9181">DDIM</a>等主流的扩散模型，这个称呼出自下面的“冷扩散”论文中。</p>
+<p>主流扩散模型处理的是连续型数据，以加性正态噪声来构建前向过程：<br />
+\begin{equation}\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon},\quad \boldsymbol{\varepsilon}\sim \mathcal{N}(\boldsymbol{0},\boldsymbol{I})\end{equation}<br />
+$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$的选择就是正态分布$\mathcal{N}(\boldsymbol{x}_0;\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t),\bar{\sigma}_t^2 \boldsymbol{I})$，一般不将$\bar{\sigma}_t$作为训练参数，所以略去常数项后就有<br />
+\begin{equation}-\log q(\boldsymbol{x}_0|\boldsymbol{x}_t) = \frac{1}{2\bar{\sigma}_t^2}\Vert\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\Vert^2\end{equation}<br />
+进一步引入参数化$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) = \frac{1}{\bar{\alpha}_t}\left(\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\right)$并结合$\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$得到<br />
+\begin{equation}-\log q(\boldsymbol{x}_0|\boldsymbol{x}_t) = \frac{\bar{\beta}_t^2}{2\bar{\sigma}_t^2\bar{\alpha}_t^2}\left\Vert\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>}}(\bar{\alpha<em _boldsymbol_theta="\boldsymbol{\theta">t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, t)\right\Vert^2\end{equation}<br />
+实验显示略去前面的系数后效果更好，所以最终训练目标一般是$\Vert\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>_t$的选择，可以参考}}(\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, t)\Vert^2$。至于采样过程中$\bar{\sigma<a href="/archives/9245">《生成扩散模型漫谈（七）：最优扩散方差估计（上）》</a>、<a href="/archives/9246">《生成扩散模型漫谈（八）：最优扩散方差估计（下）》</a>来进行。</p>
+<p>最后，关于$p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0)$我们有<br />
+\begin{equation}\begin{aligned}\boldsymbol{x}</em>} =&amp;\, \bar{\alpha<em t-1="t-1">{t-1} \boldsymbol{x}_0 + \bar{\beta}</em>\\\} \boldsymbol{\varepsilon<br />
+\sim&amp;\, \bar{\alpha}<em t-1="t-1">{t-1} \boldsymbol{x}_0 + \sqrt{\bar{\beta}</em>}^2 - \sigma_t^2}\boldsymbol{\varepsilon<em t-1="t-1">1 + \sigma_t\boldsymbol{\varepsilon}_2\end{aligned}<br />
+\,\,,\quad \boldsymbol{\varepsilon},\boldsymbol{\varepsilon}_1,\boldsymbol{\varepsilon}_2\sim \mathcal{N}(\boldsymbol{0},\boldsymbol{I})\end{equation}<br />
+从$\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$解得$\boldsymbol{\varepsilon} = \left.(\boldsymbol{x}_t - \bar{\alpha}_t \boldsymbol{x}_0)\right/ \bar{\beta}_t$，替换掉$\boldsymbol{\varepsilon}_1$，最终可以得到一般的$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0)$为<br />
+\begin{equation}\boldsymbol{x}</em>} = \bar{\alpha<em t-1="t-1">{t-1} \boldsymbol{x}_0 + \sqrt{\bar{\beta}</em>}^2 - \sigma_t^2}\frac{\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t - \bar{\alpha}_t \boldsymbol{x}_0}{\bar{\beta}_t} + \sigma_t\boldsymbol{\varepsilon},\quad\boldsymbol{\varepsilon}\sim \mathcal{N}(\boldsymbol{0},\boldsymbol{I})\end{equation}<br />
+而$\hat{\boldsymbol{x}}_0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)$意味着<br />
+\begin{equation}\hat{\boldsymbol{x}}_0 = \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) + \bar{\sigma}_t \boldsymbol{\varepsilon} = \frac{1}{\bar{\alpha}_t}\left(\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em t-1="t-1">t, t)\right) + \bar{\sigma}_t \boldsymbol{\varepsilon}\end{equation}<br />
+上面两式结合，就是最一般的主流扩散模型框架的反向过程，其中DDPM取了$\bar{\sigma}_t=0,\sigma_t = \frac{\bar{\beta}</em>_t$。}\beta_t}{\bar{\beta}_t}$，DDIM则取了$\bar{\sigma}_t=0,\sigma_t = 0$，而Analytical-DPM则重新估计了最优的非零的$\bar{\sigma</p>
+<h2 id="_3">冷之扩散</h2>
+<p>接下来，我们证明<a href="https://papers.cool/arxiv/2208.09392">《Cold Diffusion: Inverting Arbitrary Image Transforms Without Noise》</a>所介绍的“冷扩散（Cold Diffusion）”也是UDM的一个特例。Cold Diffusion处理的也是连续型数据，从论文标题可以看出，它着重于使用任意（无噪声的）变换来构建前向过程，据笔者所知，这是第一篇尝试一般前向过程的论文，UDM在构建过程中，受到了它的颇多启发，在此对原作者表示感谢。</p>
+<p>Cold Diffusion通过确定性的变换$\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0)$构建前向过程，为了方便后面的分析，我们引入更一般的前向过程<br />
+\begin{equation}\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0) + \sigma \boldsymbol{\varepsilon},\quad \boldsymbol{\varepsilon}\sim q(\boldsymbol{\varepsilon})\end{equation}<br />
+这里的变换$\boldsymbol{\mathcal{F}}$可以是对原始数据的任意破坏方式，对于图像来说有模糊、遮掩、池化等，如果需要确定性的变换，事后让$\sigma\to 0$即可。</p>
+<p>接着，$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$的选择为$l_1$范数为度量的正态分布，即<br />
+\begin{equation}q(\boldsymbol{x}_0|\boldsymbol{x}_t) = \frac{1}{Z(\tau)}\int e^{-\left.\Vert\boldsymbol{x}_0 - \boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t)\Vert_1\right/\tau}d\boldsymbol{x}_0\end{equation}<br />
+其中$Z(\tau)$是归一化因子。取$\tau$为固定值，那么除去常数项后有$-\log q(\boldsymbol{x}_0|\boldsymbol{x}_t)\propto\Vert\boldsymbol{x}_0 - \boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t)\Vert_1$，结合$\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0)$，得到训练目标为最小化<br />
+\begin{equation}\Vert\boldsymbol{x}_0 - \boldsymbol{\mathcal{G}}_t(\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0))\Vert_1\end{equation}</p>
+<p>在反向过程中，Cold Diffusion直接忽略了$q(\boldsymbol{x}<em t-1="t-1">0|\boldsymbol{x}_t)$的方差（即让$\tau\to 0$），这样得到$\hat{\boldsymbol{x}}_0 = \boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t)$。如果$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0)$直接取基准选择$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">0)$，即$\boldsymbol{x}</em>} = \boldsymbol{\mathcal{F}<em t-1="t-1">{t-1}(\boldsymbol{x}_0) + \sigma \boldsymbol{\varepsilon}$，那么代入$\hat{\boldsymbol{x}}_0$并取$\sigma\to 0$的极限后就得到<br />
+\begin{equation}\hat{\boldsymbol{x}}_0=\boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t),\quad \boldsymbol{x}</em>} = \boldsymbol{\mathcal{F}<em t-1="t-1">{t-1}(\hat{\boldsymbol{x}}_0)\end{equation}<br />
+这就是原论文的“Naive Sampling”。而如果从$\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0) + \sigma \boldsymbol{\varepsilon}$解出$\boldsymbol{\varepsilon} = \left.(\boldsymbol{x}_t - \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0))\right/\sigma$后，代入$\boldsymbol{x}</em>} = \boldsymbol{\mathcal{F}<em t-1="t-1">{t-1}(\boldsymbol{x}_0) + \sigma \boldsymbol{\varepsilon}$中就得到<br />
+\begin{equation}\hat{\boldsymbol{x}}_0=\boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t),\quad \boldsymbol{x}</em>} = \boldsymbol{x<em t-1="t-1">t + \boldsymbol{\mathcal{F}}</em>}(\hat{\boldsymbol{x}}_0) - \boldsymbol{\mathcal{F}}_t(\hat{\boldsymbol{x}}_0)\end{equation<br />
+这就是原论文的“Improved Sampling”。</p>
+<p>总的来说，Cold Diffusion首次成功实现了一般变换的前向过程的实现，但由于它过于强调“Without Noise”，所以它理论上有着无法弥补的缺陷。比如，对于$w\times w\times 3$的图片数据，Cold Diffusion在用模糊操作实现前向过程时，最终结果就相当于一个$3$维向量，而Cold Diffusion的反向过程也是确定性的，所以就是说Cold Diffusion通过一个确定性的变换，将$3w^2$维的图片变成了$3$维，然后又通过确定性的变换，将$3$维重建为$3w^2$维的图片，其中间过程必然有着严重的信息损失的，这必然会限制重建的清晰度，从而也限制了生成的清晰度。</p>
+<p>要解决这个问题，就不能在前向或者反向过程中拒绝噪声的存在。因为噪声意味着不确定性，不确定性意味着“一对多”，“一对多”意味着允许“多对一”的前向过程，即允许信息损失的出现。事实上，Cold Diffusion本身就已经意识到$3$维的向量难以生成$3w^2$维的完整数据这个事实了，它在生成过程中，事实上还往这个$3$维向量加入了$3w^2$维的轻微随机噪声，实验显示这个操作提高了生成效果。而这个操作大致上就相当于$\sigma &gt; 0$的前向过程了。</p>
+<h2 id="_4">编辑模型</h2>
+<p>以上两个例子处理的都是连续型数据，而我们说过，UDM原则上不限定数据类型，这一节我们介绍一个离散型的例子，它显示基于编辑操作的文本生成模型，本质上也可以看成UDM的特例。</p>
+<p>简单起见，我们考虑长度为$l$的定长句子生成，比如五言律诗、七言绝句等，变长句子不是不可以，而是细节上稍微复杂些。然后，我们将前向过程$\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})$定义为“随机替换”，即</p>
+<blockquote>
+<p>随机选句子中的$t$个token随机替换为别的token</p>
+</blockquote>
+<p>其中$t\leq l$时，当$t=l$时，此时$\boldsymbol{x}_t$就是$l$个完全随机组合的token。</p>
+<p>此时$q(\boldsymbol{x}<em t-1="t-1">0|\boldsymbol{x}_t)$就是用随机替换后的序列来预测原序列的模型，用自回归/非自回归模型均可，损失函数用交叉熵。注意此时$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})$关于噪声必然是不可逆的（即给定$\boldsymbol{x}_0$和$\boldsymbol{x}_t$，从$\boldsymbol{x}_0$变到$\boldsymbol{x}_t$的方式不止有一种），因此我们只能用基准选择$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{x}_0)=p(\boldsymbol{x}</em>_0)$，这意味着生成过程是：}|\boldsymbol{x</p>
+<blockquote>
+<p>1、随机选$l$个token作为初始的$\boldsymbol{x}_l$；</p>
+<p>2、从$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$预测$\hat{\boldsymbol{x}}_0$；</p>
+<p>3、随机选$\hat{\boldsymbol{x}}<em t-1="t-1">0$的$t-1$个token随机替换为别的token，作为$\boldsymbol{x}</em>$；</p>
+<p>4、反复执行2、3步，直到得出最终的$\boldsymbol{x}_0$。</p>
+</blockquote>
+<p>但是，这样的算法效果不会很好，因为第2步的预估成果往往会被第3步的随机替换“毁”掉不少，有点“一夜回到解放前”的感觉，要想提高效果，就必须要用更好的采样方案，这要求$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})$关于噪声可逆，也就是从给定的$\boldsymbol{x}_0$和$\boldsymbol{x}_t$可以看出变换方式是怎样的。为此，我们规定前向过程为：</p>
+<blockquote>
+<p>随机选句子中的$t$个token随机替换为<strong>不同</strong> 的token</p>
+</blockquote>
+<p>它跟原来的区别是随机替换的过程中，原来的token必须替换为原来不一样的token，如果不做这个选择，则有可能采样到一样的token。做了这个限制后，我们可以直接对比$\boldsymbol{x}_0$和$\boldsymbol{x}_t$的差异，来看出修改了什么，从而将第3步的随机替换，换成由$\hat{\boldsymbol{x}}_0$到$\boldsymbol{x}_t$的替换变换：</p>
+<blockquote>
+<p>1、随机选$l$个token作为初始的$\boldsymbol{x}_l$；</p>
+<p>2、从$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$预测$\hat{\boldsymbol{x}}_0$，要求$\hat{\boldsymbol{x}}_0$与$\boldsymbol{x}_t$有$t$个不同token（用非自回归模型比较好实现）；</p>
+<p>3、随机选$\boldsymbol{x}<em t-1="t-1">t$中与$\hat{\boldsymbol{x}}_0$不同的token中的一个，替换为$\hat{\boldsymbol{x}}_0$对应位置的token，作为$\boldsymbol{x}</em>$；</p>
+<p>4、反复执行2、3步，直到得出最终的$\boldsymbol{x}_0$。</p>
+</blockquote>
+<p>这样一来，每次的预测结果$\hat{\boldsymbol{x}}<em t-1="t-1">0$的有效部分（$\hat{\boldsymbol{x}}_0$与$\boldsymbol{x}_t$相同的部分）都得以保留，并且$\boldsymbol{x}</em>_t$相比只修改了一个token，因此生成过程是渐进式的稳定生成。它跟普通的自回归模型区别则是去掉了从左往右的生成方向限制。}$与$\boldsymbol{x</p>
+<h2 id="_5">掩码模型</h2>
+<p>如果读者对上述模型还是很模糊，这里笔者再提供一个简单例子辅助理解。同样考虑长度为$l$的定长句子生成，我们将前向过程$\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})$定义为“随机掩码”，即</p>
+<blockquote>
+<p>随机选句子中的$t$个token随机替换为[MASK]</p>
+</blockquote>
+<p>其中$t\leq l$时，当$t=l$时，此时$\boldsymbol{x}_t$就是$l$个[MASK]。</p>
+<p>此时$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$就是用带[MASK]的序列来预测原序列的模型，用一般用类似BERT的MLM模型（非自回归模型）来实现，损失函数用交叉熵。基准的生成过程是<br />
+生成过程是：</p>
+<blockquote>
+<p>1、以$l$个[MASK]作为初始的$\boldsymbol{x}_l$；</p>
+<p>2、从$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$采样$\hat{\boldsymbol{x}}_0$；</p>
+<p>3、随机选$\hat{\boldsymbol{x}}<em t-1="t-1">0$的$t-1$个token随机替换为[MASK]，作为$\boldsymbol{x}</em>$；</p>
+<p>4、反复执行2、3步，直到得出最终的$\boldsymbol{x}_0$。</p>
+</blockquote>
+<p>注意到，此时$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0,\boldsymbol{\varepsilon})$关于噪声是可逆的，即我们完全可以从给定的$\boldsymbol{x}_0$和$\boldsymbol{x}_t$可以看出变换方式是怎样的（即哪些token被替换为了[MASK]）。因此可以构造改进版生成过程</p>
+<blockquote>
+<p>1、以$l$个[MASK]作为初始的$\boldsymbol{x}_l$；</p>
+<p>2、从$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$采样$\hat{\boldsymbol{x}}_0$，注意只需采样那些原来是[MASK]的token，原来非[MASK]的不做改变；</p>
+<p>3、从原来$\boldsymbol{x}<em t-1="t-1">t$的$t$个[MASK]所在位置中随机选$t-1$个，将$\hat{\boldsymbol{x}}_0$的这些位置的token替换为[MASK]，作为$\boldsymbol{x}</em>$；</p>
+<p>4、反复执行2、3步，直到得出最终的$\boldsymbol{x}_0$。</p>
+</blockquote>
+<p>当然，其实第2、3步可以合并为更直接的一步：</p>
+<blockquote>
+<p>2 &amp; 3、从$\boldsymbol{x}<em t-1="t-1">t$的$t$个[MASK]所在位置中随机选$1$个，按$q(\boldsymbol{x}_0|\boldsymbol{x}_t)$对应位置的概率采样一个token替换上去，作为$\boldsymbol{x}</em>$；</p>
+</blockquote>
+<p>这跟基于MLM模型的Gibbs采样几乎一致了（参考<a href="/archives/8119">《【搜出来的文本】⋅（三）基于BERT的文本采样》</a>）。从“编辑模型”和“掩码模型”两个例子我们应该可以大致体会到，很多“渐变式生成”的模型，都可以用UDM框架来重新表述。又或者反过来，我们能想到的任何渐变式生成方式，都可以尝试用UDM框架来构建其概率表述。</p>
+<h2 id="_6">编码模型</h2>
+<p>前面我们所讨论的前向过程都是无训练参数的，也就是说都是事先设计好的流程，但这其实也并不是必要的。我们可以将DDPM的扩散过程一般化为<br />
+\begin{equation}\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{\mathcal{F}}(\boldsymbol{x}_0) + \bar{\beta}_t \boldsymbol{\varepsilon},\quad \boldsymbol{\varepsilon}\sim \mathcal{N}(\boldsymbol{0},\boldsymbol{I})\end{equation}<br />
+其中$\boldsymbol{\mathcal{F}}(\boldsymbol{x}_0)$是对$\boldsymbol{x}_0$的编码模型，可以带训练参数。此时训练目标就是<br />
+\begin{equation}-\log q(\boldsymbol{x}_0|\boldsymbol{x}_t) = -\log q(\boldsymbol{x}_0|\bar{\alpha}_t\boldsymbol{\mathcal{F}}(\boldsymbol{x}_0) + \bar{\beta}_t \boldsymbol{\varepsilon})\end{equation}<br />
+只不过此时$\boldsymbol{\mathcal{F}}$也有训练参数。至于反向过程也是类似的，只不过最后采样到$\hat{\boldsymbol{x}}_0\sim q(\boldsymbol{x}_0|\boldsymbol{x}_1)$就直接返回$\hat{\boldsymbol{x}}_0$了。特别地，由于多了一个编码模型$\boldsymbol{\mathcal{F}}$，所以输入$\boldsymbol{x}_0$既可以是离散型数据，也可以是连续型数据，它提供了类似VAE的将数据分布编码到隐变量的正态分布的一种方法。</p>
+<h2 id="_7">文章小结</h2>
+<p>本文主要应用上一篇文章所构建的统一扩散模型框架（Unified Diffusion Model，UDM）来推导几个具体的例子，包括主流的扩散模型、Cold Diffusion、文本编辑生成、编码模型等。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9271">https://spaces.ac.cn/archives/9271</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Sep. 21, 2022). 《生成扩散模型漫谈（十一）：统一扩散模型（应用篇） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9271">https://spaces.ac.cn/archives/9271</a></p>
+<p>@online{kexuefm-9271,<br />
+title={生成扩散模型漫谈（十一）：统一扩散模型（应用篇）},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Sep},<br />
+url={\url{https://spaces.ac.cn/archives/9271}},<br />
+} </p>
+<hr />
+<h2 id="_8">公式推导与注释</h2>
+<h3 id="1-udm">1. 统一扩散模型（UDM）的数学框架</h3>
+<h4 id="11">1.1 核心思想与动机</h4>
+<p>传统扩散模型（如DDPM）固定了前向扩散过程为加性高斯噪声。<strong>统一扩散模型（UDM）</strong>的核心创新是将这一框架推广到任意变换$\boldsymbol{\mathcal{F}}_t$和任意噪声分布$q(\boldsymbol{\varepsilon})$。</p>
+<p><strong>定义1.1</strong>（统一前向过程）：给定数据$\boldsymbol{x}<em _text_data="\text{data">0 \sim p</em>_0)$，前向过程定义为：}}(\boldsymbol{x</p>
+<p>$$
+\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}), \quad \boldsymbol{\varepsilon} \sim q(\boldsymbol{\varepsilon}) \tag{1}
+$$</p>
+<p>其中：
+- $\boldsymbol{\mathcal{F}}_t: \mathcal{X} \times \mathcal{E} \to \mathcal{X}$是确定性变换
+- $q(\boldsymbol{\varepsilon})$是噪声分布（不限于高斯）
+- $t \in [0, T]$是扩散时间</p>
+<p><strong>关键性质</strong>：
+1. <strong>一般性</strong>：$\boldsymbol{\mathcal{F}}_t$可以是任意可微变换（模糊、遮掩、下采样等）
+2. <strong>灵活性</strong>：$q(\boldsymbol{\varepsilon})$可以是连续或离散分布
+3. <strong>兼容性</strong>：包含DDPM、DDIM等经典模型为特例</p>
+<h4 id="12">1.2 反向过程的概率分解</h4>
+<p><strong>核心分解</strong>：给定$\boldsymbol{x}<em t-1="t-1">t$，生成$\boldsymbol{x}</em>$的过程分解为两步：</p>
+<p>$$
+p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) = \int p(\boldsymbol{x}_0|\boldsymbol{x}_t) \cdot p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) d\boldsymbol{x}_0 \tag{2}
+$$</p>
+<p><strong>第一步</strong>：预测原始数据$\boldsymbol{x}_0$</p>
+<p>$$
+\hat{\boldsymbol{x}}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t) \tag{3}
+$$</p>
+<p>我们用参数化的分布$q_\theta(\boldsymbol{x}_0|\boldsymbol{x}_t)$来近似$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$，训练目标为：</p>
+<p>$$
+\mathcal{L}_{\text{recon}} = \mathbb{E}_{\boldsymbol{x}_0, t}\left[-\log q_\theta(\boldsymbol{x}_0|\boldsymbol{x}_t)\right] \tag{4}
+$$</p>
+<p><strong>第二步</strong>：条件转移$\boldsymbol{x}<em t-1="t-1">t \to \boldsymbol{x}</em>$</p>
+<p>$$
+\boldsymbol{x}_{t-1} \sim p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0 = \hat{\boldsymbol{x}}_0) \tag{5}
+$$</p>
+<p><strong>基准选择</strong>：最简单的选择是忽略$\boldsymbol{x}_t$的信息：</p>
+<p>$$
+p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_0) \tag{6}
+$$</p>
+<p>即直接从$\boldsymbol{x}<em t-1="t-1">0$重新采样$\boldsymbol{x}</em>$：</p>
+<p>$$
+\boldsymbol{x}_{t-1} = \boldsymbol{\mathcal{F}}_{t-1}(\hat{\boldsymbol{x}}_0, \boldsymbol{\varepsilon}), \quad \boldsymbol{\varepsilon} \sim q(\boldsymbol{\varepsilon}) \tag{7}
+$$</p>
+<h4 id="13">1.3 改进的反向过程：利用变换可逆性</h4>
+<p><strong>定理1.1</strong>（确定性反向过程）：如果$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \cdot)$关于$\boldsymbol{\varepsilon}$是可逆的，即存在逆映射$\boldsymbol{\mathcal{F}}_t^{-1}$使得：</p>
+<p>$$
+\boldsymbol{\varepsilon} = \boldsymbol{\mathcal{F}}_t^{-1}(\boldsymbol{x}_0, \boldsymbol{x}_t) \tag{8}
+$$</p>
+<p>则可以构造改进的反向过程：</p>
+<p>$$
+\boldsymbol{x}_{t-1} = \boldsymbol{\mathcal{F}}_{t-1}\left(\hat{\boldsymbol{x}}_0, \boldsymbol{\mathcal{F}}_t^{-1}(\hat{\boldsymbol{x}}_0, \boldsymbol{x}_t)\right) \tag{9}
+$$</p>
+<p><strong>证明</strong>：从(1)出发，已知$\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon})$和可逆性假设，可以唯一确定$\boldsymbol{\varepsilon}$。将此$\boldsymbol{\varepsilon}$重用于$t-1$时刻，确保了噪声的连续性。□</p>
+<p><strong>直觉</strong>：这类似于DDIM的确定性采样——不是重新采样噪声，而是保持相同的"噪声轨迹"。</p>
+<h4 id="14">1.4 随机性注入：插值变体</h4>
+<p><strong>推广</strong>：即使变换可逆，我们也可以在噪声中引入随机性，平衡确定性和随机性。</p>
+<p><strong>引理1.2</strong>（噪声插值）：对于高斯噪声$q(\boldsymbol{\varepsilon}) = \mathcal{N}(\mathbf{0}, \boldsymbol{I})$，可以构造：</p>
+<p>$$
+\boldsymbol{\varepsilon}_{\text{interp}} = \sqrt{1 - \tilde{\sigma}_t^2} \cdot \boldsymbol{\mathcal{F}}_t^{-1}(\hat{\boldsymbol{x}}_0, \boldsymbol{x}_t) + \tilde{\sigma}_t \boldsymbol{\varepsilon}_{\text{new}} \tag{10}
+$$</p>
+<p>其中$\boldsymbol{\varepsilon}_{\text{new}} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})$，$\tilde{\sigma}_t \in [0, 1]$控制随机性强度。</p>
+<p>代入(7)得到：</p>
+<p>$$
+\boldsymbol{x}_{t-1} = \boldsymbol{\mathcal{F}}_{t-1}\left(\hat{\boldsymbol{x}}_0, \sqrt{1 - \tilde{\sigma}_t^2} \cdot \boldsymbol{\mathcal{F}}_t^{-1}(\hat{\boldsymbol{x}}_0, \boldsymbol{x}_t) + \tilde{\sigma}_t \boldsymbol{\varepsilon}_{\text{new}}\right) \tag{11}
+$$</p>
+<p><strong>特殊情况</strong>：
+- $\tilde{\sigma}_t = 0$：完全确定性（DDIM风格）
+- $\tilde{\sigma}_t = 1$：完全随机（基准选择）
+- $0 &lt; \tilde{\sigma}_t &lt; 1$：混合策略</p>
+<h3 id="2-hot-diffusion">2. 热之扩散（Hot Diffusion）的数学推导</h3>
+<h4 id="21">2.1 加性高斯噪声的前向过程</h4>
+<p>主流扩散模型采用线性加性噪声：</p>
+<p>$$
+\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}) = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I}) \tag{12}
+$$</p>
+<p>其中：
+- $\bar{\alpha}<em s="1">t = \prod</em>$（常见参数化）
+- 或更一般地，$\bar{\beta}_t = \sqrt{1 - \bar{\alpha}_t}$}^t \alpha_s$，$\bar{\beta}_t = \sqrt{1 - \bar{\alpha}_t^2</p>
+<p><strong>前向过程的概率形式</strong>：</p>
+<p>$$
+q(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t\boldsymbol{x}_0, \bar{\beta}_t^2\boldsymbol{I}) \tag{13}
+$$</p>
+<h4 id="22">2.2 后验分布的建模</h4>
+<p><strong>后验建模</strong>：用正态分布近似$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$：</p>
+<p>$$
+q_\theta(\boldsymbol{x}_0|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{x}_0; \bar{\boldsymbol{\mu}}_\theta(\boldsymbol{x}_t), \bar{\sigma}_t^2\boldsymbol{I}) \tag{14}
+$$</p>
+<p><strong>负对数似然</strong>（忽略常数）：</p>
+<p>$$
+-\log q_\theta(\boldsymbol{x}_0|\boldsymbol{x}_t) = \frac{1}{2\bar{\sigma}_t^2}\|\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}_\theta(\boldsymbol{x}_t)\|^2 + \text{const} \tag{15}
+$$</p>
+<h4 id="23">2.3 噪声参数化与训练目标</h4>
+<p><strong>关键参数化</strong>：引入噪声预测网络$\boldsymbol{\epsilon}_\theta$：</p>
+<p>$$
+\bar{\boldsymbol{\mu}}_\theta(\boldsymbol{x}_t) = \frac{1}{\bar{\alpha}_t}\left(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)\right) \tag{16}
+$$</p>
+<p><strong>推导训练目标</strong>：将(16)代入(15)，并利用$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$：</p>
+<p>$$
+\begin{aligned}
+\|\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}_\theta(\boldsymbol{x}_t)\|^2 &= \left\|\boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_\theta)\right\|^2 \\
+&= \left\|\boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon} - \bar{\beta}_t\boldsymbol{\epsilon}_\theta)\right\|^2 \\
+&= \left\|\frac{\bar{\beta}_t}{\bar{\alpha}_t}(\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t))\right\|^2 \\
+&= \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)\|^2
+\end{aligned} \tag{17}
+$$</p>
+<p>因此，负对数似然为：</p>
+<p>$$
+-\log q_\theta(\boldsymbol{x}_0|\boldsymbol{x}_t) = \frac{\bar{\beta}_t^2}{2\bar{\sigma}_t^2\bar{\alpha}_t^2}\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)\|^2 + \text{const} \tag{18}
+$$</p>
+<p><strong>简化训练目标</strong>：实践中，忽略权重系数效果更好：</p>
+<p>$$
+\mathcal{L}_{\text{simple}} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}}\left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_\theta(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}, t)\|^2\right] \tag{19}
+$$</p>
+<h4 id="24">2.4 反向过程的推导</h4>
+<p><strong>逆变换</strong>：从$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$解出噪声：</p>
+<p>$$
+\boldsymbol{\varepsilon} = \frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t} \tag{20}
+$$</p>
+<p><strong>条件转移概率</strong>：基于前向过程$\boldsymbol{x}<em t-1="t-1">{t-1} = \bar{\alpha}</em>}\boldsymbol{x<em t-1="t-1">0 + \bar{\beta}</em>$分解为确定性部分和随机部分。}\boldsymbol{\varepsilon}$，我们需要将$\boldsymbol{\varepsilon</p>
+<p><strong>引理2.1</strong>（高斯噪声分解）：标准高斯随机变量可以分解为：</p>
+<p>$$
+\boldsymbol{\varepsilon} \sim \sqrt{1 - r^2} \cdot \boldsymbol{\varepsilon}_1 + r \cdot \boldsymbol{\varepsilon}_2, \quad \boldsymbol{\varepsilon}_1, \boldsymbol{\varepsilon}_2 \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I}) \text{ i.i.d.} \tag{21}
+$$</p>
+<p>其中$r \in [0, 1]$控制随机性。</p>
+<p><strong>应用到反向过程</strong>：</p>
+<p>$$
+\begin{aligned}
+\boldsymbol{x}_{t-1} &= \bar{\alpha}_{t-1}\boldsymbol{x}_0 + \bar{\beta}_{t-1}\boldsymbol{\varepsilon} \\
+&= \bar{\alpha}_{t-1}\boldsymbol{x}_0 + \sqrt{\bar{\beta}_{t-1}^2 - \sigma_t^2} \cdot \boldsymbol{\varepsilon}_1 + \sigma_t \boldsymbol{\varepsilon}_2
+\end{aligned} \tag{22}
+$$</p>
+<p>将(20)代入$\boldsymbol{\varepsilon}_1$的位置：</p>
+<p>$$
+\boldsymbol{x}_{t-1} = \bar{\alpha}_{t-1}\hat{\boldsymbol{x}}_0 + \sqrt{\bar{\beta}_{t-1}^2 - \sigma_t^2} \cdot \frac{\boldsymbol{x}_t - \bar{\alpha}_t\hat{\boldsymbol{x}}_0}{\bar{\beta}_t} + \sigma_t\boldsymbol{\varepsilon} \tag{23}
+$$</p>
+<p>其中$\hat{\boldsymbol{x}}<em>0 = \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}</em>\theta(\boldsymbol{x}_t, t))$。</p>
+<p><strong>标准形式</strong>：整理得到：</p>
+<p>$$
+\boldsymbol{x}_{t-1} = \underbrace{\frac{\bar{\alpha}_{t-1}\bar{\beta}_t^2 + \bar{\alpha}_t(\bar{\beta}_{t-1}^2 - \sigma_t^2)}{\bar{\alpha}_t\bar{\beta}_t^2}}_{\mu_{\text{coef}}}\boldsymbol{x}_t - \underbrace{\frac{\bar{\beta}_{t-1}\sqrt{\bar{\beta}_{t-1}^2 - \sigma_t^2}}{\bar{\beta}_t}}_{\epsilon_{\text{coef}}}\boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t) + \sigma_t\boldsymbol{\varepsilon} \tag{24}
+$$</p>
+<h4 id="25">2.5 经典模型的统一</h4>
+<p><strong>DDPM</strong>：</p>
+<p>$$
+\sigma_t = \frac{\bar{\beta}_{t-1}}{\bar{\beta}_t}\beta_t, \quad \bar{\sigma}_t = 0 \tag{25}
+$$</p>
+<p>这对应于后验均值的最优选择。</p>
+<p><strong>DDIM</strong>：</p>
+<p>$$
+\sigma_t = 0, \quad \bar{\sigma}_t = 0 \tag{26}
+$$</p>
+<p>完全确定性采样，允许跳步。</p>
+<p><strong>Analytic-DPM</strong>：</p>
+<p>$$
+\bar{\sigma}_t^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\left(1 - \frac{1}{d}\mathbb{E}\left[\|\boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)\|^2\right]\right) \tag{27}
+$$</p>
+<p>最优化$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$的方差。</p>
+<h3 id="3-cold-diffusion">3. 冷之扩散（Cold Diffusion）的数学分析</h3>
+<h4 id="31">3.1 任意变换的前向过程</h4>
+<p><strong>Cold Diffusion</strong>允许任意确定性变换：</p>
+<p>$$
+\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0) + \sigma\boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim q(\boldsymbol{\varepsilon}) \tag{28}
+$$</p>
+<p>常见的$\boldsymbol{\mathcal{F}}<em t="t">t$包括：
+- <strong>模糊</strong>：$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0) = \text{GaussianBlur}</em>}(\boldsymbol{x<em 2_t="2^t">0)$
+- <strong>下采样</strong>：$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0) = \text{AvgPool}</em>_0)$
+- }(\boldsymbol{x<strong>遮掩</strong>：$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0) = \boldsymbol{M}_t \odot \boldsymbol{x}_0$（$\boldsymbol{M}_t$是二值掩码）
+- <strong>去色</strong>：$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0) = (1 - t/T)\boldsymbol{x}_0 + (t/T)\text{gray}(\boldsymbol{x}_0)$</p>
+<p><strong>原论文设置</strong>：$\sigma = 0$（完全确定性）。</p>
+<h4 id="32">3.2 逆变换网络的训练</h4>
+<p><strong>目标</strong>：学习逆映射$\boldsymbol{\mathcal{G}}_t \approx \boldsymbol{\mathcal{F}}_t^{-1}$。</p>
+<p><strong>后验建模</strong>：使用$L_1$损失（对图像更鲁棒）：</p>
+<p>$$
+q_\theta(\boldsymbol{x}_0|\boldsymbol{x}_t) \propto \exp\left(-\frac{\|\boldsymbol{x}_0 - \boldsymbol{\mathcal{G}}_t(\boldsymbol{x}_t)\|_1}{\tau}\right) \tag{29}
+$$</p>
+<p>其中$\tau$是温度参数（通常固定）。</p>
+<p><strong>训练目标</strong>：</p>
+<p>$$
+\mathcal{L}_{\text{cold}} = \mathbb{E}_{t, \boldsymbol{x}_0}\left[\|\boldsymbol{x}_0 - \boldsymbol{\mathcal{G}}_t(\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0))\|_1\right] \tag{30}
+$$</p>
+<p>这是一个自监督的重建任务。</p>
+<h4 id="33-naive-sampling">3.3 朴素采样（Naive Sampling）</h4>
+<p>基准选择：$p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{x}_0) = p(\boldsymbol{x}</em>_0)$}|\boldsymbol{x</p>
+<p><strong>算法3.1</strong>（Cold Diffusion朴素采样）：</p>
+<div class="codehilite"><pre><span></span><code><span class="mf">1.</span><span class="w"> </span><span class="n">初始化</span><span class="err">：</span><span class="n">x_T</span><span class="w"> </span><span class="err">~</span><span class="w"> </span><span class="n">p</span><span class="p">(</span><span class="n">x_T</span><span class="p">)</span><span class="err">（</span><span class="n">如均匀噪声</span><span class="err">）</span>
+<span class="mf">2.</span><span class="w"> </span><span class="n">对</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">T</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="o">-</span><span class="mf">1</span><span class="p">,</span><span class="w"> </span><span class="mf">...</span><span class="p">,</span><span class="w"> </span><span class="mf">1</span><span class="err">：</span>
+<span class="w">     </span><span class="err">̂</span><span class="n">x_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">G_t</span><span class="p">(</span><span class="n">x_t</span><span class="p">)</span>
+<span class="w">     </span><span class="n">x_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mf">1</span><span class="err">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">F_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mf">1</span><span class="err">}</span><span class="p">(</span><span class="err">̂</span><span class="n">x_0</span><span class="p">)</span>
+<span class="mf">3.</span><span class="w"> </span><span class="n">返回</span><span class="w"> </span><span class="n">x_0</span>
+</code></pre></div>
+
+<p><strong>问题</strong>：每步的预测$\hat{\boldsymbol{x}}<em t-1="t-1">0$在下一步又被$\boldsymbol{\mathcal{F}}</em>$"破坏"，浪费了预测成果。</p>
+<h4 id="34-improved-sampling">3.4 改进采样（Improved Sampling）</h4>
+<p>利用变换的逆：从$\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0)$解出"扰动"并重用。</p>
+<p><strong>算法3.2</strong>（Cold Diffusion改进采样）：</p>
+<div class="codehilite"><pre><span></span><code><span class="mf">1.</span><span class="w"> </span><span class="n">初始化</span><span class="err">：</span><span class="n">x_T</span><span class="w"> </span><span class="err">~</span><span class="w"> </span><span class="n">p</span><span class="p">(</span><span class="n">x_T</span><span class="p">)</span>
+<span class="mf">2.</span><span class="w"> </span><span class="n">对</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">T</span><span class="p">,</span><span class="w"> </span><span class="n">T</span><span class="o">-</span><span class="mf">1</span><span class="p">,</span><span class="w"> </span><span class="mf">...</span><span class="p">,</span><span class="w"> </span><span class="mf">1</span><span class="err">：</span>
+<span class="w">     </span><span class="err">̂</span><span class="n">x_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">G_t</span><span class="p">(</span><span class="n">x_t</span><span class="p">)</span>
+<span class="w">     </span><span class="n">残差</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x_t</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">F_t</span><span class="p">(</span><span class="err">̂</span><span class="n">x_0</span><span class="p">)</span>
+<span class="w">     </span><span class="n">x_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mf">1</span><span class="err">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">F_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mf">1</span><span class="err">}</span><span class="p">(</span><span class="err">̂</span><span class="n">x_0</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">残差</span>
+<span class="w">     </span><span class="n">或等价地</span><span class="err">：</span><span class="n">x_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mf">1</span><span class="err">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x_t</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">F_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mf">1</span><span class="err">}</span><span class="p">(</span><span class="err">̂</span><span class="n">x_0</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">F_t</span><span class="p">(</span><span class="err">̂</span><span class="n">x_0</span><span class="p">)</span>
+<span class="mf">3.</span><span class="w"> </span><span class="n">返回</span><span class="w"> </span><span class="n">x_0</span>
+</code></pre></div>
+
+<p><strong>数学形式</strong>：</p>
+<p>$$
+\boldsymbol{x}_{t-1} = \boldsymbol{x}_t + \boldsymbol{\mathcal{F}}_{t-1}(\hat{\boldsymbol{x}}_0) - \boldsymbol{\mathcal{F}}_t(\hat{\boldsymbol{x}}_0) \tag{31}
+$$</p>
+<p><strong>直觉</strong>：保持相对于预测$\hat{\boldsymbol{x}}_0$的"扰动方向"。</p>
+<h4 id="35-cold-diffusion">3.5 Cold Diffusion的理论局限</h4>
+<p><strong>定理3.1</strong>（信息瓶颈）：设图像维度为$d = W \times H \times C$，若$\boldsymbol{\mathcal{F}}_T$的输出维度为$d' \ll d$，且前向和反向过程均为确定性，则：</p>
+<p>$$
+\text{MI}(\boldsymbol{x}_0; \boldsymbol{x}_T) \leq \log |\text{Range}(\boldsymbol{\mathcal{F}}_T)| \leq d' \log(256) \text{ bits} \tag{32}
+$$</p>
+<p>（假设8位量化）</p>
+<p><strong>推论</strong>：当$\boldsymbol{\mathcal{F}}_T$造成严重降维（如模糊到3像素），确定性逆映射无法恢复全部信息。</p>
+<p><strong>解决方案</strong>：引入$\sigma &gt; 0$的噪声，允许一对多映射：</p>
+<p>$$
+p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0), \sigma^2\boldsymbol{I}) \tag{33}
+$$</p>
+<p>这增加了前向过程的熵，补偿信息损失。</p>
+<h3 id="4">4. 离散数据的扩散模型</h3>
+<h4 id="41-edit-based-diffusion">4.1 编辑模型（Edit-based Diffusion）</h4>
+<p><strong>数据</strong>：定长序列$\boldsymbol{x}<em 0_1="0,1">0 = (x</em>$（词表）。}, \ldots, x_{0,l})$，$x_{0,i} \in \mathcal{V</p>
+<p><strong>前向过程</strong>（随机替换）：</p>
+<p>$$
+\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon}): \text{随机选择}\ t\ \text{个位置，替换为随机token} \tag{34}
+$$</p>
+<p>形式化：设$\boldsymbol{M}_t \in {0, 1}^l$是掩码（$|\boldsymbol{M}_t|_1 = t$），$\boldsymbol{r}_t \sim \text{Uniform}(\mathcal{V})^l$是随机token：</p>
+<p>$$
+x_{t,i} = \begin{cases}
+r_{t,i}, & \text{if } M_{t,i} = 1 \\
+x_{0,i}, & \text{if } M_{t,i} = 0
+\end{cases} \tag{35}
+$$</p>
+<p><strong>后验建模</strong>：用序列到序列模型（自回归或非自回归）：</p>
+<p>$$
+q_\theta(\boldsymbol{x}_0|\boldsymbol{x}_t) = \prod_{i=1}^l p_\theta(x_{0,i}|\boldsymbol{x}_t) \tag{36}
+$$</p>
+<p>（非自回归MLM风格）</p>
+<p><strong>训练目标</strong>：交叉熵损失</p>
+<p>$$
+\mathcal{L}_{\text{edit}} = -\mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{M}_t}\left[\sum_{i: M_{t,i}=1} \log p_\theta(x_{0,i}|\boldsymbol{x}_t)\right] \tag{37}
+$$</p>
+<h4 id="42">4.2 基础采样算法</h4>
+<p><strong>算法4.1</strong>（编辑扩散基础采样）：</p>
+<div class="codehilite"><pre><span></span><code><span class="mf">1.</span><span class="w"> </span><span class="n">初始化</span><span class="err">：</span><span class="n">x_l</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">随机l个token</span>
+<span class="mf">2.</span><span class="w"> </span><span class="n">对</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l</span><span class="p">,</span><span class="w"> </span><span class="n">l</span><span class="o">-</span><span class="mf">1</span><span class="p">,</span><span class="w"> </span><span class="mf">...</span><span class="p">,</span><span class="w"> </span><span class="mf">1</span><span class="err">：</span>
+<span class="w">     </span><span class="n">从</span><span class="w"> </span><span class="n">q_θ</span><span class="p">(</span><span class="n">x_0</span><span class="err">|</span><span class="n">x_t</span><span class="p">)</span><span class="w"> </span><span class="n">采样</span><span class="w"> </span><span class="err">̂</span><span class="n">x_0</span>
+<span class="w">     </span><span class="n">随机选择</span><span class="w"> </span><span class="err">̂</span><span class="n">x_0</span><span class="w"> </span><span class="n">的</span><span class="w"> </span><span class="n">t</span><span class="o">-</span><span class="mf">1</span><span class="w"> </span><span class="n">个位置</span>
+<span class="w">     </span><span class="n">替换为随机token</span><span class="err">，</span><span class="n">得到</span><span class="w"> </span><span class="n">x_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mf">1</span><span class="err">}</span>
+<span class="mf">3.</span><span class="w"> </span><span class="n">返回</span><span class="w"> </span><span class="n">x_0</span>
+</code></pre></div>
+
+<p><strong>问题</strong>：步骤3破坏了步骤2的预测，效率低下。</p>
+<h4 id="43">4.3 改进采样：利用编辑距离</h4>
+<p><strong>关键洞察</strong>：如果替换时保证$x_{t,i} \neq x_{0,i}$（强制不同），则编辑位置可追踪。</p>
+<p><strong>改进前向过程</strong>：</p>
+<p>$$
+x_{t,i} = \begin{cases}
+r_{t,i} \neq x_{0,i}, & \text{if } M_{t,i} = 1 \\
+x_{0,i}, & \text{if } M_{t,i} = 0
+\end{cases} \tag{38}
+$$</p>
+<p><strong>算法4.2</strong>（编辑扩散改进采样）：</p>
+<div class="codehilite"><pre><span></span><code><span class="mf">1.</span><span class="w"> </span><span class="n">初始化</span><span class="err">：</span><span class="n">x_l</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">随机l个token</span>
+<span class="mf">2.</span><span class="w"> </span><span class="n">对</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l</span><span class="p">,</span><span class="w"> </span><span class="n">l</span><span class="o">-</span><span class="mf">1</span><span class="p">,</span><span class="w"> </span><span class="mf">...</span><span class="p">,</span><span class="w"> </span><span class="mf">1</span><span class="err">：</span>
+<span class="w">     </span><span class="n">从</span><span class="w"> </span><span class="n">q_θ</span><span class="p">(</span><span class="n">x_0</span><span class="err">|</span><span class="n">x_t</span><span class="p">)</span><span class="w"> </span><span class="n">预测</span><span class="w"> </span><span class="err">̂</span><span class="n">x_0</span><span class="err">，</span><span class="n">约束</span><span class="w"> </span><span class="n">Hamming</span><span class="p">(</span><span class="err">̂</span><span class="n">x_0</span><span class="p">,</span><span class="w"> </span><span class="n">x_t</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">t</span>
+<span class="w">     </span><span class="n">计算差异集</span><span class="w"> </span><span class="n">D</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">{</span><span class="n">i</span><span class="p">:</span><span class="w"> </span><span class="err">̂</span><span class="n">x_</span><span class="err">{</span><span class="mf">0</span><span class="p">,</span><span class="n">i</span><span class="err">}</span><span class="w"> </span><span class="err">≠</span><span class="w"> </span><span class="n">x_</span><span class="err">{</span><span class="n">t</span><span class="p">,</span><span class="n">i</span><span class="err">}}</span>
+<span class="w">     </span><span class="n">从</span><span class="w"> </span><span class="n">D</span><span class="w"> </span><span class="n">中随机选一个位置</span><span class="w"> </span><span class="n">i</span><span class="o">*</span>
+<span class="w">     </span><span class="n">x_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mf">1</span><span class="err">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x_t</span><span class="err">，</span><span class="n">但</span><span class="w"> </span><span class="n">x_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mf">1</span><span class="p">,</span><span class="n">i</span><span class="o">*</span><span class="err">}</span><span class="w"> </span><span class="err">←</span><span class="w"> </span><span class="err">̂</span><span class="n">x_</span><span class="err">{</span><span class="mf">0</span><span class="p">,</span><span class="n">i</span><span class="o">*</span><span class="err">}</span>
+<span class="mf">3.</span><span class="w"> </span><span class="n">返回</span><span class="w"> </span><span class="n">x_0</span>
+</code></pre></div>
+
+<p><strong>数学表达</strong>：</p>
+<p>$$
+\boldsymbol{x}_{t-1} = \boldsymbol{x}_t + \boldsymbol{e}_{i^*} \odot (\hat{\boldsymbol{x}}_0 - \boldsymbol{x}_t) \tag{39}
+$$</p>
+<p>其中$\boldsymbol{e}_{i^*}$是one-hot向量。</p>
+<p><strong>优势</strong>：
+- 每步只修改1个token（渐进式）
+- 保留已预测的正确部分
+- 无固定生成方向（如从左到右）</p>
+<h4 id="44-mask-based-diffusion">4.4 掩码模型（Mask-based Diffusion）</h4>
+<p><strong>特殊化</strong>：替换为统一的[MASK] token。</p>
+<p><strong>前向过程</strong>：</p>
+<p>$$
+x_{t,i} = \begin{cases}
+\text{[MASK]}, & \text{if } M_{t,i} = 1 \\
+x_{0,i}, & \text{if } M_{t,i} = 0
+\end{cases} \tag{40}
+$$</p>
+<p><strong>优势</strong>：$\boldsymbol{\mathcal{F}}_t$关于噪声天然可逆——从$\boldsymbol{x}_t$直接看出哪些位置被mask。</p>
+<p><strong>算法4.3</strong>（掩码扩散采样）：</p>
+<div class="codehilite"><pre><span></span><code><span class="mf">1.</span><span class="w"> </span><span class="n">初始化</span><span class="err">：</span><span class="n">x_l</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="n">MASK, MASK, ..., MASK</span><span class="o">]</span>
+<span class="mf">2.</span><span class="w"> </span><span class="n">对</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l</span><span class="p">,</span><span class="w"> </span><span class="n">l</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="p">...,</span><span class="w"> </span><span class="mi">1</span><span class="err">：</span>
+<span class="w">     </span><span class="n">从</span><span class="w"> </span><span class="n">q_θ</span><span class="p">(</span><span class="n">x_0</span><span class="o">|</span><span class="n">x_t</span><span class="p">)</span><span class="w"> </span><span class="n">采样</span><span class="err">，</span><span class="n">仅对</span><span class="o">[</span><span class="n">MASK</span><span class="o">]</span><span class="n">位置</span>
+<span class="w">     </span><span class="n">从当前</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="n">个</span><span class="o">[</span><span class="n">MASK</span><span class="o">]</span><span class="n">中随机选</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="n">个</span>
+<span class="w">     </span><span class="n">用采样的token替换</span><span class="err">，</span><span class="n">得到</span><span class="w"> </span><span class="n">x_</span><span class="err">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="err">}</span>
+<span class="mf">3.</span><span class="w"> </span><span class="n">返回</span><span class="w"> </span><span class="n">x_0</span>
+</code></pre></div>
+
+<p><strong>等价表述</strong>（单步合并）：</p>
+<p>$$
+\text{从}\ \boldsymbol{x}_t\ \text{的[MASK]位置中随机选1个} \to \text{用}\ p_\theta(\cdot|\boldsymbol{x}_t)\ \text{采样token填充} \tag{41}
+$$</p>
+<p><strong>与Gibbs采样的联系</strong>：这几乎等价于基于MLM的Gibbs采样（见苏剑林博客）。</p>
+<h3 id="5">5. 编码模型：参数化的前向过程</h3>
+<h4 id="51">5.1 带可学习编码器的扩散</h4>
+<p><strong>动机</strong>：前向过程$\boldsymbol{\mathcal{F}}_t$不必是预定义的，可以学习。</p>
+<p><strong>参数化前向过程</strong>：</p>
+<p>$$
+\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{\mathcal{F}}_\phi(\boldsymbol{x}_0) + \bar{\beta}_t\boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I}) \tag{42}
+$$</p>
+<p>其中$\boldsymbol{\mathcal{F}}_\phi: \mathcal{X} \to \mathbb{R}^d$是可学习的编码器（如CNN、Transformer）。</p>
+<p><strong>训练目标</strong>：联合优化编码器$\phi$和解码器$\theta$：</p>
+<p>$$
+\mathcal{L} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{\varepsilon}}\left[-\log q_\theta(\boldsymbol{x}_0|\bar{\alpha}_t\boldsymbol{\mathcal{F}}_\phi(\boldsymbol{x}_0) + \bar{\beta}_t\boldsymbol{\varepsilon})\right] \tag{43}
+$$</p>
+<h4 id="52-vae">5.2 与VAE的联系</h4>
+<p><strong>观察</strong>：当$t \to T$时，$\bar{\alpha}_T \to 0$，$\bar{\beta}_T \to 1$：</p>
+<p>$$
+\boldsymbol{x}_T \approx \boldsymbol{\varepsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I}) \tag{44}
+$$</p>
+<p>编码$\boldsymbol{z} = \boldsymbol{\mathcal{F}}_\phi(\boldsymbol{x}_0)$的先验近似为标准高斯。</p>
+<p><strong>ELBO视角</strong>：可以证明训练目标等价于VAE的ELBO（证明略，涉及变分下界）。</p>
+<h4 id="53">5.3 优势与应用</h4>
+<p><strong>优势</strong>：
+1. <strong>灵活性</strong>：$\boldsymbol{\mathcal{F}}<em>\phi$可以学习数据特定的"最优扰动方向"
+2. <strong>压缩</strong>：$\boldsymbol{\mathcal{F}}</em>\phi$可输出低维$\boldsymbol{z} \in \mathbb{R}^{d'}$（$d' &lt; d$），实现隐空间扩散
+3. <strong>跨模态</strong>：输入$\boldsymbol{x}_0$可以是离散的（文本），输出$\boldsymbol{z}$连续（便于扩散）</p>
+<p><strong>应用实例</strong>：
+- <strong>Latent Diffusion Models (LDM)</strong>：先用VAE编码图像到隐空间，再在隐空间做扩散
+- <strong>文本扩散</strong>：$\boldsymbol{x}<em>0 \in {0,1}^{l \times |\mathcal{V}|}$（one-hot），$\boldsymbol{z} = \boldsymbol{\mathcal{F}}</em>\phi(\boldsymbol{x}<em _text_emb="\text{emb">0) \in \mathbb{R}^{l \times d</em>$（嵌入）}}</p>
+<h3 id="6">6. 统一框架的理论洞察</h3>
+<h4 id="61">6.1 变换可逆性的重要性</h4>
+<p><strong>定理6.1</strong>（可逆性与采样质量）：设前向过程$\boldsymbol{x}_t = \boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon})$，后验预测误差为$|\hat{\boldsymbol{x}}_0 - \boldsymbol{x}_0| \leq \epsilon$。</p>
+<ol>
+<li><strong>不可逆情况</strong>：采样误差累积为$\mathcal{O}(T\epsilon)$</li>
+<li><strong>可逆情况</strong>：采样误差仅为$\mathcal{O}(\epsilon)$（误差不累积）</li>
+</ol>
+<p><strong>证明思路</strong>：
+- 不可逆时，每步需重新采样噪声，误差独立累加
+- 可逆时，噪声一致性保证误差沿ODE轨迹传播，不放大</p>
+<h4 id="62">6.2 数据类型与分布选择</h4>
+<p><strong>指导原则</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>数据类型</th>
+<th>后验建模</th>
+<th>损失函数</th>
+<th>采样策略</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>连续（图像）</td>
+<td>$\mathcal{N}(\bar{\boldsymbol{\mu}}, \bar{\sigma}^2\boldsymbol{I})$</td>
+<td>MSE ($L_2$)</td>
+<td>高斯采样</td>
+</tr>
+<tr>
+<td>连续（鲁棒）</td>
+<td>Laplace</td>
+<td>MAE ($L_1$)</td>
+<td>Laplace采样</td>
+</tr>
+<tr>
+<td>离散（文本）</td>
+<td>Categorical</td>
+<td>交叉熵</td>
+<td>多项采样</td>
+</tr>
+<tr>
+<td>混合</td>
+<td>联合分布</td>
+<td>组合损失</td>
+<td>条件采样</td>
+</tr>
+</tbody>
+</table>
+<h4 id="63-udm">6.3 UDM框架的表达能力</h4>
+<p><strong>命题6.2</strong>（通用性）：任何满足以下条件的生成模型都可以表示为UDM实例：</p>
+<ol>
+<li>数据逐步从简单分布（如噪声）变换到复杂分布（如真实数据）</li>
+<li>变换过程可分解为$T$步马尔可夫链</li>
+<li>每步转移概率可近似建模</li>
+</ol>
+<p><strong>例子</strong>：
+- 自回归模型：$\boldsymbol{\mathcal{F}}<em t="t">t = \text{prefix}</em>_0)$（前$t$个token）
+- 归一化流：$\boldsymbol{\mathcal{F}}_t = f_1 \circ \cdots \circ f_t$（复合可逆变换）
+- GAN（见后续文章）：将判别器隐式转化为扩散ODE}(\boldsymbol{x</p>
+<h3 id="7">7. 总结与实践建议</h3>
+<h4 id="71">7.1 核心要点回顾</h4>
+<ol>
+<li><strong>UDM的三要素</strong>：</li>
+<li>前向变换$\boldsymbol{\mathcal{F}}_t(\boldsymbol{x}_0, \boldsymbol{\varepsilon})$</li>
+<li>噪声分布$q(\boldsymbol{\varepsilon})$</li>
+<li>
+<p>后验近似$q_\theta(\boldsymbol{x}_0|\boldsymbol{x}_t)$</p>
+</li>
+<li>
+<p><strong>设计原则</strong>：</p>
+</li>
+<li>优先考虑可逆变换（提升采样质量）</li>
+<li>噪声需足够"覆盖"数据空间（避免信息瓶颈）</li>
+<li>
+<p>后验建模要匹配数据类型</p>
+</li>
+<li>
+<p><strong>经典模型的统一</strong>：
+   $$
+   \text{UDM} \supseteq \{\text{DDPM}, \text{DDIM}, \text{Cold Diffusion}, \text{Discrete Diffusion}, \ldots\}
+   $$</p>
+</li>
+</ol>
+<h4 id="72">7.2 算法选择指南</h4>
+<p><strong>连续数据（图像、音频）</strong>：
+- <strong>推荐</strong>：热扩散（DDPM/DDIM），成熟且高效
+- <strong>实验性</strong>：冷扩散+噪声（$\sigma &gt; 0$），用于特定退化</p>
+<p><strong>离散数据（文本、结构）</strong>：
+- <strong>推荐</strong>：掩码扩散（简单、稳定）
+- <strong>高级</strong>：编辑扩散（更灵活，但训练复杂）</p>
+<p><strong>低维/隐空间</strong>：
+- <strong>推荐</strong>：编码模型（Latent Diffusion），计算高效</p>
+<h4 id="73">7.3 开放问题</h4>
+<ol>
+<li>
+<p><strong>最优变换族</strong>：是否存在数据依赖的最优$\boldsymbol{\mathcal{F}}_t$？如何自动搜索？</p>
+</li>
+<li>
+<p><strong>离散与连续的桥梁</strong>：如何设计统一处理文本+图像的多模态扩散？</p>
+</li>
+<li>
+<p><strong>理论保证</strong>：UDM在何种条件下保证收敛到真实分布？</p>
+</li>
+<li>
+<p><strong>计算效率</strong>：能否设计$T=1$或$T=2$的超快扩散（保持质量）？</p>
+</li>
+</ol>
+<hr />
+<p><strong>最终总结</strong>：统一扩散模型（UDM）提供了一个高度通用的概率框架，将看似不同的生成模型统一在"渐进变换"的视角下。通过精心设计前向过程$\boldsymbol{\mathcal{F}}_t$和噪声$q(\boldsymbol{\varepsilon})$，我们可以针对不同数据类型和应用场景定制扩散模型，同时保持理论的优雅性和实现的简洁性。</p>
+        </div>
+    </div>
+</body>
+</html>

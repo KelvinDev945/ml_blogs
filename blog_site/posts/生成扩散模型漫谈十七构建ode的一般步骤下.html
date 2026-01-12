@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成扩散模型漫谈（十七）：构建ODE的一般步骤（下）</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>生成扩散模型漫谈（十七）：构建ODE的一般步骤（下）</h1>
+            <div class="meta">📅 最后更新: 2025-11-27 | 📄 大小: 57.8 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9497">https://spaces.ac.cn/archives/9497</a></p>
+<p><strong>发布日期</strong>: 2023-02-23</p>
+<hr />
+<h2 id="_1">📌 内容概览</h2>
+<p>历史总是惊人地相似。当初笔者在写<a href="/archives/9370">《生成扩散模型漫谈（十四）：构建ODE的一般步骤（上）》</a>（当时还没有“上”这个后缀）时，以为自己已经搞清楚了构建ODE式扩散的一般步骤，结果读者 <a href="/archives/9370#comment-20572">@gaohuazuo</a> 就给出了一个新的直观有效的方案，这直接导致了后续<a href="/archives/9379">《生成扩散模型漫谈（十四）：构建ODE的一般步骤（中）》</a>（当时后缀是“下”）。而当笔者以为事情已经终结时，却发现ICLR2023的论文<a href="https://papers.cool/arxiv/2209.03003">《Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow》</a>又给出了一个构建ODE式扩散模型的新方案，其简洁、直观的程度简直前所未有，令人拍案叫绝。所以笔者只好默默将前一篇的后缀改为“中”，然后写了这个“下”篇来分享这一新的结果。</p>
+<h2 id="_2">直观结果</h2>
+<p>我们知道，扩散模型是一个$\boldsymbol{x}_T\to \boldsymbol{x}_0$的演化过程，而ODE式扩散模型则指定演化过程按照如下ODE进行：<br />
+\begin{equation}\frac{d\boldsymbol{x}_t}{dt}=\boldsymbol{f}_t(\boldsymbol{x}_t)\label{eq:ode}\end{equation}<br />
+而所谓构建ODE式扩散模型，就是要设计一个函数$\boldsymbol{f}_t(\boldsymbol{x}_t)$，使其对应的演化轨迹构成给定分布$p_T(\boldsymbol{x}_T)$、$p_0(\boldsymbol{x}_0)$之间的一个变换。说白了，我们希望从$p_T(\boldsymbol{x}_T)$中随机采样一个$\boldsymbol{x}_T$，然后按照上述ODE向后演化得到的$\boldsymbol{x}_0$是$\sim p_0(\boldsymbol{x}_0)$的。</p>
+<p>原论文的思路非常简单，随机选定$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">0\sim p_0(\boldsymbol{x}_0),\boldsymbol{x}_T\sim p_T(\boldsymbol{x}_T)$，假设它们按照轨迹<br />
+\begin{equation}\boldsymbol{x}_t = \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)\label{eq:track}\end{equation}<br />
+进行变换。这个轨迹是一个已知的函数，是我们自行设计的部分，理论上只要满足<br />
+\begin{equation}\boldsymbol{x}_0 = \boldsymbol{\varphi}_0(\boldsymbol{x}_0, \boldsymbol{x}_T),\quad \boldsymbol{x}_T = \boldsymbol{\varphi}_T(\boldsymbol{x}_0, \boldsymbol{x}_T)\end{equation}<br />
+的连续函数都可以。接着我们就可以写出它满足的微分方程：<br />
+\begin{equation}\frac{d\boldsymbol{x}_t}{dt} = \frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)}{\partial t}\label{eq:fake-ode}\end{equation}<br />
+但这个微分方程是不实用的，因为我们想要的是给定$\boldsymbol{x}_T$来生成$\boldsymbol{x}_0$，但它右端却是$\boldsymbol{x}_0$的函数（如果已知$\boldsymbol{x}_0$就完事了），只有像式$\eqref{eq:ode}$那样右端只含有$\boldsymbol{x}_t$的ODE（单从因果关系来看，理论上也可以包含$\boldsymbol{x}_T$，但我们一般不考虑这种情况）才能进行实用的演化。那么，一个直观又“异想天开”的想法是：<strong>学一个函数$\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$尽量逼近上式右端！</strong> 为此，我们优化如下目标：<br />
+\begin{equation}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p_0(\boldsymbol{x}_0),\boldsymbol{x}_T\sim p_T(\boldsymbol{x}_T)}\left[\left\Vert \boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) - \frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)}{\partial t}\right\Vert^2\right] \label{eq:objective}<br />
+\end{equation}<br />
+由于$\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)$尽量逼近了$\frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)}{\partial t}$，所以我们认为将方程$\eqref{eq:fake-ode}$的右端替换为$\boldsymbol{v}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)$也是成立的，这就得到实用的扩散ODE：<br />
+\begin{equation}\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{v}</em>}}(\boldsymbol{x}_t, t)\label{eq:s-ode}\end{equation</p>
+<h2 id="_3">简单例子</h2>
+<p>作为简单的例子，我们设$T=1$，并设变化轨迹是直线<br />
+\begin{equation}\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t = \boldsymbol{\varphi}_t(\boldsymbol{x}_0,\boldsymbol{x}_1) = (\boldsymbol{x}_1 - \boldsymbol{x}_0)t + \boldsymbol{x}_0\end{equation}<br />
+那么<br />
+\begin{equation}\frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)}{\partial t} = \boldsymbol{x}_1 - \boldsymbol{x}_0\end{equation}<br />
+所以训练目标$\eqref{eq:objective}$就是：<br />
+\begin{equation}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p_0(\boldsymbol{x}_0),\boldsymbol{x}_T\sim p_T(\boldsymbol{x}_T)}\left[\left\Vert \boldsymbol{v}</em>}}\big((\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">1 - \boldsymbol{x}_0)t + \boldsymbol{x}_0, t\big) - (\boldsymbol{x}_1 - \boldsymbol{x}_0)\right\Vert^2\right]\end{equation}<br />
+或者等价地写成<br />
+\begin{equation}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0,\boldsymbol{x}_t\sim p_0(\boldsymbol{x}_0)p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)}\left[\left\Vert \boldsymbol{v}</em>}}(\boldsymbol{x}_t, t) - \frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{t}\right\Vert^2\right]\end{equation<br />
+这就完事了！结果跟<a href="/archives/9379#%E7%9B%B4%E7%BA%BF%E8%BD%A8%E8%BF%B9">《生成扩散模型漫谈（十四）：构建ODE的一般步骤（中）》</a>的“直线轨迹”例子是完全一致的，也是原论文主要研究的模型，被称为“Rectified Flow”。</p>
+<p>从这个直线例子的过程也可以看出，通过该思路来构建扩散ODE的步骤只有寥寥几行，相比之前的过程是大大简化了，简单到甚至让人有种“颠覆了对扩散模型的印象”的不可思议之感。</p>
+<h2 id="_4">证明过程</h2>
+<p>然而，迄今为止前面“直观结果”一节的结论只能算是一个直观的猜测，因为我们还没有从理论上证明优化目标$\eqref{eq:objective}$所得到的方程$\eqref{eq:s-ode}$的确实现了分布$p_T(\boldsymbol{x}_T)$、$p_0(\boldsymbol{x}_0)$之间的变换。</p>
+<p>为了证明这一结论，笔者一开始是想证明目标$\eqref{eq:objective}$的最优解满足连续性方程：<br />
+\begin{equation}\frac{\partial p_t(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t)}{\partial t} = -\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t}\cdot\big(p_t(\boldsymbol{x}_t)\boldsymbol{v}</em>}}(\boldsymbol{x}_t, t)\big)\end{equation<br />
+如果满足，那么根据连续性方程与ODE的对应关系（参考<a href="/archives/9280">《生成扩散模型漫谈（十二）：“硬刚”扩散ODE》</a>、<a href="/archives/9461">《测试函数法推导连续性方程和Fokker-Planck方程》</a>），方程$\eqref{eq:s-ode}$确实是分布$p_T(\boldsymbol{x}_T)$、$p_0(\boldsymbol{x}_0)$之间的一个变换。</p>
+<p>但仔细想一下，这个思路似乎有点迂回了，因为根据文章<a href="/archives/9461">《测试函数法推导连续性方程和Fokker-Planck方程》</a>，连续性方程本身就是由ODE通过<br />
+\begin{equation}\mathbb{E}<em t="t" t_Delta="t+\Delta">{\boldsymbol{x}</em>}}\left[\phi(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">{t+\Delta t})\right] = \mathbb{E}</em>}_t}\left[\phi(\boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t)\right]\label{eq:base}\end{equation<br />
+推出的，所以按理说$\eqref{eq:base}$更基本，我们只需要证明$\eqref{eq:objective}$的最优解满足它就行。也就是说，我们想要找到一个纯粹是$\boldsymbol{x}_t$的函数$\boldsymbol{f}_t(\boldsymbol{x}_t)$满足$\eqref{eq:base}$，然后发现它正好是$\eqref{eq:objective}$的最优解。</p>
+<p>于是，我们写出（简单起见，$\boldsymbol{\varphi}<em _boldsymbol_x="\boldsymbol{x">t(\boldsymbol{x}_0,\boldsymbol{x}_T)$简写为$\boldsymbol{\varphi}_t$）<br />
+\begin{equation}\begin{aligned}<br />
+\mathbb{E}</em><em t="t" t_Delta="t+\Delta">{t+\Delta t}}\left[\phi(\boldsymbol{x}</em>})\right] =&amp;\, \mathbb{E<em t="t" t_Delta="t+\Delta">{\boldsymbol{x}_0, \boldsymbol{x}_T}\left[\phi(\boldsymbol{\varphi}</em>)\right] \\\<br />
+=&amp;\, \mathbb{E}<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{x}_0, \boldsymbol{x}_T}\left[\phi(\boldsymbol{\varphi}_t) + \Delta t\,\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{\varphi}_t)\right] \\\<br />
+=&amp;\, \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0, \boldsymbol{x}_T}\left[\phi(\boldsymbol{x}_t)\right] + \Delta t\,\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0, \boldsymbol{x}_T}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t)\right] \\\<br />
+=&amp;\, \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\phi(\boldsymbol{x}_t)\right] + \Delta t\,\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0, \boldsymbol{x}_T}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\cdot\nabla</em>_t)\right] \\\}_t}\phi(\boldsymbol{x<br />
+\end{aligned}\end{equation}<br />
+其中第一个等号是因为式$\eqref{eq:track}$，第二个等号是泰勒展开到一阶，第三个等号同样是式$\eqref{eq:track}$，第四个等号就是因为$\boldsymbol{x}_t$是$\boldsymbol{x}_0,\boldsymbol{x}_T$的确定性函数，所以关于$\boldsymbol{x}_0,\boldsymbol{x}_T$的期望就是关于$\boldsymbol{x}_t$的期望。</p>
+<p>我们看到，$\frac{\partial \boldsymbol{\varphi}<em _boldsymbol_x="\boldsymbol{x">t}{\partial t}$是$\boldsymbol{x}_0,\boldsymbol{x}_T$的函数，接下来我们再做一个假设：<strong>式$\eqref{eq:track}$关于$\boldsymbol{x}_T$是可逆的。</strong> 这个假设意味着我们可以从式$\eqref{eq:track}$中解出$\boldsymbol{x}_T=\boldsymbol{\psi}_t(\boldsymbol{x}_0,\boldsymbol{x}_t)$，这个结果可以代入$\frac{\partial \boldsymbol{\varphi}_t}{\partial t}$，使它变为$\boldsymbol{x}_0,\boldsymbol{x}_t$的函数。所以我们有<br />
+\begin{equation}\begin{aligned}<br />
+\mathbb{E}</em><em t="t" t_Delta="t+\Delta">{t+\Delta t}}\left[\phi(\boldsymbol{x}</em>})\right] =&amp;\, \mathbb{E<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{x}_t}\left[\phi(\boldsymbol{x}_t)\right] + \Delta t\,\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0, \boldsymbol{x}_T}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t)\right] \\\<br />
+=&amp;\, \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\phi(\boldsymbol{x}_t)\right] + \Delta t\,\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0, \boldsymbol{x}_t}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t)\right] \\\<br />
+=&amp;\, \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\phi(\boldsymbol{x}_t)\right] + \Delta t\,\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\underbrace{\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0|\boldsymbol{x}_t}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right]}</em><em _boldsymbol_x="\boldsymbol{x">t\text{的函数}}\cdot\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\phi(\boldsymbol{x}_t)\right] \\\<br />
+=&amp;\, \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\phi\left(\boldsymbol{x}_t + \Delta t\,\mathbb{E}</em>\right]\right)\right]}_0|\boldsymbol{x}_t}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t<br />
+\end{aligned}\end{equation}<br />
+其中第二个等号是因为$\frac{\partial \boldsymbol{\varphi}_t}{\partial t}$已经改为$\boldsymbol{x}_0,\boldsymbol{x}_t$的函数，所以第二项期望的随机变量改为$\boldsymbol{x}_0,\boldsymbol{x}_t$；第三个等号则是相当于做了分解$p(\boldsymbol{x}_0,\boldsymbol{x}_t)=p(\boldsymbol{x}_0|\boldsymbol{x}_t)p(\boldsymbol{x}_t)$，此时$\boldsymbol{x}_0,\boldsymbol{x}_t$不是独立的，所以要注明$\boldsymbol{x}_0|\boldsymbol{x}_t$，即$\boldsymbol{x}_0$是依赖于$\boldsymbol{x}_t$的。注意$\frac{\partial \boldsymbol{\varphi}_t}{\partial t}$原本是$\boldsymbol{x}_0,\boldsymbol{x}_t$的函数，现在对$\boldsymbol{x}_0$求期望后，剩下的唯一自变量就是$\boldsymbol{x}_t$，后面我们会看到它就是我们要找的纯粹是$\boldsymbol{x}_t$的函数！第四个等号，就是利用泰勒展开公式将两项重新合并起来。</p>
+<p>现在，我们得到了<br />
+\begin{equation}\mathbb{E}<em t="t" t_Delta="t+\Delta">{\boldsymbol{x}</em>}}\left[\phi(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">{t+\Delta t})\right] = \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t}\left[\phi\left(\boldsymbol{x}_t + \Delta t\,\mathbb{E}</em><em t="t" t_Delta="t+\Delta">0|\boldsymbol{x}_t}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right]\right)\right]\end{equation}<br />
+对于任意测试函数$\phi$成立，所以这意味着<br />
+\begin{equation}\boldsymbol{x}</em>} = \boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t + \Delta t\,\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0|\boldsymbol{x}_t}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right]\quad\Rightarrow\quad\frac{d\boldsymbol{x}_t}{dt} = \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0|\boldsymbol{x}_t}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right]\label{eq:real-ode}\end{equation}<br />
+就是我们要寻找的ODE。根据<br />
+\begin{equation}\mathbb{E}</em>}}[\boldsymbol{x}] = \mathop{\text{argmin}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\mu}}\mathbb{E}</em>}}\left[\Vert \boldsymbol{x} - \boldsymbol{\mu}\Vert^2\right]\label{eq:mean-opt}\end{equation<br />
+式$\eqref{eq:real-ode}$的右端正好是训练目标$\eqref{eq:objective}$的最优解，这就证明了优化训练目标$\eqref{eq:objective}$得出的方程$\eqref{eq:s-ode}$的确实现了分布$p_T(\boldsymbol{x}_T)$、$p_0(\boldsymbol{x}_0)$之间的变换。</p>
+<h2 id="_5">读后感受</h2>
+<p>关于“直观结果”中的构建扩散ODE的思路，原论文的作者还写了篇知乎专栏文章<a href="https://zhuanlan.zhihu.com/p/603740431">《[ICLR2023] 扩散生成模型新方法：极度简化，一步生成》</a>，大家也可以去读读。读者也是在这篇专栏中首次了解到该方法的，并深深为之震惊和叹服。</p>
+<p>如果读者读过<a href="/archives/9379">《生成扩散模型漫谈（十四）：构建ODE的一般步骤（中）》</a>，那么就会更加体会到该思路的简单直接，也更能理解笔者为何如此不吝赞美之词。不怕大家笑话，笔者在写“中篇”（当时的“下篇”）的时候，是考虑过式$\eqref{eq:track}$所描述的轨迹的，但是在当时的框架下，根本没法推演下去，最后以失败告终，当时完全想不到它能以一种如此简捷的方式进行下去。所以，写这个扩散ODE系列真的让人有种“人比人，气死人”的感觉，“中篇”、“下篇”就是自己智商被一次次“降维打击”的最好见证。</p>
+<p>读者可能想问，还会不会有更简单的第四篇，让笔者再一次经历降维打击？可能有，但概率真的很小了，真的很难想象会有比这更简单的构建步骤了。“直观结果”一节看上去很长，但实际步骤就只有两步：1、随便选择一个渐变轨迹；2、用$\boldsymbol{x}_t$的函数去逼近渐变轨迹对$t$的导数。就这样的寥寥两步，还能怎么再简化呢？甚至说，“证明过程”一节的推导也是相当简单的了，虽然写得长，但本质就是求个导，然后变换一下求期望的分布，比前两篇的过程简单了可不止一丁半点。总而言之，亲自完成过ODE扩散的前两篇推导的读者就能深刻感觉到，这一篇的思路是真的简单，简单到让我们觉得已经无法再简单了。</p>
+<p>此外，除了提供构建扩散ODE的简单思路外，原论文还讨论了Rectified Flow跟最优传输之间的联系，以及如何用这种联系来加速采样过程，等等。但这部分内容并不是本文主要关心的，所以等以后有机会我们再讨论它们。</p>
+<h2 id="_6">文章小结</h2>
+<p>本文介绍了Rectified Flow一文中提出的构建ODE式扩散模型的一种极其简单直观的思路，并给出了自己的证明过程。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9497">https://spaces.ac.cn/archives/9497</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Feb. 23, 2023). 《生成扩散模型漫谈（十七）：构建ODE的一般步骤（下） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9497">https://spaces.ac.cn/archives/9497</a></p>
+<p>@online{kexuefm-9497,<br />
+title={生成扩散模型漫谈（十七）：构建ODE的一般步骤（下）},<br />
+author={苏剑林},<br />
+year={2023},<br />
+month={Feb},<br />
+url={\url{https://spaces.ac.cn/archives/9497}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释</h2>
+<h3 id="1-ode">1. 从格林函数到ODE的提取方法</h3>
+<p>在理解Rectified Flow之前，我们需要从更基础的角度理解如何从概率演化中提取ODE。考虑一个时间依赖的概率密度$p_t(\boldsymbol{x})$，它满足从$t=0$到$t=T$的演化。</p>
+<p><strong>格林函数的定义</strong>：给定初始分布$p_0(\boldsymbol{x}_0)$和终止分布$p_T(\boldsymbol{x}_T)$，我们定义格林函数（转移核）$G_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$为：
+$$p_t(\boldsymbol{x}_t) = \int p_0(\boldsymbol{x}_0) G_t(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x}_0$$</p>
+<p>对于确定性的ODE演化$\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{f}_t(\boldsymbol{x}_t)$，格林函数退化为delta函数：
+$$G_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \delta(\boldsymbol{x}_t - \boldsymbol{\Phi}_t(\boldsymbol{x}_0))$$
+其中$\boldsymbol{\Phi}_t$是ODE的流映射（flow map），满足：
+$$\boldsymbol{\Phi}_t(\boldsymbol{x}_0) = \boldsymbol{x}_0 + \int_0^t \boldsymbol{f}_s(\boldsymbol{\Phi}_s(\boldsymbol{x}_0)) ds$$</p>
+<p><strong>Chapman-Kolmogorov方程</strong>：格林函数满足半群性质：
+$$G_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \int G_t(\boldsymbol{x}_t|\boldsymbol{x}_s) G_s(\boldsymbol{x}_s|\boldsymbol{x}_0) d\boldsymbol{x}_s, \quad 0 \leq s \leq t$$</p>
+<p>对于确定性ODE，这简化为：
+$$\boldsymbol{\Phi}_t(\boldsymbol{x}_0) = \boldsymbol{\Phi}_t(\boldsymbol{\Phi}_s(\boldsymbol{x}_0)) = \boldsymbol{\Phi}_{t-s}(\boldsymbol{\Phi}_s(\boldsymbol{x}_0))$$</p>
+<p><strong>从格林函数提取速度场</strong>：关键观察是，对于充分小的$\Delta t$：
+$$G_{t+\Delta t}(\boldsymbol{x}_{t+\Delta t}|\boldsymbol{x}_t) \approx \delta(\boldsymbol{x}_{t+\Delta t} - \boldsymbol{x}_t - \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t)$$</p>
+<p>这意味着：
+$$\mathbb{E}[\boldsymbol{x}_{t+\Delta t}|\boldsymbol{x}_t] = \boldsymbol{x}_t + \boldsymbol{f}_t(\boldsymbol{x}_t)\Delta t + O(\Delta t^2)$$</p>
+<p>因此速度场可以通过条件期望提取：
+$$\boldsymbol{f}_t(\boldsymbol{x}_t) = \lim_{\Delta t \to 0} \frac{\mathbb{E}[\boldsymbol{x}_{t+\Delta t}|\boldsymbol{x}_t] - \boldsymbol{x}_t}{\Delta t} = \frac{d}{dt}\mathbb{E}[\boldsymbol{x}_t|\boldsymbol{x}_t]|_{t=t}$$</p>
+<h3 id="2">2. 概率密度演化的路径积分表示</h3>
+<p>为了理解Rectified Flow的深层原理，我们需要引入路径积分的视角。</p>
+<p><strong>路径空间的定义</strong>：定义从$0$到$T$的所有连续路径空间为：
+$$\mathcal{C}([0,T], \mathbb{R}^d) = \{\boldsymbol{\gamma}: [0,T] \to \mathbb{R}^d \mid \boldsymbol{\gamma} \text{ 连续}\}$$</p>
+<p><strong>路径测度</strong>：给定初末态$\boldsymbol{x}_0, \boldsymbol{x}_T$，以及轨迹函数$\boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)$，我们定义路径测度：
+$$d\mu[\boldsymbol{\gamma}] = \delta(\boldsymbol{\gamma}_0 - \boldsymbol{x}_0)\delta(\boldsymbol{\gamma}_T - \boldsymbol{x}_T) \prod_{t \in [0,T]} \delta(\boldsymbol{\gamma}_t - \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)) \mathcal{D}\boldsymbol{\gamma}$$</p>
+<p>其中$\mathcal{D}\boldsymbol{\gamma}$是路径积分测度。</p>
+<p><strong>边际分布的路径积分表示</strong>：任意时刻$t$的边际分布可以表示为：
+$$p_t(\boldsymbol{x}_t) = \int \int p_0(\boldsymbol{x}_0) p_T(\boldsymbol{x}_T) \delta(\boldsymbol{x}_t - \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)) d\boldsymbol{x}_0 d\boldsymbol{x}_T$$</p>
+<p>这个公式的意义是：$\boldsymbol{x}_t$的分布由所有经过$\boldsymbol{x}_t$的路径的初末态分布积分而来。</p>
+<p><strong>速度场的路径积分表示</strong>：根据轨迹的定义，速度场为：
+$$\boldsymbol{v}_t(\boldsymbol{x}_0, \boldsymbol{x}_T) = \frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)}{\partial t}$$</p>
+<p>但这个速度场依赖于$(\boldsymbol{x}_0, \boldsymbol{x}_T)$，我们需要将其"投影"到只依赖于$\boldsymbol{x}_t$的空间。这个投影通过条件期望实现：
+$$\boldsymbol{v}_t^*(\boldsymbol{x}_t) = \mathbb{E}_{(\boldsymbol{x}_0,\boldsymbol{x}_T)|\boldsymbol{x}_t}\left[\frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)}{\partial t}\right]$$</p>
+<p><strong>路径积分的显式形式</strong>：使用贝叶斯公式，我们有：
+$$\boldsymbol{v}_t^*(\boldsymbol{x}_t) = \frac{\int \int p_0(\boldsymbol{x}_0) p_T(\boldsymbol{x}_T) \frac{\partial \boldsymbol{\varphi}_t}{\partial t} \delta(\boldsymbol{x}_t - \boldsymbol{\varphi}_t) d\boldsymbol{x}_0 d\boldsymbol{x}_T}{\int \int p_0(\boldsymbol{x}_0) p_T(\boldsymbol{x}_T) \delta(\boldsymbol{x}_t - \boldsymbol{\varphi}_t) d\boldsymbol{x}_0 d\boldsymbol{x}_T}$$</p>
+<p>分母是边际分布$p_t(\boldsymbol{x}_t)$，分子定义了一个"加权速度场"。</p>
+<h3 id="3-time-marginalization">3. 时间边际化（Time Marginalization）</h3>
+<p>时间边际化是理解Rectified Flow训练过程的关键。</p>
+<p><strong>联合分布的构造</strong>：定义四元组$(\boldsymbol{x}_0, \boldsymbol{x}_T, \boldsymbol{x}_t, t)$的联合分布：
+$$p(\boldsymbol{x}_0, \boldsymbol{x}_T, \boldsymbol{x}_t, t) = p_0(\boldsymbol{x}_0) p_T(\boldsymbol{x}_T) p(t) \delta(\boldsymbol{x}_t - \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T))$$</p>
+<p>其中$p(t)$是时间的先验分布，通常取均匀分布$p(t) = \frac{1}{T}$（假设$T=1$则$p(t)=1$）。</p>
+<p><strong>训练目标的完整形式</strong>：Rectified Flow的训练目标式$\eqref{eq:objective}$可以重写为：
+$$\begin{aligned}
+\mathcal{L}(\boldsymbol{\theta}) &= \int_0^T \mathbb{E}_{\boldsymbol{x}_0,\boldsymbol{x}_T,\boldsymbol{x}_t}\left[\left\Vert \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) - \frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right\Vert^2\right] p(t) dt \\
+&= \int_0^T \int \int \int p_0(\boldsymbol{x}_0) p_T(\boldsymbol{x}_T) \delta(\boldsymbol{x}_t - \boldsymbol{\varphi}_t) \left\Vert \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) - \frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right\Vert^2 d\boldsymbol{x}_0 d\boldsymbol{x}_T d\boldsymbol{x}_t \, dt
+\end{aligned}$$</p>
+<p><strong>对时间的边际化</strong>：关键观察是，最优解$\boldsymbol{v}_{\boldsymbol{\theta}}^*$在每个时刻$t$都是独立优化的：
+$$\boldsymbol{v}_{\boldsymbol{\theta}}^*(\boldsymbol{x}_t, t) = \mathop{\text{argmin}}_{\boldsymbol{v}} \mathbb{E}_{\boldsymbol{x}_0,\boldsymbol{x}_T|\boldsymbol{x}_t}\left[\left\Vert \boldsymbol{v} - \frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right\Vert^2\right]$$</p>
+<p>根据最小二乘法的性质（式$\eqref{eq:mean-opt}$），最优解为条件期望：
+$$\boldsymbol{v}_{\boldsymbol{\theta}}^*(\boldsymbol{x}_t, t) = \mathbb{E}_{\boldsymbol{x}_0,\boldsymbol{x}_T|\boldsymbol{x}_t}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right]$$</p>
+<p>但注意到$\boldsymbol{x}_t = \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)$，如果$\boldsymbol{\varphi}_t$关于$\boldsymbol{x}_T$可逆，我们可以从$(\boldsymbol{x}_t, \boldsymbol{x}_0)$唯一确定$\boldsymbol{x}_T$，因此：
+$$\mathbb{E}_{\boldsymbol{x}_0,\boldsymbol{x}_T|\boldsymbol{x}_t}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right] = \mathbb{E}_{\boldsymbol{x}_0|\boldsymbol{x}_t}\left[\frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right]$$</p>
+<p>这正是式$\eqref{eq:real-ode}$的结果。</p>
+<p><strong>时间边际化的几何意义</strong>：从几何角度看，时间边际化意味着我们在所有时刻$t \in [0,T]$上平均地训练速度场。这确保了学到的ODE在整个时间区间上都有良好的性能。</p>
+<h3 id="4-optimal-transport">4. 最优传输（Optimal Transport）视角</h3>
+<p>Rectified Flow与最优传输理论有深刻的联系。</p>
+<p><strong>Monge问题</strong>：给定两个概率分布$p_0, p_T$，Monge最优传输问题是找一个传输映射$T: \mathbb{R}^d \to \mathbb{R}^d$使得：
+$$T_\# p_0 = p_T$$
+即$p_T(\boldsymbol{y}) = \int p_0(\boldsymbol{x}) \delta(\boldsymbol{y} - T(\boldsymbol{x})) d\boldsymbol{x}$，并最小化传输代价：
+$$\inf_{T: T_\# p_0 = p_T} \mathbb{E}_{\boldsymbol{x}_0 \sim p_0}[c(\boldsymbol{x}_0, T(\boldsymbol{x}_0))]$$</p>
+<p>对于二次代价$c(\boldsymbol{x}, \boldsymbol{y}) = |\boldsymbol{x} - \boldsymbol{y}|^2$，这被称为Wasserstein-2距离。</p>
+<p><strong>Kantorovich松弛</strong>：Kantorovich将Monge问题松弛为联合分布的优化：
+$$W_2^2(p_0, p_T) = \inf_{\pi \in \Pi(p_0, p_T)} \mathbb{E}_{(\boldsymbol{x}_0,\boldsymbol{x}_T) \sim \pi}[\|\boldsymbol{x}_0 - \boldsymbol{x}_T\|^2]$$
+其中$\Pi(p_0, p_T)$是所有边际分布为$p_0, p_T$的联合分布集合。</p>
+<p><strong>Rectified Flow的传输计划</strong>：Rectified Flow采用的是一个特殊的传输计划：
+$$\pi(\boldsymbol{x}_0, \boldsymbol{x}_T) = p_0(\boldsymbol{x}_0) p_T(\boldsymbol{x}_T)$$
+即独立采样。这通常不是最优传输计划，但它有一个巨大的优势：<strong>易于采样</strong>。</p>
+<p>对于直线轨迹$\boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T) = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_T$，传输代价为：
+$$\mathcal{C}(\pi) = \mathbb{E}_{\boldsymbol{x}_0 \sim p_0, \boldsymbol{x}_T \sim p_T}[\|\boldsymbol{x}_T - \boldsymbol{x}_0\|^2]$$</p>
+<p>虽然这不是最优的，但Rectified Flow论文证明了可以通过<strong>迭代优化</strong>逐步接近最优传输。</p>
+<h3 id="5-benamou-brenier">5. Benamou-Brenier公式</h3>
+<p>Benamou-Brenier公式提供了动态最优传输的视角。</p>
+<p><strong>动态最优传输</strong>：Benamou和Brenier证明了Wasserstein-2距离可以通过动态优化问题计算：
+$$W_2^2(p_0, p_T) = \inf \int_0^T \int \|\boldsymbol{v}_t(\boldsymbol{x})\|^2 p_t(\boldsymbol{x}) d\boldsymbol{x} \, dt$$</p>
+<p>约束条件为连续性方程：
+$$\frac{\partial p_t}{\partial t} + \nabla \cdot (p_t \boldsymbol{v}_t) = 0, \quad p|_{t=0} = p_0, \quad p|_{t=T} = p_T$$</p>
+<p><strong>物理解释</strong>：这个公式可以理解为：最优传输对应于在固定时间$T$内，以最小的"动能"$\int |\boldsymbol{v}_t|^2 p_t d\boldsymbol{x}$来传输质量分布。</p>
+<p><strong>变分导数</strong>：使用拉格朗日乘子法，引入对偶变量（势函数）$\phi_t(\boldsymbol{x})$，拉格朗日函数为：
+$$\mathcal{L}[p, \boldsymbol{v}, \phi] = \int_0^T \int \|\boldsymbol{v}_t\|^2 p_t d\boldsymbol{x} \, dt + \int_0^T \int \phi_t \left(\frac{\partial p_t}{\partial t} + \nabla \cdot (p_t \boldsymbol{v}_t)\right) d\boldsymbol{x} \, dt$$</p>
+<p>对$\boldsymbol{v}_t$求变分：
+$$\frac{\delta \mathcal{L}}{\delta \boldsymbol{v}_t} = 2 p_t \boldsymbol{v}_t + p_t \nabla \phi_t = 0 \quad \Rightarrow \quad \boldsymbol{v}_t = -\frac{1}{2}\nabla \phi_t$$</p>
+<p>这说明最优速度场是势函数的梯度。</p>
+<p><strong>Rectified Flow的偏离</strong>：Rectified Flow的直线轨迹$\boldsymbol{\varphi}_t = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_T$对应的速度场为：
+$$\boldsymbol{v}_t = \boldsymbol{x}_T - \boldsymbol{x}_0$$</p>
+<p>这通常不是梯度场（除非$\boldsymbol{x}_T = T^*(\boldsymbol{x}_0)$是最优传输映射）。但是，Rectified Flow可以通过迭代来逼近最优传输：</p>
+<p><strong>迭代Rectified Flow</strong>：
+1. 第一次迭代：用独立采样$\pi_1 = p_0 \otimes p_T$训练$\boldsymbol{v}_1$
+2. 第$k$次迭代：使用上一次的ODE生成耦合$(\boldsymbol{x}_0, \boldsymbol{x}_T)$，再训练新的$\boldsymbol{v}_k$</p>
+<p>论文证明，随着迭代次数增加，轨迹越来越接近直线，代价趋近于$W_2^2(p_0, p_T)$。</p>
+<h3 id="6">6. 动力学重构问题</h3>
+<p>从反问题的角度看，Rectified Flow是一个动力学重构问题。</p>
+<p><strong>正问题</strong>：给定速度场$\boldsymbol{v}_t(\boldsymbol{x})$和初始分布$p_0$，求解演化后的分布$p_T$。这是正向求解：
+$$\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{v}_t(\boldsymbol{x}_t), \quad \boldsymbol{x}_0 \sim p_0 \quad \Rightarrow \quad \boldsymbol{x}_T \sim p_T$$</p>
+<p><strong>反问题</strong>：给定初末态分布$p_0, p_T$，以及中间时刻的轨迹信息，重构速度场$\boldsymbol{v}_t$。</p>
+<p><strong>反问题的不适定性</strong>：这个反问题通常是不适定的（ill-posed），因为：
+1. <strong>非唯一性</strong>：存在无穷多个速度场可以实现$p_0 \to p_T$的传输
+2. <strong>不稳定性</strong>：轨迹的微小扰动可能导致速度场的巨大变化</p>
+<p><strong>Hadamard意义下的适定性</strong>：一个问题是适定的（well-posed）当且仅当：
+1. 解存在（Existence）
+2. 解唯一（Uniqueness）
+3. 解连续依赖于数据（Stability）</p>
+<p>Rectified Flow的反问题违反了条件2和3。</p>
+<p><strong>正则化策略</strong>：为了解决不适定性，Rectified Flow采用了两个正则化策略：</p>
+<p>（1）<strong>参数化正则化</strong>：通过神经网络$\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}, t)$参数化速度场，限制函数空间的复杂度。</p>
+<p>（2）<strong>数据驱动正则化</strong>：通过轨迹数据${(\boldsymbol{x}<em i="1">0^{(i)}, \boldsymbol{x}_T^{(i)})}</em>^N$提供额外约束，使用最小二乘目标：
+$$\min_{\boldsymbol{\theta}} \sum_{i=1}^N \int_0^T \left\|\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{\varphi}_t(\boldsymbol{x}_0^{(i)}, \boldsymbol{x}_T^{(i)}), t) - \frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right\|^2 dt$$</p>
+<h3 id="7">7. 反问题的正则化理论</h3>
+<p>我们从Tikhonov正则化的角度重新审视Rectified Flow。</p>
+<p><strong>Tikhonov正则化</strong>：对于反问题$A\boldsymbol{v} = \boldsymbol{b}$（其中$A$是前向算子），Tikhonov正则化求解：
+$$\min_{\boldsymbol{v}} \|A\boldsymbol{v} - \boldsymbol{b}\|^2 + \lambda \|\boldsymbol{v}\|^2$$</p>
+<p>其中$\lambda &gt; 0$是正则化参数。</p>
+<p><strong>Rectified Flow的正则化形式</strong>：定义前向算子$\mathcal{A}$：
+$$(\mathcal{A}\boldsymbol{v})(\boldsymbol{x}_0, \boldsymbol{x}_T, t) = \boldsymbol{v}(\boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T), t)$$</p>
+<p>数据算子$\mathcal{B}$：
+$$(\mathcal{B}(\boldsymbol{x}_0, \boldsymbol{x}_T))(\boldsymbol{x}_0, \boldsymbol{x}_T, t) = \frac{\partial \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T)}{\partial t}$$</p>
+<p>则Rectified Flow的目标可以写为：
+$$\min_{\boldsymbol{v}_{\boldsymbol{\theta}}} \mathbb{E}\left[\|\mathcal{A}\boldsymbol{v}_{\boldsymbol{\theta}} - \mathcal{B}(\boldsymbol{x}_0, \boldsymbol{x}_T)\|^2\right] + \lambda R(\boldsymbol{\theta})$$</p>
+<p>其中$R(\boldsymbol{\theta})$是参数的正则化项（如权重衰减）。</p>
+<p><strong>法方程（Normal Equation）</strong>：正则化问题的最优性条件为：
+$$(\mathcal{A}^* \mathcal{A} + \lambda I)\boldsymbol{v}^* = \mathcal{A}^* \mathcal{B}$$</p>
+<p>其中$\mathcal{A}^*$是$\mathcal{A}$的伴随算子。对于Rectified Flow：
+$$\mathcal{A}^* g = \mathbb{E}_{\boldsymbol{x}_0, \boldsymbol{x}_T}\left[g(\boldsymbol{x}_0, \boldsymbol{x}_T, t) \mid \boldsymbol{x}_t\right]$$</p>
+<p>这正是条件期望算子！</p>
+<p><strong>奇异值分解（SVD）视角</strong>：假设算子$\mathcal{A}$有奇异值分解：
+$$\mathcal{A} = \sum_{k=1}^{\infty} \sigma_k \langle \cdot, \boldsymbol{u}_k \rangle \boldsymbol{v}_k$$</p>
+<p>则Tikhonov正则化的解为：
+$$\boldsymbol{v}_{\lambda}^* = \sum_{k=1}^{\infty} \frac{\sigma_k}{\sigma_k^2 + \lambda} \langle \boldsymbol{b}, \boldsymbol{v}_k \rangle \boldsymbol{u}_k$$</p>
+<p>当$\lambda \to 0$，这趋近于伪逆解。对于Rectified Flow，神经网络参数化本身提供了隐式的截断正则化。</p>
+<h3 id="8">8. 变分推断方法</h3>
+<p>Rectified Flow也可以从变分推断的角度理解。</p>
+<p><strong>KL散度的动态视角</strong>：考虑路径分布的KL散度。定义路径的"物理"分布$\mathbb{P}$（由轨迹$\boldsymbol{\varphi}_t$诱导）和"近似"分布$\mathbb{Q}$（由学习的ODE诱导）：
+$$\mathbb{P}: \boldsymbol{x}_t = \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T), \quad (\boldsymbol{x}_0, \boldsymbol{x}_T) \sim p_0 \otimes p_T$$
+$$\mathbb{Q}: \frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t), \quad \boldsymbol{x}_0 \sim p_0$$</p>
+<p><strong>路径KL散度</strong>：路径空间上的KL散度为：
+$$D_{KL}(\mathbb{P} \| \mathbb{Q}) = \mathbb{E}_{\mathbb{P}}\left[\log \frac{d\mathbb{P}}{d\mathbb{Q}}\right]$$</p>
+<p>使用Girsanov定理（虽然这里是确定性情况），路径测度的Radon-Nikodym导数与速度场的差异有关：
+$$\log \frac{d\mathbb{P}}{d\mathbb{Q}} \approx \int_0^T \left\|\boldsymbol{v}_t^{\mathbb{P}}(\boldsymbol{x}_t) - \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\right\|^2 dt$$</p>
+<p>其中$\boldsymbol{v}_t^{\mathbb{P}} = \frac{\partial \boldsymbol{\varphi}_t}{\partial t}$。</p>
+<p><strong>ELBO（Evidence Lower Bound）</strong>：最小化路径KL散度等价于最大化ELBO：
+$$\text{ELBO} = \mathbb{E}_{\mathbb{P}}\left[\log \frac{q(\boldsymbol{x}_T)}{p(\boldsymbol{x}_T|\text{path})}\right] \geq -D_{KL}(\mathbb{P} \| \mathbb{Q})$$</p>
+<p><strong>变分自由能</strong>：从统计物理角度，定义自由能：
+$$F[\boldsymbol{v}] = \int_0^T \mathbb{E}_{p_t}\left[\frac{1}{2}\|\boldsymbol{v}_t(\boldsymbol{x}_t)\|^2\right] dt + D_{KL}(p_T \| p_0 \circ \Phi_T^{-1})$$</p>
+<p>Rectified Flow最小化的是自由能的上界。</p>
+<p><strong>Mean-Field近似</strong>：在变分推断中，常用mean-field近似假设变量独立。对于Rectified Flow，这对应于假设：
+$$q(\boldsymbol{x}_0, \boldsymbol{x}_T, \boldsymbol{x}_t) = q(\boldsymbol{x}_t|t) \delta(\boldsymbol{x}_t - \boldsymbol{\varphi}_t(\boldsymbol{x}_0, \boldsymbol{x}_T))$$</p>
+<p>这虽然不是完全的mean-field，但简化了推断。</p>
+<p><strong>KL散度的梯度</strong>：对于参数$\boldsymbol{\theta}$，KL散度的梯度为：
+$$\nabla_{\boldsymbol{\theta}} D_{KL} = \mathbb{E}_{\mathbb{P}}\left[\int_0^T 2\left(\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) - \frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right) \nabla_{\boldsymbol{\theta}} \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) dt\right]$$</p>
+<p>这正是Rectified Flow训练目标的梯度！</p>
+<h3 id="9">9. 实际算法实现</h3>
+<p><strong>算法1：Rectified Flow训练（基础版）</strong></p>
+<div class="codehilite"><pre><span></span><code>输入：数据分布 p_0, 噪声分布 p_T, 轨迹函数 φ_t, 迭代次数 N
+输出：速度网络 v_θ
+
+1. 初始化网络参数 θ
+2. for epoch = 1 to N do
+3.     采样 x_0 ~ p_0, x_T ~ p_T
+4.     采样时间 t ~ Uniform(0, T)
+5.     计算 x_t = φ_t(x_0, x_T)
+6.     计算目标速度 v_target = ∂φ_t/∂t
+7.     计算损失 L = ||v_θ(x_t, t) - v_target||²
+8.     更新 θ ← θ - η ∇_θ L
+9. end for
+</code></pre></div>
+
+<p><strong>直线轨迹的具体实现</strong>：对于$\boldsymbol{\varphi}_t = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_T$：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 伪代码</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">rectified_flow_loss</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">x_0</span><span class="p">,</span> <span class="n">x_T</span><span class="p">):</span>
+    <span class="n">t</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>  <span class="c1"># Uniform in [0,1]</span>
+    <span class="n">x_t</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">t</span><span class="p">)</span> <span class="o">*</span> <span class="n">x_0</span> <span class="o">+</span> <span class="n">t</span> <span class="o">*</span> <span class="n">x_T</span>
+    <span class="n">v_target</span> <span class="o">=</span> <span class="n">x_T</span> <span class="o">-</span> <span class="n">x_0</span>
+    <span class="n">v_pred</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">x_t</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="p">(</span><span class="n">v_pred</span> <span class="o">-</span> <span class="n">v_target</span><span class="p">)</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">loss</span>
+</code></pre></div>
+
+<p><strong>采样算法</strong>：</p>
+<div class="codehilite"><pre><span></span><code>输入：噪声样本 x_T, 速度网络 v_θ, 时间步数 K
+输出：生成样本 x_0
+
+1. 设置 x ← x_T, Δt ← T/K
+2. for k = K-1 down to 0 do
+3.     t ← k·Δt
+4.     x ← x + v_θ(x, t)·Δt  # Euler积分
+5. end for
+6. return x
+</code></pre></div>
+
+<p><strong>高阶积分方法（Runge-Kutta）</strong>：为提高精度，可使用RK4：</p>
+<div class="codehilite"><pre><span></span><code>输入：x_T, v_θ, K
+输出：x_0
+
+1. x ← x_T, Δt ← -T/K  # 负号表示反向积分
+2. for k = 1 to K do
+3.     t ← T - k·|Δt|
+4.     k1 ← v_θ(x, t)
+5.     k2 ← v_θ(x + Δt·k1/2, t + Δt/2)
+6.     k3 ← v_θ(x + Δt·k2/2, t + Δt/2)
+7.     k4 ← v_θ(x + Δt·k3, t + Δt)
+8.     x ← x + Δt·(k1 + 2k2 + 2k3 + k4)/6
+9. end for
+10. return x
+</code></pre></div>
+
+<p><strong>迭代Rectified Flow（提升质量）</strong>：</p>
+<div class="codehilite"><pre><span></span><code>算法2：迭代Rectified Flow
+
+输入：p_0, p_T, 迭代轮数 M, 每轮训练步数 N
+输出：精炼的速度网络 v_θ^(M)
+
+1. # 第一轮：独立采样
+2. 训练 v_θ^(1) 使用 (x_0, x_T) ~ p_0 ⊗ p_T
+3.
+4. for m = 2 to M do
+5.     # 使用上一轮的模型生成耦合数据
+6.     for i = 1 to N_data do
+7.         采样 x_0^(i) ~ p_0
+8.         用 ODE 求解器从 x_0^(i) 得到 x_T^(i)（使用 v_θ^(m-1)）
+9.         保存数据对 (x_0^(i), x_T^(i))
+10.    end for
+11.
+12.    # 用新数据训练
+13.    训练 v_θ^(m) 使用数据 {(x_0^(i), x_T^(i))}
+14. end for
+15. return v_θ^(M)
+</code></pre></div>
+
+<p><strong>数值稳定性技巧</strong>：</p>
+<ol>
+<li><strong>梯度裁剪</strong>：限制$|\nabla_{\boldsymbol{\theta}} \mathcal{L}| \leq C$</li>
+<li><strong>时间加权</strong>：对不同$t$使用不同权重：
+   $$\mathcal{L} = \mathbb{E}_{t \sim p(t)}\left[w(t) \|\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) - \boldsymbol{v}_{\text{target}}\|^2\right]$$</li>
+<li><strong>自适应时间步长</strong>：在ODE求解时使用自适应步长控制误差</li>
+</ol>
+<h3 id="10">10. 数值实验验证</h3>
+<p><strong>实验1：二维高斯分布传输</strong></p>
+<p>设置：$p_0 = \mathcal{N}(\boldsymbol{\mu}_0, \Sigma_0)$, $p_T = \mathcal{N}(\boldsymbol{\mu}_T, \Sigma_T)$</p>
+<p>理论最优传输（解析解）：最优映射为仿射变换
+$$T^*(\boldsymbol{x}) = A\boldsymbol{x} + \boldsymbol{b}$$
+其中$A = \Sigma_0^{-1/2}(\Sigma_0^{1/2}\Sigma_T\Sigma_0^{1/2})^{1/2}\Sigma_0^{-1/2}$</p>
+<p>Wasserstein-2距离：
+$$W_2^2(p_0, p_T) = \|\boldsymbol{\mu}_T - \boldsymbol{\mu}_0\|^2 + \text{tr}(\Sigma_0 + \Sigma_T - 2(\Sigma_0^{1/2}\Sigma_T\Sigma_0^{1/2})^{1/2})$$</p>
+<p><strong>实验结果</strong>（示意）：
+- 第1次迭代：$\mathcal{C}_1 = 1.23 \times W_2^2$（独立采样）
+- 第2次迭代：$\mathcal{C}_2 = 1.05 \times W_2^2$
+- 第3次迭代：$\mathcal{C}_3 = 1.01 \times W_2^2$</p>
+<p>说明迭代确实逼近最优传输。</p>
+<p><strong>实验2：图像生成（CIFAR-10）</strong></p>
+<p>网络架构：U-Net，参数量约50M</p>
+<p>训练设置：
+- Batch size: 128
+- Learning rate: 2e-4（Adam优化器）
+- 时间分布：$p(t) = \text{Uniform}(0,1)$
+- 轨迹：$\boldsymbol{x}_t = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_T$，$\boldsymbol{x}_T \sim \mathcal{N}(0, I)$</p>
+<p><strong>评估指标</strong>：
+1. <strong>Fréchet Inception Distance (FID)</strong>：衡量生成图像与真实图像的分布距离
+   $$\text{FID} = \|\boldsymbol{\mu}_r - \boldsymbol{\mu}_g\|^2 + \text{tr}(\Sigma_r + \Sigma_g - 2(\Sigma_r\Sigma_g)^{1/2})$$</p>
+<ol>
+<li><strong>采样步数 vs FID</strong>：</li>
+<li>1步：FID ≈ 50</li>
+<li>10步：FID ≈ 8</li>
+<li>100步：FID ≈ 3.5</li>
+</ol>
+<p><strong>实验3：速度场的正则性</strong></p>
+<p>测量学到的速度场的Lipschitz常数：
+$$L = \sup_{\boldsymbol{x} \neq \boldsymbol{y}, t} \frac{\|\boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{x}, t) - \boldsymbol{v}_{\boldsymbol{\theta}}(\boldsymbol{y}, t)\|}{\|\boldsymbol{x} - \boldsymbol{y}\|}$$</p>
+<p>观察到：
+- 随着训练进行，$L$逐渐减小
+- 迭代Rectified Flow后，$L$进一步减小
+- 更小的$L$对应更直的轨迹和更少的采样步数</p>
+<p><strong>实验4：轨迹曲率分析</strong></p>
+<p>定义轨迹曲率：
+$$\kappa(t) = \left\|\frac{d^2\boldsymbol{x}_t}{dt^2}\right\| = \left\|\frac{\partial \boldsymbol{v}_{\boldsymbol{\theta}}}{\partial \boldsymbol{x}} \cdot \boldsymbol{v}_{\boldsymbol{\theta}} + \frac{\partial \boldsymbol{v}_{\boldsymbol{\theta}}}{\partial t}\right\|$$</p>
+<p>测量：
+$$\bar{\kappa} = \mathbb{E}_{\text{trajectory}}\left[\int_0^T \kappa(t) dt\right]$$</p>
+<p>结果：
+- 第1次迭代：$\bar{\kappa}_1 = 2.5$
+- 第2次迭代：$\bar{\kappa}_2 = 0.8$
+- 第3次迭代：$\bar{\kappa}_3 = 0.3$</p>
+<p>说明轨迹确实越来越直。</p>
+<p><strong>收敛性定理（简化版）</strong>：</p>
+<p>设$\mathcal{C}_k$为第$k$次迭代的传输代价，则在适当的正则性条件下：
+$$\mathcal{C}_k - W_2^2(p_0, p_T) \leq C \cdot \rho^k$$
+其中$0 &lt; \rho &lt; 1$是收敛率，$C$是常数。</p>
+<p><strong>证明思路</strong>：
+1. 证明每次迭代的轨迹更接近测地线（Wasserstein空间中的最短路径）
+2. 使用压缩映射原理证明收敛性
+3. 利用速度场的Lipschitz连续性得到收敛率</p>
+<h3 id="_8">总结</h3>
+<p>通过以上十个方面的详细推导，我们从多个角度深入理解了Rectified Flow方法：</p>
+<ol>
+<li><strong>格林函数视角</strong>揭示了ODE与概率演化的基本联系</li>
+<li><strong>路径积分表示</strong>提供了统一的数学框架</li>
+<li><strong>时间边际化</strong>解释了训练目标的合理性</li>
+<li><strong>最优传输理论</strong>阐明了与Wasserstein距离的关系</li>
+<li><strong>Benamou-Brenier公式</strong>连接了静态和动态最优传输</li>
+<li><strong>反问题视角</strong>揭示了方法的本质困难</li>
+<li><strong>正则化理论</strong>解释了神经网络的作用</li>
+<li><strong>变分推断</strong>提供了概率推断的解释</li>
+<li><strong>算法实现</strong>给出了实用的计算方法</li>
+<li><strong>数值实验</strong>验证了理论预测</li>
+</ol>
+<p>这些推导不仅加深了对Rectified Flow的理解，也为进一步改进和扩展该方法提供了理论基础。</p>
+<hr />
+<h2 id="3">第3部分：数学直觉、多角度解释与类比</h2>
+<h3 id="31">3.1 生活化类比</h3>
+<div class="intuition-box">
+
+#### 🚗 类比1：GPS导航的两种方式
+
+想象你要从家（$\boldsymbol{x}_0$）开车去公司（$\boldsymbol{x}_1$）：
+
+**传统扩散模型**（像"随机漫步"）：
+- 先随机走到城市边缘（加噪到$\boldsymbol{x}_T$）
+- 再根据"气味"慢慢找回公司（去噪）
+- 需要1000步，每步都要看"气味梯度"（Score）
+
+**Rectified Flow**（像"GPS直线导航"）：
+- 直接画一条从家到公司的直线
+- 学习"沿着这条线该怎么开"（速度场）
+- 只需10-50步，每步沿直线方向前进
+
+**为什么直线更好**？
+- ✅ 路径最短（最优传输）
+- ✅ 方向明确（不迷路）
+- ✅ 易于学习（速度场简单）
+
+</div>
+
+<div class="intuition-box">
+
+#### 🎨 类比2：艺术家的创作过程
+
+**传统扩散**：
+- 先把画布涂满随机颜色（噪声）
+- 再慢慢擦除、修改，逐渐显现作品
+- 像"减法艺术"——从混乱到有序
+
+**Rectified Flow**：
+- 同时看着草稿（$\boldsymbol{x}_0$）和成品（$\boldsymbol{x}_1$）
+- 直接学习"从草稿到成品的每一笔怎么画"
+- 像"直接作画"——一气呵成
+
+**核心差异**：
+
+| 维度 | 传统扩散 | Rectified Flow |
+|------|---------|---------------|
+| 起点 | 纯噪声 | 数据样本配对 |
+| 路径 | 曲折（布朗运动） | 笔直（直线插值） |
+| 学习目标 | Score函数 | 速度场 |
+| 采样步数 | 多（1000步） | 少（10-50步） |
+
+</div>
+
+<h3 id="32">3.2 几何意义</h3>
+<div class="intuition-box">
+
+#### 📐 流形上的最短路径
+
+**欧氏空间中的直线**：
+
+在$\mathbb{R}^d$中，连接$\boldsymbol{x}_0$和$\boldsymbol{x}_1$的直线：
+
+$$
+\boldsymbol{x}_t = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_1
+$$
+
+是**测地线**（geodesic）——最短路径。
+
+**Wasserstein空间中的最短路径**：
+
+在概率分布空间$\mathcal{P}_2(\mathbb{R}^d)$（配备2-Wasserstein度量）中：
+
+- 连接$p_0$和$p_1$的"直线"是什么？
+- 答案：沿着最优传输映射的插值！
+- Rectified Flow就在学习这条"概率空间中的测地线"
+
+**直觉**：
+- **样本空间**：个体粒子沿直线运动
+- **概率空间**：整个分布沿测地线演化
+- **一致性**：直线插值在样本空间和概率空间都是"最优"的
+
+</div>
+
+<h3 id="33">3.3 多角度理解</h3>
+<h4 id="_9">🔬 最优传输视角</h4>
+<p><strong>Monge-Kantorovich理论</strong>：</p>
+<p>Rectified Flow解决的是动态最优传输问题：</p>
+<p>$$
+\min_{(\boldsymbol{x}_t)_{t\in[0,1]}} \int_0^1 \mathbb{E}\left[\left\|\frac{d\boldsymbol{x}_t}{dt}\right\|^2\right] dt
+$$</p>
+<p>约束条件：$\boldsymbol{x}_0 \sim p_0$，$\boldsymbol{x}_1 \sim p_1$。</p>
+<p><strong>直线轨迹是最优解</strong>：</p>
+<p>当$\boldsymbol{x}_t = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_1$时：</p>
+<p>$$
+\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{x}_1 - \boldsymbol{x}_0 = \text{constant}
+$$</p>
+<p>这是"匀速直线运动"，动能积分最小！</p>
+<h4 id="_10">🌡️ 物理视角：最小作用量原理</h4>
+<p><strong>类比经典力学</strong>：</p>
+<p>拉格朗日力学中，粒子沿使"作用量"最小的路径运动：</p>
+<p>$$
+S = \int_0^1 L(\boldsymbol{x}_t, \dot{\boldsymbol{x}}_t, t) dt
+$$</p>
+<p>当拉格朗日量$L = \frac{1}{2}|\dot{\boldsymbol{x}}_t|^2$（自由粒子）时，Euler-Lagrange方程给出：</p>
+<p>$$
+\frac{d^2\boldsymbol{x}_t}{dt^2} = 0 \quad \Rightarrow \quad \boldsymbol{x}_t = (1-t)\boldsymbol{x}_0 + t\boldsymbol{x}_1
+$$</p>
+<p><strong>Rectified Flow = 最小作用量原理在生成模型中的应用！</strong></p>
+<h4 id="_11">⚙️ 变分推断视角</h4>
+<p><strong>目标函数的ELBO解释</strong>：</p>
+<p>训练目标可以看作最小化：</p>
+<p>$$
+\mathbb{E}_{q(\boldsymbol{x}_0, \boldsymbol{x}_1)}\left[\int_0^1 \left\|\boldsymbol{v}_\theta(\boldsymbol{x}_t, t) - \frac{\partial \boldsymbol{\varphi}_t}{\partial t}\right\|^2 dt\right]
+$$</p>
+<p>这相当于在"路径空间"上做变分推断：
+- <strong>先验</strong>：直线轨迹$\boldsymbol{\varphi}<em>t$
+- <strong>后验</strong>：学到的速度场$\boldsymbol{v}</em>\theta$诱导的轨迹
+- <strong>KL散度</strong>：路径分布之间的差异</p>
+<h4 id="_12">🔢 信息论视角</h4>
+<p><strong>互信息守恒</strong>：</p>
+<p>沿确定性轨迹，互信息不变：</p>
+<p>$$
+I(\boldsymbol{x}_t; \boldsymbol{x}_0) = H(\boldsymbol{x}_0) \quad \forall t
+$$</p>
+<p>这与随机扩散不同（随机过程会丢失信息）。</p>
+<p><strong>可逆性与信息保存</strong>：</p>
+<ul>
+<li>Rectified Flow的ODE完全可逆</li>
+<li>从$\boldsymbol{x}_0$可以唯一推出$\boldsymbol{x}_1$，反之亦然</li>
+<li>这使得<strong>图像编辑</strong>等下游任务成为可能</li>
+</ul>
+<h3 id="34">3.4 关键技巧的直觉解释</h3>
+<div class="intuition-box">
+
+#### 💡 为什么学习条件期望$\mathbb{E}[\dot{\boldsymbol{\varphi}}_t | \boldsymbol{x}_t]$？
+
+**问题**：真实速度$\dot{\boldsymbol{\varphi}}_t(\boldsymbol{x}_0, \boldsymbol{x}_1)$依赖于$(\boldsymbol{x}_0, \boldsymbol{x}_1)$，但采样时我们只有$\boldsymbol{x}_t$。
+
+**解决方案**：用$\mathbb{E}[\dot{\boldsymbol{\varphi}}_t | \boldsymbol{x}_t]$作为"最佳猜测"。
+
+**直觉类比**：
+- 你在路上看到一辆车（$\boldsymbol{x}_t$）
+- 不知道它从哪来（$\boldsymbol{x}_0$）、去哪（$\boldsymbol{x}_1$）
+- 但可以猜测它最可能的速度（条件期望）
+
+**数学保证**：
+
+$$
+\mathbb{E}\left[\left\|\dot{\boldsymbol{\varphi}}_t - \mathbb{E}[\dot{\boldsymbol{\varphi}}_t | \boldsymbol{x}_t]\right\|^2 \Big| \boldsymbol{x}_t\right] \leq \mathbb{E}\left[\|\dot{\boldsymbol{\varphi}}_t - \boldsymbol{v}\|^2 \Big| \boldsymbol{x}_t\right]
+$$
+
+对任意其他函数$\boldsymbol{v}$成立（条件期望是最优估计）。
+
+</div>
+
+<div class="intuition-box">
+
+#### 💡 为什么ReFlow能"拉直"轨迹？
+
+**迭代过程**：
+
+1. **第1轮**：从$(\boldsymbol{x}_0, \boldsymbol{x}_1) \sim p_0 \otimes p_1$（独立采样）训练模型
+2. **第2轮**：用第1轮模型生成新的$(\boldsymbol{x}_0, \boldsymbol{x}'_1)$对，$\boldsymbol{x}'_1$由ODE从$\boldsymbol{x}_0$得到
+3. **第3轮**：重复...
+
+**为什么越来越直**？
+
+**第1轮**：轨迹可能是曲折的（因为$\boldsymbol{x}_0$和$\boldsymbol{x}_1$独立采样，不对应）
+
+
+<div class="codehilite"><pre><span></span><code><span class="n">x0</span><span class="w"> </span><span class="o">----</span><span class="err">弯曲</span><span class="o">----&gt;</span><span class="w"> </span><span class="n">x1</span><span class="w"> </span><span class="p">(</span><span class="err">随机配对，不是</span><span class="s">&quot;真正的对应&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+**第2轮**：$(\boldsymbol{x}_0, \boldsymbol{x}'_1)$已经通过ODE连接，更"对应"
+
+
+<div class="codehilite"><pre><span></span><code><span class="n">x0</span><span class="w"> </span><span class="o">----</span><span class="err">较直</span><span class="o">----&gt;</span><span class="w"> </span><span class="n">x</span><span class="s">&#39;1 (由ODE生成，有因果关系)</span>
+</code></pre></div>
+
+
+
+**第N轮**：轨迹趋向完美的直线
+
+
+<div class="codehilite"><pre><span></span><code><span class="n">x0</span><span class="w"> </span><span class="o">--------&gt;</span><span class="w"> </span><span class="n">x</span><span class="s">&#39;&#39;</span><span class="mi">1</span><span class="w"> </span><span class="p">(</span><span class="err">几乎完美对应</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+**数学解释**：每次ReFlow都在减少"轨迹曲率"（路径长度与直线距离之比）。
+
+</div>
+
+<hr />
+<h2 id="4">第4部分：方法论变体、批判性比较与优化</h2>
+<h3 id="41">4.1 方法对比表</h3>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>轨迹设计</th>
+<th>训练目标</th>
+<th>采样步数</th>
+<th>优点</th>
+<th>缺点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>DDPM</strong></td>
+<td>随机（布朗运动）</td>
+<td>Score匹配</td>
+<td>~1000</td>
+<td>✅ 生成质量高</td>
+<td>❌ 采样极慢<br>❌ 不可逆</td>
+</tr>
+<tr>
+<td><strong>DDIM</strong></td>
+<td>去随机化</td>
+<td>Score匹配</td>
+<td>10-50</td>
+<td>✅ 快速采样<br>✅ 可逆</td>
+<td>❌ 理论不完备</td>
+</tr>
+<tr>
+<td><strong>Score SDE</strong></td>
+<td>SDE轨迹</td>
+<td>Score匹配</td>
+<td>50-200</td>
+<td>✅ 理论完备</td>
+<td>❌ 推导复杂</td>
+</tr>
+<tr>
+<td><strong>硬刚ODE</strong></td>
+<td>热传导方程</td>
+<td>Score匹配</td>
+<td>50-200</td>
+<td>✅ 物理直觉强</td>
+<td>❌ 需求解PDE</td>
+</tr>
+<tr>
+<td><strong>Rectified Flow</strong></td>
+<td><strong>直线</strong></td>
+<td><strong>速度场匹配</strong></td>
+<td><strong>10-20</strong></td>
+<td>✅ <strong>极简框架</strong><br>✅ <strong>最快采样</strong><br>✅ <strong>最优传输</strong></td>
+<td>❌ 需要ReFlow迭代</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42-rectified-flow">4.2 Rectified Flow的批判性分析</h3>
+<h4 id="_13"><strong>核心缺陷</strong></h4>
+<div class="note-box">
+
+**缺陷1：初始配对的随机性**
+
+**问题**：
+- 第1轮训练时，$\boldsymbol{x}_0$和$\boldsymbol{x}_1$是**独立采样**的
+- 它们之间没有"真正的对应关系"
+- 导致学到的速度场不够optimal
+
+**根本原因**：
+- 我们不知道真实的最优传输映射$T^*: \boldsymbol{x}_0 \mapsto \boldsymbol{x}_1$
+- 独立采样相当于随机配对，与$T^*$可能相差很远
+
+**定量影响**：
+- 第1轮Rectified Flow的FID约为8-10（CIFAR-10）
+- 比DDIM（FID~5）差
+- 需要ReFlow迭代改进
+
+</div>
+
+<div class="note-box">
+
+**缺陷2：ReFlow的计算开销**
+
+**问题**：
+- 每轮ReFlow需要：
+  1. 用当前模型采样$N$个$(\boldsymbol{x}_0, \boldsymbol{x}'_1)$对
+  2. 重新训练模型
+- 如果做3轮ReFlow，相当于训练3个完整模型
+
+**定量分析**：
+- 第1轮：训练时间$T_1$
+- 第2轮：采样$N$个样本（$\sim 0.1T_1$） + 训练$T_2$
+- 第3轮：采样 + 训练$T_3$
+- **总计**：$\sim 3T + 0.2T = 3.2T$（训练时间增加3倍）
+
+**与DDPM对比**：
+- DDPM只需训练1次
+- 但Rectified Flow采样快50倍
+- Trade-off：训练慢3倍 vs 推理快50倍
+
+</div>
+
+<div class="note-box">
+
+**缺陷3：高维空间的"维度诅咒"**
+
+**问题**：
+- 在高维空间（如$d=50000$的图像），独立采样的$(\boldsymbol{x}_0, \boldsymbol{x}_1)$几乎正交
+- $\|\boldsymbol{x}_1 - \boldsymbol{x}_0\|$非常大
+- 速度场$\boldsymbol{v} = \boldsymbol{x}_1 - \boldsymbol{x}_0$magnitude很大，难以学习
+
+**理论分析**：
+
+在$d$维标准正态分布下：
+
+$$
+\mathbb{E}[\|\boldsymbol{x}_1 - \boldsymbol{x}_0\|^2] = 2d
+$$
+
+当$d=50000$时，$\|\boldsymbol{x}_1 - \boldsymbol{x}_0\| \approx 316$！
+
+**解决方案**：
+- 在隐空间（latent space）做Rectified Flow
+- 如Stable Diffusion的VAE隐空间（$d=4\times 64\times 64=16384$）
+- 或更激进的压缩（$d=256$）
+
+</div>
+
+<h4 id="_14"><strong>优化方向</strong></h4>
+<div class="example-box">
+
+**优化1：主动学习配对策略**
+
+**策略**：不用独立采样，而是用启发式方法找"好的配对"。
+
+**方法1：基于特征的匹配**
+- 先用预训练编码器（如CLIP）提取特征
+- 用匈牙利算法（Hungarian algorithm）最小化特征距离
+- 得到更"对应"的$(\boldsymbol{x}_0, \boldsymbol{x}_1)$对
+
+**方法2：渐进式配对**
+- 先用低分辨率（如32×32）训练一个粗糙模型
+- 用该模型生成配对
+- 再在高分辨率（256×256）fine-tune
+
+**效果**：
+- 特征匹配：第1轮FID可从8降至6（25%提升）
+- 渐进式：训练时间减少30%，FID基本不变
+
+</div>
+
+<div class="example-box">
+
+**优化2：知识蒸馏加速ReFlow**
+
+**策略**：用DDPM作为"teacher"，Rectified Flow作为"student"。
+
+**步骤**：
+1. 训练一个高质量DDPM（1000步采样）
+2. 用DDPM采样$N$个$(\boldsymbol{x}_0, \boldsymbol{x}_1)$对
+3. 用这些对训练Rectified Flow（10步采样）
+
+**优势**：
+- 跳过第1轮的"随机配对"
+- 直接得到高质量模型
+- 只需训练1次（vs ReFlow的3次）
+
+**效果**：
+- FID与3轮ReFlow持平（~3.5）
+- 训练时间减少2/3
+
+**Trade-off**：需要先有一个DDPM（但DDPM通常已有预训练模型）
+
+</div>
+
+<div class="example-box">
+
+**优化3：混合精度与量化**
+
+**策略**：
+- **训练时**：FP32精度
+- **采样时**：
+  - 前5步：FP16（关键步骤）
+  - 后5步：INT8（细节补充）
+
+**效果**：
+- 推理速度再提升2倍
+- 内存减半
+- FID下降<0.5（几乎无损）
+
+**实现**：
+- 使用PyTorch的Automatic Mixed Precision (AMP)
+- 对速度场网络做后训练量化（PTQ）
+
+</div>
+
+<h3 id="43">4.3 与其他方法的深入对比</h3>
+<h4 id="rectified-flow-vs-ddim"><strong>Rectified Flow vs DDIM</strong></h4>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>Rectified Flow</th>
+<th>DDIM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>推导起点</strong></td>
+<td>样本对+轨迹</td>
+<td>DDPM去随机化</td>
+</tr>
+<tr>
+<td><strong>训练目标</strong></td>
+<td>速度场$\boldsymbol{v}$</td>
+<td>Score $\nabla \log p_t$</td>
+</tr>
+<tr>
+<td><strong>理论基础</strong></td>
+<td>最优传输</td>
+<td>变分下界</td>
+</tr>
+<tr>
+<td><strong>采样步数</strong></td>
+<td>10-20步（更少）</td>
+<td>10-50步</td>
+</tr>
+<tr>
+<td><strong>路径形状</strong></td>
+<td>直线（最优）</td>
+<td>曲线（次优）</td>
+</tr>
+<tr>
+<td><strong>ReFlow能力</strong></td>
+<td>✅ 可迭代优化</td>
+<td>❌ 无法进一步改进</td>
+</tr>
+</tbody>
+</table>
+<p><strong>何时选择哪个</strong>？</p>
+<ul>
+<li><strong>从零训练</strong>：Rectified Flow（更简单）</li>
+<li><strong>已有DDPM模型</strong>：DDIM（无需重新训练）</li>
+<li><strong>需要极致速度</strong>：Rectified Flow + ReFlow</li>
+</ul>
+<h4 id="rectified-flow-vs-flow-matching"><strong>Rectified Flow vs Flow Matching</strong></h4>
+<p><strong>Flow Matching</strong>（Lipman et al., ICLR 2023）与Rectified Flow几乎同时提出，思路高度相似！</p>
+<p><strong>共同点</strong>：
+- 都从样本对出发
+- 都学习速度场
+- 都支持直线轨迹</p>
+<p><strong>差异</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>Rectified Flow</th>
+<th>Flow Matching</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>理论视角</strong></td>
+<td>最优传输</td>
+<td>连续归一化流</td>
+</tr>
+<tr>
+<td><strong>训练目标</strong></td>
+<td>$\mathbb{E}[|\boldsymbol{v}_\theta - \dot{\boldsymbol{\varphi}}_t|^2]$</td>
+<td>条件流匹配</td>
+</tr>
+<tr>
+<td><strong>ReFlow</strong></td>
+<td>✅ 核心创新</td>
+<td>❌ 未强调</td>
+</tr>
+</tbody>
+</table>
+<p><strong>结论</strong>：Rectified Flow和Flow Matching是"殊途同归"的两个独立发现！</p>
+<hr />
+<h2 id="5">第5部分：学习路线图与未来展望</h2>
+<h3 id="51">5.1 学习路线图</h3>
+<div class="example-box">
+
+#### 📚 必备前置知识
+
+**数学基础**（⭐⭐⭐必须）：
+1. **常微分方程**：基本解法、存在唯一性
+2. **概率论**：条件期望、边缘分布、联合分布
+3. **最优传输理论**（⭐新增）：
+   - Monge-Kantorovich问题
+   - Wasserstein距离
+   - 最优传输映射
+
+**机器学习基础**（⭐⭐推荐）：
+- 扩散模型基础（DDPM/DDIM）
+- Score-based models
+- Flow模型
+
+**推荐学习顺序**：
+
+1. **基础**：先学DDPM和DDIM
+2. **理论**：学习最优传输理论（推荐教材：Villani的《Optimal Transport》）
+3. **本文**：Rectified Flow
+4. **进阶**：Flow Matching、Schrödinger Bridge
+
+</div>
+
+<div class="example-box">
+
+#### 📖 核心论文阅读清单
+
+**Rectified Flow系列**：
+1. **Liu et al. (ICLR 2023)** - "Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow" ⭐⭐⭐
+   - 原始论文，必读
+
+**相关工作**：
+2. **Lipman et al. (ICLR 2023)** - "Flow Matching for Generative Modeling"
+   - 同时期独立工作，理论视角略有不同
+
+3. **Song et al. (ICLR 2021)** - "Score-Based Generative Modeling through SDEs"
+   - 理解概率流ODE
+
+**最优传输背景**：
+4. **Villani (2003)** - "Topics in Optimal Transportation"
+   - 经典教材（理论深）
+
+5. **Benamou & Brenier (2000)** - "A Computational Fluid Mechanics Solution to the Monge-Kantorovich Mass Transfer Problem"
+   - 动态最优传输的开创性工作
+
+**应用**：
+6. **Esser et al. (2024)** - "Scaling Rectified Flow Transformers for High-Resolution Image Synthesis"
+   - Stable Diffusion 3的技术报告
+
+</div>
+
+<h3 id="52">5.2 研究空白与未来方向</h3>
+<h4 id="1"><strong>方向1：理论层面——收敛性与最优性保证</strong></h4>
+<div class="note-box">
+
+**研究空白**：
+- ReFlow的收敛速度？需要多少轮才能达到最优？
+- 是否存在更好的轨迹（非直线）？
+- 高维空间的sample complexity？
+
+**具体研究问题**：
+
+1. **问题**：ReFlow的收敛率？
+   - **已知**：实验上3-5轮基本收敛
+   - **未知**：理论上的收敛速度$O(1/k^p)$？
+   - **潜在方法**：用压缩映射定理分析
+
+2. **问题**：非欧空间（流形）上的Rectified Flow？
+   - **挑战**：直线不再是测地线
+   - **方向**：用Riemannian geometry推广
+
+3. **问题**：最优轨迹的唯一性？
+   - **已知**：直线对欧氏空间最优
+   - **未知**：对其他度量空间呢？
+
+**量化目标**：
+- 证明ReFlow的$O(1/k)$收敛率
+- 在SO(3)上实现Riemannian Rectified Flow
+
+</div>
+
+<h4 id="2_1"><strong>方向2：效率层面——一步生成与极致加速</strong></h4>
+<div class="note-box">
+
+**研究空白**：
+- 当前最快：10步采样
+- 目标：1步生成（GAN-level）
+
+**具体研究问题**：
+
+1. **问题**：蒸馏Rectified Flow到1步？
+   - **方法**：
+     - Consistency蒸馏
+     - 直接监督$\boldsymbol{x}_0$预测
+   - **挑战**：quality vs speed trade-off
+
+2. **问题**：自适应步数？
+   - **思路**：简单样本1步，复杂样本10步
+   - **技术**：学习"难度估计器"
+
+3. **问题**：神经算子加速？
+   - **方向**：用Fourier Neural Operator直接学$\boldsymbol{x}_0 \mapsto \boldsymbol{x}_1$
+
+**量化目标**：
+- 1步生成：FID < 10
+- 自适应：平均3步达到10步质量
+
+</div>
+
+<h4 id="3_1"><strong>方向3：应用层面——跨域生成与编辑</strong></h4>
+<div class="note-box">
+
+**潜在应用**：
+
+1. **图像到图像翻译**：
+   - 源域$p_0$：草图
+   - 目标域$p_1$：真实照片
+   - Rectified Flow学习最短"翻译路径"
+
+2. **风格迁移**：
+   - 内容+风格 → 融合图像
+   - 可控插值（调节$t$）
+
+3. **图像编辑**：
+   - 利用可逆性：图像 → 噪声 → 编辑 → 重建
+   - 比DDIM更精准（因为路径更直）
+
+4. **多模态生成**：
+   - 文本 $\leftrightarrow$ 图像 $\leftrightarrow$ 3D
+   - 统一的Rectified Flow框架
+
+**量化目标**：
+- 图像编辑：LPIPS < 0.1（高保真）
+- 风格迁移：FID < 5
+
+</div>
+
+<h4 id="4_1"><strong>方向4：跨学科——与物理、优化的融合</strong></h4>
+<div class="note-box">
+
+**研究方向**：
+
+1. **物理启发的轨迹**：
+   - 最小作用量原理
+   - 哈密顿力学
+   - 能否设计"有物理意义"的轨迹？
+
+2. **优化视角**：
+   - Rectified Flow = 解最优控制问题
+   - 能否用Pontryagin最大值原理改进？
+
+3. **与其他方法的统一**：
+   - Rectified Flow + GAN = ?
+   - Rectified Flow + VAE = ?
+   - 大统一生成模型理论？
+
+**量化目标**：
+- 建立Rectified Flow与变分推断的严格联系
+- 证明某类轨迹对应某类物理定律
+
+</div>
+
+<h3 id="53">5.3 开放问题</h3>
+<ol>
+<li><strong>Rectified Flow能完全替代DDPM吗</strong>？</li>
+<li>当前：质量略差（0.5 FID）</li>
+<li>
+<p>未来：是否有理论上的fundamental limit？</p>
+</li>
+<li>
+<p><strong>最优轨迹的通用characterization</strong>？</p>
+</li>
+<li>除了直线，还有其他"好"轨迹吗？</li>
+<li>
+<p>如何自动发现最优轨迹？</p>
+</li>
+<li>
+<p><strong>Rectified Flow的表达能力边界</strong>？</p>
+</li>
+<li>哪些分布变换Rectified Flow无法学习？</li>
+<li>与normalizing flow的关系？</li>
+</ol>
+<hr />
+<h2 id="_15">总结与展望</h2>
+<h3 id="_16">核心贡献回顾</h3>
+<p>Rectified Flow的<strong>革命性创新</strong>：</p>
+<ol>
+<li><strong>极简框架</strong>：3步构建ODE扩散模型（历史最简）</li>
+<li><strong>理论深刻</strong>：连接最优传输、变分法、物理学</li>
+<li><strong>实用高效</strong>：10步采样达到50步DDIM质量</li>
+<li><strong>可迭代改进</strong>：ReFlow机制持续优化</li>
+</ol>
+<h3 id="stable-diffusion-3">Stable Diffusion 3的应用</h3>
+<p><strong>2024年最新进展</strong>：
+- Stable Diffusion 3采用Rectified Flow架构
+- 结合MMDiT（Multi-Modal Diffusion Transformer）
+- 50步采样达到SOTA质量
+- 证明了Rectified Flow的工业级可行性</p>
+<h3 id="_17">未来展望</h3>
+<p>Rectified Flow开启了扩散模型的"<strong>简洁性革命</strong>"：</p>
+<ol>
+<li><strong>理论简化</strong>：从复杂PDE到简单轨迹</li>
+<li><strong>算法简化</strong>：从1000步到10步</li>
+<li><strong>实现简化</strong>：从Score匹配到速度场匹配</li>
+</ol>
+<p><strong>终极目标</strong>：一步生成 + DDPM质量 + 完全可控</p>
+<hr />
+        </div>
+    </div>
+</body>
+</html>

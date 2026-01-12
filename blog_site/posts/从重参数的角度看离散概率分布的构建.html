@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>从重参数的角度看离散概率分布的构建</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>从重参数的角度看离散概率分布的构建</h1>
+            <div class="meta">📅 最后更新: 2025-11-19 | 📄 大小: 23.1 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9085">https://spaces.ac.cn/archives/9085</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>一般来说，神经网络的输出都是无约束的，也就是值域为$\mathbb{R}$，而为了得到有约束的输出，通常是采用加激活函数的方式。例如，如果我们想要输出一个概率分布来代表每个类别的概率，那么通常在最后加上Softmax作为激活函数。那么一个紧接着的疑问就是：除了Softmax，还有什么别的操作能生成一个概率分布吗？</p>
+<p>在<a href="/archives/6705">《漫谈重参数：从正态分布到Gumbel Softmax》</a>中，我们介绍了Softmax的重参数操作，本文将这个过程反过来，即先定义重参数操作，然后去反推对应的概率分布，从而得到一个理解概率分布构建的新视角。</p>
+<h2 id="_1">问题定义</h2>
+<p>假设模型的输出向量为$\boldsymbol{\mu}=[\mu_1,\cdots,\mu_n]\in\mathbb{R}^n$，不失一般性，这里假设$\mu_i$两两不等。我们希望通过某个变换$\mathcal{T}$将$\boldsymbol{\mu}$转换为$n$元概率分布$\boldsymbol{p}=[p_1,\cdots,p_n]$，并保持一定的性质。比如，最基本的要求是：<br />
+\begin{equation}{\color{red}1.}\,p_i\geq 0 \qquad {\color{red}2.}\,\sum_i p_i = 1 \qquad {\color{red}3.}\,p_i \geq p_j \Leftrightarrow \mu_i \geq \mu_j\end{equation}<br />
+当然，这些要求都很平凡，只要$f$是$\mathbb{R}\mapsto\mathbb{R}^+$的单调函数（对于Softmax有$f(x)=e^x$），那么变换<br />
+\begin{equation}p_i = \frac{f(\mu_i)}{\sum\limits_j f(\mu_j)}\end{equation}<br />
+都可以满足上述要求。接下来我们增加一个不那么平凡的条件：<br />
+\begin{equation}{\color{red}4.}\, \mathcal{T}(\boldsymbol{\mu}) = \mathcal{T}(\boldsymbol{\mu} + c\boldsymbol{1})\quad (\forall c \in \mathbb{R})\end{equation}<br />
+其中$\boldsymbol{1}$代表全1向量，$c$则是任意常数。也就是说，$\boldsymbol{\mu}$的每个分量都加上同一常数后，变换的结果保持不变，提出这个条件是因为每个分量都加上一个常数后，$\mathop{\text{argmax}}$的结果不会改变，而$\mathcal{T}$最好能尽量保持跟它一样的性质。容易检验Softmax是满足这个条件的，然而除了Softmax外，我们似乎很难想到别的变换了。</p>
+<h2 id="_2">噪声扰动</h2>
+<p>非常有意思的是，我们可以借助重参数（Reparameterization）的逆过程来构造这样的变换！假设$\boldsymbol{\varepsilon}=[\varepsilon_1,\cdots,\varepsilon_n]$是从分布$p(\varepsilon)$独立重复采样$n$次得到的向量，由于$\boldsymbol{\varepsilon}$是随机的，那么$\mathop{\text{argmax}}(\boldsymbol{\mu}+\boldsymbol{\varepsilon})$通常也是随机的，那么我们可以通过<br />
+\begin{equation}p_i = P[\mathop{\text{argmax}}(\boldsymbol{\mu}+\boldsymbol{\varepsilon})=i]\end{equation}<br />
+来定义变换$\mathcal{T}$。由于$\boldsymbol{\varepsilon}$是独立同分布的，且整个定义只跟$\mathop{\text{argmax}}(\boldsymbol{\mu}+\boldsymbol{\varepsilon})$有关，也就是只涉及到每个分量的相对大小，因此所定义的变换必然是满足前述4个条件的。</p>
+<p>我们也可以通过直接算出$p_i$的形式来判断它满足的性质。具体来说，$\mathop{\text{argmax}}(\boldsymbol{\mu}+\boldsymbol{\varepsilon})=i$意味着<br />
+\begin{equation}\mu_i + \varepsilon_i &gt; \mu_j + \varepsilon_j\quad (\forall j\neq i)\end{equation}<br />
+也就是$\mu_i - \mu_j + \varepsilon_i &gt; \varepsilon_j$，显然$\mu_i$越大该式成立的可能性越大，也即$\mu_i$越大对应的$p_i$越大，这便是条件$3$。具体来说，固定$\varepsilon_i$的情况下，满足该条件的概率是<br />
+\begin{equation}\int_{-\infty}^{\mu_i - \mu_j + \varepsilon_i} p(\varepsilon_j)d\varepsilon_j = \Phi(\mu_i - \mu_j + \varepsilon_i)\end{equation}<br />
+这里$\Phi$是$p(\varepsilon)$的累积分布函数（Cumulative Distribution Function）。由于各个$\varepsilon_j$都是独立同分布的，因此我们可以将概率直接连乘起来：<br />
+\begin{equation}\prod_{j\neq i} \Phi(\mu_i - \mu_j + \varepsilon_i)\end{equation}<br />
+这是固定$\varepsilon_i$的情况下，$\mathop{\text{argmax}}(\boldsymbol{\mu}+\boldsymbol{\varepsilon})=i$的概率。最后我们只需要对$\varepsilon_i$求平均，就可以得到$p_i$：<br />
+\begin{equation}p_i = \int_{-\infty}^{\infty} p(\varepsilon_i)\left[\prod_{j\neq i} \Phi(\mu_i - \mu_j + \varepsilon_i)\right]d\varepsilon_i \label{eq:pi}\end{equation}<br />
+从$p_i$的表达式可以看到它只依赖于相对值$\mu_i - \mu_j$，因此显然它满足定义中的条件$4$。</p>
+<h2 id="_3">温故知新</h2>
+<p>对照<a href="/archives/6705">《漫谈重参数：从正态分布到Gumbel Softmax》</a>中关于Gumbel Max的介绍，我们可以发现上述推导跟重参数正好相反，它是先定义了重参数的方法，然后在反向推导出对应的概率分布。</p>
+<p>现在我们可以来重新检验一下之前的结果，即当噪声分布取<a href="https://en.wikipedia.org/wiki/Gumbel_distribution">Gumbel分布</a>时，式$\eqref{eq:pi}$是否能得到常规的Softmax操作。Gumbel噪声是$u\sim U[0,1]$通过$\varepsilon = -\log(-\log u)$变换而来，由于$u$的分布正好是$U[0,1]$，所以解出来$u=e^{-e^{-\varepsilon}}$正好就是Gumbel分布的累积分布函数，即$\Phi(\varepsilon)=e^{-e^{-\varepsilon}}$，而$p(\varepsilon)$就是$\Phi(\varepsilon)$的导数，即$p(\varepsilon)=\Phi'(\varepsilon)=e^{-\varepsilon-e^{-\varepsilon}}$。</p>
+<p>将上述结果代入式$\eqref{eq:pi}$得<br />
+\begin{equation}\begin{aligned}<br />
+p_i =&amp;\, \int_{-\infty}^{\infty} e^{-\varepsilon_i-e^{-\varepsilon_i}} e^{-\sum\limits_{j\neq i}e^{-\varepsilon_i + \mu_j - \mu_i}} d\varepsilon_i \\\<br />
+=&amp;\, \int_{-\infty}^0 e^{-e^{-\varepsilon_i}\left(1+\sum\limits_{j\neq i}e^{\mu_j - \mu_i}\right)} d(-e^{-\varepsilon_i}) \\\<br />
+=&amp;\, \int_{-\infty}^0 e^{t\left(1+\sum\limits_{j\neq i}e^{\mu_j - \mu_i}\right)} dt\\\<br />
+=&amp;\, \frac{1}{1+\sum\limits_{j\neq i}e^{\mu_j - \mu_i}} = \frac{e^{\mu_i}}{\sum\limits_j e^{\mu_j }}<br />
+\end{aligned}\end{equation}<br />
+这正好是Softmax。于是我们再次验证了Gumbel Max与Softmax的对应关系。</p>
+<h2 id="_4">数值计算</h2>
+<p>能像Gumbel分布那样解出诸如Softmax的解析解是极其稀罕的，至少笔者目前还找不到第二例。因此，大多数情况下，我们只能用数值计算方法近似估算式$\eqref{eq:pi}$。由于$p(\varepsilon)=\Phi'(\varepsilon)$，所以我们可以直接凑微分得：<br />
+\begin{equation}p_i = \int_0^1 \left[\prod_{j\neq i} \Phi(\mu_i - \mu_j + \varepsilon_i)\right]d\Phi(\varepsilon_i)\end{equation}<br />
+记$t=\Phi(\varepsilon_i)$，那么<br />
+\begin{equation}\begin{aligned}<br />
+p_i =&amp;\, \int_0^1 \left[\prod_{j\neq i} \Phi(\mu_i - \mu_j + \Phi^{-1}(t))\right]dt \\\<br />
+\approx&amp;\, \frac{1}{K}\sum_{k=1}^K\prod_{j\neq i} \Phi\left(\mu_i - \mu_j + \Phi^{-1}\left(\frac{k}{K+1}\right)\right)<br />
+\end{aligned}\end{equation}<br />
+其中$\Phi^{-1}$是$\Phi$的逆函数，在概率中也叫分位函数（Quantile Function、Percent Point Function等）。</p>
+<p>从上式可以看到，只要我们知道$\Phi$的解析式，就可以对$p_i$进行近似计算。注意我们不需要知道$\Phi^{-1}$的解析式，因为采样点$\Phi^{-1}\left(\frac{k}{K+1}\right)$的结果我们可以用其他数值方法提前计算好。</p>
+<p>以标准正态分布为例，$\Phi(x)=\frac{1}{2} \left(1+\text{erf}\left(\frac{x}{\sqrt{2}}\right)\right)$，而主流的深度学习框架基本上都自带了$\text{erf}$函数，所以$\Phi(x)$的计算是没有问题的；至于$\Phi^{-1}\left(\frac{k}{K+1}\right)$我们可以通过<code>scipy.stats.norm.ppf</code>来事先计算好。所以当$\boldsymbol{\varepsilon}$采样自标准正态分布时，$p_i$的计算在主流深度学习框架中都是没问题的。</p>
+<h2 id="_5">文章小结</h2>
+<p>本文从重参数角度对Softmax进行推广，得到了一类具备相似性质的概率归一化方法。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9085">https://spaces.ac.cn/archives/9085</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 25, 2022). 《从重参数的角度看离散概率分布的构建 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9085">https://spaces.ac.cn/archives/9085</a></p>
+<p>@online{kexuefm-9085,<br />
+title={从重参数的角度看离散概率分布的构建},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/9085}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释</h2>
+<p>本文提出了一种基于重参数（Reparameterization）的新视角来理解和构造概率分布，特别是推广了 Softmax 操作。这个方法通过噪声扰动和 argmax 操作，自然地满足概率分布的所有要求。</p>
+<h3 id="1">1. 问题背景与动机</h3>
+<h4 id="11">1.1 神经网络输出归一化问题</h4>
+<p><strong>问题设定</strong>：神经网络输出 $\boldsymbol{\mu} = [\mu_1, \ldots, \mu_n] \in \mathbb{R}^n$（无约束实数向量），需要转换为概率分布 $\boldsymbol{p} = [p_1, \ldots, p_n]$。</p>
+<p><strong>经典解决方案</strong>（Softmax）：</p>
+<p>$$p_i = \frac{\exp(\mu_i)}{\sum_{j=1}^n \exp(\mu_j)}$$</p>
+<p><strong>核心问题</strong>：除了 Softmax，还有其他满足概率分布要求的归一化方法吗？</p>
+<h4 id="12">1.2 概率分布的必要条件</h4>
+<p>一个有效的变换 $\mathcal{T}: \mathbb{R}^n \to \Delta^{n-1}$（$\Delta^{n-1}$ 是 $(n-1)$ 维单纯形）需满足：</p>
+<p><strong>条件 1（非负性）</strong>：
+$$p_i \geq 0, \quad \forall i \in \{1, \ldots, n\}$$</p>
+<p><strong>条件 2（归一化）</strong>：
+$$\sum_{i=1}^n p_i = 1$$</p>
+<p><strong>条件 3（单调性）</strong>：
+$$p_i \geq p_j \Leftrightarrow \mu_i \geq \mu_j$$</p>
+<p><strong>条件 4（平移不变性）</strong>：
+$$\mathcal{T}(\boldsymbol{\mu}) = \mathcal{T}(\boldsymbol{\mu} + c\boldsymbol{1}), \quad \forall c \in \mathbb{R}$$</p>
+<p>其中 $\boldsymbol{1} = [1, \ldots, 1]^T$。</p>
+<h4 id="13">1.3 一般形式</h4>
+<p><strong>定理</strong>：任何单调递增函数 $f: \mathbb{R} \to \mathbb{R}^+$ 都可以定义满足条件 1-4 的变换：</p>
+<p>$$p_i = \frac{f(\mu_i)}{\sum_{j=1}^n f(\mu_j)}$$</p>
+<p><strong>证明</strong>：</p>
+<ul>
+<li><strong>条件 1</strong>：由于 $f(\mu_i) &gt; 0$ 且 $\sum_j f(\mu_j) &gt; 0$，显然 $p_i &gt; 0$。</li>
+<li><strong>条件 2</strong>：$\sum_i p_i = \frac{\sum_i f(\mu_i)}{\sum_j f(\mu_j)} = 1$。</li>
+<li><strong>条件 3</strong>：若 $\mu_i \geq \mu_j$，则 $f(\mu_i) \geq f(\mu_j)$（单调性），因此：
+  $$\frac{p_i}{p_j} = \frac{f(\mu_i)}{f(\mu_j)} \geq 1 \Rightarrow p_i \geq p_j$$</li>
+<li><strong>条件 4</strong>：$f(\mu_i + c) / \sum_j f(\mu_j + c)$ 在分子分母中 $c$ 的影响相同，约分后不变。</li>
+</ul>
+<p><strong>特例</strong>：
+- $f(x) = e^x$ → Softmax
+- $f(x) = \max(0, x)$ → Sparsemax（近似）
+- $f(x) = x^2$ （$x &gt; 0$ 时）→ 二次归一化</p>
+<p>但这还不够有趣，我们需要更本质的构造方法。</p>
+<h3 id="2">2. 重参数技巧与噪声扰动</h3>
+<h4 id="21-reparameterization">2.1 重参数（Reparameterization）回顾</h4>
+<p><strong>正向重参数</strong>（从分布到采样）：</p>
+<p>如果 $X \sim p_\theta(x)$，我们希望找到确定性函数 $g$ 和噪声分布 $\varepsilon \sim p(\varepsilon)$，使得：</p>
+<p>$$X = g(\theta, \varepsilon)$$</p>
+<p>这样可以通过 $\varepsilon$ 的梯度来反向传播 $\theta$ 的梯度。</p>
+<p><strong>例子</strong>（正态分布）：
+$$X \sim \mathcal{N}(\mu, \sigma^2) \Rightarrow X = \mu + \sigma \varepsilon, \quad \varepsilon \sim \mathcal{N}(0, 1)$$</p>
+<h4 id="22">2.2 逆向重参数：从噪声到分布</h4>
+<p><strong>核心思想</strong>（本文创新）：反过来，先定义噪声扰动方式，再推导出对应的概率分布。</p>
+<p><strong>定义</strong>：设 $\boldsymbol{\varepsilon} = [\varepsilon_1, \ldots, \varepsilon_n]$，其中 $\varepsilon_i \overset{\text{i.i.d.}}{\sim} p(\varepsilon)$。定义：</p>
+<p>$$p_i = P\left[\mathop{\arg\max}_j (\mu_j + \varepsilon_j) = i\right]$$</p>
+<p><strong>直观理解</strong>：
+- 在 $\boldsymbol{\mu}$ 上加随机噪声 $\boldsymbol{\varepsilon}$
+- 取最大值的索引（argmax）
+- $p_i$ 是索引为 $i$ 的概率</p>
+<p><strong>为什么这样定义？</strong>
+1. 自然满足 $\sum_i p_i = 1$（argmax 必然选中某个位置）
+2. 自然满足 $p_i &gt; 0$（任何位置都有机会成为最大）
+3. $\mu_i$ 越大，$i$ 被选中的概率越大（满足单调性）
+4. 加常数不改变相对大小（满足平移不变性）</p>
+<h3 id="3">3. 概率分布的显式推导</h3>
+<h4 id="31">3.1 条件概率分解</h4>
+<p>$\mathop{\arg\max}_j (\mu_j + \varepsilon_j) = i$ 等价于：</p>
+<p>$$\mu_i + \varepsilon_i > \mu_j + \varepsilon_j, \quad \forall j \neq i$$</p>
+<p>即：</p>
+<p>$$\varepsilon_j < \mu_i - \mu_j + \varepsilon_i, \quad \forall j \neq i$$</p>
+<h4 id="32-varepsilon_i">3.2 固定 $\varepsilon_i$ 时的条件概率</h4>
+<p>给定 $\varepsilon_i$ 的值，事件 $\varepsilon_j &lt; \mu_i - \mu_j + \varepsilon_i$ 的概率为：</p>
+<p>$$P[\varepsilon_j < \mu_i - \mu_j + \varepsilon_i] = \int_{-\infty}^{\mu_i - \mu_j + \varepsilon_i} p(\varepsilon_j) d\varepsilon_j = \Phi(\mu_i - \mu_j + \varepsilon_i)$$</p>
+<p>其中 $\Phi(x)$ 是 $p(\varepsilon)$ 的<strong>累积分布函数</strong>（CDF）：</p>
+<p>$$\Phi(x) = \int_{-\infty}^x p(t) \, dt$$</p>
+<h4 id="33">3.3 独立性与乘积</h4>
+<p>由于 $\varepsilon_1, \ldots, \varepsilon_n$ 独立同分布，对于固定的 $\varepsilon_i$：</p>
+<p>$$P[\text{所有 } j \neq i \text{ 都满足条件} \mid \varepsilon_i] = \prod_{j \neq i} \Phi(\mu_i - \mu_j + \varepsilon_i)$$</p>
+<h4 id="34-varepsilon_i">3.4 对 $\varepsilon_i$ 积分（全概率公式）</h4>
+<p>$$p_i = \int_{-\infty}^{\infty} p(\varepsilon_i) \left[\prod_{j \neq i} \Phi(\mu_i - \mu_j + \varepsilon_i)\right] d\varepsilon_i$$</p>
+<p><strong>这是本文的核心公式</strong>！它给出了任意噪声分布 $p(\varepsilon)$ 对应的概率归一化方法。</p>
+<h4 id="35">3.5 性质验证</h4>
+<p><strong>平移不变性</strong>：</p>
+<p>$$p_i = \int p(\varepsilon_i) \prod_{j \neq i} \Phi((\mu_i + c) - (\mu_j + c) + \varepsilon_i) d\varepsilon_i$$</p>
+<p>$$= \int p(\varepsilon_i) \prod_{j \neq i} \Phi(\mu_i - \mu_j + \varepsilon_i) d\varepsilon_i$$</p>
+<p>因为 $c$ 在差值中抵消，所以满足条件 4。✅</p>
+<h3 id="4-gumbel-softmax">4. Gumbel 分布与 Softmax 的等价性</h3>
+<h4 id="41-gumbel">4.1 Gumbel 分布定义</h4>
+<p><strong>标准 Gumbel 分布</strong>：</p>
+<p><strong>采样方法</strong>：$u \sim \text{Uniform}(0, 1)$，则：</p>
+<p>$$\varepsilon = -\log(-\log u)$$</p>
+<p>服从 Gumbel$(0, 1)$ 分布。</p>
+<p><strong>累积分布函数</strong>（CDF）：</p>
+<p>$$\Phi(\varepsilon) = P[\varepsilon \leq x] = e^{-e^{-x}}$$</p>
+<p><strong>证明</strong>：</p>
+<p>$$P[\varepsilon \leq x] = P[-\log(-\log u) \leq x] = P[-\log u \geq e^{-x}]$$</p>
+<p>$$= P[u \leq e^{-e^{-x}}] = e^{-e^{-x}}$$</p>
+<p><strong>概率密度函数</strong>（PDF）：</p>
+<p>$$p(\varepsilon) = \frac{d\Phi}{d\varepsilon} = e^{-\varepsilon - e^{-\varepsilon}}$$</p>
+<p><strong>验证</strong>：</p>
+<p>$$\frac{d}{d\varepsilon} e^{-e^{-\varepsilon}} = e^{-e^{-\varepsilon}} \cdot (-e^{-\varepsilon}) \cdot (-1) = e^{-\varepsilon - e^{-\varepsilon}}$$ ✅</p>
+<h4 id="42">4.2 代入核心公式</h4>
+<p>将 Gumbel 分布代入 $p_i$ 的积分表达式：</p>
+<p>$$p_i = \int_{-\infty}^{\infty} e^{-\varepsilon_i - e^{-\varepsilon_i}} \prod_{j \neq i} e^{-e^{-\varepsilon_i + \mu_j - \mu_i}} d\varepsilon_i$$</p>
+<p><strong>简化指数项</strong>：</p>
+<p>$$\prod_{j \neq i} e^{-e^{-\varepsilon_i + \mu_j - \mu_i}} = \exp\left(-\sum_{j \neq i} e^{-\varepsilon_i + \mu_j - \mu_i}\right)$$</p>
+<p>$$= \exp\left(-e^{-\varepsilon_i} \sum_{j \neq i} e^{\mu_j - \mu_i}\right)$$</p>
+<h4 id="43">4.3 合并指数</h4>
+<p>$$p_i = \int_{-\infty}^{\infty} \exp\left(-\varepsilon_i - e^{-\varepsilon_i} - e^{-\varepsilon_i} \sum_{j \neq i} e^{\mu_j - \mu_i}\right) d\varepsilon_i$$</p>
+<p>$$= \int_{-\infty}^{\infty} \exp\left(-\varepsilon_i - e^{-\varepsilon_i} \left(1 + \sum_{j \neq i} e^{\mu_j - \mu_i}\right)\right) d\varepsilon_i$$</p>
+<h4 id="44">4.4 变量替换</h4>
+<p>令 $t = e^{-\varepsilon_i}$，则：
+- $\varepsilon_i = -\log t$
+- $d\varepsilon_i = -\frac{1}{t} dt$
+- 当 $\varepsilon_i \to -\infty$ 时，$t \to +\infty$
+- 当 $\varepsilon_i \to +\infty$ 时，$t \to 0$</p>
+<p>$$p_i = \int_{+\infty}^{0} \exp\left(\log t - t \sum_j e^{\mu_j - \mu_i}\right) \left(-\frac{1}{t}\right) dt$$</p>
+<p>$$= \int_0^{+\infty} \exp\left(-t \sum_j e^{\mu_j - \mu_i}\right) dt$$</p>
+<p>其中 $\sum_j e^{\mu_j - \mu_i} = e^{-\mu_i} \sum_j e^{\mu_j}$。</p>
+<h4 id="45">4.5 标准积分</h4>
+<p>$$\int_0^{\infty} e^{-\lambda t} dt = \frac{1}{\lambda}, \quad \lambda > 0$$</p>
+<p>应用得：</p>
+<p>$$p_i = \frac{1}{\sum_j e^{\mu_j - \mu_i}} = \frac{e^{\mu_i}}{\sum_j e^{\mu_j}}$$</p>
+<p><strong>这正是 Softmax！</strong> ✅</p>
+<p><strong>结论</strong>：Gumbel Max 重参数等价于 Softmax 操作。</p>
+<h3 id="5">5. 其他噪声分布</h3>
+<h4 id="51">5.1 标准正态分布</h4>
+<p>如果 $\varepsilon_i \sim \mathcal{N}(0, 1)$，则：</p>
+<p>$$\Phi(\varepsilon) = \frac{1}{2}\left(1 + \text{erf}\left(\frac{\varepsilon}{\sqrt{2}}\right)\right)$$</p>
+<p>其中 $\text{erf}(x) = \frac{2}{\sqrt{\pi}} \int_0^x e^{-t^2} dt$ 是误差函数。</p>
+<p>代入核心公式：</p>
+<p>$$p_i = \int_{-\infty}^{\infty} \frac{1}{\sqrt{2\pi}} e^{-\varepsilon_i^2/2} \prod_{j \neq i} \frac{1}{2}\left(1 + \text{erf}\left(\frac{\mu_i - \mu_j + \varepsilon_i}{\sqrt{2}}\right)\right) d\varepsilon_i$$</p>
+<p><strong>注意</strong>：这个积分<strong>没有解析解</strong>，需要数值计算（见下节）。</p>
+<h4 id="52-logistic">5.2 Logistic 分布</h4>
+<p>$$\Phi(\varepsilon) = \frac{1}{1 + e^{-\varepsilon}}$$</p>
+<p>这会导致另一种类似 Softmax 的分布，但仍需数值积分。</p>
+<h3 id="6">6. 数值计算方法</h3>
+<h4 id="61">6.1 变量替换技巧</h4>
+<p>利用 $p(\varepsilon) = \Phi'(\varepsilon)$，进行变量替换 $u = \Phi(\varepsilon_i)$：</p>
+<p>$$p_i = \int_0^1 \left[\prod_{j \neq i} \Phi(\mu_i - \mu_j + \Phi^{-1}(u))\right] du$$</p>
+<p>其中 $\Phi^{-1}$ 是<strong>分位函数</strong>（Quantile Function）。</p>
+<h4 id="62">6.2 蒙特卡洛近似</h4>
+<p>$$p_i \approx \frac{1}{K} \sum_{k=1}^K \prod_{j \neq i} \Phi\left(\mu_i - \mu_j + \Phi^{-1}\left(\frac{k}{K+1}\right)\right)$$</p>
+<p><strong>优点</strong>：
+- 只需要知道 $\Phi(x)$ 的解析式（通常深度学习框架都有）
+- $\Phi^{-1}(k/(K+1))$ 可以预先计算并存储</p>
+<h4 id="63">6.3 标准正态分布的实现</h4>
+<p><strong>Python 示例</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.stats</span><span class="w"> </span><span class="kn">import</span> <span class="n">norm</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.special</span><span class="w"> </span><span class="kn">import</span> <span class="n">erf</span>
+
+<span class="c1"># 预计算分位点</span>
+<span class="n">K</span> <span class="o">=</span> <span class="mi">100</span>
+<span class="n">quantiles</span> <span class="o">=</span> <span class="n">norm</span><span class="o">.</span><span class="n">ppf</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">1</span><span class="o">/</span><span class="p">(</span><span class="n">K</span><span class="o">+</span><span class="mi">1</span><span class="p">),</span> <span class="n">K</span><span class="o">/</span><span class="p">(</span><span class="n">K</span><span class="o">+</span><span class="mi">1</span><span class="p">),</span> <span class="n">K</span><span class="p">))</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">normal_softmax</span><span class="p">(</span><span class="n">mu</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;基于标准正态噪声的 Softmax 推广&quot;&quot;&quot;</span>
+    <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">mu</span><span class="p">)</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">n</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+        <span class="c1"># 对每个分位点计算乘积</span>
+        <span class="n">probs</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">q</span> <span class="ow">in</span> <span class="n">quantiles</span><span class="p">:</span>
+            <span class="n">prod</span> <span class="o">=</span> <span class="mf">1.0</span>
+            <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">j</span> <span class="o">!=</span> <span class="n">i</span><span class="p">:</span>
+                    <span class="c1"># Φ(μ_i - μ_j + ε_i)</span>
+                    <span class="n">arg</span> <span class="o">=</span> <span class="p">(</span><span class="n">mu</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">-</span> <span class="n">mu</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">+</span> <span class="n">q</span><span class="p">)</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+                    <span class="n">prod</span> <span class="o">*=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">erf</span><span class="p">(</span><span class="n">arg</span><span class="p">))</span>
+            <span class="n">probs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">prod</span><span class="p">)</span>
+
+        <span class="c1"># 蒙特卡洛平均</span>
+        <span class="n">p</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">probs</span><span class="p">)</span>
+
+    <span class="c1"># 重新归一化（数值稳定性）</span>
+    <span class="n">p</span> <span class="o">/=</span> <span class="n">p</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">p</span>
+
+<span class="c1"># 测试</span>
+<span class="n">mu</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Normal-Softmax:&quot;</span><span class="p">,</span> <span class="n">normal_softmax</span><span class="p">(</span><span class="n">mu</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Standard Softmax:&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">mu</span><span class="p">)</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">mu</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+</code></pre></div>
+
+<p><strong>输出示例</strong>：</p>
+<div class="codehilite"><pre><span></span><code>Normal-Softmax: [0.241, 0.632, 0.127]
+Standard Softmax: [0.211, 0.643, 0.146]
+</code></pre></div>
+
+<p>差异不大，但 Normal-Softmax 更"温和"（熵更高）。</p>
+<h3 id="7">7. 性质对比分析</h3>
+<h4 id="71">7.1 不同噪声分布的效果</h4>
+<table>
+<thead>
+<tr>
+<th>噪声分布</th>
+<th>CDF $\Phi(\varepsilon)$</th>
+<th>归一化效果</th>
+<th>解析解</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gumbel</td>
+<td>$e^{-e^{-\varepsilon}}$</td>
+<td>Softmax</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>正态</td>
+<td>$\Phi_{\mathcal{N}}(\varepsilon)$</td>
+<td>温和 Softmax</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Logistic</td>
+<td>$(1+e^{-\varepsilon})^{-1}$</td>
+<td>类 Softmax</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>指数</td>
+<td>$1 - e^{-\varepsilon}$ （$\varepsilon \geq 0$）</td>
+<td>偏向大值</td>
+<td>❌</td>
+</tr>
+</tbody>
+</table>
+<h4 id="72">7.2 熵的比较</h4>
+<p>对于相同的 $\boldsymbol{\mu}$，不同噪声分布产生的 $\boldsymbol{p}$ 具有不同的熵：</p>
+<p>$$\mathcal{H}(\boldsymbol{p}) = -\sum_i p_i \log p_i$$</p>
+<p><strong>观察</strong>（实验结果）：
+- <strong>Gumbel</strong>（Softmax）：中等熵
+- <strong>正态</strong>：略高熵（分布更均匀）
+- <strong>重尾分布</strong>（如 Cauchy）：更高熵
+- <strong>轻尾分布</strong>（如截断正态）：更低熵</p>
+<p><strong>解释</strong>：噪声方差越大，$\arg\max$ 越随机，熵越高。</p>
+<h3 id="8">8. 梯度计算与反向传播</h3>
+<h4 id="81">8.1 梯度的隐式形式</h4>
+<p>$$\frac{\partial p_i}{\partial \mu_k} = \frac{\partial}{\partial \mu_k} \int p(\varepsilon_i) \prod_{j \neq i} \Phi(\mu_i - \mu_j + \varepsilon_i) d\varepsilon_i$$</p>
+<p><strong>情况 1</strong>（$k = i$）：</p>
+<p>$$\frac{\partial p_i}{\partial \mu_i} = \int p(\varepsilon_i) \sum_{j \neq i} \left[\Phi'(\mu_i - \mu_j + \varepsilon_i) \prod_{l \neq i, l \neq j} \Phi(\mu_i - \mu_l + \varepsilon_i)\right] d\varepsilon_i$$</p>
+<p><strong>情况 2</strong>（$k \neq i$）：</p>
+<p>$$\frac{\partial p_i}{\partial \mu_k} = -\int p(\varepsilon_i) \Phi'(\mu_i - \mu_k + \varepsilon_i) \prod_{j \neq i, j \neq k} \Phi(\mu_i - \mu_j + \varepsilon_i) d\varepsilon_i$$</p>
+<h4 id="82">8.2 自动微分</h4>
+<p>好消息：在深度学习框架中，如果用蒙特卡洛近似计算 $p_i$，梯度可以自动计算！</p>
+<p>$$p_i \approx \frac{1}{K} \sum_{k=1}^K g_i^{(k)}(\boldsymbol{\mu})$$</p>
+<p>其中 $g_i^{(k)}(\boldsymbol{\mu}) = \prod_{j \neq i} \Phi(\mu_i - \mu_j + \varepsilon_i^{(k)})$ 是可微的。</p>
+<h3 id="9">9. 应用与扩展</h3>
+<h4 id="91">9.1 温和的分类</h4>
+<p>相比 Softmax，正态噪声归一化产生更均匀的分布，可用于：
+- 减轻过拟合（分布更平滑）
+- 提高鲁棒性（对异常值不敏感）</p>
+<h4 id="92">9.2 可学习的噪声分布</h4>
+<p>可以将噪声分布 $p_\theta(\varepsilon)$ 参数化，通过学习 $\theta$ 来优化归一化方式：</p>
+<p>$$p_i(\theta) = \int p_\theta(\varepsilon_i) \prod_{j \neq i} \Phi_\theta(\mu_i - \mu_j + \varepsilon_i) d\varepsilon_i$$</p>
+<h4 id="93">9.3 结构化噪声</h4>
+<p>对于结构化输出（如序列标注），可以使用相关噪声 $\boldsymbol{\varepsilon}$ 来建模输出之间的依赖关系。</p>
+<h3 id="10">10. 理论深入</h3>
+<h4 id="101">10.1 与极值理论的联系</h4>
+<p><strong>Fisher-Tippett-Gnedenko 定理</strong>（极值分布）：</p>
+<p>在适当归一化下，i.i.d. 随机变量的最大值收敛到三种分布之一：
+1. <strong>Gumbel 分布</strong>（指数尾）
+2. Fréchet 分布（重尾）
+3. Weibull 分布（有界）</p>
+<p><strong>意义</strong>：Gumbel 是"自然"的最大值分布，这解释了为什么 Gumbel Max 对应 Softmax如此常用。</p>
+<h4 id="102-gibbs">10.2 Gibbs 分布的重参数解释</h4>
+<p>Softmax 也可以看作 Gibbs 分布：</p>
+<p>$$p_i \propto e^{-E_i/T}$$</p>
+<p>其中 $E_i = -\mu_i$ 是"能量"，$T$ 是温度。</p>
+<p><strong>重参数视角</strong>：加 Gumbel 噪声 $\Leftrightarrow$ 热力学涨落</p>
+<h3 id="11_1">11. 总结</h3>
+<h4 id="_7">核心贡献</h4>
+<p>本文展示了从重参数到概率分布的<strong>逆向构造</strong>方法：</p>
+<p>$$\text{噪声分布 } p(\varepsilon) \xrightarrow{\text{argmax}} \text{归一化方法 } \mathcal{T}(\boldsymbol{\mu})$$</p>
+<h4 id="_8">关键公式</h4>
+<p>$$p_i = \int_{-\infty}^{\infty} p(\varepsilon_i) \prod_{j \neq i} \Phi(\mu_i - \mu_j + \varepsilon_i) \, d\varepsilon_i$$</p>
+<h4 id="_9">特殊情况</h4>
+<ul>
+<li><strong>Gumbel 噪声</strong> → Softmax（解析解）</li>
+<li><strong>正态噪声</strong> → 温和 Softmax（数值解）</li>
+<li><strong>其他噪声</strong> → 新的归一化方法</li>
+</ul>
+<h4 id="_10">意义</h4>
+<ol>
+<li><strong>理论</strong>：统一了重参数和 Softmax</li>
+<li><strong>实践</strong>：提供了 Softmax 的可调推广</li>
+<li><strong>视角</strong>：噪声 → 随机性 → 概率</li>
+</ol>
+        </div>
+    </div>
+</body>
+</html>

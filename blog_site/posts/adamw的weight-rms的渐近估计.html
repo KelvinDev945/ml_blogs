@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AdamW的Weight RMS的...</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>AdamW的Weight RMS的...</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 39.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/11307">https://spaces.ac.cn/archives/11307</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在<a href="/archives/11267">《为什么Adam的Update RMS是0.2？》</a>中，我们用平均场近似估计了Adam的Update RMS。不久后，读者 <a href="https://x.com/EIFY/status/1965888629814988984">@EIFY</a> 指出相同的结果已经出现在论文<a href="https://papers.cool/arxiv/2305.17212">《Rotational Equilibrium: How Weight Decay Balances Learning Across Neural Networks》</a>中。阅读后，笔者发现其中不仅包含了Update RMS的估计，还包含了Weight RMS的估计。</p>
+<p>也就是说，AdamW训出来的模型，其权重的RMS是可以事先估计出来一个渐近结果的。大家会不会觉得这个结论有点意外？反正笔者第一次看到它是颇为意外的，直觉上权重模长是模型根据训练集自己学出来的，结果它告诉我这已经隐藏在优化器的超参中，可谓很反直觉了。</p>
+<p>这篇文章我们还是用平均场近似方法，来复现对Weight RMS的渐近估计。</p>
+<h2 id="_1">滑动视角</h2>
+<p>首先还是来回顾AdamW的更新规则：<br />
+\begin{equation}\text{Adam}\color{skyblue}{\text{W}}:=\left\{\begin{aligned}<br />
+&amp;\boldsymbol{m}<em t-1="t-1">t = \beta_1 \boldsymbol{m}</em>} + \left(1 - \beta_1\right) \boldsymbol{g<em t-1="t-1">t\\\<br />
+&amp;\boldsymbol{v}_t = \beta_2 \boldsymbol{v}</em>} + \left(1 - \beta_2\right) \boldsymbol{g<em t-1="t-1">t^2\\\<br />
+&amp;\hat{\boldsymbol{m}}_t = \boldsymbol{m}_t\left/\left(1 - \beta_1^t\right)\right.\\\<br />
+&amp;\hat{\boldsymbol{v}}_t = \boldsymbol{v}_t\left/\left(1 - \beta_2^t\right)\right.\\\<br />
+&amp;\boldsymbol{u}_t =\hat{\boldsymbol{m}}_t\left/\left(\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon\right)\right.\\\<br />
+&amp;\boldsymbol{\theta}_t = \boldsymbol{\theta}</em>} - \eta_t (\boldsymbol{u<em t-1="t-1">t \color{skyblue}{ + \lambda_t \boldsymbol{\theta}</em>)}<br />
+\end{aligned}\right.\end{equation}<br />
+再次说明，这里加粗符号默认都是$\mathbb{R}^d$的向量，向量的乘除（包括平方、开根号）默认都是Element-wise的Hadamard积/商。</p>
+<p>跟<a href="/archives/11267">《为什么Adam的Update RMS是0.2？》</a>一样，我们考虑$t\to\infty$（对于$\beta_1,\beta_2$来说）和$\epsilon\to 0$，所以$\boldsymbol{u}<em t-1="t-1">t=\boldsymbol{m}_t/\sqrt{\boldsymbol{v}_t}$。我们暂时先考虑$\eta_t,\lambda_t$都是常数的例子，所以它们的下标可以省略掉，并且记$\beta_3 = 1-\eta\lambda$，我们有<br />
+\begin{equation}\boldsymbol{\theta}_t = \beta_3\boldsymbol{\theta}</em>} + (1-\beta_3)(-\boldsymbol{u}_t/\lambda)\label{eq:ema-wd}\end{equation<br />
+这个式子表明，我们可以从更新量的滑动平均（Exponential Moving Average，EMA）角度来理解Weight Decay。这是一个很有意义的视角转换，是<a href="https://papers.cool/arxiv/2405.13698">《How to set AdamW’s weight decay as you scale model and dataset size》</a>、<a href="https://papers.cool/arxiv/2505.13738">《Power Lines: Scaling Laws for Weight Decay and Batch Size in LLM Pre-training》</a>等工作的基础。</p>
+<h2 id="_2">加权平均</h2>
+<p>根据式$\eqref{eq:ema-wd}$，我们可以将$\boldsymbol{\theta}<em i="1">t$展开为加权平均形式<br />
+\begin{equation}\boldsymbol{\theta}_t = \beta_3^t\boldsymbol{\theta}_0 + (1-\beta_3)\sum</em>}^t \beta_3^{t-i} (-\boldsymbol{u<em i="1">i/\lambda)\label{eq:theta-t}\end{equation}<br />
+同理，$\boldsymbol{m}_t$和$\boldsymbol{v}_t$也可以展开为<br />
+\begin{equation}\boldsymbol{m}_t = (1 - \beta_1)\sum</em>}^t \beta_1^{t-i}\boldsymbol{g<em i="1">i,\qquad \boldsymbol{v}_t = (1 - \beta_2)\sum</em>}^t \beta_2^{t-i}\boldsymbol{g}_i^2\label{eq:mv-roll}\end{equation<br />
+这里有个小细节，$\boldsymbol{\theta}_t$的表达式我们保留了$\boldsymbol{\theta}_0$，但$\boldsymbol{m}_t$和$\boldsymbol{v}_t$的表达式我们没有保留$\boldsymbol{m}_0$和$\boldsymbol{v}_0$，原因有两个：1、$\boldsymbol{m}$和$\boldsymbol{v}$的初始化一般是零；2、即便它们初始化不是零，但对应的$\beta_1^t$和$\beta_2^t$也会足够接近于零，因此初始化的影响可以忽略。</p>
+<p>然而，$\boldsymbol{\theta}$是模型权重，它的初始化通常不是零，并且$\beta_3$往往非常接近于1，对于整个训练周期而言，$\beta_3^t$不一定能充分接近于零，因此我们显式保留$\beta_3^t$和$\boldsymbol{\theta}_0$，按需取舍。</p>
+<h2 id="_3">快速估计</h2>
+<p>我们的任务是估计Weight RMS，即$\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>$，顾名思义，它是各个分量的Root Mean Square：<br />
+\begin{equation}\Vert\boldsymbol{\theta}\Vert_{RMS} = \sqrt{\frac{1}{d}\sum_{i=1}^d \theta_i^2},\qquad\qquad \text{其中 }\boldsymbol{\theta} = (\theta_1,\theta_2,\cdots,\theta_d)\end{equation}<br />
+它跟模长的区别就是多除了个$\sqrt{d}$，所以模长的大部分性质对RMS同样成立。对于$\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>^2$，可以得到}$，我们有一个快速但不是那么准确的推导方式：直接对式$\eqref{eq:ema-wd}$两边求$\Vert\cdot\Vert_{RMS<br />
+\begin{equation}\begin{aligned}<br />
+\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>}^2 =&amp;\, \Vert\beta_3\boldsymbol{\theta<em RMS="RMS">{t-1} + (1-\beta_3)(-\boldsymbol{u}_t/\lambda)\Vert</em>^2 \\\[5pt]<br />
+=&amp;\, \beta_3^2\Vert\boldsymbol{\theta}<em RMS="RMS">{t-1}\Vert</em>}^2 + (1-\beta_3)^2\Vert\boldsymbol{u<em RMS="RMS">t\Vert</em>}^2/\lambda^2 - 2\beta_3(1-\beta_3)\boldsymbol{\theta<em t-1="t-1">{t-1}\cdot\boldsymbol{u}_t/(\lambda d)<br />
+\end{aligned}\end{equation}<br />
+假设$\boldsymbol{\theta}</em>},\boldsymbol{u<em t-1="t-1">t$近乎正交，那么$\boldsymbol{\theta}</em>}\cdot\boldsymbol{u<em RMS="RMS">t\approx 0$，这在高维空间中通常是一个不错的近似（参考<a href="/archives/7076">《n维空间下两个随机向量的夹角分布》</a>），然后$\Vert\boldsymbol{u}_t\Vert</em>}$我们已经算过了，答案是约等于$\sqrt{\frac{1-\beta_1}{1+\beta_1}}$，最后我们考虑的是趋于稳态的结果，所以$\Vert\boldsymbol{\theta<em RMS="RMS">t\Vert</em>}^2=\Vert\boldsymbol{\theta<em RMS="RMS">{t-1}\Vert</em>^2$，于是有<br />
+\begin{equation}(1-\beta_3^2)\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>}^2 \approx (1-\beta_3)^2 \frac{1-\beta_1}{1+\beta_1} /\lambda^2\qquad\Rightarrow\qquad \Vert\boldsymbol{\theta<em RMS="RMS">t\Vert</em>} \approx \sqrt{\frac{1-\beta_1}{1+\beta_1}\frac{\eta}{2\lambda}}\end{equation<br />
+从左式到右式还用到了$\beta_3\approx 1$的近似。最后的结果会有些误差，因为$\boldsymbol{\theta}<em RMS="RMS">t\cdot\boldsymbol{u}_t\approx 0$实际上并不那么成立，但$\Vert\boldsymbol{\theta}_t\Vert</em>$的结论是正确的。类似的推导还出现在}\propto \sqrt{\eta/\lambda<a href="https://papers.cool/arxiv/2506.02285">《Why Gradients Rapidly Increase Near the End of Training》</a>。</p>
+<h2 id="_4">更好近似</h2>
+<p>很多情况下我们只需要知道$\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>$就行了，这是一个比较通用的结论。而对于追求更准确结论的读者来说，我们可以用平均场方法得到一个更好的近似，代价是计算过程会复杂不少，但好处是我们可以获得更多更清晰的认知。}\propto \sqrt{\eta/\lambda</p>
+<h3 id="_5">步骤之一</h3>
+<p>我们从式$\eqref{eq:theta-t}$出发，求和这一项，本身就具有加权平均的形式，所以我们先用第一次平均场：<br />
+\begin{equation}\underbrace{\frac{1-\beta_3}{1-\beta_3^t}\sum_{i=1}^t \beta_3^{t-i} \boldsymbol{u}<em _text_记为="\text{记为">i}</em>}\bar{\boldsymbol{u}<em i="1">t} = \frac{1-\beta_3}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i} \frac{\boldsymbol{m<em i="1">i}{\sqrt{\boldsymbol{v}_i}}\approx \frac{\bar{\boldsymbol{m}}_t \,\,\triangleq\,\, \frac{1-\beta_3}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i}\boldsymbol{m<em i="1">i}{\sqrt{\bar{\boldsymbol{v}}_t \,\,\triangleq\,\, \frac{1-\beta_3}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i}\boldsymbol{v<em RMS="RMS">i}}\label{eq:u-bar}\end{equation}<br />
+现在再次回到式$\eqref{eq:theta-t}$，由于$\boldsymbol{\theta}_0$是随机的初始化向量，因此可以假设$\boldsymbol{\theta}_0$与$\bar{\boldsymbol{u}}_t$正交，于是我们有<br />
+\begin{equation}\Vert\boldsymbol{\theta}_t\Vert</em>}^2 \approx \beta_3^{2t}\Vert\boldsymbol{\theta<em RMS="RMS">0\Vert</em>}^2 + (1-\beta_3^t)^2 \lambda^{-2}\Vert \bar{\boldsymbol{u}<em RMS="RMS">t\Vert</em>}^2\end{equation<br />
+现在我们要求$\Vert \bar{\boldsymbol{u}}<em RMS="RMS">t\Vert</em>}^2$，根据之前的经验，我们需要假设$\boldsymbol{g<em RMS="RMS">j$独立同分布地服从$\mathcal{N}(\boldsymbol{\mu},\boldsymbol{\sigma}^2)$，然后求<br />
+\begin{equation}\mathbb{E}[\bar{\boldsymbol{u}}_t^2] \approx \mathbb{E}\left[\frac{\bar{\boldsymbol{m}}_t^2}{\bar{\boldsymbol{v}}_t}\right] \approx \frac{\mathbb{E}[\bar{\boldsymbol{m}}_t^2]}{\mathbb{E}[\bar{\boldsymbol{v}}_t]}\end{equation}<br />
+最后再对$\mathbb{E}[\bar{\boldsymbol{u}}_t^2]$的各个分量求平均，那么就可以作为$\Vert \bar{\boldsymbol{u}}_t\Vert</em>^2$的近似。</p>
+<h3 id="_6">步骤之二</h3>
+<p>结合式$\eqref{eq:mv-roll}$，我们得到<br />
+\begin{gather}<br />
+\sum_{i=1}^t \beta_3^{t-i}\boldsymbol{m}<em i="1">i = (1 - \beta_1)\sum</em>}^t \beta_3^{t-i} \sum_{j=1}^i \beta_1^{i-j}\boldsymbol{g<em j="1">j = (1 - \beta_1)\sum</em>}^t \frac{\beta_3^{t-j+1} - \beta_1^{t-j+1}}{\beta_3 - \beta_1}\boldsymbol{g<em i="1">j\\\<br />
+\sum</em>}^t \beta_3^{t-i}\boldsymbol{v<em i="1">i = (1 - \beta_2)\sum</em>}^t \beta_3^{t-i} \sum_{j=1}^i \beta_2^{i-j}\boldsymbol{g<em j="1">j^2 = (1 - \beta_2)\sum</em>}^t \frac{\beta_3^{t-j+1} - \beta_2^{t-j+1}}{\beta_3 - \beta_2}\boldsymbol{g<em RMS="RMS">j^2\\\<br />
+\end{gather}<br />
+最后一个双重求和化简，如果大家没有思路，可以交给Kimi完成（参考<a href="https://www.kimi.com/share/d3d35hpsfuv6jqe78c20">链接</a>）。由上式可知$\bar{\boldsymbol{m}}_t,\bar{\boldsymbol{v}}_t$分别是梯度和梯度平方的加权平均，所以求$\Vert \bar{\boldsymbol{u}}_t\Vert</em>^2$跟<a href="/archives/11267">《为什么Adam的Update RMS是0.2？》</a>求$\Vert \boldsymbol{u}<em RMS="RMS">t\Vert</em>^2$本质上是一样的，只不过加权系数不同。</p>
+<h3 id="_7">步骤之三</h3>
+<p>我们先求分母<br />
+\begin{equation}\begin{aligned}<br />
+\mathbb{E}[\bar{\boldsymbol{v}}<em j="1">t] =&amp;\, \frac{(1 - \beta_3)(1 - \beta_2)}{1 - \beta_3^t}\sum</em>}^t \frac{\beta_3^{t-j+1} - \beta_2^{t-j+1}}{\beta_3 - \beta_2}\mathbb{E}[\boldsymbol{g<em j="1">j^2] \\\<br />
+=&amp;\, \frac{(1 - \beta_3)(1 - \beta_2)}{1 - \beta_3^t}\sum</em>^2) \\\}^t \frac{\beta_3^{t-j+1} - \beta_2^{t-j+1}}{\beta_3 - \beta_2}(\boldsymbol{\mu}^2 + \boldsymbol{\sigma<br />
+=&amp;\, \frac{(1 - \beta_3)(1 - \beta_2)}{(1 - \beta_3^t)(\beta_3 - \beta_2)}\left(\frac{\beta_3 - \beta_3^{t+1}}{1 - \beta_3} - \frac{\beta_2 - \beta_2^{t+1}}{1 - \beta_2}\right)(\boldsymbol{\mu}^2 + \boldsymbol{\sigma}^2) \\\[5pt]<br />
+\approx &amp;\, \boldsymbol{\mu}^2 + \boldsymbol{\sigma}^2<br />
+\end{aligned}\end{equation}<br />
+最后一步的约等号，是因为实际训练中，$\beta_3$会足够接近于1，而$\beta_2^{t+1}$会足够接近于0，但$\beta_3^{t+1}$不一定，所以我们将$\beta_2^{t+1}$替换成零，并在化简之后将独立的$\beta_3$替换成$1$，最后再加上近似$\beta_3^{t+1}\approx \beta_3^t$。</p>
+<h3 id="_8">步骤之四</h3>
+<p>然后是$\mathbb{E}[\bar{\boldsymbol{m}}<em j="1">t^2] = \mathbb{E}[\bar{\boldsymbol{m}}_t]^2 + \mathbb{V}ar[\bar{\boldsymbol{m}}_t]$，$\mathbb{E}[\bar{\boldsymbol{m}}_t]$的计算跟$\mathbb{E}[\bar{\boldsymbol{v}}_t]$类似，结果是$\boldsymbol{\mu}$，$\mathbb{V}ar[\bar{\boldsymbol{m}}_t]$的计算我们则利用方差的平方可加性：<br />
+\begin{equation}\begin{aligned}<br />
+\mathbb{V}ar[\bar{\boldsymbol{m}}_t] =&amp;\, \frac{(1 - \beta_3)^2(1 - \beta_1)^2}{(1-\beta_3^t)^2}\sum</em>}^t \left(\frac{\beta_3^{t-j+1} - \beta_1^{t-j+1}}{\beta_3 - \beta_1}\right)^2\mathbb{V}ar[\boldsymbol{g<em j="1">j] \\\<br />
+=&amp;\, \frac{(1 - \beta_3)^2(1 - \beta_1)^2}{(1-\beta_3^t)^2}\sum</em>^2 \\\}^t \left(\frac{\beta_3^{t-j+1} - \beta_1^{t-j+1}}{\beta_3 - \beta_1}\right)^2 \boldsymbol{\sigma<br />
+=&amp;\, \frac{(1 - \beta_3)^2(1 - \beta_1)^2}{(1-\beta_3^t)^2(\beta_3 - \beta_1)^2}\left(\frac{\beta_3^2 - \beta_3^{2(t+1)}}{1 - \beta_3^2} + \frac{\beta_1^2 - \beta_1^{2(t+1)}}{1 - \beta_1^2} - 2\frac{\beta_1\beta_3 - \beta_1^{t+1}\beta_3^{t+1}}{1 - \beta_1\beta_3}\right) \boldsymbol{\sigma}^2 \\\[5pt]<br />
+\approx &amp;\, (1 - \beta_3)(1 + \beta_3^t)\boldsymbol{\sigma}^2/2(1 - \beta_3^t)<br />
+\end{aligned}\end{equation}<br />
+取约等号的理由同上。</p>
+<h3 id="_9">步骤之五</h3>
+<p>代入上两节的计算结果，我们有<br />
+\begin{equation}\mathbb{E}[\bar{\boldsymbol{u}}<em RMS="RMS">t^2] \approx \frac{\boldsymbol{\mu}^2 + (1 - \beta_3)(1 + \beta_3^t)\boldsymbol{\sigma}^2/2(1 - \beta_3^t)}{\boldsymbol{\mu}^2 + \boldsymbol{\sigma}^2}\end{equation}<br />
+那么<br />
+\begin{equation}\Vert\bar{\boldsymbol{u}}_t\Vert</em>}^2 \approx \frac{\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2 + (1 - \beta_3)(1 + \beta_3^t)/2(1 - \beta_3^t)}{\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2 + 1} \end{equation<br />
+最终有<br />
+\begin{equation}\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>}^2 \approx \beta_3^{2t}\Vert\boldsymbol{\theta<em RMS="RMS">0\Vert</em>}^2 + (1-\beta_3^t)^2 \frac{\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2 + (1 - \beta_3)(1 + \beta_3^t)/2(1 - \beta_3^t)}{\lambda^2(\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2 + 1)}\label{eq:theta-rms}\end{equation</p>
+<h2 id="_10">结果浅析</h2>
+<p>式$\eqref{eq:theta-rms}$看起来比较复杂，我们观察几个特例。首先考虑$\boldsymbol{\mu}=\boldsymbol{0}$这个例子，此时<br />
+\begin{equation}\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>}^2 \approx \beta_3^{2t}\Vert\boldsymbol{\theta<em RMS="RMS">0\Vert</em>}^2 + (1-\beta_3^{2t}) (1 - \beta_3)/2\lambda^2 = \beta_3^{2t}\Vert\boldsymbol{\theta<em RMS="RMS">0\Vert</em>}^2 + (1-\beta_3^{2t}) \eta/2\lambda\label{eq:theta-rms-mu0}\end{equation<br />
+特别地，如果考虑$t\to\infty$，或者$\Vert\boldsymbol{\theta}<em RMS="RMS">0\Vert</em>^2$就初始化为$\eta/2\lambda$，那么就有<br />
+\begin{equation}\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>} \approx \sqrt{\frac{\eta}{2\lambda}}\label{eq:theta-rms-simple}\end{equation<br />
+这便是论文<a href="https://papers.cool/arxiv/2305.17212">《Rotational Equilibrium: How Weight Decay Balances Learning Across Neural Networks》</a>给出的结果，跟原论文的假设一致，它是零均值下的随机游走的稳态结果。如果不考虑$t\to\infty$，而是考虑$\lambda\to 0$的极限，那么由式$\eqref{eq:theta-rms-mu0}$我们将得到<br />
+\begin{equation}\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>}^2 \approx \Vert\boldsymbol{\theta<em RMS="RMS">0\Vert</em>}^2 + \eta^2 t\end{equation<br />
+这表明在没有Weight Decay的时候，$\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>$得}$大致按照$\eta\sqrt{t}$的速度增长，这也表明在没有Weight Decay时，我们可以通过设置特定的学习率Schedule来实现Weight RMS的稳定性。另一方面，如果Batch Size足够大，导致信噪比项$\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2$占主导，那么由式$\eqref{eq:theta-rms<br />
+\begin{equation}\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>}^2 \approx \beta_3^{2t}\Vert\boldsymbol{\theta<em RMS="RMS">0\Vert</em>}^2 + (1-\beta_3^t)^2 \frac{\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2}{\lambda^2(\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2 + 1)}\end{equation<br />
+这个可能适用于模型需要主动增加Weight RMS的特殊情形。不过从经验来看，这种情况发生的概率一般比较小。</p>
+<h2 id="_11">模拟实验</h2>
+<p>我们可以用如下模拟脚本，来简单验证上述的准确性：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="n">N</span><span class="p">,</span> <span class="n">T</span> <span class="o">=</span> <span class="mi">10000</span><span class="p">,</span> <span class="mi">100000</span>
+<span class="n">beta1</span><span class="p">,</span> <span class="n">beta2</span> <span class="o">=</span> <span class="mf">0.9</span><span class="p">,</span> <span class="mf">0.95</span>
+<span class="n">m</span><span class="p">,</span> <span class="n">v</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span>
+<span class="n">w</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">N</span><span class="p">)</span> <span class="o">*</span> <span class="mf">0.1</span>
+<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">T</span><span class="p">):</span>
+    <span class="n">g</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">N</span><span class="p">)</span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">beta1</span> <span class="o">*</span> <span class="n">m</span> <span class="o">+</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">beta1</span><span class="p">)</span> <span class="o">*</span> <span class="n">g</span>
+    <span class="n">v</span> <span class="o">=</span> <span class="n">beta2</span> <span class="o">*</span> <span class="n">v</span> <span class="o">+</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">beta2</span><span class="p">)</span> <span class="o">*</span> <span class="n">g</span><span class="o">**</span><span class="mi">2</span>
+    <span class="n">w</span> <span class="o">=</span> <span class="n">w</span> <span class="o">-</span> <span class="mf">0.001</span> <span class="o">*</span> <span class="p">(</span><span class="n">m</span> <span class="o">/</span> <span class="n">v</span><span class="o">**</span><span class="mf">0.5</span> <span class="o">+</span> <span class="mf">0.1</span> <span class="o">*</span> <span class="n">w</span><span class="p">)</span>
+
+<span class="n">weight_rms</span> <span class="o">=</span> <span class="p">(</span><span class="n">w</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="kp">mean</span><span class="p">()</span><span class="o">**</span><span class="mf">0.5</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">weight_rms</span><span class="p">)</span>
+</code></pre></div>
+
+<p>大家可以自行改变权重的初始化或梯度的均值方差等，看最终结果跟式$\eqref{eq:theta-rms}$的吻合程度，笔者自行试了一波，整体来说还是比较靠谱的。</p>
+<h2 id="_12">符号版本</h2>
+<p>只需要将前述证明调整一下，就可以适用于“SignSGDM + Weight Decay”的组合：<br />
+\begin{equation}\text{SignSGDM}\color{skyblue}{\text{W}}:=\left\{\begin{aligned}<br />
+&amp;\boldsymbol{m}<em t-1="t-1">t = \beta_1 \boldsymbol{m}</em>} + \left(1 - \beta_1\right) \boldsymbol{g<em t-1="t-1">t\\\<br />
+&amp;\boldsymbol{u}_t = \newcommand{sign}{\mathop{\text{sign}}}\sign(\boldsymbol{m}_t)\\\<br />
+&amp;\boldsymbol{\theta}_t = \boldsymbol{\theta}</em>} - \eta_t (\boldsymbol{u<em t-1="t-1">t \color{skyblue}{ + \lambda_t \boldsymbol{\theta}</em>)}<br />
+\end{aligned}\right.\end{equation}<br />
+修改的地方是由于$\sign(\boldsymbol{m}<em i="1">t)=\boldsymbol{m}_t/\sqrt{\boldsymbol{m}_t^2}$，所以要将$\bar{\boldsymbol{v}}_t$的定义改为<br />
+\begin{equation}\bar{\boldsymbol{v}}_t \triangleq \frac{1-\beta_3}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i}\boldsymbol{m<em i="1">i^2\end{equation}<br />
+那么<br />
+\begin{equation}\mathbb{E}[\bar{\boldsymbol{v}}_t] = \frac{1-\beta_3}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i}\mathbb{E}[\boldsymbol{m<em i="1">i^2] \approx \frac{1-\beta_3}{1-\beta_3^t}\sum</em>}^t \beta_3^{t-i}\mathbb{E}\left(\boldsymbol{\mu}^2 + \frac{1-\beta_1}{1 + \beta_1}\boldsymbol{\sigma}^2\right) = \boldsymbol{\mu}^2 + \frac{1-\beta_1}{1 + \beta_1}\boldsymbol{\sigma}^2\end{equation<br />
+其中$\mathbb{E}[\boldsymbol{m}<em RMS="RMS">i^2]$的计算我们参考<a href="/archives/11267">《为什么Adam的Update RMS是0.2？》</a>或<a href="/archives/11301">《重新思考学习率与Batch Size（四）：EMA》</a>都行。利用上述结果，我们得到<br />
+\begin{equation}\Vert\boldsymbol{\theta}_t\Vert</em>}^2 \approx \beta_3^{2t}\Vert\boldsymbol{\theta<em RMS="RMS">0\Vert</em>}^2 + (1-\beta_3^t)^2 \frac{\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2 + (1 - \beta_3)(1 + \beta_3^t)/2(1 - \beta_3^t)}{\lambda^2\left(\Vert\boldsymbol{\mu}\Vert^2/\Vert\boldsymbol{\sigma}\Vert^2 + \frac{1-\beta_1}{1 + \beta_1}\right)}\end{equation<br />
+特别地，考虑$\boldsymbol{\mu}=0,t\to\infty$的极限，我们有<br />
+\begin{equation}\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>}^2 \approx \sqrt{\frac{\eta}{2\lambda}\frac{1+\beta_1}{1 - \beta_1}}\end{equation<br />
+这个结果也很合理，因为SignSGDMW的Update RMS是AdamW的$\sqrt{\frac{1+\beta_1}{1 - \beta_1}}$倍，所以同样$\eta,\lambda$下它的Weight RMS也是$\sqrt{\frac{1+\beta_1}{1 - \beta_1}}$倍。</p>
+<h2 id="_13">相关分析</h2>
+<p>前面说了，结果$\eqref{eq:theta-rms-simple}$跟论文<a href="https://papers.cool/arxiv/2305.17212">《Rotational Equilibrium: How Weight Decay Balances Learning Across Neural Networks》</a>是一致的，但我们的推导方法是完全不同的，并且能得到更一般的$\eqref{eq:theta-rms}$。不过，原论文也有一些很有意思的地方，比如它所提的 <strong>Total Update Contribution (TUC)</strong> 概念，就值得赏析一番。</p>
+<p>TUC的思想是这样的：由于动量机制的存在，当前的梯度$\boldsymbol{g}<em t_1="t+1">t$不止停留在当前步骤，它还会影响到未来的步骤（但会打个“折扣”），所以假设训练步数趋于无穷，我们可以考虑当前梯度$\boldsymbol{g}_t$对整个训练过程的<strong>总贡献</strong> 。具体来说，对于Adam我们有$\boldsymbol{u}_t=\boldsymbol{m}_t/\sqrt{\boldsymbol{v}_t}$，当前$\boldsymbol{g}_t$对$\boldsymbol{u}_t$的贡献是$(1-\beta_1)\boldsymbol{g}_t/\sqrt{\boldsymbol{v}_t}$，下一步$\boldsymbol{g}_t$将会打个折扣（乘以$\beta_1$），而且分母改为$\boldsymbol{v}</em>$，依此类推，所以可以定义总贡献为<br />
+\begin{equation}\tilde{\boldsymbol{u}}<em k="t">t = \sum</em>}^{\infty} (1-\beta_1)\beta_1^{k-t}\frac{\boldsymbol{g<em RMS="RMS">t}{\sqrt{\boldsymbol{v}_k}}\end{equation}<br />
+这样我们就将更新$\boldsymbol{u}_1,\boldsymbol{u}_2,\boldsymbol{u}_3,\cdots$分解为更新$\tilde{\boldsymbol{u}}_1,\tilde{\boldsymbol{u}}_2,\tilde{\boldsymbol{u}}_3,\cdots$，这样的好处是每个$\tilde{\boldsymbol{u}}$只有单步梯度，那么我们就可以重复快速估计一节的推导：<br />
+\begin{equation}\Vert\boldsymbol{\theta}_t\Vert</em>}^2 = \Vert\beta_3\boldsymbol{\theta<em RMS="RMS">{t-1} + (1-\beta_3)(-\tilde{\boldsymbol{u}}_t/\lambda)\Vert</em>}^2 \approx \beta_3^2\Vert\boldsymbol{\theta<em RMS="RMS">{t-1}\Vert</em>}^2 + (1-\beta_3)^2\Vert\tilde{\boldsymbol{u}<em RMS="RMS">t\Vert</em>}^2/\lambda^2 \label{eq:tilde-u-rms}\end{equation<br />
+最后的近似依赖于$\boldsymbol{\theta}<em t-1="t-1">{t-1}\cdot\tilde{\boldsymbol{u}}_t\approx 0$，我们断言$\boldsymbol{\theta}</em>}\cdot\tilde{\boldsymbol{u}<em t-1="t-1">t$比$\boldsymbol{\theta}</em>}\cdot\boldsymbol{u<em t-1="t-1">t$更接近于零，因为$\tilde{\boldsymbol{u}}_t$只依赖于当前梯度$\boldsymbol{g}_t$，而$\boldsymbol{\theta}</em>}$还没接触到$\boldsymbol{g<em t-1="t-1">t$，所以它们是独立的变量，假设$\boldsymbol{g}_t$具有零均值时，$\boldsymbol{\theta}</em>}\cdot\tilde{\boldsymbol{u}<em RMS="RMS">t\approx 0$往往就容易成立了。而为了估计$\Vert\tilde{\boldsymbol{u}}_t\Vert</em>}^2$，原论文直接假设$\boldsymbol{g<em RMS="RMS">t/\sqrt{\boldsymbol{v}_k}$具有相同方向并且单位RMS，于是<br />
+\begin{equation}\Vert\tilde{\boldsymbol{u}}_t\Vert</em>} = \sum_{k=t}^{\infty} (1-\beta_1)\beta_1^{k-t}\left\Vert\frac{\boldsymbol{g<em RMS="RMS">t}{\sqrt{\boldsymbol{v}_k}}\right\Vert</em>} = \sum_{k=t}^{\infty} (1-\beta_1)\beta_1^{k-t} = 1\end{equation<br />
+代入式$\eqref{eq:tilde-u-rms}$，结合快速估计一节同样的近似处理，解得<br />
+\begin{equation}\Vert\boldsymbol{\theta}<em RMS="RMS">t\Vert</em>} \approx \sqrt{\frac{\eta}{2\lambda}}\end{equation<br />
+然而，如果局限在原论文看，我们会发现有很多近似是莫名其妙的，比如$\boldsymbol{v}<em RMS="RMS">t$中也有$\boldsymbol{g}_t$，所以说$\tilde{\boldsymbol{u}}_t$只包含当前$\boldsymbol{g}_t$的影响是不大准确的，还有$\Vert\boldsymbol{g}_t/\sqrt{\boldsymbol{v}_k}\Vert</em>=1$的断言也显得比较生硬。但如果放到本文来看，我们会发现在平均场近似下，原论文的各种操作会显得很合理，所以原论文其实已经隐含地用到了平均场方法。</p>
+<h2 id="_14">文章小结</h2>
+<p>这篇文章我们用平均场近似推导了一个有趣且可能让人意外的结论：AdamW训出来的模型，其权重的RMS也是可以渐近估计出来的，一般情况下，它只依赖于学习率和Weight Decay。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/11307">https://spaces.ac.cn/archives/11307</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Oct. 01, 2025). 《AdamW的Weight RMS的渐近估计 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/11307">https://spaces.ac.cn/archives/11307</a></p>
+<p>@online{kexuefm-11307,<br />
+title={AdamW的Weight RMS的渐近估计},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={Oct},<br />
+url={\url{https://spaces.ac.cn/archives/11307}},<br />
+} </p>
+<hr />
+<hr />
+<h2 id="_15">公式推导与注释</h2>
+<h3 id="1-adamw">1. AdamW优化器的完整数学定义</h3>
+<p>AdamW是Adam优化器的变体，引入了解耦的权重衰减（Decoupled Weight Decay）。其更新规则如下：</p>
+<p>给定参数$\theta_t$，在第$t$步的更新过程为：</p>
+<p>$$
+\begin{aligned}
+g_t &= \nabla_\theta \mathcal{L}(\theta_{t-1}) \\
+m_t &= \beta_1 m_{t-1} + (1-\beta_1) g_t \\
+v_t &= \beta_2 v_{t-1} + (1-\beta_2) g_t^2 \\
+\hat{m}_t &= \frac{m_t}{1-\beta_1^t} \\
+\hat{v}_t &= \frac{v_t}{1-\beta_2^t} \\
+\theta_t &= \theta_{t-1} - \alpha \left(\frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon} + \lambda \theta_{t-1}\right)
+\end{aligned}
+$$</p>
+<p>其中：
+- $\alpha$是学习率（learning rate）
+- $\beta_1, \beta_2$是动量参数，通常取$\beta_1=0.9, \beta_2=0.999$
+- $\epsilon$是数值稳定项，通常取$10^{-8}$
+- $\lambda$是权重衰减系数（weight decay coefficient）
+- $g_t$是梯度，$m_t$是一阶矩估计，$v_t$是二阶矩估计</p>
+<p><strong>关键区别</strong>：与Adam不同，AdamW的权重衰减项$\lambda \theta_{t-1}$是在自适应学习率之外单独应用的，而不是作为梯度的一部分加入$L_2$正则。</p>
+<h3 id="2-weight-rms">2. Weight RMS的定义与意义</h3>
+<p>权重的均方根（Root Mean Square, RMS）定义为：</p>
+<p>$$
+\text{RMS}(\theta) = \sqrt{\frac{1}{d}\sum_{i=1}^d \theta_i^2} = \sqrt{\mathbb{E}[\theta^2]}
+$$</p>
+<p>其中$d$是参数维度。在深度学习中，Weight RMS反映了：</p>
+<ol>
+<li><strong>模型容量的使用程度</strong>：更大的RMS通常意味着模型使用了更多的表达能力</li>
+<li><strong>正则化强度的体现</strong>：权重衰减会限制RMS的增长</li>
+<li><strong>优化动态的表征</strong>：RMS随训练的演化反映了优化过程</li>
+</ol>
+<p><strong>核心问题</strong>：给定AdamW的超参数$(\alpha, \beta_1, \beta_2, \lambda)$，能否预测训练收敛后权重的渐近RMS？</p>
+<h3 id="3">3. 平均场近似的基本假设</h3>
+<p>平均场近似（Mean Field Approximation）是统计物理中的经典方法，用于处理高维系统。在优化器分析中，我们做如下假设：</p>
+<p><strong>假设1（统计独立性）</strong>：不同参数分量在统计意义上独立且同分布（i.i.d.）</p>
+<p><strong>假设2（梯度统计）</strong>：梯度$g_t$可以分解为
+$$
+g_t = \mu_g + \sigma_g \xi_t
+$$
+其中$\mu_g$是均值（通常在收敛时趋于0），$\sigma_g$是标准差，$\xi_t \sim \mathcal{N}(0, 1)$是标准正态噪声。</p>
+<p><strong>假设3（稳态假设）</strong>：在$t \to \infty$时，系统达到统计稳态，各量的统计分布不再随时间变化。</p>
+<p>这些假设允许我们从单个参数的演化推导整体行为。</p>
+<h3 id="4">4. 渐近分析框架</h3>
+<p>在$t \to \infty$时，偏置修正因子趋于1：
+$$
+1 - \beta_1^t \to 1, \quad 1 - \beta_2^t \to 1
+$$</p>
+<p>因此$\hat{m}_t \to m_t$，$\hat{v}_t \to v_t$。更新方程简化为：</p>
+<p>$$
+\theta_t = \theta_{t-1} - \alpha \left(\frac{m_t}{\sqrt{v_t} + \epsilon} + \lambda \theta_{t-1}\right)
+$$</p>
+<p>重新整理：
+$$
+\theta_t = (1 - \alpha\lambda)\theta_{t-1} - \alpha \frac{m_t}{\sqrt{v_t} + \epsilon}
+$$</p>
+<p>定义<strong>有效衰减率</strong>：
+$$
+\gamma = 1 - \alpha\lambda
+$$</p>
+<p>则：
+$$
+\theta_t = \gamma \theta_{t-1} - \alpha \frac{m_t}{\sqrt{v_t} + \epsilon}
+$$</p>
+<p>这是一个包含递归和随机噪声的动力学方程。</p>
+<h3 id="5-m_t">5. 一阶矩$m_t$的渐近行为</h3>
+<p>一阶矩的递推：
+$$
+m_t = \beta_1 m_{t-1} + (1-\beta_1) g_t
+$$</p>
+<p>这是一个指数移动平均（EMA）。其稳态解满足：</p>
+<p>假设$g_t$是平稳随机过程，均值为$\mu_g$，则：
+$$
+\mathbb{E}[m_\infty] = \frac{1-\beta_1}{1-\beta_1} \mu_g = \mu_g
+$$</p>
+<p>在收敛附近（接近局部极小值），梯度均值$\mu_g \approx 0$，因此：
+$$
+\mathbb{E}[m_\infty] \approx 0
+$$</p>
+<p>但$m_t$仍有波动。计算方差：
+$$
+\text{Var}(m_t) = \beta_1^2 \text{Var}(m_{t-1}) + (1-\beta_1)^2 \sigma_g^2
+$$</p>
+<p>稳态时$\text{Var}(m_\infty) = \text{Var}(m_{\infty-1})$，解得：
+$$
+\text{Var}(m_\infty) = \frac{(1-\beta_1)^2}{1-\beta_1^2} \sigma_g^2 = \frac{1-\beta_1}{1+\beta_1} \sigma_g^2
+$$</p>
+<p>对于$\beta_1 = 0.9$：
+$$
+\text{Var}(m_\infty) = \frac{0.1}{1.9} \sigma_g^2 \approx 0.053 \sigma_g^2
+$$</p>
+<h3 id="6-v_t">6. 二阶矩$v_t$的渐近行为</h3>
+<p>二阶矩的递推：
+$$
+v_t = \beta_2 v_{t-1} + (1-\beta_2) g_t^2
+$$</p>
+<p>假设$\mathbb{E}[g_t^2] = \mu_g^2 + \sigma_g^2 \approx \sigma_g^2$（因为$\mu_g \approx 0$），稳态时：
+$$
+\mathbb{E}[v_\infty] = \sigma_g^2
+$$</p>
+<p>这是一个关键结果：<strong>二阶矩估计收敛到梯度的方差</strong>。</p>
+<p>进一步，我们需要$v_\infty$本身的波动。由于$g_t^2$的方差与四阶矩有关，假设梯度服从高斯分布，则：
+$$
+\mathbb{E}[g_t^4] = 3\sigma_g^4
+$$</p>
+<p>可以证明：
+$$
+\text{Var}(v_\infty) = \frac{1-\beta_2}{1+\beta_2} \cdot 2\sigma_g^4
+$$</p>
+<p>但在实际应用中，由于$\beta_2 = 0.999$非常接近1，$v_t$的波动相对较小，我们可以近似：
+$$
+v_t \approx \mathbb{E}[v_\infty] = \sigma_g^2
+$$</p>
+<h3 id="7">7. 权重动力学的简化</h3>
+<p>将上述结果代入权重更新方程：
+$$
+\theta_t = \gamma \theta_{t-1} - \alpha \frac{m_t}{\sqrt{v_t} + \epsilon}
+$$</p>
+<p>忽略$\epsilon$（假设$v_t \gg \epsilon^2$）：
+$$
+\theta_t \approx \gamma \theta_{t-1} - \alpha \frac{m_t}{\sqrt{\sigma_g^2}} = \gamma \theta_{t-1} - \frac{\alpha}{\sigma_g} m_t
+$$</p>
+<p>定义标准化的一阶矩：
+$$
+\tilde{m}_t = \frac{m_t}{\sigma_g}
+$$</p>
+<p>则：
+$$
+\theta_t = \gamma \theta_{t-1} - \alpha \tilde{m}_t
+$$</p>
+<p>这是一个线性随机差分方程。</p>
+<h3 id="8">8. 稳态方程的推导</h3>
+<p>在稳态下，$\theta_t$的分布不随时间变化。对方程两边取平方并求期望：</p>
+<p>$$
+\mathbb{E}[\theta_\infty^2] = \gamma^2 \mathbb{E}[\theta_{\infty-1}^2] + \alpha^2 \mathbb{E}[\tilde{m}_\infty^2] - 2\alpha\gamma \mathbb{E}[\theta_{\infty-1} \tilde{m}_\infty]
+$$</p>
+<p><strong>关键假设（平均场解耦）</strong>：假设$\theta_{t-1}$与$m_t$在统计上独立（这是平均场近似的核心），则：
+$$
+\mathbb{E}[\theta_{\infty-1} \tilde{m}_\infty] = \mathbb{E}[\theta_{\infty-1}] \mathbb{E}[\tilde{m}_\infty] \approx 0
+$$</p>
+<p>因为$\mathbb{E}[\tilde{m}_\infty] = 0$。</p>
+<p>因此：
+$$
+\mathbb{E}[\theta_\infty^2] = \gamma^2 \mathbb{E}[\theta_\infty^2] + \alpha^2 \mathbb{E}[\tilde{m}_\infty^2]
+$$</p>
+<p>利用$\text{Var}(\tilde{m}_\infty) = \frac{1-\beta_1}{1+\beta_1}$（从第5节，除以$\sigma_g^2$）：
+$$
+\mathbb{E}[\tilde{m}_\infty^2] = \frac{1-\beta_1}{1+\beta_1}
+$$</p>
+<p>代入稳态方程：
+$$
+\mathbb{E}[\theta_\infty^2] = \gamma^2 \mathbb{E}[\theta_\infty^2] + \alpha^2 \frac{1-\beta_1}{1+\beta_1}
+$$</p>
+<p>解得：
+$$
+\mathbb{E}[\theta_\infty^2] = \frac{\alpha^2}{1-\gamma^2} \cdot \frac{1-\beta_1}{1+\beta_1}
+$$</p>
+<h3 id="9">9. 权重衰减的影响</h3>
+<p>回忆$\gamma = 1 - \alpha\lambda$，则：
+$$
+1 - \gamma^2 = 1 - (1-\alpha\lambda)^2 = 2\alpha\lambda - \alpha^2\lambda^2 = \alpha\lambda(2 - \alpha\lambda)
+$$</p>
+<p>当$\alpha\lambda \ll 1$（通常情况），近似：
+$$
+1 - \gamma^2 \approx 2\alpha\lambda
+$$</p>
+<p>代入：
+$$
+\mathbb{E}[\theta_\infty^2] \approx \frac{\alpha^2}{2\alpha\lambda} \cdot \frac{1-\beta_1}{1+\beta_1} = \frac{\alpha}{2\lambda} \cdot \frac{1-\beta_1}{1+\beta_1}
+$$</p>
+<h3 id="10-weight-rms">10. Weight RMS的渐近公式</h3>
+<p>权重的RMS定义为$\sqrt{\mathbb{E}[\theta_\infty^2]}$，因此：</p>
+<p>$$
+\boxed{\text{RMS}(\theta_\infty) = \sqrt{\frac{\alpha}{2\lambda} \cdot \frac{1-\beta_1}{1+\beta_1}}}
+$$</p>
+<p>这是<strong>核心结果</strong>！注意以下几点：</p>
+<ol>
+<li><strong>与学习率的关系</strong>：$\text{RMS} \propto \sqrt{\alpha}$，学习率越大，权重RMS越大</li>
+<li><strong>与权重衰减的关系</strong>：$\text{RMS} \propto \frac{1}{\sqrt{\lambda}}$，权重衰减越强，RMS越小</li>
+<li><strong>与梯度统计无关</strong>：惊人的是，$\sigma_g$消失了！RMS只依赖于优化器超参</li>
+<li><strong>与二阶矩参数$\beta_2$无关</strong>：只与一阶矩参数$\beta_1$有关</li>
+</ol>
+<h3 id="11">11. 数值验证</h3>
+<p>对于典型的AdamW超参数：
+- $\alpha = 10^{-3}$
+- $\lambda = 0.01$
+- $\beta_1 = 0.9$
+- $\beta_2 = 0.999$</p>
+<p>计算：
+$$
+\frac{1-\beta_1}{1+\beta_1} = \frac{0.1}{1.9} \approx 0.0526
+$$</p>
+<p>$$
+\text{RMS} = \sqrt{\frac{10^{-3}}{2 \times 0.01} \times 0.0526} = \sqrt{\frac{0.001}{0.02} \times 0.0526} = \sqrt{0.05 \times 0.0526} \approx \sqrt{0.00263} \approx 0.051
+$$</p>
+<p>这意味着典型训练后的权重RMS约为<strong>0.05</strong>量级。</p>
+<h3 id="12-">12. 不同学习率-权重衰减比例的分析</h3>
+<p>定义比例$r = \frac{\alpha}{\lambda}$，则：
+$$
+\text{RMS} = \sqrt{\frac{r}{2} \cdot \frac{1-\beta_1}{1+\beta_1}}
+$$</p>
+<p>这表明：
+- 若保持$\frac{\alpha}{\lambda}$恒定，改变$\alpha$和$\lambda$的绝对值不会改变渐近RMS
+- 例如：$(\alpha=0.001, \lambda=0.01)$与$(\alpha=0.01, \lambda=0.1)$会产生相同的RMS</p>
+<p>这与实验观察一致：<strong>学习率和权重衰减的比例决定了模型的最终尺度</strong>。</p>
+<h3 id="13-adam">13. 与Adam（无权重衰减）的对比</h3>
+<p>对于标准Adam（$\lambda=0$），上述推导中$\gamma = 1$，稳态方程变为：
+$$
+\mathbb{E}[\theta_\infty^2] = \mathbb{E}[\theta_\infty^2] + \alpha^2 \frac{1-\beta_1}{1+\beta_1}
+$$</p>
+<p>这个方程无解（除非$\alpha=0$），意味着：</p>
+<p><strong>Adam不存在稳态！</strong> 权重会持续增长（或减小），没有均衡点。这是为什么实践中Adam需要其他正则化手段（如梯度裁剪、层归一化）的原因。</p>
+<p>只有引入权重衰减（AdamW），系统才能达到动态平衡：
+- 权重衰减提供<strong>收缩力</strong>，使权重趋向0
+- 梯度更新提供<strong>扩张力</strong>，使权重偏离0
+- 平衡点就是我们推导的RMS</p>
+<h3 id="14-epsilon">14. 更精确的分析：考虑$\epsilon$的影响</h3>
+<p>之前我们忽略了$\epsilon$，现在考虑其影响。更新方程：
+$$
+\theta_t = \gamma \theta_{t-1} - \alpha \frac{m_t}{\sqrt{v_t} + \epsilon}
+$$</p>
+<p>定义有效的自适应学习率：
+$$
+\alpha_{\text{eff}} = \frac{\alpha}{\sqrt{v_t} + \epsilon} \approx \frac{\alpha}{\sqrt{\sigma_g^2} + \epsilon}
+$$</p>
+<p>当$\sigma_g \gg \epsilon$时，$\alpha_{\text{eff}} \approx \frac{\alpha}{\sigma_g}$，与之前分析一致。</p>
+<p>当$\sigma_g \ll \epsilon$（接近完美收敛），$\alpha_{\text{eff}} \approx \frac{\alpha}{\epsilon}$，此时更新步长由$\epsilon$控制，防止数值不稳定。</p>
+<p>在实践中，$\epsilon = 10^{-8}$非常小，对大多数层$\sigma_g \gg \epsilon$，因此我们的近似是合理的。</p>
+<h3 id="15-rms">15. 层级依赖的RMS</h3>
+<p>不同层的梯度统计$\sigma_g$可能不同。但由于最终公式：
+$$
+\text{RMS} = \sqrt{\frac{\alpha}{2\lambda} \cdot \frac{1-\beta_1}{1+\beta_1}}
+$$</p>
+<p><strong>与$\sigma_g$无关</strong>，这意味着：</p>
+<p><strong>所有层的权重RMS渐近到相同的值！</strong>（前提是使用相同的$\alpha, \lambda, \beta_1$）</p>
+<p>这是一个强有力的结论。在实践中：
+- 不同层可能有不同的初始尺度
+- 但经过足够长的AdamW训练，它们会收敛到相同的RMS
+- 这称为<strong>旋转平衡</strong>（Rotational Equilibrium），即论文标题所指</p>
+<h3 id="16">16. 权重初始化的影响</h3>
+<p>考虑初始条件$\theta_0$。从递推关系：
+$$
+\theta_t = \gamma^t \theta_0 + \sum_{k=1}^t \gamma^{t-k} \left(-\alpha \frac{m_k}{\sqrt{v_k}}\right)
+$$</p>
+<p>第一项$\gamma^t \theta_0$以指数速度衰减（因为$\gamma &lt; 1$）：
+$$
+\gamma^t = (1-\alpha\lambda)^t \approx e^{-\alpha\lambda t}
+$$</p>
+<p><strong>遗忘时间尺度</strong>：
+$$
+\tau_{\text{forget}} = \frac{1}{\alpha\lambda}
+$$</p>
+<p>对于$\alpha=0.001, \lambda=0.01$：
+$$
+\tau_{\text{forget}} = \frac{1}{10^{-5}} = 10^5 \text{ 步}
+$$</p>
+<p>在约$10^5$步后，初始化的影响基本消失，权重完全由优化器超参决定。</p>
+<h3 id="17">17. 多参数组的扩展</h3>
+<p>在实践中，不同参数组可能有不同的$\alpha, \lambda$（如学习率缩放、层级权重衰减）。</p>
+<p>对于第$i$组参数，其RMS为：
+$$
+\text{RMS}_i = \sqrt{\frac{\alpha_i}{2\lambda_i} \cdot \frac{1-\beta_1}{1+\beta_1}}
+$$</p>
+<p>这允许<strong>显式控制不同层的尺度</strong>：
+- 若希望某层权重更大，增大$\frac{\alpha_i}{\lambda_i}$
+- 若希望某层权重更小，减小$\frac{\alpha_i}{\lambda_i}$</p>
+<p>例如，对于输出层，可以设置更小的$\frac{\alpha}{\lambda}$以获得更小的权重，有助于稳定训练。</p>
+<h3 id="18">18. 训练动态的时间演化</h3>
+<p>虽然我们关注渐近值，但训练过程中RMS如何演化？</p>
+<p>从差分方程的解：
+$$
+\mathbb{E}[\theta_t^2] = \gamma^{2t} \mathbb{E}[\theta_0^2] + \frac{1-\gamma^{2t}}{1-\gamma^2} \alpha^2 \frac{1-\beta_1}{1+\beta_1}
+$$</p>
+<p>随着$t \to \infty$，$\gamma^{2t} \to 0$，第一项消失。RMS的时间演化：
+$$
+\text{RMS}(t) = \sqrt{\gamma^{2t} \text{RMS}_0^2 + (1-\gamma^{2t}) \text{RMS}_\infty^2}
+$$</p>
+<p>这是从初始RMS到渐近RMS的指数衰减/增长：
+- 若$\text{RMS}<em>0 &gt; \text{RMS}</em>\infty$：权重逐渐收缩
+- 若$\text{RMS}<em>0 &lt; \text{RMS}</em>\infty$：权重逐渐扩张</p>
+<p>时间常数为$\tau_{\text{eq}} = \frac{1}{2\alpha\lambda}$。</p>
+<h3 id="19">19. 实验验证策略</h3>
+<p>理论预测可以通过以下实验验证：</p>
+<p><strong>实验1：改变$\alpha/\lambda$比例</strong>
+- 固定$\beta_1=0.9$，尝试不同的$(\alpha, \lambda)$组合
+- 测量收敛后的权重RMS
+- 验证$\text{RMS} \propto \sqrt{\alpha/\lambda}$</p>
+<p><strong>实验2：改变$\beta_1$</strong>
+- 固定$\alpha, \lambda$，改变$\beta_1$（如0.8, 0.9, 0.95）
+- 验证$\text{RMS} \propto \sqrt{\frac{1-\beta_1}{1+\beta_1}}$</p>
+<p><strong>实验3：不同初始化</strong>
+- 使用不同的权重初始化（如Xavier, He）
+- 验证经过足够步数后RMS收敛到相同值</p>
+<p><strong>实验4：层级一致性</strong>
+- 在深度网络中，测量每层的RMS
+- 验证所有层收敛到相同的RMS（使用相同超参时）</p>
+<h3 id="20">20. 理论的适用范围和局限</h3>
+<p><strong>适用条件</strong>：
+1. 训练接近收敛（梯度均值$\approx 0$）
+2. 参数维度足够高（平均场近似有效）
+3. 梯度噪声不退化（$\sigma_g$不趋于0）
+4. $\alpha\lambda \ll 1$（小步长近似）</p>
+<p><strong>局限性</strong>：
+1. <strong>训练早期</strong>：理论预测稳态，不适用于训练初期的瞬态行为
+2. <strong>梯度相关性</strong>：实际中不同参数的梯度可能相关，平均场假设失效
+3. <strong>非高斯梯度</strong>：若梯度分布严重非高斯，方差分析可能不准确
+4. <strong>学习率调度</strong>：理论假设固定超参，学习率衰减会改变结果
+5. <strong>稀疏梯度</strong>：对于嵌入层等稀疏更新，需要更精细的建模</p>
+<h3 id="21">21. 与其他正则化的交互</h3>
+<p>AdamW的权重衰减可以视为$L_2$正则化的一种形式。考虑其他正则化：</p>
+<p><strong>Dropout</strong>：引入随机性，增大梯度方差$\sigma_g$，但不改变公式（因为RMS与$\sigma_g$无关）</p>
+<p><strong>Batch Normalization</strong>：归一化激活，间接影响梯度统计，可能改变$\sigma_g$的层级分布</p>
+<p><strong>Gradient Clipping</strong>：限制梯度范数，相当于改变梯度分布的尾部，可能影响$\mathbb{E}[m_t^2]$</p>
+<p><strong>Layer-wise Learning Rate</strong>：不同层的$\alpha_i$不同，导致层级RMS差异</p>
+<p>综合正则化的影响需要更复杂的分析。</p>
+<h3 id="22">22. 深度学习理论的启示</h3>
+<p>这个分析揭示了几个深刻的理论问题：</p>
+<p><strong>1. 优化器的隐式偏好</strong>：优化器不仅决定"如何收敛"，还决定"收敛到哪里"。AdamW隐式地选择了特定RMS的解。</p>
+<p><strong>2. 超参数的双重作用</strong>：
+   - $\alpha$：控制收敛速度 + 控制权重尺度
+   - $\lambda$：控制正则化强度 + 控制权重尺度</p>
+<p><strong>3. 尺度不变性的破缺</strong>：虽然损失函数可能对权重尺度不敏感（如ReLU网络），AdamW打破了这种对称性，选择了特定尺度。</p>
+<p><strong>4. 训练与泛化的联系</strong>：权重RMS与泛化性能相关（更大的权重可能过拟合），理论预测帮助我们理解超参数如何影响泛化。</p>
+<h3 id="23">23. 推广到其他优化器</h3>
+<p>类似的分析可应用于其他优化器：</p>
+<p><strong>SGD with Momentum + Weight Decay</strong>：
+$$
+\text{RMS} \propto \sqrt{\frac{\alpha}{\lambda}}
+$$
+（与AdamW类似，但系数不同）</p>
+<p><strong>RMSprop + Weight Decay</strong>：
+$$
+\text{RMS} \propto \sqrt{\frac{\alpha}{\lambda} \cdot f(\beta_2)}
+$$
+（依赖于二阶矩参数）</p>
+<p><strong>Lion Optimizer</strong>：需要不同的分析框架，因为其更新规则基于符号而非幅度</p>
+<p>这些分析有助于统一理解不同优化器的行为。</p>
+<h3 id="24">24. 理论公式的实用建议</h3>
+<p>基于推导的公式，我们可以提供实用的超参数选择建议：</p>
+<p><strong>选择1：固定目标RMS</strong>
+若希望权重RMS约为$R$，则选择：
+$$
+\lambda = \frac{\alpha}{2R^2} \cdot \frac{1-\beta_1}{1+\beta_1}
+$$</p>
+<p>例如，目标$R=0.1$，$\alpha=0.001$，$\beta_1=0.9$：
+$$
+\lambda = \frac{0.001}{2 \times 0.01} \times 0.0526 = 0.00263 \approx 0.003
+$$</p>
+<p><strong>选择2：参数量自适应</strong>
+对于大模型，可以根据参数量调整$\lambda$，保持RMS恒定。</p>
+<p><strong>选择3：学习率预热与权重衰减</strong>
+在预热阶段，$\alpha$增大，为保持RMS稳定，可以同步增大$\lambda$。</p>
+<h3 id="25">25. 结论与展望</h3>
+<p>通过平均场近似，我们推导出AdamW的权重RMS渐近公式：</p>
+<p>$$
+\boxed{\text{RMS}(\theta_\infty) = \sqrt{\frac{\alpha}{2\lambda} \cdot \frac{1-\beta_1}{1+\beta_1}}}
+$$</p>
+<p><strong>关键发现</strong>：
+1. RMS完全由优化器超参决定，与梯度统计、初始化无关（渐近地）
+2. $\text{RMS} \propto \sqrt{\alpha/\lambda}$，学习率-权重衰减比例是核心
+3. 所有层收敛到相同RMS（使用相同超参时）
+4. Adam（无权重衰减）不存在稳态，必须引入$\lambda &gt; 0$</p>
+<p><strong>未来方向</strong>：
+- 扩展到非平稳设置（学习率调度）
+- 考虑梯度相关性的影响
+- 分析瞬态动力学（训练早期）
+- 与神经网络架构（如Transformer）的具体交互
+- 泛化界的理论联系</p>
+<p>这一理论框架为理解和设计优化器提供了新的视角，也为超参数调优提供了理论指导。</p>
+        </div>
+    </div>
+</body>
+</html>

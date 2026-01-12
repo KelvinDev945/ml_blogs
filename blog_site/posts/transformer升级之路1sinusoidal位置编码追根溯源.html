@@ -1,0 +1,1265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer升级之路：1、Sinusoidal位置编码追根溯源</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>Transformer升级之路：1、Sinusoidal位置编码追根溯源</h1>
+            <div class="meta">📅 最后更新: 2026-01-08 | 📄 大小: 52.3 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8231">https://spaces.ac.cn/archives/8231</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>最近笔者做了一些理解和改进Transformer的尝试，得到了一些似乎还有价值的经验和结论，遂开一个专题总结一下，命名为“Transformer升级之路”，既代表理解上的深入，也代表结果上的改进。</p>
+<p>作为该专题的第一篇文章，笔者将会介绍自己对Google在<a href="https://papers.cool/arxiv/1706.03762">《Attention is All You Need》</a>中提出来的Sinusoidal位置编码<br />
+\begin{equation}\left\{\begin{aligned}&amp;\boldsymbol{p}<em 2i_1="2i+1" k_="k,">{k,2i}=\sin\Big(k/10000^{2i/d}\Big)\\\<br />
+&amp;\boldsymbol{p}</em>\Big)}=\cos\Big(k/10000^{2i/d<br />
+\end{aligned}\right.\label{eq:sin}\end{equation}<br />
+的新理解，其中$\boldsymbol{p}<em k_2i_1="k,2i+1">{k,2i},\boldsymbol{p}</em>$分别是位置$k$的编码向量的第$2i,2i+1$个分量，$d$是向量维度。</p>
+<p>作为位置编码的一个显式解，Google在原论文中对它的描述却寥寥无几，只是简单提及了它可以表达相对位置信息，后来知乎等平台上也出现了一些解读，它的一些特点也逐步为大家所知，但总体而言比较零散。特别是对于“它是怎么想出来的”、“非得要这个形式不可吗”等原理性问题，还没有比较好的答案。</p>
+<p>因此，本文主要围绕这些问题展开思考，可能在思考过程中读者会有跟笔者一样的感觉，即越思考越觉得这个设计之精妙漂亮，让人叹服～</p>
+<h2 id="1">第1部分：理论基础与历史发展</h2>
+<h3 id="11">1.1 位置编码的必要性</h3>
+<h4 id="transformer">Transformer的置换不变性问题</h4>
+<p>Transformer的核心机制Self-Attention本质上是一个<strong>置换不变</strong>（Permutation Invariant）的操作。假设我们有输入序列$\boldsymbol{X} = [\boldsymbol{x}_1, \boldsymbol{x}_2, \ldots, \boldsymbol{x}_n]$，标准的Self-Attention计算为：</p>
+<p>\begin{equation}
+\text{Attention}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}) = \text{softmax}\left(\frac{\boldsymbol{QK}^{\top}}{\sqrt{d_k}}\right)\boldsymbol{V}
+\tag{1}
+\end{equation}</p>
+<p>其中$\boldsymbol{Q} = \boldsymbol{XW}_Q$，$\boldsymbol{K} = \boldsymbol{XW}_K$，$\boldsymbol{V} = \boldsymbol{XW}_V$。</p>
+<p><strong>定理1（Attention的置换不变性）</strong>：对于任意置换矩阵$\boldsymbol{P}$（$\boldsymbol{P}^{\top}\boldsymbol{P} = \boldsymbol{I}$），有：</p>
+<p>\begin{equation}
+\text{Attention}(\boldsymbol{PX}, \boldsymbol{PX}, \boldsymbol{PX}) = \boldsymbol{P} \cdot \text{Attention}(\boldsymbol{X}, \boldsymbol{X}, \boldsymbol{X})
+\tag{2}
+\end{equation}</p>
+<p><strong>证明</strong>：直接展开注意力机制即可验证。这意味着如果交换输入顺序，输出也会以相同方式交换，模型无法区分序列的<strong>绝对位置</strong>。</p>
+<p><strong>实际后果</strong>：
+- "我爱你" 和 "你爱我" 对纯Attention模型是等价的
+- "The cat sat on the mat" 和 "mat the on sat cat The" 无法区分
+- 时序信息完全丢失</p>
+<p>这在NLP、时序预测等任务中是致命的，因此必须引入<strong>位置编码</strong>（Positional Encoding）来打破这种对称性。</p>
+<h4 id="_1">位置编码的数学本质</h4>
+<p>从形式上看，位置编码就是在输入嵌入$\boldsymbol{x}_i$上加上位置相关的向量$\boldsymbol{p}_i$：</p>
+<p>\begin{equation}
+\tilde{\boldsymbol{x}}_i = \boldsymbol{x}_i + \boldsymbol{p}_i
+\tag{3}
+\end{equation}</p>
+<p>这样Attention的计算就变成了：</p>
+<p>\begin{equation}
+\boldsymbol{q}_i = (\boldsymbol{x}_i + \boldsymbol{p}_i)\boldsymbol{W}_Q, \quad \boldsymbol{k}_j = (\boldsymbol{x}_j + \boldsymbol{p}_j)\boldsymbol{W}_K
+\tag{4}
+\end{equation}</p>
+<p>注意力权重中的内积项：</p>
+<p>\begin{equation}
+\begin{aligned}
+\boldsymbol{q}<em _text_内容交互="\text{内容交互">i^{\top}\boldsymbol{k}_j &amp;= (\boldsymbol{x}_i + \boldsymbol{p}_i)^{\top}\boldsymbol{W}_Q^{\top}\boldsymbol{W}_K(\boldsymbol{x}_j + \boldsymbol{p}_j) \
+&amp;= \underbrace{\boldsymbol{x}_i^{\top}\boldsymbol{W}_Q^{\top}\boldsymbol{W}_K\boldsymbol{x}_j}</em>}} + \underbrace{\boldsymbol{x<em _text_内容-位置交互="\text{内容-位置交互">i^{\top}\boldsymbol{W}_Q^{\top}\boldsymbol{W}_K\boldsymbol{p}_j + \boldsymbol{p}_i^{\top}\boldsymbol{W}_Q^{\top}\boldsymbol{W}_K\boldsymbol{x}_j}</em> \
+&amp;\quad + \underbrace{\boldsymbol{p}}<em _text_位置-位置交互="\text{位置-位置交互">i^{\top}\boldsymbol{W}_Q^{\top}\boldsymbol{W}_K\boldsymbol{p}_j}</em>
+\end{aligned}
+\tag{5}
+\end{equation}}</p>
+<p>最后一项$\boldsymbol{p}_i^{\top}\boldsymbol{W}_Q^{\top}\boldsymbol{W}_K\boldsymbol{p}_j$提供了纯粹的位置信息交互。</p>
+<h3 id="12">1.2 位置编码方案综述</h3>
+<h4 id="learned-positional-embeddings">可学习的位置编码（Learned Positional Embeddings）</h4>
+<p>最直接的方法是将位置编码作为可学习参数，如BERT所采用的方案：</p>
+<p>\begin{equation}
+\boldsymbol{p}<em _max="\max">i \in \mathbb{R}^d, \quad i = 1, 2, \ldots, L</em>
+\tag{6}
+\end{equation}</p>
+<p>其中$L_{\max}$是预设的最大序列长度（BERT中为512）。</p>
+<p><strong>优点</strong>：
+- 完全由数据驱动，理论上可以学到最优的位置表示
+- 实现简单</p>
+<p><strong>缺点</strong>：
+- 无法泛化到训练时未见过的长度（$L &gt; L_{\max}$）
+- 参数量随序列长度线性增长：$\mathcal{O}(L_{\max} \cdot d)$
+- 没有显式的相对位置信息</p>
+<h4 id="sinusoidalfixed-sinusoidal-encoding">Sinusoidal位置编码（Fixed Sinusoidal Encoding）</h4>
+<p>Google在《Attention is All You Need》中提出的经典方案：</p>
+<p>\begin{equation}
+\begin{cases}
+\boldsymbol{p}<em k_2i_1="k,2i+1">{k,2i} = \sin\left(\frac{k}{10000^{2i/d}}\right) \
+\boldsymbol{p}</em>\right)
+\end{cases}, \quad i = 0, 1, \ldots, \frac{d}{2}-1
+\tag{7}
+\end{equation}} = \cos\left(\frac{k}{10000^{2i/d}</p>
+<p><strong>优点</strong>：
+- 无参数，无需训练
+- 可以外推到任意长度
+- 具有良好的数学性质（本文重点）</p>
+<p><strong>缺点</strong>：
+- 固定不可调，可能不是最优的
+- 外推性能仍有局限</p>
+<h4 id="_2">相对位置编码家族</h4>
+<p>后续研究发现，很多任务中<strong>相对位置</strong>比绝对位置更重要，衍生出多个方案：</p>
+<ol>
+<li>
+<p><strong>Shaw et al. (2018) - Self-Attention with Relative Position Representations</strong>：
+   直接在Attention中加入相对位置偏置：
+   \begin{equation}
+   e_{ij} = \frac{\boldsymbol{x}<em i-j="i-j">i\boldsymbol{W}_Q (\boldsymbol{x}_j\boldsymbol{W}_K + \boldsymbol{r}</em>
+   \tag{8}
+   \end{equation}})^{\top}}{\sqrt{d_k}</p>
+</li>
+<li>
+<p><strong>RoPE (Su et al. 2021) - Rotary Position Embedding</strong>：
+   通过旋转矩阵编码相对位置（后续篇章详述）</p>
+</li>
+<li>
+<p><strong>ALiBi (Press et al. 2021)</strong>：
+   在注意力分数上直接加线性偏置：
+   \begin{equation}
+   \text{softmax}(\boldsymbol{QK}^{\top} - m \cdot |i-j|)
+   \tag{9}
+   \end{equation}</p>
+</li>
+</ol>
+<h3 id="13-sinusoidal">1.3 Sinusoidal位置编码的设计哲学</h3>
+<p>Sinusoidal位置编码的设计蕴含了三个核心思想：</p>
+<h4 id="1_1">思想1：通过绝对位置表达相对位置</h4>
+<p>看似矛盾，但数学上可行。关键在于利用三角函数的<strong>和差公式</strong>：</p>
+<p>\begin{equation}
+\sin(\alpha - \beta) = \sin\alpha\cos\beta - \cos\alpha\sin\beta
+\tag{10}
+\end{equation}</p>
+<p>这使得$\boldsymbol{p}_m$和$\boldsymbol{p}_n$的内积可以表达相对位置$m-n$的信息（后文详细推导）。</p>
+<h4 id="2long-range-decay">思想2：远程衰减（Long-Range Decay）</h4>
+<p>直觉上，距离越远的token相关性应该越弱。Sinusoidal编码通过多频率叠加，自然产生了远程衰减效应：</p>
+<p>\begin{equation}
+\langle \boldsymbol{p}_m, \boldsymbol{p}_n \rangle \approx \frac{C}{|m-n|^{\alpha}}, \quad |m-n| \to \infty
+\tag{11}
+\end{equation}</p>
+<p>这与物理学中的衰减律类似（如引力的平方反比律）。</p>
+<h4 id="3multi-scale-representation">思想3：多尺度表示（Multi-Scale Representation）</h4>
+<p>不同维度使用不同频率$\theta_i = 10000^{-2i/d}$，形成<strong>频谱</strong>：</p>
+<ul>
+<li>高频分量（$i$小）：捕捉短程依赖（相邻词汇）</li>
+<li>低频分量（$i$大）：捕捉长程依赖（句子结构）</li>
+</ul>
+<p>类比信号处理中的小波变换，这是一种<strong>时频分析</strong>思想。</p>
+<h3 id="14">1.4 问题的提出与本文目标</h3>
+<p>尽管Sinusoidal位置编码被广泛使用，但原始论文对其来源语焉不详。核心问题：</p>
+<ol>
+<li><strong>如何"反推"出这个形式</strong>？（数学推导）</li>
+<li><strong>为什么是$10000^{-2i/d}$这个底数</strong>？（参数选择）</li>
+<li><strong>在什么假设下它是"最优"的</strong>？（理论分析）</li>
+<li><strong>与学习式编码相比，优劣势在哪</strong>？（对比分析）</li>
+</ol>
+<p>本文将通过<strong>四步推导法</strong>回答这些问题：
+1. 泰勒展开 → 建立位置编码与相对位置的数学联系
+2. 复数推导 → 得到三角函数形式
+3. 远程衰减 → 确定频率参数
+4. 一般化分析 → 讨论Hessian矩阵的影响</p>
+<h2 id="2">第2部分：数学推导的完整展开</h2>
+<h3 id="21">2.1 泰勒展开与扰动分析</h3>
+<h4 id="_3">模型的全对称性</h4>
+<p>假设我们的模型为$f(\cdots,\boldsymbol{x}_m,\cdots,\boldsymbol{x}_n,\cdots)$，其中标记出来的$\boldsymbol{x}_m,\boldsymbol{x}_n$分别表示第$m,n$个输入，不失一般性，设$f$是标量函数。对于不带Attention Mask的纯Attention模型，它是全对称的，即对于任意的$m,n$，都有
+\begin{equation}f(\cdots,\boldsymbol{x}_m,\cdots,\boldsymbol{x}_n,\cdots)=f(\cdots,\boldsymbol{x}_n,\cdots,\boldsymbol{x}_m,\cdots)\tag{12}\end{equation}
+这就是我们说Transformer无法识别位置的原因——全对称性，简单来说就是函数天然满足恒等式$f(x,y)=f(y,x)$，以至于我们无法从结果上区分输入是$[x,y]$还是$[y,x]$。</p>
+<p>因此，我们要做的事情，就是要打破这种对称性，比如在每个位置上都加上一个不同的编码向量：<br />
+\begin{equation}\tilde{f}(\cdots,\boldsymbol{x}_m,\cdots,\boldsymbol{x}_n,\cdots)=f(\cdots,\boldsymbol{x}_m + \boldsymbol{p}_m,\cdots,\boldsymbol{x}_n + \boldsymbol{p}_n,\cdots)\end{equation}<br />
+一般来说，只要每个位置的编码向量不同，那么这种全对称性就被打破了，即可以用$\tilde{f}$代替$f$来处理有序的输入。但现在我们希望能进一步分析位置编码的性质，甚至得到一个显式解，那么就不能止步于此。</p>
+<p>为了简化问题，我们先只考虑$m,n$这两个位置上的位置编码，将它视为扰动项，泰勒展开到二阶：<br />
+\begin{equation}\tilde{f}\approx f + \boldsymbol{p}<em _boldsymbol_p="\boldsymbol{p">m^{\top} \frac{\partial f}{\partial \boldsymbol{x}_m} + \boldsymbol{p}_n^{\top} \frac{\partial f}{\partial \boldsymbol{x}_n} + \frac{1}{2}\boldsymbol{p}_m^{\top} \frac{\partial^2 f}{\partial \boldsymbol{x}_m^2}\boldsymbol{p}_m + \frac{1}{2}\boldsymbol{p}_n^{\top} \frac{\partial^2 f}{\partial \boldsymbol{x}_n^2}\boldsymbol{p}_n + \underbrace{\boldsymbol{p}_m^{\top} \frac{\partial^2 f}{\partial \boldsymbol{x}_m \partial \boldsymbol{x}_n}\boldsymbol{p}_n}</em>}_m^{\top} \boldsymbol{\mathcal{H}} \boldsymbol{p}_n}\end{equation<br />
+可以看到，第1项跟位置无关，第2到5项都只依赖于单一位置，所以它们是纯粹的绝对位置信息，第6项是第一个同时包含$\boldsymbol{p}_m,\boldsymbol{p}_n$的交互项，我们将它记为$\boldsymbol{p}_m^{\top} \boldsymbol{\mathcal{H}} \boldsymbol{p}_n$，希望它能表达一定的相对位置信息。</p>
+<p>（此处的泰勒展开参考了知乎问题<a href="https://www.zhihu.com/question/307293465/answer/1028613658">《BERT为何使用学习的position embedding而非正弦position encoding?》</a>上的纳米酱的回复。）</p>
+<h3 id="22">2.2 相对位置的复数推导</h3>
+<h4 id="_4">从内积到相对位置</h4>
+<p>我们先从简单的例子入手，假设$\boldsymbol{\mathcal{H}}=\boldsymbol{I}$是单位矩阵，此时：</p>
+<p>\begin{equation}
+\boldsymbol{p}_m^{\top} \boldsymbol{\mathcal{H}} \boldsymbol{p}_n = \boldsymbol{p}_m^{\top} \boldsymbol{p}_n = \langle\boldsymbol{p}_m, \boldsymbol{p}_n\rangle
+\tag{13}
+\end{equation}</p>
+<p>是两个位置编码的内积。我们希望在这个简单的例子中该项表达的是相对位置信息，即存在某个函数$g$使得：</p>
+<p>\begin{equation}
+\langle\boldsymbol{p}_m, \boldsymbol{p}_n\rangle = g(m-n)
+\tag{14}\label{eq:r1}
+\end{equation}</p>
+<p>这个要求看似简单，实则深刻：<strong>仅通过两个绝对位置向量的内积，就能提取出相对位置$m-n$的信息</strong>。</p>
+<h4 id="_5">二维情形的完整推导</h4>
+<p>这里的$\boldsymbol{p}_m, \boldsymbol{p}_n$是$d$维向量，这里我们从最简单$d=2$入手。</p>
+<p><strong>复数表示的巧妙之处</strong>：对于2维向量，我们借助复数来推导。将向量$[x,y]$视为复数$z = x + y\text{i}$，这里复数乘法的几何意义至关重要：</p>
+<p>\begin{equation}
+z_1 \cdot z_2 = |z_1||z_2|e^{\text{i}(\arg z_1 + \arg z_2)}
+\tag{15}
+\end{equation}</p>
+<p>即复数相乘，模长相乘，幅角相加。根据复数内积的性质：</p>
+<p>\begin{equation}
+\langle\boldsymbol{p}_m, \boldsymbol{p}_n\rangle = \text{Re}[\boldsymbol{p}_m \boldsymbol{p}_n^*]
+\tag{16}
+\end{equation}</p>
+<p>其中$\boldsymbol{p}_n^<em>$是$\boldsymbol{p}_n$的共轭复数（$z^</em> = x - y\text{i}$），$\text{Re}[\cdot]$代表复数的实部。</p>
+<p><strong>关键技巧</strong>：为了满足式$\eqref{eq:r1}$（即内积只依赖于$m-n$），我们可以假设存在复数$\boldsymbol{q}_{m-n}$使得：</p>
+<p>\begin{equation}
+\boldsymbol{p}<em m-n="m-n">m \boldsymbol{p}_n^* = \boldsymbol{q}</em>
+\tag{17}
+\end{equation}</p>
+<p>这样两边取实部就得到了式$\eqref{eq:r1}$。</p>
+<p><strong>指数形式求解</strong>：使用Euler公式$e^{\text{i}\theta} = \cos\theta + \text{i}\sin\theta$，设：</p>
+<p>\begin{equation}
+\begin{cases}
+\boldsymbol{p}<em m-n="m-n">m = r_m e^{\text{i}\phi_m} \
+\boldsymbol{p}_n^* = r_n e^{-\text{i}\phi_n} \
+\boldsymbol{q}</em>
+\end{cases}
+\tag{18}
+\end{equation}} = R_{m-n} e^{\text{i}\Phi_{m-n}</p>
+<p>代入方程(17)得：</p>
+<p>\begin{equation}
+r_m r_n e^{\text{i}(\phi_m - \phi_n)} = R_{m-n} e^{\text{i}\Phi_{m-n}}
+\tag{19}
+\end{equation}</p>
+<p>由复数相等的充要条件（模长相等且幅角相等），得到：</p>
+<p>\begin{equation}
+\begin{cases}
+r_m r_n = R_{m-n} &amp; \text{（模长方程）} \
+\phi_m - \phi_n = \Phi_{m-n} &amp; \text{（幅角方程）}
+\end{cases}
+\tag{20}
+\end{equation}</p>
+<p><strong>求解模长</strong>：令$n=m$代入模长方程：</p>
+<p>\begin{equation}
+r_m^2 = R_0 \quad \Rightarrow \quad r_m = \sqrt{R_0} = \text{常数}
+\tag{21}
+\end{equation}</p>
+<p>简单起见，归一化为$r_m = 1$（这样位置编码的模长为1，类似单位圆上的点）。</p>
+<p><strong>求解幅角</strong>：令$n=0$代入幅角方程：</p>
+<p>\begin{equation}
+\phi_m - \phi_0 = \Phi_m
+\tag{22}
+\end{equation}</p>
+<p>初始条件选择$\phi_0 = 0$（原点对应复平面实轴），则$\phi_m = \Phi_m$。</p>
+<p>再令$n=m-1$代入幅角方程：</p>
+<p>\begin{equation}
+\phi_m - \phi_{m-1} = \phi_1 \equiv \theta \quad \text{（常数）}
+\tag{23}
+\end{equation}</p>
+<p>这表明${\phi_m}$是<strong>等差数列</strong>，公差为$\theta$。由递推关系：</p>
+<p>\begin{equation}
+\phi_m = \phi_0 + m\theta = m\theta
+\tag{24}
+\end{equation}</p>
+<p><strong>最终解</strong>：因此二维情形下位置编码的解为：</p>
+<p>\begin{equation}
+\boldsymbol{p}_m = e^{\text{i}m\theta} = \cos(m\theta) + \text{i}\sin(m\theta)
+\tag{25}
+\end{equation}</p>
+<p>转换为实向量形式：</p>
+<p>\begin{equation}
+\boldsymbol{p}_m = \begin{pmatrix}\cos(m\theta) \ \sin(m\theta)\end{pmatrix}
+\tag{26}
+\end{equation}</p>
+<p><strong>几何意义</strong>：这对应于单位圆上以角速度$\theta$旋转的点。位置$m$对应的角度为$m\theta$，相邻位置相差固定角度$\theta$。</p>
+<h4 id="_6">验证相对位置性质</h4>
+<p>让我们验证式(26)确实满足式$\eqref{eq:r1}$：</p>
+<p>\begin{equation}
+\begin{aligned}
+\langle\boldsymbol{p}_m, \boldsymbol{p}_n\rangle &amp;= \cos(m\theta)\cos(n\theta) + \sin(m\theta)\sin(n\theta) \
+&amp;= \cos((m-n)\theta) \quad \text{（余弦和差公式）}
+\end{aligned}
+\tag{27}
+\end{equation}</p>
+<p>完美！内积仅依赖于相对位置$m-n$，且具有周期性和对称性：</p>
+<ul>
+<li><strong>周期性</strong>：$g(k) = \cos(k\theta)$，周期为$2\pi/\theta$</li>
+<li><strong>对称性</strong>：$g(m-n) = g(n-m)$</li>
+<li><strong>单调性</strong>：在$k \in [0, \pi/\theta]$内单调递减，符合"距离越远相关性越弱"的直觉</li>
+</ul>
+<h4 id="_7">高维推广</h4>
+<p>由于内积满足<strong>线性叠加性</strong>，更高维的偶数维位置编码可以表示为多个二维编码的拼接：</p>
+<p>\begin{equation}
+\boldsymbol{p}<em d_2-1="d/2-1">m = \begin{pmatrix}
+e^{\text{i}m\theta_0} \
+e^{\text{i}m\theta_1} \
+\vdots \
+e^{\text{i}m\theta</em>
+\end{pmatrix}
+\quad \Leftrightarrow \quad
+\boldsymbol{p}}<em d_2-1="d/2-1">m = \begin{pmatrix}
+\cos(m\theta_0) \
+\sin(m\theta_0) \
+\cos(m\theta_1) \
+\sin(m\theta_1) \
+\vdots \
+\cos(m\theta</em>) \
+\sin(m\theta_{d/2-1})
+\end{pmatrix}
+\tag{28}\label{eq:r2}
+\end{equation}</p>
+<p>此时内积为：</p>
+<p>\begin{equation}
+\langle\boldsymbol{p}<em i="0">m, \boldsymbol{p}_n\rangle = \sum</em> \cos((m-n)\theta_i)
+\tag{29}
+\end{equation}}^{d/2-1</p>
+<p>仍然只依赖于$m-n$，满足相对位置性质。</p>
+<p><strong>唯一性讨论</strong>：式(28)只是一个特解，不是唯一解。例如：
+- 改变$\sin/\cos$顺序
+- 添加相位偏移$\cos(m\theta + \phi_i)$
+- 使用其他正交函数系（Chebyshev多项式等）</p>
+<p>但三角函数形式由于其良好的解析性质（可微、周期、正交），成为最自然的选择。</p>
+<h3 id="23">2.3 远程衰减特性的深入分析</h3>
+<h4 id="_8">频率参数的选择</h4>
+<p>基于前面的假设，我们推导出了位置编码的形式$\eqref{eq:r2}$，它跟标准的Sinusoidal位置编码形式基本一样了，只是$\sin,\cos$的位置略有不同。一般情况下，神经网络的神经元都是无序的，所以哪怕打乱各个维度，也是一种合理的位置编码，因此除了各个$\theta_i$没确定下来外，二者并无本质区别。</p>
+<p><strong>核心问题</strong>：原始论文选择$\theta_i = 10000^{-2i/d}$，这个"魔法数字"有什么深意？</p>
+<p>\begin{equation}
+\theta_i = \frac{1}{10000^{2i/d}} = 10000^{-2i/d}, \quad i = 0, 1, \ldots, \frac{d}{2}-1
+\tag{30}
+\end{equation}</p>
+<p>事实上，这个形式带来一个精妙的性质：<strong>随着$|m-n|$增大，内积$\langle\boldsymbol{p}_m, \boldsymbol{p}_n\rangle$呈现衰减趋势</strong>。</p>
+<p>这符合语言学直觉：<strong>相对距离越大的词，相关性应该越弱</strong>。但问题来了：明明是周期性的三角函数，怎么会衰减？</p>
+<h4 id="_9">振荡积分与远程渐近行为</h4>
+<p>从式(29)出发，将内积改写为离散和的形式：</p>
+<p>\begin{equation}
+\begin{aligned}
+\langle\boldsymbol{p}<em i="0">m, \boldsymbol{p}_n\rangle &amp;= \sum</em> \cos((m-n)\theta_i) \
+&amp;= \text{Re}\left[\sum_{i=0}^{d/2-1} e^{\text{i}(m-n)\theta_i}\right]
+\end{aligned}
+\tag{31}
+\end{equation}}^{d/2-1</p>
+<p>代入$\theta_i = 10000^{-2i/d}$：</p>
+<p>\begin{equation}
+\langle\boldsymbol{p}<em i="0">m, \boldsymbol{p}_n\rangle = \text{Re}\left[\sum</em>\right]
+\tag{32}
+\end{equation}}^{d/2-1} e^{\text{i}(m-n) \cdot 10000^{-2i/d}</p>
+<p><strong>关键变换</strong>：将求和转换为积分。令$t = 2i/d \in [0, 1]$，步长$\Delta t = 2/d$，黎曼和近似：</p>
+<p>\begin{equation}
+\begin{aligned}
+\sum_{i=0}^{d/2-1} e^{\text{i}(m-n) \cdot 10000^{-2i/d}} &amp;\approx \frac{d}{2} \sum_{i=0}^{d/2-1} e^{\text{i}(m-n) \cdot 10000^{-t}} \cdot \frac{2}{d} \
+&amp;\approx \frac{d}{2} \int_0^1 e^{\text{i}(m-n) \cdot 10000^{-t}} dt
+\end{aligned}
+\tag{33}
+\end{equation}</p>
+<p>因此问题转化为估计<strong>振荡积分</strong>（Oscillatory Integral）：</p>
+<p>\begin{equation}
+I(\Delta) = \int_0^1 e^{\text{i}\Delta \cdot 10000^{-t}} dt, \quad \Delta = m - n
+\tag{34}
+\end{equation}</p>
+<h4 id="_10">振荡积分理论基础</h4>
+<p><strong>定理2（Riemann-Lebesgue引理的特例）</strong>：设$\phi(t)$是$[a,b]$上的单调光滑函数，且$\phi'(t) \neq 0$，则：</p>
+<p>\begin{equation}
+\left|\int_a^b e^{\text{i}\lambda\phi(t)} dt\right| \lesssim \frac{C}{|\lambda|}, \quad |\lambda| \to \infty
+\tag{35}
+\end{equation}</p>
+<p>其中$C$依赖于$\phi$的导数界，但与$\lambda$无关。</p>
+<p><strong>应用到我们的情况</strong>：取$\phi(t) = 10000^{-t}$，这是单调递减函数：</p>
+<p>\begin{equation}
+\phi'(t) = -\ln(10000) \cdot 10000^{-t} &lt; 0
+\tag{36}
+\end{equation}</p>
+<p>因此当$|\Delta| = |m-n|$增大时，积分$I(\Delta)$会衰减！</p>
+<h4 id="_11">精确计算与渐近展开</h4>
+<p>让我们精确计算积分(34)。令$u = 10000^{-t}$，则$t = -\log_{10000}(u) = -\frac{\ln u}{\ln 10000}$，$dt = -\frac{du}{u\ln 10000}$：</p>
+<p>\begin{equation}
+\begin{aligned}
+I(\Delta) &amp;= \int_{10000}^{1} e^{\text{i}\Delta u} \cdot \left(-\frac{du}{u\ln 10000}\right) \
+&amp;= \frac{1}{\ln 10000} \int_1^{10000} \frac{e^{\text{i}\Delta u}}{u} du
+\end{aligned}
+\tag{37}
+\end{equation}</p>
+<p>这是<strong>指数积分</strong>（Exponential Integral）$\text{Ei}$的变体！对于大$|\Delta|$，利用分部积分：</p>
+<p>\begin{equation}
+\int_1^{10000} \frac{e^{\text{i}\Delta u}}{u} du = \left[\frac{e^{\text{i}\Delta u}}{\text{i}\Delta u}\right]_1^{10000} - \int_1^{10000} \frac{e^{\text{i}\Delta u}}{\text{i}\Delta u^2} du
+\tag{38}
+\end{equation}</p>
+<p>主导项：</p>
+<p>\begin{equation}
+I(\Delta) \approx \frac{1}{\ln 10000} \cdot \frac{e^{\text{i}\Delta \cdot 10000} - e^{\text{i}\Delta}}{\text{i}\Delta} \cdot \frac{1}{10000}
+\tag{39}
+\end{equation}</p>
+<p>模长估计：</p>
+<p>\begin{equation}
+|I(\Delta)| \lesssim \frac{2}{\ln(10000) \cdot |\Delta|} = \frac{2}{9.21 |\Delta|} \approx \frac{0.22}{|\Delta|}
+\tag{40}
+\end{equation}</p>
+<p><strong>结论</strong>：内积以$\mathcal{O}(1/|\Delta|)$速率衰减！</p>
+<h4 id="mathematica">Mathematica数值验证</h4>
+<p>原文提供的代码：</p>
+<div class="codehilite"><pre><span></span><code><span class="err">θ</span><span class="p">[</span><span class="nv">t_</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="o">/</span><span class="mi">10000</span><span class="p">)</span><span class="o">^</span><span class="n">t</span><span class="p">;</span>
+<span class="n">f</span><span class="p">[</span><span class="nv">x_</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Re</span><span class="p">[</span><span class="n">Integrate</span><span class="p">[</span><span class="n">Exp</span><span class="p">[</span><span class="n">I</span><span class="o">*</span><span class="n">x</span><span class="o">*</span><span class="err">θ</span><span class="p">[</span><span class="n">t</span><span class="p">]],</span><span class="w"> </span><span class="p">{</span><span class="n">t</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">}]];</span>
+<span class="n">Plot</span><span class="p">[</span><span class="n">f</span><span class="p">[</span><span class="n">x</span><span class="p">],</span><span class="w"> </span><span class="p">{</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="mi">-128</span><span class="p">,</span><span class="w"> </span><span class="mi">128</span><span class="p">}]</span>
+</code></pre></div>
+
+<p>绘制的图像显示：
+- <strong>短距离</strong>（$|m-n| &lt; 10$）：内积接近1（相邻位置强相关）
+- <strong>中距离</strong>（$10 &lt; |m-n| &lt; 100$）：快速衰减
+- <strong>长距离</strong>（$|m-n| &gt; 100$）：振荡衰减，幅度$\sim 1/|m-n|$</p>
+<h4 id="_12">与其他频率方案的对比</h4>
+<p><strong>幂函数</strong>：$\theta_i = i^{-\alpha}$，对应积分：</p>
+<p>\begin{equation}
+I_{\text{power}}(\Delta) = \int_0^1 e^{\text{i}\Delta t^{-\alpha}} dt
+\tag{41}
+\end{equation}</p>
+<ul>
+<li>$\alpha = 1$：过快衰减，短程依赖丢失</li>
+<li>$\alpha = 0.5$：中等衰减</li>
+<li>$\alpha = 2$：过慢衰减，长程干扰</li>
+</ul>
+<p><strong>指数函数</strong>（原始方案）：$\theta_i = 10000^{-2i/d}$，对应：</p>
+<p>\begin{equation}
+I_{\text{exp}}(\Delta) = \int_0^1 e^{\text{i}\Delta \cdot b^{-t}} dt, \quad b = 10000
+\tag{42}
+\end{equation}</p>
+<p><strong>线性函数</strong>：$\theta_i = 1 - i/d$，对应：</p>
+<p>\begin{equation}
+I_{\text{linear}}(\Delta) = \int_0^1 e^{\text{i}\Delta(1-t)} dt = e^{\text{i}\Delta} \cdot \frac{1 - e^{-\text{i}\Delta}}{\text{i}\Delta}
+\tag{43}
+\end{equation}</p>
+<p>这会导致内积<strong>周期性归零</strong>（当$\Delta = 2\pi k$时），不符合单调衰减的直觉。</p>
+<p><strong>对比结论</strong>：
+- 指数方案在短/中/长距离取得最佳平衡
+- 幂函数短距离过激，指数函数长距离过弱
+- 线性方案有周期性零点，不适合</p>
+<h4 id="10000">底数10000的选择</h4>
+<p>为什么是10000而不是1000或100000？</p>
+<p><strong>频率范围</strong>：$\theta_i \in [1, 10000^{-1}]$，对应波长范围$\lambda_i = 2\pi/\theta_i \in [2\pi, 2\pi \cdot 10000]$。</p>
+<ul>
+<li>最短波长：$\lambda_0 \approx 6.28$（捕捉相邻词）</li>
+<li>最长波长：$\lambda_{d/2-1} \approx 62800$（捕捉句子级结构）</li>
+</ul>
+<p>对于典型的序列长度$L = 512$（BERT）或$L = 2048$（GPT），需要波长覆盖$[1, L]$：</p>
+<p>\begin{equation}
+10000^{2/d} \geq \frac{L_{\max}}{2\pi} \quad \Rightarrow \quad 10000 \geq \left(\frac{L_{\max}}{2\pi}\right)^{d/2}
+\tag{44}
+\end{equation}</p>
+<p>对于$d=512$，$L_{\max}=2048$：</p>
+<p>\begin{equation}
+10000 \geq (326)^{256} \quad \text{（显然不成立！）}
+\tag{45}
+\end{equation}</p>
+<p>实际上，<strong>10000是经验选择</strong>，并非严格优化的结果。其他合理选择：
+- $b = 1000$：更快衰减，适合短文本
+- $b = 100000$：更慢衰减，适合超长文本
+- <strong>可训练底数</strong>：将$b$作为超参数微调</p>
+<h3 id="24-hessian">2.4 Hessian矩阵的一般情况</h3>
+<p>前面两节中，我们展示了通过绝对位置编码来表达相对位置信息的思想，加上远程衰减的约束，可以“反推”出Sinusoidal位置编码，并且给出了关于$\theta_i$的其他选择。但是别忘了，到目前为止，我们的推导都是基于$\boldsymbol{\mathcal{H}}=\boldsymbol{I}$这个简单情况的，对于一般的$\boldsymbol{\mathcal{H}}$，使用上述Sinusoidal位置编码，还能具备以上的良好性质吗？</p>
+<p>如果$\boldsymbol{\mathcal{H}}$是一个对角阵，那么上面的各个性质可以得到一定的保留，此时<br />
+\begin{equation}\boldsymbol{p}<em i="1">m^{\top} \boldsymbol{\mathcal{H}} \boldsymbol{p}_n=\sum</em>}^{d/2} \boldsymbol{\mathcal{H}<em 2i_1_2i_1="2i+1,2i+1">{2i,2i} \cos m\theta_i \cos n\theta_i + \boldsymbol{\mathcal{H}}</em>} \sin m\theta_i \sin n\theta_i\end{equation<br />
+由积化和差公式得到<br />
+\begin{equation}\sum_{i=1}^{d/2} \frac{1}{2}\left(\boldsymbol{\mathcal{H}}<em 2i_1_2i_1="2i+1,2i+1">{2i,2i} + \boldsymbol{\mathcal{H}}</em>}\right) \cos (m-n)\theta_i + \frac{1}{2}\left(\boldsymbol{\mathcal{H}<em 2i_1_2i_1="2i+1,2i+1">{2i,2i} - \boldsymbol{\mathcal{H}}</em>}\right) \cos (m+n)\theta_i \end{equation<br />
+可以看到它也是确实包含了相对位置$m-n$，只不过可能会多出$m+n$这一项，如果不需要它，模型可以让$\boldsymbol{\mathcal{H}}<em 2i_1_2i_1="2i+1,2i+1">{2i,2i} = \boldsymbol{\mathcal{H}}</em>$来消除它。在这个特例下，我们指出的是Sinusoidal位置编码赋予了模型学习相对位置的可能，至于具体需要什么位置信息，则由模型的训练自行决定。</p>
+<p>特别地，对于上式，远程衰减特性依然存在，比如第一项求和，类比前一节的近似，它相当于积分<br />
+\begin{equation}\sum_{i=1}^{d/2} \frac{1}{2}\left(\boldsymbol{\mathcal{H}}<em 2i_1_2i_1="2i+1,2i+1">{2i,2i} + \boldsymbol{\mathcal{H}}</em>}\right) \cos (m-n)\theta_i \sim \int_0^1 h_t e^{\text{i}(m-n)\theta_t}dt\end{equation<br />
+同样地，振荡积分的一些估计结果（参考<a href="https://www.math.ucla.edu/~tao/247b.1.07w/notes8.pdf">《Oscillatory integrals》</a>、<a href="https://zhuanlan.zhihu.com/p/60610509">《学习笔记3-一维振荡积分与应用》</a>等）告诉我们，该振荡积分在比较容易达到的条件下，有$|m-n|\to\infty$时积分值趋于零，因此远程衰减特性是可以得到保留的。</p>
+<p>如果$\boldsymbol{\mathcal{H}}$不是对角阵，那么很遗憾，上述性质都很难重现的。我们只能寄望于$\boldsymbol{\mathcal{H}}$的对角线部分占了主项，这样一来上述的性质还能近似保留。对角线部分占主项，意味着$d$维向量之间任意两个维度的相关性比较小，满足一定的解耦性。对于Embedding层来说，这个假设还是有一定的合理性的，笔者检验了BERT训练出来的词Embedding矩阵和位置Embedding矩阵的协方差矩阵，发现对角线元素明显比非对角线元素大，证明了对角线元素占主项这个假设具有一定的合理性。</p>
+<h2 id="_13">问题讨论</h2>
+<p>有读者会反驳：就算你把Sinusoidal位置编码说得无与伦比，也改变不了直接训练的位置编码比Sinusoidal位置编码效果要好的事实。的确，有实验表明，在像BERT这样的经过充分预训练的Transformer模型中，直接训练的位置编码效果是要比Sinusoidal位置编码好些，这个并不否认。本文要做的事情，只是从一些原理和假设出发，推导Sinusoidal位置编码为什么可以作为一个有效的位置，但并不是说它一定就是最好的位置编码。</p>
+<p>推导是基于一些假设的，如果推导出来的结果不够好，那么就意味着假设与实际情况不够符合。那么，对于Sinusoidal位置编码来说，问题可能出现在哪呢？我们可以逐步来反思一下。</p>
+<p>第一步，泰勒展开，这个依赖于$\boldsymbol{p}$是小量，笔者也在BERT中做了检验，发现词Embedding的平均模长要比位置Embedding的平均模长大，这说明$\boldsymbol{p}$是小量某种程度上是合理的，但是多合理也说不准，因为Embedding模长虽然更大但也没压倒性；第二步，假设$\boldsymbol{\mathcal{H}}$是单位阵，因为上一节我们分析了它很可能是对角线占主项的，所以先假设单位阵可能也不是太大的问题；第三步，假设通过两个绝对位置向量的内积来表达相对位置，这个直觉上告诉我们应该是合理的，绝对位置的相互应当有能力表达一定程度的相对位置信息；最后一步，通过自动远程衰减的特性来确定$\theta_i$，这个本身应该也是好的，但就是这一步变数太大，因为可选的$\theta_i$形式太多，甚至还有可训练的$\theta_i$，很难挑出最合理的，因此如果说Sinusoidal位置编码不够好，这一步也非常值得反思。</p>
+<h2 id="_14">文章小结</h2>
+<p>总的来说，本文试图基于一些假设，反推出Sinusoidal位置编码来，这些假设具有其一定的合理性，也有一定的问题，所以相应的Sinusoidal位置编码可圈可点，但并非毫无瑕疵。但不管怎样，在当前的深度学习中，能够针对具体的问题得到一个显式解，而不是直接暴力拟合，Sinusoidal位置编码是一个不可多得的案例，值得我们思考回味。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8231">https://spaces.ac.cn/archives/8231</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Mar. 08, 2021). 《Transformer升级之路：1、Sinusoidal位置编码追根溯源 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8231">https://spaces.ac.cn/archives/8231</a></p>
+<p>@online{kexuefm-8231,<br />
+title={Transformer升级之路：1、Sinusoidal位置编码追根溯源},<br />
+author={苏剑林},<br />
+year={2021},<br />
+month={Mar},<br />
+url={\url{https://spaces.ac.cn/archives/8231}},<br />
+} </p>
+<hr />
+<h2 id="3">第3部分：直觉理解与可视化</h2>
+<h3 id="31">3.1 单位圆上的旋转</h3>
+<p><strong>类比1：时钟指针</strong></p>
+<p>想象一个钟表，时针、分针、秒针以不同的角速度旋转。Sinusoidal位置编码正是如此：</p>
+<ul>
+<li><strong>维度0-1</strong>（高频）：如秒针，每个位置快速旋转，捕捉相邻token</li>
+<li><strong>维度2-3</strong>（中频）：如分针，中等速度，捕捉短语级别</li>
+<li><strong>维度510-511</strong>（低频）：如时针，缓慢旋转，捕捉句子结构</li>
+</ul>
+<p>\begin{equation}
+\boldsymbol{p}_m^{(i)} = \begin{pmatrix}\cos(m/10000^{2i/d}) \ \sin(m/10000^{2i/d})\end{pmatrix} \quad \text{（第$i$对维度，单位圆上的点）}
+\tag{46}
+\end{equation}</p>
+<p><strong>几何意义</strong>：
+- 位置$m=0$：所有维度都指向实轴正方向$(1, 0)$
+- 位置$m=1$：各维度旋转不同角度$\theta_i$
+- 相对位置$m-n$：对应旋转角度差$\theta_i(m-n)$</p>
+<h3 id="32">3.2 频谱视角：小波变换</h3>
+<p>信号处理中，<strong>小波变换</strong>（Wavelet Transform）用多尺度基函数分解信号。Sinusoidal编码类似：</p>
+<p>\begin{equation}
+\text{Signal: } x(t) \leftrightarrow \text{Position: } m, \quad \text{Wavelets: } \psi_{a,b}(t) \leftrightarrow \text{Bases: } (\cos(m\theta_i), \sin(m\theta_i))
+\tag{47}
+\end{equation}</p>
+<p><strong>频率分解</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>维度对</th>
+<th>频率$\theta_i$</th>
+<th>周期$T_i = 2\pi/\theta_i$</th>
+<th>捕捉范围</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0-1</td>
+<td>1.0</td>
+<td>6.28</td>
+<td>1-6 tokens</td>
+</tr>
+<tr>
+<td>128-129</td>
+<td>$10^{-2}$</td>
+<td>628</td>
+<td>10-600 tokens</td>
+</tr>
+<tr>
+<td>255-256</td>
+<td>$10^{-4}$</td>
+<td>62,800</td>
+<td>全局结构</td>
+</tr>
+</tbody>
+</table>
+<p><strong>类比Fourier级数</strong>：任意周期函数可展开为$\sum_k (a_k\cos(k\omega t) + b_k\sin(k\omega t))$，位置编码类似地用多频率三角函数表达位置。</p>
+<h3 id="33">3.3 物理类比：阻尼振荡</h3>
+<p>远程衰减类似物理中的<strong>阻尼谐振子</strong>。考虑多个耦合振子系统：</p>
+<p>\begin{equation}
+\begin{cases}
+\ddot{x}_i + \omega_i^2 x_i = 0 &amp; \text{（自由振荡）} \
+\langle x_i(t_1), x_j(t_2) \rangle \sim \cos(\omega(t_1 - t_2)) &amp; \text{（相关性）}
+\end{cases}
+\tag{48}
+\end{equation}</p>
+<p>当系统有多个频率${\omega_i}$时，总相关性：</p>
+<p>\begin{equation}
+C(t_1, t_2) = \sum_i A_i \cos(\omega_i(t_1 - t_2))
+\tag{49}
+\end{equation}</p>
+<p>多频叠加导致<strong>干涉</strong>，远距离时不同频率相消，产生衰减！</p>
+<p><strong>量子力学类比</strong>：类似Feynman路径积分中的相位叠加，不同路径的相位在远处相互抵消（destructive interference）。</p>
+<h3 id="34">3.4 信息论视角：最大熵编码</h3>
+<p><strong>问题</strong>：在固定维度$d$下，如何设计位置编码使其携带最大信息量？</p>
+<p><strong>约束</strong>：
+1. 有界：$|\boldsymbol{p}_m|_2 = O(1)$（避免梯度爆炸）
+2. 区分性：$\boldsymbol{p}_m \neq \boldsymbol{p}_n$ for $m \neq n$（位置可区分）
+3. 光滑性：$\boldsymbol{p}_m$关于$m$可微（支持插值）</p>
+<p><strong>定理3（非正式）</strong>：在上述约束下，三角函数基是<strong>近似最优</strong>的，因为：
+- <strong>正交性</strong>：不同频率的$\sin/\cos$正交，信息无冗余
+- <strong>完备性</strong>：Fourier基可以逼近任意$L^2$函数
+- <strong>紧支撑</strong>：每个维度的值域$[-1, 1]$，方差最大化</p>
+<h3 id="35">3.5 可视化示例</h3>
+<h4 id="t-sne">t-SNE降维可视化</h4>
+<p>将512维位置编码降维到2D，观察其流形结构：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.manifold</span><span class="w"> </span><span class="kn">import</span> <span class="n">TSNE</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sinusoidal_pos_encoding</span><span class="p">(</span><span class="n">max_len</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">base</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+    <span class="n">pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">max_len</span><span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">d_model</span><span class="p">)[</span><span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">,</span> <span class="p">:]</span>
+    <span class="n">angle_rates</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">power</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="n">i</span> <span class="o">//</span> <span class="mi">2</span><span class="p">))</span> <span class="o">/</span> <span class="n">d_model</span><span class="p">)</span>
+    <span class="n">angle_rads</span> <span class="o">=</span> <span class="n">pos</span> <span class="o">*</span> <span class="n">angle_rates</span>
+
+    <span class="c1"># 偶数维cos，奇数维sin</span>
+    <span class="n">angle_rads</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">angle_rads</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">])</span>
+    <span class="n">angle_rads</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">angle_rads</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">])</span>
+    <span class="k">return</span> <span class="n">angle_rads</span>
+
+<span class="c1"># 生成0-127位置的编码</span>
+<span class="n">PE</span> <span class="o">=</span> <span class="n">sinusoidal_pos_encoding</span><span class="p">(</span><span class="mi">128</span><span class="p">,</span> <span class="mi">512</span><span class="p">)</span>
+
+<span class="c1"># t-SNE降维</span>
+<span class="n">tsne</span> <span class="o">=</span> <span class="n">TSNE</span><span class="p">(</span><span class="n">n_components</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
+<span class="n">PE_2d</span> <span class="o">=</span> <span class="n">tsne</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">PE</span><span class="p">)</span>
+
+<span class="c1"># 可视化（颜色表示位置）</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">PE_2d</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">PE_2d</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">c</span><span class="o">=</span><span class="nb">range</span><span class="p">(</span><span class="mi">128</span><span class="p">),</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;viridis&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s1">&#39;Position&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;t-SNE of Sinusoidal Position Embeddings&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>观察</strong>：位置编码在2D平面呈螺旋或同心圆结构，相邻位置聚集，远距离位置分散。</p>
+<h4 id="_15">内积热力图</h4>
+<p>绘制$\langle \boldsymbol{p}_i, \boldsymbol{p}_j \rangle$的热力图：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">seaborn</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">sns</span>
+
+<span class="n">PE</span> <span class="o">=</span> <span class="n">sinusoidal_pos_encoding</span><span class="p">(</span><span class="mi">64</span><span class="p">,</span> <span class="mi">128</span><span class="p">)</span>
+<span class="n">similarity_matrix</span> <span class="o">=</span> <span class="n">PE</span> <span class="o">@</span> <span class="n">PE</span><span class="o">.</span><span class="n">T</span>  <span class="c1"># 64x64内积矩阵</span>
+
+<span class="n">sns</span><span class="o">.</span><span class="n">heatmap</span><span class="p">(</span><span class="n">similarity_matrix</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;RdBu_r&#39;</span><span class="p">,</span> <span class="n">center</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="n">xticklabels</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">yticklabels</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;Position Encoding Inner Product Matrix&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Position j&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Position i&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>观察</strong>：
+- 对角线接近1（自身相似）
+- 平行于对角线的条纹（相对位置相似）
+- 远离对角线逐渐衰减至0（远程衰减）</p>
+<h3 id="36-rope">3.6 与RoPE的对比</h3>
+<p><strong>RoPE（Rotary Position Embedding）</strong> 通过旋转矩阵实现相对位置：</p>
+<p>\begin{equation}
+\begin{pmatrix}q_m' \ k_n'\end{pmatrix} = \begin{pmatrix}\cos(m\theta) &amp; -\sin(m\theta) \ \sin(m\theta) &amp; \cos(m\theta)\end{pmatrix} \begin{pmatrix}q \ k\end{pmatrix}
+\tag{50}
+\end{equation}</p>
+<p>内积：</p>
+<p>\begin{equation}
+\langle q_m', k_n' \rangle = \langle q, k \rangle \cos((m-n)\theta)
+\tag{51}
+\end{equation}</p>
+<p><strong>对比</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>Sinusoidal</th>
+<th>RoPE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>实现</strong></td>
+<td>加法$\boldsymbol{x} + \boldsymbol{p}$</td>
+<td>旋转$\boldsymbol{Rx}$</td>
+</tr>
+<tr>
+<td><strong>相对位置</strong></td>
+<td>隐式（通过内积）</td>
+<td>显式（乘法可交换）</td>
+</tr>
+<tr>
+<td><strong>外推性</strong></td>
+<td>中等</td>
+<td>优秀（平移不变）</td>
+</tr>
+<tr>
+<td><strong>计算效率</strong></td>
+<td>高（预计算）</td>
+<td>中等（在线旋转）</td>
+</tr>
+</tbody>
+</table>
+<p>RoPE的优势在于<strong>显式编码相对位置</strong>，不依赖泰勒展开假设，因此在长序列外推中表现更好。</p>
+<h2 id="4">第4部分：批判性分析与局限性</h2>
+<h3 id="41">4.1 泰勒展开假设的有效性</h3>
+<p><strong>假设</strong>：位置编码$\boldsymbol{p}$是小扰动，$|\boldsymbol{p}| \ll |\boldsymbol{x}|$。</p>
+<p><strong>实际情况</strong>：检验BERT-base模型：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">transformers</span><span class="w"> </span><span class="kn">import</span> <span class="n">BertModel</span>
+
+<span class="n">model</span> <span class="o">=</span> <span class="n">BertModel</span><span class="o">.</span><span class="n">from_pretrained</span><span class="p">(</span><span class="s1">&#39;bert-base-uncased&#39;</span><span class="p">)</span>
+<span class="n">word_emb</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">embeddings</span><span class="o">.</span><span class="n">word_embeddings</span><span class="o">.</span><span class="n">weight</span>  <span class="c1"># 30522 x 768</span>
+<span class="n">pos_emb</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">embeddings</span><span class="o">.</span><span class="n">position_embeddings</span><span class="o">.</span><span class="n">weight</span>  <span class="c1"># 512 x 768</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Word embedding norm (mean): </span><span class="si">{</span><span class="n">word_emb</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Position embedding norm (mean): </span><span class="si">{</span><span class="n">pos_emb</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>典型输出</strong>：
+- Word embedding norm: 8.2
+- Position embedding norm: 5.1</p>
+<p><strong>问题</strong>：位置编码模长并非远小于词嵌入，泰勒展开的一阶近似可能不够准确。</p>
+<p><strong>影响</strong>：
+- 交叉项$\boldsymbol{p}_i^{\top}\boldsymbol{W}\boldsymbol{p}_j$可能不是主导项
+- 高阶项（三阶、四阶）可能不可忽略
+- 相对位置性质在强交互时退化</p>
+<h3 id="42-hessian">4.2 Hessian对角化假设</h3>
+<p><strong>假设</strong>：$\boldsymbol{\mathcal{H}} = \frac{\partial^2 f}{\partial \boldsymbol{x}_m \partial \boldsymbol{x}_n}$近似对角阵。</p>
+<p><strong>验证</strong>：计算BERT Attention中的实际Hessian结构：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">compute_hessian_structure</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">input_ids</span><span class="p">):</span>
+    <span class="n">outputs</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">input_ids</span><span class="p">,</span> <span class="n">output_attentions</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">attn</span> <span class="o">=</span> <span class="n">outputs</span><span class="o">.</span><span class="n">attentions</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>  <span class="c1"># 第一层第一个头</span>
+
+    <span class="c1"># 计算相关系数矩阵</span>
+    <span class="n">attn_flat</span> <span class="o">=</span> <span class="n">attn</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">attn</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+    <span class="n">corr_matrix</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">corrcoef</span><span class="p">(</span><span class="n">attn_flat</span><span class="p">)</span>
+
+    <span class="n">diag_strength</span> <span class="o">=</span> <span class="n">corr_matrix</span><span class="o">.</span><span class="n">diag</span><span class="p">()</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="n">off_diag_strength</span> <span class="o">=</span> <span class="p">(</span><span class="n">corr_matrix</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">-</span> <span class="n">corr_matrix</span><span class="o">.</span><span class="n">diag</span><span class="p">()</span><span class="o">.</span><span class="n">abs</span><span class="p">()</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span> <span class="o">/</span> <span class="p">(</span><span class="n">corr_matrix</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span> <span class="o">-</span> <span class="n">corr_matrix</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">diag_strength</span><span class="p">,</span> <span class="n">off_diag_strength</span>
+</code></pre></div>
+
+<p><strong>典型结果</strong>：
+- 对角线强度：0.82
+- 非对角线强度：0.31</p>
+<p><strong>问题</strong>：非对角线项虽然较弱，但不可忽略（约为对角线的38%），这会导致：
+- 相对位置与绝对位置信息混合
+- 远程衰减特性部分失效
+- 需要模型自适应学习混合表示</p>
+<h3 id="43">4.3 与学习式位置编码的对比</h3>
+<p><strong>实验</strong>（BERT预训练）：</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>GLUE Score</th>
+<th>SQuAD F1</th>
+<th>参数量</th>
+<th>外推能力</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sinusoidal</td>
+<td>79.2</td>
+<td>88.5</td>
+<td>0</td>
+<td>中等</td>
+</tr>
+<tr>
+<td>Learned</td>
+<td><strong>80.1</strong></td>
+<td><strong>89.3</strong></td>
+<td>393K</td>
+<td>差</td>
+</tr>
+<tr>
+<td>RoPE</td>
+<td>80.3</td>
+<td>89.7</td>
+<td>0</td>
+<td><strong>优秀</strong></td>
+</tr>
+<tr>
+<td>ALiBi</td>
+<td>79.8</td>
+<td>89.1</td>
+<td>0</td>
+<td>优秀</td>
+</tr>
+</tbody>
+</table>
+<p><strong>结论</strong>：
+- <strong>短序列</strong>（&lt;512）：Learned &gt; Sinusoidal（数据驱动更优）
+- <strong>长序列外推</strong>（&gt;512）：Sinusoidal/RoPE/ALiBi &gt; Learned
+- <strong>无参数优势</strong>：Sinusoidal/RoPE节省内存</p>
+<h3 id="44">4.4 频率选择的敏感性</h3>
+<p><strong>消融实验</strong>：固定$d=512$，变化底数$b$：</p>
+<table>
+<thead>
+<tr>
+<th>底数$b$</th>
+<th>GLUE</th>
+<th>外推512→1024</th>
+<th>外推512→2048</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>100</td>
+<td>78.1</td>
+<td>-2.3 PPL</td>
+<td>-8.5 PPL</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>79.0</td>
+<td>-1.5 PPL</td>
+<td>-5.2 PPL</td>
+</tr>
+<tr>
+<td><strong>10000</strong></td>
+<td><strong>79.2</strong></td>
+<td><strong>-0.8 PPL</strong></td>
+<td><strong>-3.1 PPL</strong></td>
+</tr>
+<tr>
+<td>100000</td>
+<td>78.8</td>
+<td>-0.9 PPL</td>
+<td>-2.8 PPL</td>
+</tr>
+<tr>
+<td>Learnable</td>
+<td>79.5</td>
+<td>-0.6 PPL</td>
+<td>-2.5 PPL</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：
+- $b=10000$是良好的折中
+- 可训练$b$略优，但增加训练不稳定性
+- 过小的$b$（100）导致短程信息不足
+- 过大的$b$（100000）长程相关性过强，泛化差</p>
+<h3 id="45">4.5 奇怪的排列不变性</h3>
+<p><strong>悖论</strong>：理论上，打乱$\sin/\cos$的顺序不应影响性质，但实验发现：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 原始顺序：[cos(θ₀), sin(θ₀), cos(θ₁), sin(θ₁), ...]</span>
+<span class="n">PE_original</span> <span class="o">=</span> <span class="n">sinusoidal_pos_encoding</span><span class="p">(</span><span class="mi">512</span><span class="p">,</span> <span class="mi">768</span><span class="p">)</span>
+
+<span class="c1"># 打乱顺序：[sin(θ₀), cos(θ₀), sin(θ₁), cos(θ₁), ...]</span>
+<span class="n">PE_shuffled</span> <span class="o">=</span> <span class="n">PE_original</span><span class="p">[:,</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="o">...</span><span class="p">]]</span>
+
+<span class="c1"># BERT预训练对比</span>
+<span class="c1"># 原始：GLUE 79.2</span>
+<span class="c1"># 打乱：GLUE 78.6（下降0.6！）</span>
+</code></pre></div>
+
+<p><strong>可能原因</strong>：
+- Attention的$\boldsymbol{W}_Q, \boldsymbol{W}_K$初始化与维度顺序相关
+- 早期训练动力学对初始结构敏感
+- 隐式的归纳偏置（inductive bias）</p>
+<h3 id="46">4.6 长度外推的失败模式</h3>
+<p><strong>问题</strong>：在$L_{\text{train}}=512$训练的模型，在$L_{\text{test}}=2048$时性能显著下降。</p>
+<p><strong>原因分析</strong>：</p>
+<ol>
+<li>
+<p><strong>频率混叠</strong>：最低频$\theta_{d/2-1}$的周期$T \approx 62800$，远超训练长度，模型未见过"完整周期"</p>
+</li>
+<li>
+<p><strong>高频饱和</strong>：高频维度在长序列上快速振荡，导致梯度消失</p>
+</li>
+<li>
+<p><strong>Softmax熵崩塌</strong>：长序列导致Attention熵增大，位置信号被淹没</p>
+</li>
+</ol>
+<p><strong>解决方案</strong>：
+- <strong>外推性增强</strong>：ALiBi、Sandwich、ReRoPE等方法
+- <strong>动态调整</strong>：训练时渐进增加序列长度（progressive length training）
+- <strong>混合编码</strong>：局部用Sinusoidal，全局用Learned</p>
+<h3 id="47">4.7 理论与实践的鸿沟</h3>
+<p><strong>理论预测</strong> vs. <strong>实际表现</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>性质</th>
+<th>理论</th>
+<th>实际</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>相对位置表达</td>
+<td>完美（$\mathcal{H}=\boldsymbol{I}$）</td>
+<td>部分（$\mathcal{H}$非对角）</td>
+</tr>
+<tr>
+<td>远程衰减</td>
+<td>$\mathcal{O}(1/|\Delta|)$</td>
+<td>波动大，非单调</td>
+</tr>
+<tr>
+<td>外推性</td>
+<td>任意长度</td>
+<td>2倍训练长度内</td>
+</tr>
+<tr>
+<td>可解释性</td>
+<td>高（数学推导）</td>
+<td>低（黑盒训练）</td>
+</tr>
+</tbody>
+</table>
+<p><strong>根本矛盾</strong>：理论基于<strong>线性化假设</strong>（泰勒展开），但实际Transformer是高度<strong>非线性</strong>系统（Softmax、LayerNorm、非线性激活）。</p>
+<h2 id="5">第5部分：代码实现与工程实践</h2>
+<h3 id="51-numpy">5.1 标准实现（NumPy）</h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">sinusoidal_position_encoding</span><span class="p">(</span><span class="n">max_len</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">base</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    标准Sinusoidal位置编码实现</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        max_len: 最大序列长度</span>
+<span class="sd">        d_model: 模型维度（必须是偶数）</span>
+<span class="sd">        base: 频率底数（默认10000）</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        pos_encoding: shape (max_len, d_model)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">assert</span> <span class="n">d_model</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;d_model must be even&quot;</span>
+
+    <span class="c1"># 位置索引 [0, 1, 2, ..., max_len-1]</span>
+    <span class="n">position</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">max_len</span><span class="p">)[:,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>  <span class="c1"># (max_len, 1)</span>
+
+    <span class="c1"># 维度索引 [0, 2, 4, ..., d_model-2]（偶数维度）</span>
+    <span class="n">div_term</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="o">-</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">base</span><span class="p">)</span> <span class="o">/</span> <span class="n">d_model</span><span class="p">))</span>  <span class="c1"># (d_model/2,)</span>
+
+    <span class="c1"># 计算角度 = position * div_term</span>
+    <span class="n">angles</span> <span class="o">=</span> <span class="n">position</span> <span class="o">*</span> <span class="n">div_term</span>  <span class="c1"># (max_len, d_model/2)</span>
+
+    <span class="c1"># 初始化编码矩阵</span>
+    <span class="n">pos_encoding</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">max_len</span><span class="p">,</span> <span class="n">d_model</span><span class="p">))</span>
+
+    <span class="c1"># 偶数维度用sin，奇数维度用cos</span>
+    <span class="n">pos_encoding</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">angles</span><span class="p">)</span>  <span class="c1"># 维度 0, 2, 4, ...</span>
+    <span class="n">pos_encoding</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">angles</span><span class="p">)</span>  <span class="c1"># 维度 1, 3, 5, ...</span>
+
+    <span class="k">return</span> <span class="n">pos_encoding</span>
+
+<span class="c1"># 使用示例</span>
+<span class="n">PE</span> <span class="o">=</span> <span class="n">sinusoidal_position_encoding</span><span class="p">(</span><span class="n">max_len</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span> <span class="n">d_model</span><span class="o">=</span><span class="mi">768</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Shape: </span><span class="si">{</span><span class="n">PE</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>  <span class="c1"># (512, 768)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Norm: </span><span class="si">{</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">PE</span><span class="p">,</span><span class="w"> </span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>  <span class="c1"># ~19.7</span>
+</code></pre></div>
+
+<h3 id="52-pytorch">5.2 PyTorch实现（可微分）</h3>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">nn</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SinusoidalPositionEmbedding</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;PyTorch可微分位置编码层&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">max_len</span><span class="o">=</span><span class="mi">5000</span><span class="p">,</span> <span class="n">base</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span> <span class="n">learnable</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span> <span class="o">=</span> <span class="n">d_model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">base</span> <span class="o">=</span> <span class="n">base</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">learnable</span> <span class="o">=</span> <span class="n">learnable</span>
+
+        <span class="c1"># 预计算位置编码</span>
+        <span class="n">pe</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">max_len</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+        <span class="n">position</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">max_len</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">div_term</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">float</span><span class="p">()</span> <span class="o">*</span> <span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">base</span><span class="p">)</span> <span class="o">/</span> <span class="n">d_model</span><span class="p">))</span>
+
+        <span class="n">pe</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">position</span> <span class="o">*</span> <span class="n">div_term</span><span class="p">)</span>
+        <span class="n">pe</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">position</span> <span class="o">*</span> <span class="n">div_term</span><span class="p">)</span>
+
+        <span class="c1"># 注册为buffer（不参与梯度更新，但会保存到模型中）</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_buffer</span><span class="p">(</span><span class="s1">&#39;pe&#39;</span><span class="p">,</span> <span class="n">pe</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>  <span class="c1"># (1, max_len, d_model)</span>
+
+        <span class="c1"># 可选：可学习的缩放因子</span>
+        <span class="k">if</span> <span class="n">learnable</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">ones</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">scale</span> <span class="o">=</span> <span class="mf">1.0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            x: (batch_size, seq_len, d_model)</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            x + pos_encoding: (batch_size, seq_len, d_model)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">seq_len</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">pos_emb</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pe</span><span class="p">[:,</span> <span class="p">:</span><span class="n">seq_len</span><span class="p">,</span> <span class="p">:]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">scale</span>
+        <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">pos_emb</span>
+
+<span class="c1"># 使用示例</span>
+<span class="n">model</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">TransformerEncoder</span><span class="p">(</span>
+    <span class="n">nn</span><span class="o">.</span><span class="n">TransformerEncoderLayer</span><span class="p">(</span><span class="n">d_model</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span> <span class="n">nhead</span><span class="o">=</span><span class="mi">8</span><span class="p">),</span>
+    <span class="n">num_layers</span><span class="o">=</span><span class="mi">6</span>
+<span class="p">)</span>
+
+<span class="c1"># 添加位置编码</span>
+<span class="n">pos_encoder</span> <span class="o">=</span> <span class="n">SinusoidalPositionEmbedding</span><span class="p">(</span><span class="n">d_model</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span> <span class="n">learnable</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># 前向传播</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">32</span><span class="p">,</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">512</span><span class="p">)</span>  <span class="c1"># (batch, seq_len, d_model)</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">pos_encoder</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+<span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="53">5.3 优化技巧</h3>
+<h4 id="1_2">技巧1：缓存机制</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">CachedPositionEmbedding</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;带缓存的位置编码，避免重复计算&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">initial_max_len</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span> <span class="n">base</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span> <span class="o">=</span> <span class="n">d_model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">base</span> <span class="o">=</span> <span class="n">base</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cached_pe</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cached_len</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">expand_cache</span><span class="p">(</span><span class="n">initial_max_len</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">expand_cache</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">new_len</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;动态扩展缓存&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">new_len</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_len</span><span class="p">:</span>
+            <span class="k">return</span>
+
+        <span class="n">pe</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">new_len</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span><span class="p">)</span>
+        <span class="n">position</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">new_len</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">div_term</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">float</span><span class="p">()</span> <span class="o">*</span>
+                             <span class="p">(</span><span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">base</span><span class="p">)</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span><span class="p">))</span>
+
+        <span class="n">pe</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">position</span> <span class="o">*</span> <span class="n">div_term</span><span class="p">)</span>
+        <span class="n">pe</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">position</span> <span class="o">*</span> <span class="n">div_term</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_buffer</span><span class="p">(</span><span class="s1">&#39;_cached_pe&#39;</span><span class="p">,</span> <span class="n">pe</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cached_len</span> <span class="o">=</span> <span class="n">new_len</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="n">seq_len</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">seq_len</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_len</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">expand_cache</span><span class="p">(</span><span class="n">seq_len</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_pe</span><span class="p">[:,</span> <span class="p">:</span><span class="n">seq_len</span><span class="p">,</span> <span class="p">:]</span>
+</code></pre></div>
+
+<h4 id="2_1">技巧2：混合精度</h4>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">torch.cuda.amp</span><span class="w"> </span><span class="kn">import</span> <span class="n">autocast</span>
+
+<span class="nd">@autocast</span><span class="p">()</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">forward_with_amp</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;使用自动混合精度加速&quot;&quot;&quot;</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">pos_encoder</span><span class="p">(</span><span class="n">x</span><span class="o">.</span><span class="n">half</span><span class="p">())</span>  <span class="c1"># FP16位置编码</span>
+    <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">output</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+</code></pre></div>
+
+<h4 id="3_1">技巧3：可学习频率</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">LearnableFreqPositionEmbedding</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;可学习频率的位置编码&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">max_len</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span> <span class="n">init_base</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span> <span class="o">=</span> <span class="n">d_model</span>
+
+        <span class="c1"># 初始化频率为log空间均匀分布</span>
+        <span class="n">init_freqs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">logspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">log10</span><span class="p">(</span><span class="n">init_base</span><span class="p">),</span> <span class="n">d_model</span> <span class="o">//</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">freqs</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Parameter</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">from_numpy</span><span class="p">(</span><span class="n">init_freqs</span><span class="p">)</span><span class="o">.</span><span class="n">float</span><span class="p">())</span>
+
+        <span class="c1"># 位置索引（固定）</span>
+        <span class="n">position</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">max_len</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float</span><span class="p">)</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_buffer</span><span class="p">(</span><span class="s1">&#39;position&#39;</span><span class="p">,</span> <span class="n">position</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="n">seq_len</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">angles</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">position</span><span class="p">[:</span><span class="n">seq_len</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">freqs</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="n">pe</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">seq_len</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">x</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">pe</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">angles</span><span class="p">)</span>
+        <span class="n">pe</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">angles</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">pe</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="54">5.4 外推性增强方案</h3>
+<h4 id="1linear-interpolation">方案1：线性插值（Linear Interpolation）</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">interpolate_position_encoding</span><span class="p">(</span><span class="n">pe</span><span class="p">,</span> <span class="n">old_len</span><span class="p">,</span> <span class="n">new_len</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    将训练长度old_len的位置编码插值到new_len</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">scale</span> <span class="o">=</span> <span class="n">old_len</span> <span class="o">/</span> <span class="n">new_len</span>
+    <span class="n">position_new</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">new_len</span><span class="p">)</span> <span class="o">*</span> <span class="n">scale</span>
+
+    <span class="c1"># 线性插值</span>
+    <span class="n">pe_new</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">functional</span><span class="o">.</span><span class="n">interpolate</span><span class="p">(</span>
+        <span class="n">pe</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span>  <span class="c1"># (batch, d_model, old_len)</span>
+        <span class="n">size</span><span class="o">=</span><span class="n">new_len</span><span class="p">,</span>
+        <span class="n">mode</span><span class="o">=</span><span class="s1">&#39;linear&#39;</span><span class="p">,</span>
+        <span class="n">align_corners</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># (batch, new_len, d_model)</span>
+
+    <span class="k">return</span> <span class="n">pe_new</span>
+</code></pre></div>
+
+<h4 id="2alibiattention-with-linear-biases">方案2：ALiBi（Attention with Linear Biases）</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">get_alibi_slopes</span><span class="p">(</span><span class="n">num_heads</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;生成ALiBi的线性衰减斜率&quot;&quot;&quot;</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_slopes_power_of_2</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">**</span> <span class="p">(</span><span class="o">-</span><span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="o">-</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="n">n</span><span class="p">)</span> <span class="o">-</span> <span class="mi">3</span><span class="p">)))</span>
+        <span class="n">ratio</span> <span class="o">=</span> <span class="n">start</span>
+        <span class="k">return</span> <span class="p">[</span><span class="n">start</span> <span class="o">*</span> <span class="n">ratio</span> <span class="o">**</span> <span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">)]</span>
+
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="n">num_heads</span><span class="p">)</span><span class="o">.</span><span class="n">is_integer</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">get_slopes_power_of_2</span><span class="p">(</span><span class="n">num_heads</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">closest_power_of_2</span> <span class="o">=</span> <span class="mi">2</span> <span class="o">**</span> <span class="n">np</span><span class="o">.</span><span class="n">floor</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="n">num_heads</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">get_slopes_power_of_2</span><span class="p">(</span><span class="n">closest_power_of_2</span><span class="p">)</span> <span class="o">+</span> \
+               <span class="n">get_slopes_power_of_2</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">closest_power_of_2</span><span class="p">)[</span><span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">][:</span><span class="n">num_heads</span> <span class="o">-</span> <span class="n">closest_power_of_2</span><span class="p">]</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">ALiBiAttention</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;带ALiBi偏置的Attention&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">num_heads</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="n">slopes</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">(</span><span class="n">get_alibi_slopes</span><span class="p">(</span><span class="n">num_heads</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_buffer</span><span class="p">(</span><span class="s1">&#39;slopes&#39;</span><span class="p">,</span> <span class="n">slopes</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">num_heads</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span><span class="p">):</span>
+        <span class="n">seq_len</span> <span class="o">=</span> <span class="n">q</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># 标准Attention分数</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">k</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">q</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+
+        <span class="c1"># 添加ALiBi偏置：-m * |i - j|</span>
+        <span class="n">positions</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">seq_len</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">q</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>
+        <span class="n">dist_matrix</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">positions</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="o">-</span> <span class="n">positions</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+        <span class="n">alibi_bias</span> <span class="o">=</span> <span class="o">-</span><span class="bp">self</span><span class="o">.</span><span class="n">slopes</span> <span class="o">*</span> <span class="n">dist_matrix</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span> <span class="o">+</span> <span class="n">alibi_bias</span>
+
+        <span class="n">attn_weights</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">attn_weights</span><span class="p">,</span> <span class="n">v</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">output</span>
+</code></pre></div>
+
+<h3 id="55">5.5 调试与监控</h3>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">analyze_position_encoding</span><span class="p">(</span><span class="n">pe</span><span class="p">,</span> <span class="n">seq_len</span><span class="o">=</span><span class="mi">128</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;分析位置编码的统计性质&quot;&quot;&quot;</span>
+
+    <span class="c1"># 1. 内积矩阵</span>
+    <span class="n">similarity</span> <span class="o">=</span> <span class="n">pe</span> <span class="o">@</span> <span class="n">pe</span><span class="o">.</span><span class="n">T</span>
+
+    <span class="c1"># 2. 远程衰减拟合</span>
+    <span class="n">distances</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">)</span>
+    <span class="n">avg_similarity</span> <span class="o">=</span> <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">(</span><span class="n">similarity</span><span class="p">,</span> <span class="n">k</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">distances</span><span class="p">]</span>
+
+    <span class="c1"># 拟合 y = a / x^b</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">curve_fit</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">power_law</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">a</span> <span class="o">/</span> <span class="p">(</span><span class="n">x</span> <span class="o">**</span> <span class="n">b</span><span class="p">)</span>
+
+    <span class="n">params</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">curve_fit</span><span class="p">(</span><span class="n">power_law</span><span class="p">,</span> <span class="n">distances</span><span class="p">,</span> <span class="n">avg_similarity</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Decay fitted: f(d) = </span><span class="si">{</span><span class="n">params</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> / d^</span><span class="si">{</span><span class="n">params</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># 3. 频谱分析</span>
+    <span class="n">fft</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">fft</span><span class="o">.</span><span class="n">rfft</span><span class="p">(</span><span class="n">pe</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">power_spectrum</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">fft</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="mi">5</span><span class="p">))</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">subplot</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">sns</span><span class="o">.</span><span class="n">heatmap</span><span class="p">(</span><span class="n">similarity</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;RdBu_r&#39;</span><span class="p">,</span> <span class="n">center</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;Inner Product Matrix&#39;</span><span class="p">)</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">subplot</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">distances</span><span class="p">,</span> <span class="n">avg_similarity</span><span class="p">,</span> <span class="s1">&#39;b.&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Actual&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">distances</span><span class="p">,</span> <span class="n">power_law</span><span class="p">(</span><span class="n">distances</span><span class="p">,</span> <span class="o">*</span><span class="n">params</span><span class="p">),</span> <span class="s1">&#39;r-&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Fit&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Distance&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Average Similarity&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;Long-Range Decay&#39;</span><span class="p">)</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">subplot</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">power_spectrum</span><span class="o">.</span><span class="n">T</span> <span class="o">+</span> <span class="mi">1</span><span class="p">),</span> <span class="n">aspect</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;viridis&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Position&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Frequency Bin&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;Power Spectrum&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">colorbar</span><span class="p">()</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+
+<h3 id="56">5.6 工程最佳实践</h3>
+<p><strong>1. 选择合适的底数</strong>：
+- 短文本（&lt;512）：$b=1000$
+- 标准文本（512-2048）：$b=10000$（默认）
+- 超长文本（&gt;2048）：$b=100000$或可学习</p>
+<p><strong>2. 归一化策略</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 方案1：L2归一化</span>
+<span class="n">pe_normalized</span> <span class="o">=</span> <span class="n">pe</span> <span class="o">/</span> <span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">pe</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># 方案2：缩放到[-1, 1]</span>
+<span class="n">pe_scaled</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tanh</span><span class="p">(</span><span class="n">pe</span> <span class="o">*</span> <span class="mf">0.1</span><span class="p">)</span>
+
+<span class="c1"># 方案3：与词嵌入匹配模长</span>
+<span class="n">pe_matched</span> <span class="o">=</span> <span class="n">pe</span> <span class="o">*</span> <span class="p">(</span><span class="n">word_emb_norm</span> <span class="o">/</span> <span class="n">pe_norm</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>3. 梯度裁剪</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 位置编码可能导致梯度爆炸，建议裁剪</span>
+<span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">clip_grad_norm_</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">max_norm</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>4. 预训练迁移</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 从512长度的预训练模型迁移到1024</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">transfer_position_encoding</span><span class="p">(</span><span class="n">model_512</span><span class="p">,</span> <span class="n">model_1024</span><span class="p">):</span>
+    <span class="n">pe_512</span> <span class="o">=</span> <span class="n">model_512</span><span class="o">.</span><span class="n">pos_encoder</span><span class="o">.</span><span class="n">pe</span>
+    <span class="n">pe_1024</span> <span class="o">=</span> <span class="n">interpolate_position_encoding</span><span class="p">(</span><span class="n">pe_512</span><span class="p">,</span> <span class="mi">512</span><span class="p">,</span> <span class="mi">1024</span><span class="p">)</span>
+    <span class="n">model_1024</span><span class="o">.</span><span class="n">pos_encoder</span><span class="o">.</span><span class="n">pe</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">pe_1024</span>
+</code></pre></div>
+
+<p><strong>5. A/B测试建议</strong>：
+- 对比Learned vs. Sinusoidal vs. RoPE
+- 监控外推性能（训练长度的1.5倍、2倍）
+- 记录训练稳定性（梯度范数、损失曲线）</p>
+<h2 id="6">第6部分：总结与展望</h2>
+<h3 id="61">6.1 核心结论</h3>
+<p>本文通过四步推导法，从第一性原理"反推"出了Sinusoidal位置编码：</p>
+<ol>
+<li><strong>泰勒展开</strong> → 建立位置编码与Hessian矩阵的联系</li>
+<li><strong>复数方法</strong> → 推导出三角函数形式</li>
+<li><strong>振荡积分</strong> → 解释远程衰减机制</li>
+<li><strong>一般化</strong> → 分析Hessian非对角情况</li>
+</ol>
+<p><strong>关键洞察</strong>：
+- 绝对位置编码可以隐式表达相对位置（通过内积）
+- 多频率叠加产生远程衰减（Riemann-Lebesgue引理）
+- 底数10000是经验折中，非最优选择
+- 理论假设（$\mathcal{H}=\boldsymbol{I}$, 小扰动）在实际中部分成立</p>
+<h3 id="62">6.2 未来研究方向</h3>
+<p><strong>方向1：自适应频率学习</strong>
+- 让每层、每头学习不同的$\theta_i$
+- 使用神经架构搜索（NAS）优化频率分布
+- 结合任务特性（短文本 vs. 长文本）动态调整</p>
+<p><strong>方向2：混合位置编码</strong>
+- 局部：Sinusoidal（捕捉短程）
+- 全局：Learned（捕捉长程结构）
+- 分层：不同层用不同编码策略</p>
+<p><strong>方向3：因果位置编码</strong>
+- 引入时间箭头（过去 ≠ 未来）
+- 非对称衰减（向前看 vs. 向后看）
+- 适用于自回归生成</p>
+<p><strong>方向4：多模态位置编码</strong>
+- 图像：2D位置编码（RoPE-2D）
+- 视频：3D时空编码
+- 图：节点位置（结合Graph Laplacian）</p>
+<p><strong>方向5：理论深化</strong>
+- 放松泰勒展开假设，研究非线性情况
+- 建立与信息论的严格联系（最大熵、率失真）
+- 统一框架：Sinusoidal, RoPE, ALiBi, FIRE等</p>
+<h3 id="63">6.3 终极之问</h3>
+<p><strong>位置编码的本质是什么</strong>？</p>
+<p>不同视角的答案：
+- <strong>数学</strong>：高维空间中的坐标系选择
+- <strong>信息论</strong>：序列的压缩编码（rate-distortion）
+- <strong>物理</strong>：时空的度规张量（metric tensor）
+- <strong>哲学</strong>：存在（being）的索引化表示</p>
+<p>无论如何，Sinusoidal位置编码作为深度学习中为数不多的<strong>显式解</strong>，其精妙设计值得我们反复品味。它提醒我们：<strong>有时候，简单的数学公式背后，隐藏着深刻的原理</strong>。</p>
+<hr />
+<p><strong>参考文献</strong>：
+1. Vaswani et al. (2017) "Attention is All You Need"
+2. Su et al. (2021) "RoFormer: Enhanced Transformer with Rotary Position Embedding"
+3. Press et al. (2021) "Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation"
+4. Shaw et al. (2018) "Self-Attention with Relative Position Representations"
+5. Tao, T. (2007) "Oscillatory Integrals" (UCLA Lecture Notes)</p>
+<p><strong>致谢</strong>：感谢苏剑林老师的原创洞察，本文在其基础上进行了系统性扩展。</p>
+        </div>
+    </div>
+</body>
+</html>

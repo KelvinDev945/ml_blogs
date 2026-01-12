@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>【搜出来的文本】⋅（二）从MCMC到模拟退火</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>【搜出来的文本】⋅（二）从MCMC到模拟退火</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 24.9 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8084">https://spaces.ac.cn/archives/8084</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在上一篇文章中，我们介绍了“受限文本生成”这个概念，指出可以通过量化目标并从中采样的方式来无监督地完成某些带条件的文本生成任务。同时，上一篇文章还介绍了“重要性采样”和“拒绝采样”两个方法，并且指出对于高维空间而言，它们所依赖的易于采样的分布往往难以设计，导致它们难以满足我们的采样需求。</p>
+<p>此时，我们就需要引入采样界最重要的算法之一“Markov Chain Monte Carlo（MCMC）”方法了，它将马尔可夫链和蒙特卡洛方法结合起来，使得（至少理论上是这样）我们从很多高维分布中进行采样成为可能，也是后面我们介绍的受限文本生成应用的重要基础算法之一。本文试图对它做一个基本的介绍。</p>
+<h2 id="_1">马尔可夫链</h2>
+<p>马尔可夫链实际上就是一种“无记忆”的随机游走过程，它以转移概率$p(\boldsymbol{y}\leftarrow\boldsymbol{x})$为基础，从一个初始状态$\boldsymbol{x}_0$出发，每一步均通过该转移概率随机选择下一个状态，从而构成随机状态列$\boldsymbol{x}_0, \boldsymbol{x}_1, \boldsymbol{x}_2, \cdots, \boldsymbol{x}_t, \cdots $，我们希望考察对于足够大的步数$t$，$\boldsymbol{x}_t$所服从的分布，也就是该马尔可夫链的“平稳分布”。</p>
+<p>$\setCounter{11}$假设$\boldsymbol{x}<em t_1="t+1">t$所服从的分布为$p^{(t)}(\boldsymbol{x}_t)$，那么$\boldsymbol{x}</em>$所服从的分布就是<br />
+\begin{equation}p^{(t+1)}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">{t+1}) = \sum</em><em t_1="t+1">t} p(\boldsymbol{x}</em>} \leftarrow \boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)p^{(t)}(\boldsymbol{x}_t)\end{equation}<br />
+如果已经达到平衡，那么应该有$p^{(t+1)}=p^{(t)}$，所以如果$p(\boldsymbol{x})$是平稳分布，那么它满足<br />
+\begin{equation}p(\boldsymbol{y}) = \sum</em>}} p(\boldsymbol{y} \leftarrow \boldsymbol{x})p(\boldsymbol{x})\label{eq:stable}\end{equation<br />
+或者说，平稳分布就是上述关于$p(\boldsymbol{x})$的方程的非零解。</p>
+<p>那么，有一个需要回答的问题是：上述方程的非零解唯一吗？这个问题的答案关系到马尔可夫链的平稳分布 <em>是否依赖于初始状态$\boldsymbol{x}_0$</em> 。很遗憾，答案是不一定。简单来说，非零解唯一的条件是该马尔可夫链的任意两个状态都是连通的，说具体点就是对于任意两个状态$\boldsymbol{x},\boldsymbol{y}$，存在状态链$\boldsymbol{x}=\boldsymbol{x}<em n-1="n-1">0,\boldsymbol{x}_1,\cdots,\boldsymbol{x}</em>},\boldsymbol{x<em 1="1">n=\boldsymbol{y}$，使得<br />
+\begin{equation}\begin{aligned}<br />
+&amp;p(\boldsymbol{x}</em>} \leftarrow \boldsymbol{x<em 2="2">0) &gt; 0 \\\<br />
+&amp;p(\boldsymbol{x}</em>} \leftarrow \boldsymbol{x<em n="n">1) &gt; 0 \\\<br />
+&amp;\qquad\vdots \\\<br />
+&amp;p(\boldsymbol{x}</em>) &gt; 0} \leftarrow \boldsymbol{x}_{n-1<br />
+\end{aligned}\end{equation}<br />
+说白了，就是从状态$\boldsymbol{x}$跳转到$\boldsymbol{y}$（不要求一步到位，可以多步）的概率大于0。其实这个判据也不难理解，形象比喻就是指平稳分布唯一的条件是马尔可夫链不能存在“孤岛”，要不然如果$\boldsymbol{x}_0$在孤岛内，那么就永远在孤岛内游走了，如果$\boldsymbol{x}_0$在孤岛外，那么也就永远在孤岛外游走了，从而不同的初始状态导致了不同的平稳分布。</p>
+<h2 id="_2">细致平稳</h2>
+<p>由于马尔可夫链存在一个平稳分布，而构建马尔可夫链则只需要一个转移矩阵，如果我们可以构建一个易于采样的转移矩阵，并且它的平稳分布就是我们要采样的分布$p(\boldsymbol{x})$，那么迭代足够多步后，不就相当于从$p(\boldsymbol{x})$中采样了？这就是所有MCMC方法的思想。当然，马尔可夫链往往需要迭代多步才能达到平稳，因此采样往往比较费时，但即便如此，终究能在有限成本内完成了采样过程，因此在很多情况下依然是实用的。</p>
+<p>假设MCMC是可行的，那么很显然关键之处就是如何构造出一个转移概率$p(\boldsymbol{y}\leftarrow\boldsymbol{x})$，使得它的平稳分布是我们给定的分布$p(\boldsymbol{x})$，同时，根据上一篇文章的介绍，我们往往只知道跟$p(\boldsymbol{x})$成正比的$\rho(\boldsymbol{x})$，而 <em>不知道归一化因子</em> ，因此构建$p(\boldsymbol{y}\leftarrow\boldsymbol{x})$的过程中，不能依赖于$p(\boldsymbol{x})$的归一化因子。</p>
+<p>为此，我们需要用到一个“细致平稳条件”：</p>
+<blockquote>
+<p><strong>细致平稳条件</strong> 如果分布$p(\boldsymbol{x})$和转移概率$p(\boldsymbol{y}\leftarrow\boldsymbol{x})$满足恒等式\begin{equation}p(\boldsymbol{y}\leftarrow\boldsymbol{x})p(\boldsymbol{x})=p(\boldsymbol{x}\leftarrow\boldsymbol{y})p(\boldsymbol{y})\end{equation} 那么$p(\boldsymbol{x})$就是$p(\boldsymbol{y}\leftarrow\boldsymbol{x})$的平稳分布。</p>
+</blockquote>
+<p>名字看上去高端，实际上它非常容易证明，只要两端对$\boldsymbol{x}$求和，马上就得到式$\eqref{eq:stable}$了，满足式$\eqref{eq:stable}$就说明$p(\boldsymbol{x})$是$p(\boldsymbol{y}\leftarrow\boldsymbol{x})$的平稳分布。“细致平稳条件”是判断平稳分布的一个 <em>充分条件</em> ，但不是必要的，它的价值在于提供了一种比较方便的为任意分布构建转移概率的方式。</p>
+<h2 id="_3">转移概率</h2>
+<p>给定平稳分布$p(\boldsymbol{x})$以及任意的参考转移概率$q(\boldsymbol{y}\leftarrow\boldsymbol{x})$，如果它满足细致平稳条件，那么就万事大吉，直接用参考转移概率$q(\boldsymbol{y}\leftarrow\boldsymbol{x})$作为最终的概率就好，如果它不满足，那么记$\alpha(\boldsymbol{x}\leftarrow\boldsymbol{y})=q(\boldsymbol{y}\leftarrow\boldsymbol{x})p(\boldsymbol{x})$，那么有下述显然成立的恒等式：<br />
+\begin{equation}\underbrace{\alpha(\boldsymbol{y}\leftarrow\boldsymbol{x})q(\boldsymbol{y}\leftarrow\boldsymbol{x})}<em _tilde_q="\tilde{q">{\tilde{q}(\boldsymbol{y}\leftarrow\boldsymbol{x})}p(\boldsymbol{x})=\underbrace{\alpha(\boldsymbol{x}\leftarrow\boldsymbol{y})q(\boldsymbol{x}\leftarrow\boldsymbol{y})}</em>}(\boldsymbol{x}\leftarrow\boldsymbol{y})}p(\boldsymbol{y})\label{eq:feihua}\end{equation<br />
+事实上，这个恒等式近乎废话，它相当于说“虽然$a\neq b$，但$ab=ba$始终成立”。但就是这么个“废话”般的恒等式，给了我们启示：如果用$\tilde{q}(\boldsymbol{y}\leftarrow\boldsymbol{x})$作为转移概率，那么对应的平稳分布不就是$p(\boldsymbol{x})$了？</p>
+<p>其实没那么简单，因为这样构造出来的$\tilde{q}(\boldsymbol{y}\leftarrow\boldsymbol{x})$通常是没有归一化的，而没有归一化即意味着它本身就不是一个合理的转移概率，也就没有什么平稳分布之说了。注意， <em>如果要进行采样，我们或许可以不需要知道归一化因子，但是理论分布的时候，我们是需要保证归一化成立的</em> 。有的读者可能会想，那我手动除以个归一化因子行不？不行，因为除以归一化因子之后，细致平稳条件就未必成立了，甚至式$\eqref{eq:stable}$都可能不成立了。笔者查阅了很多介绍资料，都没有澄清这个问题，都是说直接用$\tilde{q}(\boldsymbol{y}\leftarrow\boldsymbol{x})$作为转移概率的，困惑了很长时间。</p>
+<p>事实上，MCMC方法根本就没有去归一化$\tilde{q}(\boldsymbol{y}\leftarrow\boldsymbol{x})$，而是将剩余部分的概率概率全部转移到自身去了。用数学的话来说，就是它最后使用的转移概率实际上是：<br />
+\begin{equation}p(\boldsymbol{y}\leftarrow\boldsymbol{x})=\tilde{q}(\boldsymbol{y}\leftarrow\boldsymbol{x}) + \left(1 - \sum_{\boldsymbol{y}} \tilde{q}(\boldsymbol{y}\leftarrow\boldsymbol{x})\right)\delta(\boldsymbol{y}\leftarrow\boldsymbol{x})<br />
+\end{equation}<br />
+其中$\delta(\boldsymbol{y}\leftarrow\boldsymbol{x}) = \left\{\begin{aligned}1,\boldsymbol{y}=\boldsymbol{x} \\\ 0, \boldsymbol{y}\neq \boldsymbol{x}\end{aligned}\right.$，代表了只能转移到自身（即“永远不变”）的转移概率。所以，$p(\boldsymbol{y}\leftarrow\boldsymbol{x})$的定义其实就是把多出来的概率统统叠加到“不变”这一操作上，所以它显然满足归一化，至于细致平稳条件可以代入检验，同样是满足的，其中主要是因为对于任意的$p(\boldsymbol{x})$和$f(\boldsymbol{x},\boldsymbol{y})$，下式总是恒成立的。<br />
+\begin{equation}f(\boldsymbol{x},\boldsymbol{y})\delta(\boldsymbol{y}\leftarrow \boldsymbol{x})p(\boldsymbol{x})=f(\boldsymbol{y},\boldsymbol{x})\delta(\boldsymbol{x}\leftarrow \boldsymbol{y})p(\boldsymbol{y})\end{equation}<br />
+所以$p(\boldsymbol{y}\leftarrow\boldsymbol{x})$才是我们所要寻求的真正的转移概率。如果状态空间有限的话，那么转移概率就对应一个有限的矩阵，上述结果其实就是说“通过调整转移矩阵的对角线元素可以完成归一化，并且不影响细致平稳条件的成立”。</p>
+<h2 id="mcmc">MCMC方法</h2>
+<p>怎么实现从上述$p(\boldsymbol{y}\leftarrow\boldsymbol{x})$从采样呢？很简单，先实现从$\tilde{q}(\boldsymbol{y}\leftarrow\boldsymbol{x})$采样，然后如果不满足从$\tilde{q}(\boldsymbol{y}\leftarrow\boldsymbol{x})$采样的条件，那么就保持不变；而$\tilde{q}(\boldsymbol{y}\leftarrow\boldsymbol{x})=\alpha(\boldsymbol{y}\leftarrow\boldsymbol{x})q(\boldsymbol{y}\leftarrow\boldsymbol{x})$，我们假定从$q(\boldsymbol{y}\leftarrow\boldsymbol{x})$中采样是容易的，那么回忆上一篇文章介绍的拒绝采样，我们可以通过进一步采样一个$\varepsilon\sim U[0,1]$，通过$ \alpha(\boldsymbol{y}\leftarrow\boldsymbol{x}) &lt; \varepsilon$来决定是否接受采样出来的$\boldsymbol{y}$。综上所述，我们就得到了如下的MCMC采样流程：</p>
+<blockquote>
+<p><strong>Metropolis采样</strong></p>
+<p>初始状态为$\boldsymbol{x}_0$，$t$时刻状态为$\boldsymbol{x}_t$。</p>
+<p>通过如下流程采样出$\boldsymbol{x}<em t_1="t+1">{t+1}$：<br />
+ 1、采样$\boldsymbol{y}\sim q(\boldsymbol{y}\leftarrow\boldsymbol{x}_t)$；<br />
+ 2、采样$\varepsilon\sim U[0,1]$；<br />
+ 3、计算$\alpha(\boldsymbol{y}\leftarrow\boldsymbol{x}_t)=q(\boldsymbol{x}_t\leftarrow\boldsymbol{y})p(\boldsymbol{y})$；<br />
+ 4、如果$\varepsilon \leq \alpha(\boldsymbol{y}\leftarrow\boldsymbol{x}_t)$，那么$\boldsymbol{x}</em>_t$。} = \boldsymbol{y}$，否则$\boldsymbol{x}_{t+1}=\boldsymbol{x</p>
+</blockquote>
+<p>这就是由Metropolis在1953年提出来的采样算法，一般称为Metropolis算法，或者干脆称为MCMC方法。它需要知道$p(\boldsymbol{x})$的精确表达式，并且需要知道一个易于采样的转移概率$q(\boldsymbol{y}\leftarrow\boldsymbol{x})$，然后根据上述流程迭代采样足够多步后，所得的$\boldsymbol{x}_t$我们就可以认为是从$p(\boldsymbol{x})$中采样出来的。这里的足够多步取决于$p(\boldsymbol{x})$和$q(\boldsymbol{y}\leftarrow\boldsymbol{x})$的具体选择，一般来说只能根据实验结果确定，没有统一的标准。</p>
+<p>可能有读者觉得，这不就是一个普通的拒绝采样吗？刚才说的“把多出来的概率统统叠加到‘不变’这一操作上”体现在哪？事实上，跟普通的拒绝采样还是有点不一样的，在普通的拒绝采样中，如果$\varepsilon &gt; \alpha(\boldsymbol{y}\leftarrow\boldsymbol{x})$，那就重复1、2、3步采样过程，直到采样出$\varepsilon \leq \alpha(\boldsymbol{y}\leftarrow\boldsymbol{x})$的$\boldsymbol{y}$为止，然后让$\boldsymbol{x}<em t_1="t+1">{t+1} = \boldsymbol{y}$；而上述采样过程中，如果$\varepsilon &gt; \alpha(\boldsymbol{y}\leftarrow\boldsymbol{x})$，那么直接让$\boldsymbol{x}</em>} = \boldsymbol{x<em t_2="t+2">t$了，再下一步采样出来的就是$\boldsymbol{x}</em>}$了。假如我们认为从$T$时刻开始，分布就平稳了，那么$\{\boldsymbol{x<em t="T">t\}</em>}^{\infty}$都是$p(\boldsymbol{x})$中采样出来的样本（同分布但不独立），显然两种不同的拒绝方式，会影响$\{\boldsymbol{x<em t="T">t\}</em>$最终的分布情况。}^{\infty</p>
+<p>此外，值得指出的是，尽管本系列文章中，我们所处理的$\boldsymbol{x}$是离散对象，但事实上同样的结论也适用于连续型对象的采样，只需要在前面的推导过程中，将求和改为对概率密度的积分就行了，没有实质的区别。</p>
+<h2 id="mh">MH采样</h2>
+<p>上述Metropolis采样在很多场景下已经可用了，但它还不是特别完美。首先，刚才说了，Metropolis采样需要知道$p(\boldsymbol{x})$的精确表达式，这在不少任务下是难以做到的；其次，接受率$\alpha(\boldsymbol{y}\leftarrow\boldsymbol{x})$往往过小，导致长时间“原地踏步”，从而达到平稳状态的时间过长。幸运的是，有一个简单的技巧可以同时解决这两个问题。</p>
+<p>该技巧就是使用如下式子作为接受率<br />
+\begin{equation}\mathcal{A}(\boldsymbol{y}\leftarrow\boldsymbol{x}) = \min\left(1, \frac{q(\boldsymbol{x}\leftarrow\boldsymbol{y})p(\boldsymbol{y})}{q(\boldsymbol{y}\leftarrow\boldsymbol{x})p(\boldsymbol{x})}\right)\end{equation}<br />
+该接受率其实也是源于恒等式$\eqref{eq:feihua}$，对于接受率而言，我们唯一的要求就是它在0～1之间，此外是越接近于1越好，为此，我们可以让恒等式$\eqref{eq:feihua}$两边的接受率都除以$\max(\alpha(\boldsymbol{y}\leftarrow\boldsymbol{x}),\alpha(\boldsymbol{x}\leftarrow\boldsymbol{y}))$，这样一来，它们俩其中一个就变成了1，另一个也不大于1，并且得到了放大，化简之后就得到了$\mathcal{A}(\boldsymbol{y}\leftarrow\boldsymbol{x})$。而且相当巧妙的是，此时$\mathcal{A}(\boldsymbol{y}\leftarrow\boldsymbol{x})$只依赖于$p(\boldsymbol{y})$的相对值，所以我们可以不用算出它的归一化因子了。</p>
+<p>这样一来，我们就得到了改进版的Metropolis采样算法，这就是大名鼎鼎的Metropolis-Hastings Sampling（MH采样）：</p>
+<blockquote>
+<p><strong>Metropolis-Hastings采样</strong></p>
+<p>初始状态为$\boldsymbol{x}_0$，$t$时刻状态为$\boldsymbol{x}_t$。</p>
+<p>通过如下流程采样出$\boldsymbol{x}<em t_1="t+1">{t+1}$：<br />
+ 1、采样$\boldsymbol{y}\sim q(\boldsymbol{y}\leftarrow\boldsymbol{x}_t)$；<br />
+ 2、采样$\varepsilon\sim U[0,1]$；<br />
+ 3、计算$\mathcal{A}(\boldsymbol{y}\leftarrow\boldsymbol{x}_t) = \min\left(1, \frac{q(\boldsymbol{x}_t\leftarrow\boldsymbol{y})p(\boldsymbol{y})}{q(\boldsymbol{y}\leftarrow\boldsymbol{x}_t)p(\boldsymbol{x}_t)}\right)$；<br />
+ 4、如果$\varepsilon \leq \mathcal{A}(\boldsymbol{y}\leftarrow\boldsymbol{x}_t)$，那么$\boldsymbol{x}</em>_t$。} = \boldsymbol{y}$，否则$\boldsymbol{x}_{t+1}=\boldsymbol{x</p>
+</blockquote>
+<h2 id="_4">分析思考</h2>
+<p>上一篇文章中，我们指出直接从$p(\boldsymbol{x})$中采样是很困难的，就算是拒绝采样，如果$\boldsymbol{x}$的维度过高，那么从近似分布$q(\boldsymbol{x})$采样后其接受率通常也会很低，导致拒绝采样的效率极低而无法使用。那么很自然的一个问题是：</p>
+<blockquote>
+<p>在MCMC方法中，同样要从转移概率$q(\boldsymbol{y}\leftarrow \boldsymbol{x})$中采样，同样有接受概率$\mathcal{A}(\boldsymbol{y}\leftarrow \boldsymbol{x})$，那为什么MCMC就是实用的，而普通的拒绝采样就是不实用的？</p>
+</blockquote>
+<p>其实，对于直接拒绝采样来说，它要从近似分布$q(\boldsymbol{x})$中直接采样的是整个高维序列，如果$q(\boldsymbol{x})$与精确的$p(\boldsymbol{x})$差得比较大，那么接受概率往往是指数衰减的，因此接受概率极低；而对于MCMC方法来说，我们对$q(\boldsymbol{y}\leftarrow \boldsymbol{x})$的形式没有过多的限制，那么我们可以适当地设计$q(\boldsymbol{y}\leftarrow \boldsymbol{x})$，使得概率分布只集中在跟$\boldsymbol{x}$相似的那些$\boldsymbol{y}$中，换句话说，只有当$\boldsymbol{y}$与$\boldsymbol{x}$很相似时，$q(\boldsymbol{y}\leftarrow \boldsymbol{x})$才不为0，否则就为0。这样一来，从$q(\boldsymbol{y}\leftarrow \boldsymbol{x})$采样的结果跟输入$\boldsymbol{x}$只有小的差别，变化不大的情况下，接受率往往更高些，所以使得拒绝采样成为可能。</p>
+<p>所以，说白了，MCMC方法就是将“直接生成$\boldsymbol{x}$”，转换为了“从$\boldsymbol{x}_0$出发，反复对它微调、润色，直到生成符合条件的$\boldsymbol{x}$”这么一个渐进式过程，从而使得它行之有效，这跟上一篇文章提到的“一步步来”的思想是一致的。</p>
+<p>接下来，我们将介绍两个MH采样的例子：Gibbs采样和模拟退火，它们都体现了MCMC的这种微调、渐进的思想。</p>
+<h2 id="gibbs">Gibbs采样</h2>
+<p>假设$\boldsymbol{x}=(x_1,x_2,\dots,x_l)$是一个长度为$l$的序列，Gibbs采样每次只调整其中一个元素。具体来说，Gibbs采样将参考转移概率定义为（严格来说还要再除以个$l$，但常数不改变结果，就不写出来了）：<br />
+\begin{equation}q(\boldsymbol{x}<em -i="-i">{[x_i=y]}\leftarrow \boldsymbol{x}) = p(y|\boldsymbol{x}</em>})\triangleq\frac{p(x_1,\dots,x_{i-1},y,x_{i+1},\cdots,x_l)}{\sum\limits_y p(x_1,\dots,x_{i-1},y,x_{i+1},\cdots,x_l)}\end{equation<br />
+其中$\boldsymbol{x}<em -i="-i">{[x_i=y]}$是将$\boldsymbol{x}$的第$i$个位置替换为$y$后的序列。这也就是说，它根据待采样分布$p(\boldsymbol{x})$自身来构建$p(y|\boldsymbol{x}</em>})$作为转移概率，每次先从$1,2,\cdots,l$中随机选择一个位置$i$，然后将位置$i$的元素替换成从分布$p(y|\boldsymbol{x<em _x_i="y]">{-i})$采样出来的结果。更妙的是，我们可以证明这种情况下接受概率恒为1：<br />
+\begin{equation}\begin{aligned}<br />
+\mathcal{A}(\boldsymbol{x}</em>}\leftarrow \boldsymbol{x}) =&amp;\, \min\left(1, \frac{p(x_i|\boldsymbol{x<em _x_i="y]">{-i})p(\boldsymbol{x}</em>})}{p(y|\boldsymbol{x<em -i="-i">{-i})p(\boldsymbol{x})}\right) \\\<br />
+=&amp;\, \min\left(1, \frac{p(x_i|\boldsymbol{x}</em>})p(y|\boldsymbol{x<em -i="-i">{-i})p(\boldsymbol{x}</em>})}{p(y|\boldsymbol{x<em -i="-i">{-i})p(x_i|\boldsymbol{x}</em>\right)\\\})p(\boldsymbol{x}_{-i})<br />
+=&amp;\, \min\left(1, 1\right)\\\<br />
+=&amp;\,1<br />
+\end{aligned}\end{equation}<br />
+由此，我们可以构建如下的Gibbs采样过程：</p>
+<blockquote>
+<p><strong>Gibbs采样</strong></p>
+<p>初始状态为$\boldsymbol{x}<em 0_1="0,1">0=(x</em>},x_{0,2},\cdots,x_{0,l})$，$t$时刻状态为$\boldsymbol{x<em t_1="t,1">t=(x</em>)$。},x_{t,2},\cdots,x_{t,l</p>
+<p>通过如下流程采样出$\boldsymbol{x}<em t_-i="t,-i">{t+1}$：<br />
+ 1、均匀地从$1,2,\cdots,l$中采样一个$i$；<br />
+ 2、计算$p(y|\boldsymbol{x}</em>$；})=\frac{p(x_{t,1},\dots,x_{t,i-1},y,x_{t,i+1},\cdots,x_{t,l})}{\sum\limits_y p(x_{t,1},\dots,x_{t,i-1},y,x_{t,i+1},\cdots,x_{t,l})<br />
+ 3、采样$y\sim p(y|\boldsymbol{x}<em t_1="t+1">{t,-i})$；<br />
+ 4、$\boldsymbol{x}</em>} = {\boldsymbol{x<em _x__t_i="[x_{t,i">t}</em>}=y]}$（即将$\boldsymbol{x<em t_1="t+1">t$的第$i$个位置替换为$y$作为$\boldsymbol{x}</em>$）。</p>
+</blockquote>
+<h2 id="_5">模拟退火</h2>
+<p>另一个例子是模拟退火（Simulated Annealing）算法。前一篇文章中，我们提到了最大化一个目标，其实也可以看成是从这个目标中进行随机采样，其结果便对应着模拟退火算法。</p>
+<p>首先，设我们要最大化的函数是$f(\boldsymbol{x})$，并且假设存在某个常数$T &gt; 0$，使得对于任意$0 &lt; \tau \leq T$，都有<br />
+\begin{equation}\sum_{\boldsymbol{x}} e^{f(\boldsymbol{x})/\tau} &lt; \infty\end{equation}<br />
+这里的$\tau$的物理意义就是温度。这个假设看起来是额外的约束，但事实上模拟退火也就只适用于满足这个条件的场景。由于满足该条件，那么我们就可以构造分布<br />
+\begin{equation}p_{\tau}(\boldsymbol{x}) = \frac{e^{f(\boldsymbol{x})/\tau}}{\sum\limits_{\boldsymbol{x}} e^{f(\boldsymbol{x})/\tau}}\end{equation}<br />
+假设最大值点是唯一的，那么当$\tau\to 0$时，$p_{\tau}(\boldsymbol{x})$就会退化为one hot分布，也就是只有最大值点的概率为1，如果从$p_{\tau}(\boldsymbol{x})$中采样，那么采样结果就是最大值点了。即使$\tau &gt; 0$，那么依然是最大值点的概率最大，所以从$p_{\tau}(\boldsymbol{x})$中采样，也会有趋于最大值点的趋势。所以，我们可以先固定温度$\tau$，构造一个从$p_{\tau}(\boldsymbol{x})$进行MH采样的随机过程，然后再慢慢让$\tau$下降，那么最终的收敛结果就是最大值点附近了，这就是所谓的“模拟退火”了。</p>
+<p>为了进行MH采样，我们需要构建转移矩阵，模拟退火的选择比较简单，就是根据当前状态$\boldsymbol{x}$设计固定数目的$\boldsymbol{y}$作为新的$\boldsymbol{x}$的候选值（这步通常称为“变异”，往往只是对$\boldsymbol{x}$进行简单修改来得到$\boldsymbol{y}$），然后$q(\boldsymbol{y}\leftarrow \boldsymbol{x})$就是从候选中均允随机地选一个。既然是均匀的，那么$q(\boldsymbol{y}\leftarrow \boldsymbol{x})$就是一个常数，并且$q(\boldsymbol{y}\leftarrow \boldsymbol{x})=q(\boldsymbol{x}\leftarrow \boldsymbol{y})$，因此就有<br />
+\begin{equation}\mathcal{A}(\boldsymbol{y}\leftarrow\boldsymbol{x}) = \min\left(1, \frac{q(\boldsymbol{x}\leftarrow\boldsymbol{y})p_{\tau}(\boldsymbol{y})}{q(\boldsymbol{y}\leftarrow\boldsymbol{x})p_{\tau}(\boldsymbol{x})}\right) = \min\left(1, e^{[f(\boldsymbol{y}) - f(\boldsymbol{x})]/\tau}\right)\end{equation}<br />
+所以，模拟退火就是一种搜索策略，如果$f(\boldsymbol{y}) \geq f(\boldsymbol{x})$，那么就更新$\boldsymbol{x}=\boldsymbol{y}$，就算不是，那么还有一定的概率更新$\boldsymbol{x}=\boldsymbol{y}$。在整个搜索过程中，我们慢慢进行退火（$\tau$慢慢趋于0），在适当的退火策略下，模拟退火几乎总是能找到最大值点的。当然，如何根据具体问题制定“适当的”退火策略，那又是一个值得思考的问题了。</p>
+<blockquote>
+<p><strong>模拟退火</strong></p>
+<p>初始状态为$\boldsymbol{x}_0$，初始温度为$\tau_0$，温度按照事先制定的策略下降，$t$时刻状态为$\boldsymbol{x}_t$，温度为$\tau_t$。</p>
+<p>通过如下流程采样出$\boldsymbol{x}<em t_1="t+1">{t+1}$：<br />
+ 1、采样$\boldsymbol{y}\sim q(\boldsymbol{y}\leftarrow\boldsymbol{x}_t)$；<br />
+ 2、采样$\varepsilon\sim U[0,1]$；<br />
+ 3、计算$\mathcal{A}(\boldsymbol{y}\leftarrow\boldsymbol{x}_t) = \min\left(1, e^{[f(\boldsymbol{y}) - f(\boldsymbol{x}_t)]/\tau_t}\right)$；<br />
+ 4、如果$\varepsilon\leq \mathcal{A}(\boldsymbol{y}\leftarrow\boldsymbol{x}_t)$，那么$\boldsymbol{x}</em>_t$。} = \boldsymbol{y}$，否则$\boldsymbol{x}_{t+1}=\boldsymbol{x</p>
+</blockquote>
+<p>如果简单修改一下，将接受策略改为“如果$f(\boldsymbol{y}) \geq f(\boldsymbol{x}_t)$则接受，否则就拒绝”，那么就变成了更朴素的“爬山法（Hill Climbing）”了。显然，爬山法目标更明确，前期可能收敛更快，但是一旦陷入了局部最大值后，通常就跳不出来了，最终的收敛结果没有模拟退火那么好。当然，也可以通过选择不同的初始值来重复实验，提升爬山法的效果。具体选择什么算法，那就看具体问题而定了。</p>
+<h2 id="_6">本文小结</h2>
+<p>本文依然介绍“受限文本生成”所需要的基础采样算法——MCMC方法。经过反复修改，本文总算写出了笔者觉得比较满意的MCMC方法介绍，其中主要的区别是回答了一些常见的MCMC方法教程中没有提及到的细节问题。对于基础算法的介绍，到此就告一段落。从下一篇文章开始，我们将逐步介绍如何将这些看似枯燥的采样算法应用到生动、具体的文本生成任务中去。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8084">https://spaces.ac.cn/archives/8084</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jan. 14, 2021). 《【搜出来的文本】⋅（二）从MCMC到模拟退火 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8084">https://spaces.ac.cn/archives/8084</a></p>
+<p>@online{kexuefm-8084,<br />
+title={【搜出来的文本】⋅（二）从MCMC到模拟退火},<br />
+author={苏剑林},<br />
+year={2021},<br />
+month={Jan},<br />
+url={\url{https://spaces.ac.cn/archives/8084}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

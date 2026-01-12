@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成扩散模型漫谈（十四）：构建ODE的一般步骤（上）</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>生成扩散模型漫谈（十四）：构建ODE的一般步骤（上）</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 62.1 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9370">https://spaces.ac.cn/archives/9370</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>书接上文，在<a href="/archives/9305">《生成扩散模型漫谈（十三）：从万有引力到扩散模型》</a>中，我们介绍了一个由万有引力启发的、几何意义非常清晰的ODE式生成扩散模型。有的读者看了之后就疑问：似乎“万有引力”并不是唯一的选择，其他形式的力是否可以由同样的物理绘景构建扩散模型？另一方面，该模型在物理上确实很直观，但还欠缺从数学上证明最后确实能学习到数据分布。</p>
+<p>本文就尝试从数学角度比较精确地回答“什么样的力场适合构建ODE式生成扩散模型”这个问题。</p>
+<h2 id="_1">基础结论</h2>
+<p>要回答这个问题，需要用到在<a href="/archives/9280">《生成扩散模型漫谈（十二）：“硬刚”扩散ODE》</a>中我们推导过的一个关于常微分方程对应的分布变化的结论。</p>
+<p>考虑$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t\in\mathbb{R}^d, t\in[0,T]$的一阶（常）微分方程（组）<br />
+\begin{equation}\frac{d\boldsymbol{x}_t}{dt}=\boldsymbol{f}_t(\boldsymbol{x}_t)\label{eq:ode}\end{equation}<br />
+它描述了从$\boldsymbol{x}_0$到$\boldsymbol{x}_T$的一个（可逆）变换，如果$\boldsymbol{x}_0$是一个随机变量，那么整个过程中的$\boldsymbol{x}_t$也都是随机变量，它的分布变化规律，可以由如下方程描述<br />
+\begin{equation}\frac{\partial}{\partial t} p_t(\boldsymbol{x}_t) = - \nabla</em>}_t}\cdot\Big(\boldsymbol{f}_t(\boldsymbol{x}_t) p_t(\boldsymbol{x}_t)\Big)\label{eq:ode-f-eq-fp}\end{equation<br />
+该结果可以按照<a href="/archives/9280">《生成扩散模型漫谈（十二）：“硬刚”扩散ODE》</a>的格式用“雅可比行列式+泰勒近似”的方式推导，也可以像<a href="/archives/9228#F-P%E6%96%B9%E7%A8%8B">《生成扩散模型漫谈（六）：一般框架之ODE篇》</a>一样先推导完整的“Fokker-Planck方程”，然后让$g_t=0$。顺便一提，方程$\eqref{eq:ode-f-eq-fp}$在物理上非常出名，它被称为“<a href="https://en.wikipedia.org/wiki/Continuity_equation">连续性方程</a>”，是各种守恒定律的体现之一。</p>
+<p>回到扩散模型，扩散模型想要做的事情，是构造一个变换，能够将简单分布的样本变换成目标分布的样本。而利用式$\eqref{eq:ode-f-eq-fp}$，理论上我们可以通过给定的$p_t(\boldsymbol{x}_t)$来可以求出可行的$\boldsymbol{f}_t(\boldsymbol{x}_t)$，继而利用式$\eqref{eq:ode}$完成生成过程。注意，式$\eqref{eq:ode-f-eq-fp}$只是一个方程，但是要求解的$\boldsymbol{f}_t(\boldsymbol{x}_t)$有$d$个分量，所以这是一个不定方程，原则上来说我们可以任意指定完整的$p_t(\boldsymbol{x}_t)$（而不单单是$t=0,T$两个边界）来求解$\boldsymbol{f}_t(\boldsymbol{x}_t)$。</p>
+<p>所以从理论上来说，构建ODE式扩散模型只是求解一个非常轻松的几乎没约束的不定方程。确实如此，但问题是这样求出来的解在实践上会有困难，说白了就是代码上不好实现。因此，问题的准确提法是如何从式$\eqref{eq:ode-f-eq-fp}$中求出更实用的解。</p>
+<h2 id="_2">简化方程</h2>
+<p>留意到，式$\eqref{eq:ode-f-eq-fp}$可以改写成<br />
+\begin{equation}\underbrace{\left(\frac{\partial}{\partial t}, \nabla_{\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x" _nabla__t_="\nabla_{(t,\,">t}\right)}</em><em _boldsymbol_u="\boldsymbol{u">t)}}\cdot \underbrace{\Big(p_t( \boldsymbol{x}_t), \boldsymbol{f}_t(\boldsymbol{x}_t) p_t(\boldsymbol{x}_t)\Big)}</em>}\in\mathbb{R}^{d+1}}=0\end{equation<br />
+如上式所示，$\left(\frac{\partial}{\partial t},\nabla_{\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x" _t_="(t,\,">t}\right)$我们刚好可以当成$d+1$维的梯度$\nabla</em><em _boldsymbol_x="\boldsymbol{x" _t_="(t,\,">t)}$，$\big(p_t( \boldsymbol{x}_t), \boldsymbol{f}_t(\boldsymbol{x}_t) p_t(\boldsymbol{x}_t)\big)$正好可以组成了一个$d+1$的向量$\boldsymbol{u}(t, \boldsymbol{x}_t)$，所以$\eqref{eq:ode-f-eq-fp}$可以写成简单的散度方程<br />
+\begin{equation}\nabla</em><em 1="1" _="&gt;">t)}\cdot\boldsymbol{u}(t, \boldsymbol{x}_t)=0\label{eq:div-eq}\end{equation}<br />
+在此形式之下有<br />
+\begin{equation}\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{f}_t(\boldsymbol{x}_t) = \frac{\boldsymbol{u}</em>}(t, \boldsymbol{x<em 1="1" _="&gt;">t)}{\boldsymbol{u}_1(t, \boldsymbol{x}_t)}\label{eq:div-eq-ode}\end{equation}<br />
+其中$\boldsymbol{u}_1$、$\boldsymbol{u}</em>$的第一维分量和后$d$维分量。当然，不能忘了约束条件}$分别代表$\boldsymbol{u<br />
+\begin{equation}\left\{\begin{aligned}<br />
+&amp;\boldsymbol{u}_1(0, \boldsymbol{x}_0) = p_0(\boldsymbol{x}_0)\quad&amp;(\text{初值条件}) \\\[5pt]<br />
+&amp;\int \boldsymbol{u}_1(t, \boldsymbol{x}_t) d\boldsymbol{x}_t = 1\quad&amp;(\text{积分条件}) \end{aligned}\right.\end{equation}<br />
+其中$p_0(\boldsymbol{x}_0)$是数据分布，即要生成的目标样本分布。对于$t=T$时的终值分布，我们对它的要求只是尽可能简单，方便采样，除此之外没有定量要求，因此这里暂时不用写出。</p>
+<h2 id="_3">格林函数</h2>
+<p>经过这样的形式变换后，我们可以将$\boldsymbol{u}(t, \boldsymbol{x}_t)$看成一个$d+1$维的向量场，而微分方程$\eqref{eq:div-eq-ode}$正好描述的是质点沿着场线运动的轨迹，这样就跟<a href="/archives/9305">《生成扩散模型漫谈（十三）：从万有引力到扩散模型》</a>所给出的物理图景同出一辙了。</p>
+<p>为了求出$\boldsymbol{u}(t, \boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x" _t_="(t,\,">t)$的一般解，我们可以用格林函数的思想。首先尝试求解如下问题：<br />
+\begin{equation}\left\{\begin{aligned}<br />
+&amp;\nabla</em><em _boldsymbol_x="\boldsymbol{x">t)}\cdot\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)=0\\\<br />
+&amp;\boldsymbol{G}_1(0, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = \delta(\boldsymbol{x}_t - \boldsymbol{x}_0),\int \boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) d\boldsymbol{x}_t = 1<br />
+\end{aligned}\right.\label{eq:div-green}\end{equation}<br />
+容易证明，如果上式成立，那么<br />
+\begin{equation}\boldsymbol{u}(t, \boldsymbol{x}_t) = \int \boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 = \mathbb{E}</em>}_0\sim p_0(\boldsymbol{x}_0)}[\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)]\label{eq:div-green-int}\end{equation<br />
+将是方程$\eqref{eq:div-eq}$满足相应约束的解。这样一来，我们就将$\boldsymbol{u}(t, \boldsymbol{x}_t)$表示为了训练样本的期望形式，这有利于模型的训练。不难看出，这里的$\boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$实际上就是扩散模型中的条件概率$p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$。</p>
+<p>事实上，式$\eqref{eq:div-green}$所定义的$\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$，并非通常意义下的格林函数。一般的格林函数指的是点源下的解，而这里的格林函数的“点源”放到了边界处。但即便如此，所定义的$\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$依然具有常规格林函数类似的性质，它本身也相当于点源产生的“力场”，而式$\eqref{eq:div-green-int}$也正好是对点源的场进行积分，求出了连续分布源的场。</p>
+<h2 id="_4">万有引力</h2>
+<p>现在我们根据上述框架，求解一些具体的结果。前面已经提到，方程$\eqref{eq:div-eq}$或$\eqref{eq:div-green}$，都是“$d+1$个未知数、一个方程”的不定方程，理论上具有无穷多的各式各样的解，我们要对它进行求解，反而要引入一些额外的假设，使得它的解更为明确一些。第一个解是基于各向同性假设，它正好对应<a href="/archives/9305">《生成扩散模型漫谈（十三）：从万有引力到扩散模型》</a>中的结果。</p>
+<h3 id="_5">假设求解</h3>
+<p>注意，这里的“各向同性”，指的是在$(t,\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x" _t_="(t,\,">t)$组成的$d+1$维空间中的各向同性，这意味着$\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$是指向源点$(0,\,\boldsymbol{x}_0)$的，且模长只依赖于$R = \sqrt{(t-0)^2 + \Vert \boldsymbol{x}_t - \boldsymbol{x}_0\Vert^2}$，因此可以设<br />
+\begin{equation}\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = \varphi(R)(t, \boldsymbol{x}_t - \boldsymbol{x}_0)\end{equation}<br />
+于是<br />
+\begin{equation}\begin{aligned}<br />
+0 =&amp;\, \nabla</em><em _boldsymbol_x="\boldsymbol{x" _t_="(t,\,">t)}\cdot\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) \\\<br />
+=&amp;\, \nabla</em><em _boldsymbol_x="\boldsymbol{x" _t_="(t,\,">t)}\varphi(R)\cdot(t, \boldsymbol{x}_t - \boldsymbol{x}_0) + \varphi(R)\nabla</em>_0) \\\}_t)}\cdot (t, \boldsymbol{x}_t - \boldsymbol{x<br />
+=&amp;\, \varphi'(R) \frac{(t, \boldsymbol{x}_t - \boldsymbol{x}_0)}{R}\cdot(t, \boldsymbol{x}_t - \boldsymbol{x}_0) + (d+1)\varphi(R)\\\<br />
+=&amp;\, \varphi'(R) R + (d+1)\varphi(R) \\\<br />
+=&amp;\,\frac{[\varphi(R)R^{d+1}]'}{R^d}<br />
+\end{aligned}\end{equation}<br />
+也即$[\varphi(R)R^{d+1}]'=0$，或$\varphi(R)R^{d+1}=C$，即$\varphi(R)=C\times R^{-(d+1)}$，因此一个候选解是<br />
+\begin{equation}\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = C\times\frac{(t, \boldsymbol{x}_t - \boldsymbol{x}_0)}{\left(t^2 + \Vert \boldsymbol{x}_t - \boldsymbol{x}_0\Vert^2\right)^{(d+1)/2}}\end{equation}</p>
+<h3 id="_6">约束条件</h3>
+<p>可以看到，在各向同性假设下，万有引力解是唯一解了。为了证明是可行解，还要检验约束条件，其中关键一条是<br />
+\begin{equation}\int\boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) d\boldsymbol{x}_t = C\times \int\frac{t}{\left(t^2 + \Vert \boldsymbol{x}_t - \boldsymbol{x}_0\Vert^2\right)^{(d+1)/2}}d\boldsymbol{x}_t\end{equation}<br />
+其实我们只需要检验积分结果跟$t$和$\boldsymbol{x}_0$都没关系，那么就可以选择适当的常数$C$让积分结果为1。而对于$t &gt; 0$，可以检验做变量代换$\boldsymbol{z} = (\boldsymbol{x}_t - \boldsymbol{x}_0) / t$，由于$\boldsymbol{x}_t$的范围是全空间的，所以$\boldsymbol{z}$也是全空间的，代入上式得到<br />
+\begin{equation}\int\boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) d\boldsymbol{x}_t = C\times \int\frac{1}{\left(1 + \Vert \boldsymbol{z}\Vert^2\right)^{(d+1)/2}}d\boldsymbol{z}\label{eq:pz}\end{equation}<br />
+现在可以看出积分结果跟$t$和$\boldsymbol{x}_0$都无关了。因此只要选择适当的$C$，积分为1这一条检验可以通过。下面都假设已经选择了让积分为1的$C$。</p>
+<p>至于初值，我们需要验证$\lim\limits_{t\to 0^+}\boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = \delta(\boldsymbol{x}_t - \boldsymbol{x}_0)$，这只需要按照狄拉克函数的定义进行检验就行了：</p>
+<blockquote>
+<p>1、当$\boldsymbol{x}_t\neq \boldsymbol{x}_0$时，极限显然为0；</p>
+<p>2、当$\boldsymbol{x}_t = \boldsymbol{x}_0$时，极限显然为$\infty$；</p>
+<p>3、刚才我们已经检验了，$\boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$关于$\boldsymbol{x}_t$的积分恒为1。</p>
+</blockquote>
+<p>这三点正好是狄拉克函数的基本性质，甚至可以说是狄拉克函数的定义，因此初值检验也可以通过。</p>
+<h3 id="_7">结果分析</h3>
+<p>现在，根据式$\eqref{eq:div-green-int}$我们就有<br />
+\begin{equation}\boldsymbol{u}(t, \boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t) = C\times\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim p_0(\boldsymbol{x}_0)}\left[\frac{(t, \boldsymbol{x}_t - \boldsymbol{x}_0)}{\left(t^2 + \Vert \boldsymbol{x}_t - \boldsymbol{x}_0\Vert^2\right)^{(d+1)/2}}\right]\end{equation}<br />
+接下来利用$\mathbb{E}</em>}}[\boldsymbol{x}] = \mathop{\text{argmin}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\mu}}\mathbb{E}</em>\Vert^2\right]$构建一个类似得分匹配的目标进行学习就行了，这个过程已经说过多次，不再重复展开。}}\left[\Vert \boldsymbol{x} - \boldsymbol{\mu</p>
+<p>前面提到过，$\boldsymbol{G}<em prior="prior">1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$实际上就是$p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$，现在我们已经知道它的具体形式为<br />
+\begin{equation}p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)\propto \frac{t}{\left(t^2 + \Vert \boldsymbol{x}_t - \boldsymbol{x}_0\Vert^2\right)^{(d+1)/2}}\end{equation}<br />
+当$t=T$足够大的时候，$\boldsymbol{x}_0$的影响就微乎其微，即$p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$退化为跟$\boldsymbol{x}_0$无关的先验分布<br />
+\begin{equation}p</em>}(\boldsymbol{x}_T) \propto \frac{T}{(T^2 + \Vert\boldsymbol{x}_T\Vert^2)^{(d+1)/2}}\end{equation<br />
+之前我们在<a href="/archives/9305">《生成扩散模型漫谈（十三）：从万有引力到扩散模型》</a>中推导这一结果还颇费周折，而在这个框架下这一结果可谓是“水到渠成”了。不仅如此，现在我们$p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$也有了，那么理论上就可以完成$\boldsymbol{x}_t\sim p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)$的采样了。从式$\eqref{eq:pz}$的推导我们知道，如果做代换$\boldsymbol{z} = (\boldsymbol{x}_t - \boldsymbol{x}_0) / t$，就有<br />
+\begin{equation}p(\boldsymbol{z}) \propto \frac{1}{\left(1 + \Vert \boldsymbol{z}\Vert^2\right)^{(d+1)/2}}\label{eq:pz-2}\end{equation}<br />
+于是我们可以先从$p(\boldsymbol{z})$中采样，然后通过$\boldsymbol{x}_t = \boldsymbol{x}_0 + t\, \boldsymbol{z}$来得到相应的$\boldsymbol{x}_t$。至于从$p(\boldsymbol{z})$的采样，它只依赖于模长，所以我们可以通过逆累积函数法先采样模长，然后随机采样一个方向来构成采样结果，这跟先验分布的采样是完全一样的。不过，笔者在进一步研究下面的遗留问题时，发现了一个让人意外的“惊喜”！</p>
+<h3 id="_8">问题重拾</h3>
+<p>在<a href="/archives/9305">《生成扩散模型漫谈（十三）：从万有引力到扩散模型》</a>中，我们曾指出原论文给出的采样方案是：<br />
+\begin{equation}\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t = \boldsymbol{x}_0 + \Vert \boldsymbol{\varepsilon}</em>}}\Vert (1+\tau)^m \boldsymbol{u},\quad t = |\varepsilon_t| (1+\tau)^m\end{equation<br />
+其中$(\boldsymbol{\varepsilon}<em _d_1_times_d_1_="(d+1)\times(d+1)">{\boldsymbol{x}},\varepsilon_t)\sim\mathcal{N}(\boldsymbol{0}, \sigma^2\boldsymbol{I}</em>$的一个实现！})$，$m\sim U[0,M]$，$\boldsymbol{u}$是$d$维单位球面上均匀分布的单位向量，而$\tau,\sigma,M$则都是常数。当时对这个采样的评价是“有颇多的主观性”，也就是觉得是原作者主观设计的，没太多的理由。然而，不知道作者有意还是无意，笔者发现了一个神奇的“巧合”：这个采样正好是式$\eqref{eq:pz-2</p>
+<p>接下来我们证明这一点。首先，我们将上式后半部分代入前半部分，得到<br />
+\begin{equation}\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t = \boldsymbol{x}_0 + t\times \frac{\Vert \boldsymbol{\varepsilon}</em>}}\Vert}{|\varepsilon_t|} \boldsymbol{u}\end{equation<br />
+形式上已经跟上一节说的$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t = \boldsymbol{x}_0 + t\, \boldsymbol{z}$一样了，并且$\boldsymbol{u}$也是各向同性的单位随机向量，所以问题变为$\frac{\Vert \boldsymbol{\varepsilon}</em>$有}}\Vert}{|\varepsilon_t|}$是否跟$\Vert\boldsymbol{z}\Vert$同分布，答案是肯定的！注意，概率密度从笛卡尔坐标变为球坐标，要多乘以一个$\text{半径}^{d-1}$，所以根据式$\eqref{eq:pz-2<br />
+\begin{equation}p(\Vert\boldsymbol{z}\Vert) \propto \frac{\Vert \boldsymbol{z}\Vert^{d-1}}{\left(1 + \Vert \boldsymbol{z}\Vert^2\right)^{(d+1)/2}}\label{eq:pz-3}\end{equation}<br />
+而根据$(\boldsymbol{\varepsilon}<em _d_1_times_d_1_="(d+1)\times(d+1)">{\boldsymbol{x}},\varepsilon_t)\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I}</em>)$（由于研究的是比值，方差可以约掉，因此简单起见取$\sigma=1$）有<br />
+\begin{equation}p(\Vert\boldsymbol{\varepsilon}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{x}}\Vert) \propto \Vert\boldsymbol{\varepsilon}</em>}}\Vert^{d-1} e^{-\Vert\boldsymbol{\varepsilon<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{x}}\Vert^2/2}, \quad p(|\varepsilon_t|) \propto e^{-|\varepsilon_t|^2/2}\end{equation}<br />
+记$r = \frac{\Vert \boldsymbol{\varepsilon}</em>}}\Vert}{|\varepsilon_t|}$，则$\Vert \boldsymbol{\varepsilon<em _varepsilon_t_sim="|\varepsilon_t|\sim" p_varepsilon_t_="p(|\varepsilon_t|)">{\boldsymbol{x}}\Vert=r|\varepsilon_t|$，然后根据概率的相等性，有<br />
+\begin{equation}\begin{aligned}<br />
+p(r)dr =&amp;\, \mathbb{E}</em>}\big[p(\Vert \boldsymbol{\varepsilon<em _varepsilon_t_sim="|\varepsilon_t|\sim" p_varepsilon_t_="p(|\varepsilon_t|)">{\boldsymbol{x}}\Vert\color{red}{=r|\varepsilon_t|})d(\color{red}{r|\varepsilon_t|})\big] \\\[5pt]<br />
+\propto&amp;\, \mathbb{E}</em> dr\big] \\\[5pt]}\big[r^{d-1}|\varepsilon_t|^d e^{-r^2|\varepsilon_t|^2/2<br />
+\propto&amp;\, \int_0^{\infty} r^{d-1}|\varepsilon_t|^d e^{-r^2|\varepsilon_t|^2/2} e^{-|\varepsilon_t|^2/2} d|\varepsilon_t| dr \\\<br />
+=&amp;\, \int_0^{\infty} r^{d-1}|\varepsilon_t|^d e^{-(r^2+1)|\varepsilon_t|^2/2} d|\varepsilon_t| dr \\\<br />
+=&amp;\, \frac{r^{d-1}}{(1+r^2)^{(d+1)/2}} \int_0^{\infty} s^d e^{-s^2/2} ds dr \quad\left(\text{设}s = |\varepsilon_t|\sqrt{r^2+1}\right) \\\<br />
+\propto&amp;\, \frac{r^{d-1}}{(1+r^2)^{(d+1)/2}} dr<br />
+\end{aligned}\end{equation}<br />
+因此$p(r)\propto \frac{r^{d-1}}{(1+r^2)^{(d+1)/2}}$，跟$\eqref{eq:pz-3}$完全一致。所以，$\frac{\Vert \boldsymbol{\varepsilon}_{\boldsymbol{x}}\Vert}{|\varepsilon_t|}\boldsymbol{u}$确实提供了$\boldsymbol{z}$的一种有效采样方式，这在实现上要比逆累积函数法简单得多，但原论文并没有提及这一点。</p>
+<h2 id="_9">时空分离</h2>
+<p>刚才我们求解了$(t,\boldsymbol{x}_t)$组成的$d+1$维空间中的各向同性解，其实某种意义上来说，这算是最简单的一个解。可能这种说明有些读者难以接受，毕竟这个万有引力扩散模型在数学上看上去明显复杂得多。但事实上，在求解数学物理方程时，很多时候各向同性解确实是作为最简单的解来试探求解的。</p>
+<p>当然，将$(t,\boldsymbol{x}_t)$看成“时-空”整体的各向同性，在理解上确实没那么直观，我们更习惯的是理解空间上的各向同性，将时间维度独立开来，这一节就在这个假设下求解。</p>
+<h3 id="_10">假设求解</h3>
+<p>也就是说，这部分的“各向同性”，指的是在$\boldsymbol{x}<em 1="1" _="&gt;">t$的$d$维空间中的各向同性，$\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$被分解为$(\boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0), \boldsymbol{G}</em>}(t, 0; \boldsymbol{x<em 1="1" _="&gt;">t, \boldsymbol{x}_0))$两部分来理解。其中$\boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$只是一个标量，各向同性意味着它只依赖于$r = \Vert \boldsymbol{x}_t - \boldsymbol{x}_0\Vert$，我们将它记为$\phi_t(r)$；$\boldsymbol{G}</em>}(t, 0; \boldsymbol{x<em _1="&gt;1">t, \boldsymbol{x}_0)$是一个$d$维向量，各向同性意味着$\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$指向源点$\boldsymbol{x}_0$，且模长只依赖于$r = \Vert \boldsymbol{x}_t - \boldsymbol{x}_0\Vert$，因此可以设<br />
+\begin{equation}\boldsymbol{G}</em>}(t, 0; \boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, \boldsymbol{x}_0) = \varphi_t(r)(\boldsymbol{x}_t - \boldsymbol{x}_0)\end{equation}<br />
+于是<br />
+\begin{equation}\begin{aligned}<br />
+0 =&amp;\, \frac{\partial}{\partial t}\phi_t(r) + \nabla</em>_0)) \\\}_t}\cdot(\varphi_t(r) (\boldsymbol{x}_t - \boldsymbol{x<br />
+=&amp;\, \frac{\partial}{\partial t}\phi_t(r) + r\frac{\partial}{\partial r}\varphi_t(r) + d\, \varphi_t(r) \\\<br />
+=&amp;\, \frac{\partial}{\partial t}\phi_t(r) + \frac{1}{r^{d-1}}\frac{\partial}{\partial r}\big(\varphi_t(r) r^d\big)\\\<br />
+\end{aligned}\end{equation}<br />
+这里有两个待定函数$\phi_t(r)$、$\varphi_t(r)$，但只有一个方程，所以求解就更简单了。由于约束条件约束的是$\boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$，也就是$\phi_t(r)$而不是$\varphi_t(r)$，所以简单起见通常是给定满足条件的$\phi_t(r)$来求解$\varphi_t(r)$，结果是<br />
+\begin{equation}\varphi_t(r) = -\frac{1}{r^d}\int \frac{\partial}{\partial t}\phi_t(r) r^{d-1} dr = -\frac{1}{r^d}\frac{\partial}{\partial t}\int \phi_t(r) r^{d-1} dr\label{eq:f-g-t-r}\end{equation}</p>
+<h3 id="_11">高斯扩散</h3>
+<p>这部分我们来表明，常见的基于高斯分布假设的ODE扩散模型，也是式$\eqref{eq:f-g-t-r}$的一个特例。对于高斯分布假设，有<br />
+\begin{equation}\boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = p_t(\boldsymbol{x}_t|\boldsymbol{x}_0) = \frac{1}{(2\pi\sigma_t^2)^{d/2}} e^{-\Vert\boldsymbol{x}_t-\boldsymbol{x}_0\Vert^2/2\sigma_t^2}\end{equation}<br />
+即$\phi_t(r) = \frac{1}{(2\pi\sigma_t^2)^{d/2}} e^{-r^2/2\sigma_t^2}$，其中$\sigma_t$是关于$t$的单调递增函数，满足$\sigma_0=0$且$\sigma_T$足够大，$\sigma_0=0$是为了成立初值条件，$\sigma_T$足够大是为了先验分布与数据无关，至于积分等于1的约束，这是高斯分布的基本性质，自然满足。</p>
+<p>代入式$\eqref{eq:f-g-t-r}$后解得：<br />
+\begin{equation}\varphi_t(r) = \frac{\dot{\sigma}<em 1="1" _="&gt;">t}{(2\pi\sigma_t^2)^{d/2}\sigma_t} e^{-r^2/2\sigma_t^2} = \frac{\dot{\sigma}_t}{\sigma_t}\phi_t(r)\end{equation}<br />
+其中$r$的积分涉及到不完全伽马函数，比较复杂，笔者是直接用Mathematica算的。有了这个结果后，我们有<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{u}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) =&amp;\, \int p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 = p_t(\boldsymbol{x}_t) \\\<br />
+\boldsymbol{u}</em>}(t, 0; \boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, \boldsymbol{x}_0) =&amp;\, \int \frac{\dot{\sigma}_t}{\sigma_t}(\boldsymbol{x}_t - \boldsymbol{x}_0)p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 \\\<br />
+=&amp;\, -\dot{\sigma}_t\sigma_t \int\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} p_t(\boldsymbol{x}_t|\boldsymbol{x}_0)p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 \\\<br />
+=&amp;\, -\dot{\sigma}_t\sigma_t \nabla</em><em 1="1" _="&gt;">t} p_t(\boldsymbol{x}_t) \\\<br />
+\end{aligned}\end{equation}<br />
+从而根据式$\eqref{eq:div-eq-ode}$有<br />
+\begin{equation}\boldsymbol{f}_t(\boldsymbol{x}_t) = \frac{\boldsymbol{u}</em>}(t, \boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)}{\boldsymbol{u}_1(t, \boldsymbol{x}_t)} = -\dot{\sigma}_t\sigma_t \nabla</em>}_t} \log p_t(\boldsymbol{x}_t) \end{equation<br />
+这些结果跟<a href="/archives/9280">《生成扩散模型漫谈（十二）：“硬刚”扩散ODE》</a>的完全一致，剩下的处理细节，也可以参考该文章。</p>
+<h3 id="_12">逆向构造</h3>
+<p>像刚才那样给定$\phi_t(r)$来求解$\varphi_t(r)$的做法在理论上很简单，但在实践上会有两个困难：1、$\phi_t(r)$既要满足初值条件，又要满足积分条件，不是那么容易构造的；2、对$r$的积分也不一定有简单的初等形式。既然如此，我们可以想一个逆向构造的方法。</p>
+<p>我们知道，$\phi_t(r)$是在笛卡尔坐标下的概率密度，换到球坐标下要乘以$C_d r^{d-1}$，$C_d$是某个常数（跟$d$有关），根据式$\eqref{eq:div-eq-ode}$，最终结果是一个比值，不受常数影响，所以简单起见我们忽略这个常数，而忽略常数后正好是式$\eqref{eq:f-g-t-r}$的被积函数，所以式$\eqref{eq:f-g-t-r}$中的积分<br />
+\begin{equation}\int \phi_t(r) r^{d-1} dr\end{equation}<br />
+正好是一个累积概率函数（更准确说，是累积概率函数的$1/C_d$再加上一个常数，但我们已经忽略掉无关紧要的常数），而从概率密度算累积概率不一定容易，但从累积概率算概率密度很简单（求导），所以我们可以先构造累积概率函数，然后再去求相应的$\phi_t(r),\varphi_t(r)$，这样就免去了积分的困难。</p>
+<p>具体来说，构造累积概率函数$\psi_t(r)$，满足如下条件：</p>
+<blockquote>
+<p>1、$\psi_t(0)=0$，$\psi_t(\infty)=1$；</p>
+<p>2、$\psi_t(r)$关于$r$单调递增；</p>
+<p>3、$\forall r &gt; 0, \lim\limits_{t\to 0^+} \psi_t(r)=1$。</p>
+</blockquote>
+<p>稍微研究过激活函数的同学，应该不难构造满足上述条件的函数，它其实这就是“<a href="https://en.wikipedia.org/wiki/Heaviside_step_function">阶跃函数</a>”的光滑近似，比如$\tanh\left(\frac{r}{t}\right)$、$1-e^{-r/t}$等。有了$\psi_t(r)$后，根据式$\eqref{eq:f-g-t-r}$，我们就有<br />
+\begin{equation}\phi_t(r) = \frac{1}{r^{d-1}}\frac{\partial}{\partial r}\psi_t(r), \quad \varphi_t(r) = -\frac{1}{r^d}\frac{\partial}{\partial t}(\psi_t(r)\color{skyblue}{+\lambda_t})\end{equation}<br />
+其中$\color{skyblue}{\lambda_t}$是$t$的任意函数，一般情况下可以直接设为0。当然，这些各向同性解本质上都是等价的，包括前一节推导的“万有引力扩散”也是如此，它们都可以纳入上式之中，也可以通过坐标变换相互推导，这是因为上式只依赖于一个一元的累积概率函数$\psi_t(r)$，不同分布之间的累积概率函数一般都可以相互变换（它们都是形态良好的单调递增函数）。</p>
+<h2 id="_13">文章小结</h2>
+<p>本文构建了一个ODE式扩散的一般框架，理论上来说，所有的ODE式扩散模型可以纳入到该框架之中，我们也可以从中推导出各种新奇的、奇葩的ODE式扩散模型，比如目前的推导都是基于各向同性假设的，其实也可以将各向同性的$\varphi(R)$换成更一般的$\varphi(t;\boldsymbol{x}_t,\boldsymbol{x}_0)$，这可以利用<a href="/archives/4718">《一阶偏微分方程的特征线法》</a>的方法来完成求解，得到一簇新的模型。总的来说，这是一个名副其实的ODE式扩散模型的“生产车间”。</p>
+<p>可能有读者想问，我不就想要一个可用的生成扩散模型而已，你搞那么多花里花俏的变体又有什么价值？事实上，跟之前<a href="/archives/6016">《f-GAN简介：GAN模型的生产车间》</a>、<a href="/archives/7210">《Designing GANs：又一个GAN生产车间》</a>一样，我们希望发现、掌握生成模型的构建规律，以便进一步理解生成模型的关键，从而发现更有效的生成模型，这是一个追求完美的永无止境的过程。</p>
+<p>之前“万有引力扩散”论文中的实验结果已经表明，作为一个ODE式扩散模型，它要比高斯扩散的效果要好些。这就说明，即便是基于各向同性假设，这些数学本质等价的扩散模型在实践上依然会有效果差异。所以，如何更好地结合实验细节来回答“什么样的设计才是更好的扩散模型”，将会是未来的一个非常有意义的研究问题。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9370">https://spaces.ac.cn/archives/9370</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Dec. 15, 2022). 《生成扩散模型漫谈（十四）：构建ODE的一般步骤（上） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9370">https://spaces.ac.cn/archives/9370</a></p>
+<p>@online{kexuefm-9370,<br />
+title={生成扩散模型漫谈（十四）：构建ODE的一般步骤（上）},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Dec},<br />
+url={\url{https://spaces.ac.cn/archives/9370}},<br />
+} </p>
+<hr />
+<h2 id="_14">推导</h2>
+<p>本节将深入探讨构建扩散ODE的数学理论基础，包括常微分方程理论、格林函数方法、边界条件设定、解的存在唯一性、稳定性分析等内容，并结合数值方法给出完整的理论框架。</p>
+<h3 id="_15">一、常微分方程的基础理论</h3>
+<h4 id="11">1.1 初值问题的存在唯一性定理</h4>
+<p>对于一阶常微分方程初值问题：
+$$\begin{cases}
+\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}(t, \boldsymbol{x}) \\
+\boldsymbol{x}(t_0) = \boldsymbol{x}_0
+\end{cases}$$</p>
+<p>根据<strong>Picard-Lindelöf定理</strong>（皮卡-林德洛夫定理），如果$\boldsymbol{f}(t, \boldsymbol{x})$在区域$D = {(t,\boldsymbol{x}): |t-t_0| \leq a, |\boldsymbol{x}-\boldsymbol{x}_0| \leq b}$上满足：</p>
+<p><strong>（i）连续性条件</strong>：$\boldsymbol{f}(t, \boldsymbol{x})$关于$(t, \boldsymbol{x})$连续，即
+$$\forall \epsilon > 0, \exists \delta > 0, \text{当} |t-t'| + \|\boldsymbol{x}-\boldsymbol{x}'\| < \delta \text{时，有} \|\boldsymbol{f}(t,\boldsymbol{x}) - \boldsymbol{f}(t',\boldsymbol{x}')|| < \epsilon$$</p>
+<p><strong>（ii）Lipschitz连续条件</strong>：存在常数$L &gt; 0$，使得
+$$\|\boldsymbol{f}(t, \boldsymbol{x}) - \boldsymbol{f}(t, \boldsymbol{y})\| \leq L\|\boldsymbol{x} - \boldsymbol{y}\|, \quad \forall (t,\boldsymbol{x}), (t,\boldsymbol{y}) \in D$$</p>
+<p>则在区间$|t-t_0| \leq \min{a, b/M}$上，其中$M = \max_{(t,\boldsymbol{x})\in D}|\boldsymbol{f}(t,\boldsymbol{x})|$，初值问题存在唯一解。</p>
+<p><strong>证明思路</strong>（Picard逐次逼近法）：</p>
+<p>构造函数序列：
+$$\boldsymbol{x}_0(t) = \boldsymbol{x}_0$$
+$$\boldsymbol{x}_{n+1}(t) = \boldsymbol{x}_0 + \int_{t_0}^{t} \boldsymbol{f}(s, \boldsymbol{x}_n(s)) ds, \quad n = 0,1,2,\ldots$$</p>
+<p>首先证明该序列一致收敛。设$\boldsymbol{\phi}<em n_1="n+1">n(t) = \boldsymbol{x}</em>_n(t)$，则：
+$$\|\boldsymbol{\phi}_0(t)\| = \|\boldsymbol{x}_1(t) - \boldsymbol{x}_0\| = \left\|\int_{t_0}^{t} \boldsymbol{f}(s, \boldsymbol{x}_0) ds\right\| \leq M|t-t_0|$$}(t) - \boldsymbol{x</p>
+<p>对于$\boldsymbol{\phi}_n(t)$，利用Lipschitz条件：
+$$\begin{aligned}
+\|\boldsymbol{\phi}_n(t)\| &= \left\|\int_{t_0}^{t} [\boldsymbol{f}(s, \boldsymbol{x}_n(s)) - \boldsymbol{f}(s, \boldsymbol{x}_{n-1}(s))] ds\right\| \\
+&\leq \int_{t_0}^{t} L\|\boldsymbol{x}_n(s) - \boldsymbol{x}_{n-1}(s)\| ds \\
+&= \int_{t_0}^{t} L\|\boldsymbol{\phi}_{n-1}(s)\| ds
+\end{aligned}$$</p>
+<p>用数学归纳法可以证明：
+$$\|\boldsymbol{\phi}_n(t)\| \leq M\frac{(L|t-t_0|)^{n+1}}{(n+1)!}$$</p>
+<p>因此级数$\sum_{n=0}^{\infty}\boldsymbol{\phi}_n(t)$一致收敛，其和函数
+$$\boldsymbol{x}(t) = \boldsymbol{x}_0 + \sum_{n=0}^{\infty}\boldsymbol{\phi}_n(t) = \lim_{n\to\infty}\boldsymbol{x}_n(t)$$</p>
+<p>即为初值问题的解。</p>
+<p><strong>唯一性证明</strong>：假设有两个解$\boldsymbol{x}(t)$和$\boldsymbol{y}(t)$，则：
+$$\|\boldsymbol{x}(t) - \boldsymbol{y}(t)\| = \left\|\int_{t_0}^{t} [\boldsymbol{f}(s, \boldsymbol{x}(s)) - \boldsymbol{f}(s, \boldsymbol{y}(s))] ds\right\| \leq L\int_{t_0}^{t} \|\boldsymbol{x}(s) - \boldsymbol{y}(s)\| ds$$</p>
+<p>设$\psi(t) = |\boldsymbol{x}(t) - \boldsymbol{y}(t)|$，则$\psi(t) \leq L\int_{t_0}^{t} \psi(s) ds$。</p>
+<p>由Gronwall不等式（将在后面详细推导），若$\psi(t_0) = 0$，则$\psi(t) \equiv 0$，即$\boldsymbol{x}(t) \equiv \boldsymbol{y}(t)$。</p>
+<h4 id="12">1.2 解对初值的连续依赖性</h4>
+<p>考虑两个初值问题：
+$$\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}(t, \boldsymbol{x}), \quad \boldsymbol{x}(t_0) = \boldsymbol{x}_0$$
+$$\frac{d\boldsymbol{y}}{dt} = \boldsymbol{f}(t, \boldsymbol{y}), \quad \boldsymbol{y}(t_0) = \boldsymbol{y}_0$$</p>
+<p>设$\boldsymbol{x}(t)$和$\boldsymbol{y}(t)$分别是两个问题的解，则：
+$$\|\boldsymbol{x}(t) - \boldsymbol{y}(t)\| \leq \|\boldsymbol{x}_0 - \boldsymbol{y}_0\| e^{L|t-t_0|}$$</p>
+<p><strong>证明</strong>：由积分方程形式：
+$$\boldsymbol{x}(t) - \boldsymbol{y}(t) = \boldsymbol{x}_0 - \boldsymbol{y}_0 + \int_{t_0}^{t} [\boldsymbol{f}(s, \boldsymbol{x}(s)) - \boldsymbol{f}(s, \boldsymbol{y}(s))] ds$$</p>
+<p>取范数并利用Lipschitz条件：
+$$\|\boldsymbol{x}(t) - \boldsymbol{y}(t)\| \leq \|\boldsymbol{x}_0 - \boldsymbol{y}_0\| + L\int_{t_0}^{t} \|\boldsymbol{x}(s) - \boldsymbol{y}(s)\| ds$$</p>
+<p>应用Gronwall不等式即得结论。这说明解关于初值是<strong>指数稳定的</strong>。</p>
+<h4 id="13-gronwall">1.3 Gronwall不等式的详细推导</h4>
+<p><strong>Gronwall不等式</strong>是常微分方程理论中极其重要的工具，用于估计解的界。</p>
+<p><strong>定理（Gronwall不等式）</strong>：设$u(t)$、$v(t)$、$w(t)$是$[t_0, T]$上的非负连续函数，且满足：
+$$u(t) \leq v(t) + \int_{t_0}^{t} w(s)u(s) ds, \quad t \in [t_0, T]$$</p>
+<p>则有：
+$$u(t) \leq v(t) + \int_{t_0}^{t} v(s)w(s)e^{\int_s^t w(\tau)d\tau} ds$$</p>
+<p>特别地，如果$v(t) \equiv C$为常数，则：
+$$u(t) \leq C\exp\left(\int_{t_0}^{t} w(s)ds\right)$$</p>
+<p><strong>证明</strong>：设
+$$U(t) = \int_{t_0}^{t} w(s)u(s) ds$$</p>
+<p>则$U(t_0) = 0$，且$U'(t) = w(t)u(t)$。由假设$u(t) \leq v(t) + U(t)$，因此：
+$$U'(t) = w(t)u(t) \leq w(t)[v(t) + U(t)]$$</p>
+<p>即：
+$$U'(t) - w(t)U(t) \leq w(t)v(t)$$</p>
+<p>两边乘以积分因子$e^{-\int_{t_0}^{t} w(s)ds}$：
+$$\frac{d}{dt}\left[U(t)e^{-\int_{t_0}^{t} w(s)ds}\right] \leq w(t)v(t)e^{-\int_{t_0}^{t} w(s)ds}$$</p>
+<p>从$t_0$到$t$积分：
+$$U(t)e^{-\int_{t_0}^{t} w(s)ds} - U(t_0) \leq \int_{t_0}^{t} w(s)v(s)e^{-\int_{t_0}^{s} w(\tau)d\tau} ds$$</p>
+<p>注意到$U(t_0) = 0$，整理得：
+$$U(t) \leq \int_{t_0}^{t} w(s)v(s)e^{\int_s^t w(\tau)d\tau} ds$$</p>
+<p>结合$u(t) \leq v(t) + U(t)$即得结论。</p>
+<h3 id="fokker-planck">二、连续性方程与Fokker-Planck方程</h3>
+<h4 id="21-liouville">2.1 从Liouville定理到连续性方程</h4>
+<p>在统计力学和动力系统理论中，<strong>Liouville定理</strong>指出，对于Hamiltonian系统，相空间中的概率密度沿着系统轨迹保持不变。</p>
+<p>考虑一个动力系统$\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}(t, \boldsymbol{x})$，设$\phi_t: \mathbb{R}^d \to \mathbb{R}^d$是从时刻$0$到时刻$t$的流映射，即$\phi_t(\boldsymbol{x}_0)$是以$\boldsymbol{x}_0$为初值的解在时刻$t$的值。</p>
+<p>如果$\boldsymbol{x}_0 \sim p_0(\boldsymbol{x}_0)$，则$\boldsymbol{x}_t = \phi_t(\boldsymbol{x}_0)$的分布由变量替换公式给出：
+$$p_t(\boldsymbol{x}_t) = p_0(\phi_t^{-1}(\boldsymbol{x}_t)) \left|\det\frac{\partial\phi_t^{-1}}{\partial\boldsymbol{x}_t}\right|$$</p>
+<p>或等价地（使用$\phi_t$的Jacobian）：
+$$p_t(\phi_t(\boldsymbol{x}_0)) = \frac{p_0(\boldsymbol{x}_0)}{\left|\det\frac{\partial\phi_t}{\partial\boldsymbol{x}_0}\right|}$$</p>
+<p>对时间$t$求导（应用复合函数求导法则）：
+$$\frac{\partial p_t(\boldsymbol{x}_t)}{\partial t} = -\nabla_{\boldsymbol{x}_t} \cdot (\boldsymbol{f}(t, \boldsymbol{x}_t) p_t(\boldsymbol{x}_t))$$</p>
+<p>这就是<strong>连续性方程</strong>（Continuity Equation），也称为<strong>Liouville方程</strong>的无散形式。</p>
+<h4 id="22">2.2 连续性方程的物理意义</h4>
+<p>连续性方程可以写成：
+$$\frac{\partial p_t}{\partial t} + \nabla \cdot (\boldsymbol{j}_t) = 0$$</p>
+<p>其中$\boldsymbol{j}_t = \boldsymbol{f}_t(\boldsymbol{x}_t) p_t(\boldsymbol{x}_t)$是<strong>概率流密度</strong>。</p>
+<p>这个方程表达了<strong>概率守恒</strong>：对于任意区域$\Omega \subset \mathbb{R}^d$，
+$$\frac{d}{dt}\int_{\Omega} p_t(\boldsymbol{x}) d\boldsymbol{x} = -\int_{\partial\Omega} \boldsymbol{j}_t \cdot \boldsymbol{n} dS$$</p>
+<p>其中$\boldsymbol{n}$是边界$\partial\Omega$的外法向量。这说明区域内概率的变化率等于流出边界的概率流。</p>
+<h4 id="23-fokker-planck">2.3 Fokker-Planck方程</h4>
+<p>对于包含随机扰动的SDE（随机微分方程）：
+$$d\boldsymbol{x}_t = \boldsymbol{f}_t(\boldsymbol{x}_t)dt + g_t(\boldsymbol{x}_t)d\boldsymbol{W}_t$$</p>
+<p>其中$\boldsymbol{W}_t$是$d$维Wiener过程，相应的概率密度演化方程是<strong>Fokker-Planck方程</strong>：
+$$\frac{\partial p_t}{\partial t} = -\nabla \cdot (\boldsymbol{f}_t p_t) + \frac{1}{2}\sum_{i,j=1}^{d} \frac{\partial^2}{\partial x_i \partial x_j}(D_{ij} p_t)$$</p>
+<p>其中扩散矩阵$D_{ij} = [g_t g_t^T]_{ij}$。</p>
+<p>当$g_t = 0$时（无随机扰动），Fokker-Planck方程退化为连续性方程：
+$$\frac{\partial p_t}{\partial t} = -\nabla \cdot (\boldsymbol{f}_t p_t)$$</p>
+<p>这正是我们研究的ODE扩散模型的基础方程。</p>
+<h3 id="_16">三、格林函数方法的深入分析</h3>
+<h4 id="31">3.1 格林函数的定义与性质</h4>
+<p>格林函数方法是求解偏微分方程的强有力工具。对于线性微分算子$\mathcal{L}$和方程：
+$$\mathcal{L}u = f$$</p>
+<p>格林函数$G(\boldsymbol{x}, \boldsymbol{x}')$满足：
+$$\mathcal{L}_{\boldsymbol{x}} G(\boldsymbol{x}, \boldsymbol{x}') = \delta(\boldsymbol{x} - \boldsymbol{x}')$$</p>
+<p>其中$\delta$是Dirac delta函数。方程的解可以表示为：
+$$u(\boldsymbol{x}) = \int G(\boldsymbol{x}, \boldsymbol{x}')f(\boldsymbol{x}') d\boldsymbol{x}'$$</p>
+<p><strong>格林函数的对称性</strong>：对于自伴算子$\mathcal{L}$（满足$\langle \mathcal{L}u, v\rangle = \langle u, \mathcal{L}v\rangle$），格林函数满足：
+$$G(\boldsymbol{x}, \boldsymbol{x}') = G(\boldsymbol{x}', \boldsymbol{x})$$</p>
+<h4 id="32">3.2 扩散方程的格林函数</h4>
+<p>对于本文研究的散度方程：
+$$\nabla_{(t, \boldsymbol{x})} \cdot \boldsymbol{u}(t, \boldsymbol{x}) = 0$$</p>
+<p>我们定义格林函数$\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$满足：
+$$\begin{cases}
+\nabla_{(t, \boldsymbol{x}_t)} \cdot \boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = 0 \\
+\boldsymbol{G}_1(0, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = \delta(\boldsymbol{x}_t - \boldsymbol{x}_0) \\
+\int \boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) d\boldsymbol{x}_t = 1
+\end{cases}$$</p>
+<p>这里$\boldsymbol{G}_1$表示向量$\boldsymbol{G}$的第一个分量（对应时间方向）。</p>
+<p><strong>物理解释</strong>：$\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0)$可以理解为在$(0, \boldsymbol{x}_0)$处放置单位点源时，在时空点$(t, \boldsymbol{x}_t)$处产生的"场"。</p>
+<h4 id="33">3.3 格林函数的积分表示定理</h4>
+<p>一旦得到格林函数，任意初始分布$p_0(\boldsymbol{x}_0)$对应的解可以通过卷积得到：
+$$\boldsymbol{u}(t, \boldsymbol{x}_t) = \int \boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0$$</p>
+<p><strong>验证</strong>：
+$$\begin{aligned}
+\nabla_{(t, \boldsymbol{x}_t)} \cdot \boldsymbol{u}(t, \boldsymbol{x}_t) &= \int \nabla_{(t, \boldsymbol{x}_t)} \cdot \boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 \\
+&= \int 0 \cdot p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0 = 0
+\end{aligned}$$</p>
+<p>初值条件：
+$$\begin{aligned}
+\boldsymbol{u}_1(0, \boldsymbol{x}_0) &= \int \boldsymbol{G}_1(0, 0; \boldsymbol{x}_0, \boldsymbol{x}_0') p_0(\boldsymbol{x}_0') d\boldsymbol{x}_0' \\
+&= \int \delta(\boldsymbol{x}_0 - \boldsymbol{x}_0') p_0(\boldsymbol{x}_0') d\boldsymbol{x}_0' \\
+&= p_0(\boldsymbol{x}_0)
+\end{aligned}$$</p>
+<p>这证明了格林函数方法的正确性。</p>
+<h4 id="34">3.4 各向同性格林函数的求解</h4>
+<p>假设在$(d+1)$维时空中，格林函数具有各向同性，即：
+$$\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = \varphi(R)(t, \boldsymbol{x}_t - \boldsymbol{x}_0)$$</p>
+<p>其中$R = \sqrt{t^2 + |\boldsymbol{x}_t - \boldsymbol{x}_0|^2}$。</p>
+<p>计算散度（使用分量记号，设$(t, \boldsymbol{x}_t - \boldsymbol{x}_0) = (y_0, y_1, \ldots, y_d)$）：
+$$\begin{aligned}
+\nabla_{(t, \boldsymbol{x}_t)} \cdot \boldsymbol{G} &= \sum_{i=0}^{d} \frac{\partial}{\partial y_i}[\varphi(R)y_i] \\
+&= \sum_{i=0}^{d} \left[\varphi'(R)\frac{\partial R}{\partial y_i}y_i + \varphi(R)\right] \\
+&= \varphi'(R)\sum_{i=0}^{d}\frac{y_i^2}{R} + (d+1)\varphi(R) \\
+&= \varphi'(R)R + (d+1)\varphi(R)
+\end{aligned}$$</p>
+<p>要使散度为零：
+$$\varphi'(R)R + (d+1)\varphi(R) = 0$$</p>
+<p>这是关于$\varphi(R)$的一阶线性ODE。改写为：
+$$\frac{d\varphi}{dR} = -\frac{d+1}{R}\varphi$$</p>
+<p>分离变量：
+$$\frac{d\varphi}{\varphi} = -\frac{d+1}{R}dR$$</p>
+<p>积分：
+$$\ln|\varphi| = -(d+1)\ln R + C = \ln\frac{C}{R^{d+1}}$$</p>
+<p>因此：
+$$\varphi(R) = \frac{C}{R^{d+1}}$$</p>
+<p>其中$C$是待定常数。故格林函数为：
+$$\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = C \frac{(t, \boldsymbol{x}_t - \boldsymbol{x}_0)}{(t^2 + \|\boldsymbol{x}_t - \boldsymbol{x}_0\|^2)^{(d+1)/2}}$$</p>
+<h4 id="35">3.5 归一化常数的确定</h4>
+<p>需要确定常数$C$使得积分条件$\int \boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) d\boldsymbol{x}_t = 1$满足。</p>
+<p>$$\int \boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) d\boldsymbol{x}_t = C \int \frac{t}{(t^2 + \|\boldsymbol{x}_t - \boldsymbol{x}_0\|^2)^{(d+1)/2}} d\boldsymbol{x}_t$$</p>
+<p>平移不变性允许我们取$\boldsymbol{x}_0 = \boldsymbol{0}$，并令$\boldsymbol{z} = \boldsymbol{x}_t/t$：
+$$C t \int \frac{1}{(t^2 + \|\boldsymbol{x}_t\|^2)^{(d+1)/2}} d\boldsymbol{x}_t = C t \int \frac{t^d}{t^{d+1}(1 + \|\boldsymbol{z}\|^2)^{(d+1)/2}} d\boldsymbol{z} = C \int \frac{1}{(1 + \|\boldsymbol{z}\|^2)^{(d+1)/2}} d\boldsymbol{z}$$</p>
+<p>转换为球坐标（$\boldsymbol{z} = r\boldsymbol{\omega}$，$|\boldsymbol{\omega}| = 1$）：
+$$C \int_0^{\infty} \int_{S^{d-1}} \frac{r^{d-1}}{(1 + r^2)^{(d+1)/2}} dS(\boldsymbol{\omega}) dr = C \cdot S_{d-1} \int_0^{\infty} \frac{r^{d-1}}{(1 + r^2)^{(d+1)/2}} dr$$</p>
+<p>其中$S_{d-1} = \frac{2\pi^{d/2}}{\Gamma(d/2)}$是$(d-1)$维单位球面的面积。</p>
+<p>积分$I_d = \int_0^{\infty} \frac{r^{d-1}}{(1 + r^2)^{(d+1)/2}} dr$可通过换元$r = \tan\theta$计算：
+$$I_d = \int_0^{\pi/2} \frac{\tan^{d-1}\theta}{\sec^{d+1}\theta} \sec^2\theta d\theta = \int_0^{\pi/2} \sin^{d-1}\theta \cos\theta d\theta = \frac{1}{d}$$</p>
+<p>（或使用Beta函数：$I_d = \frac{1}{2}B\left(\frac{d}{2}, \frac{1}{2}\right) = \frac{\Gamma(d/2)\Gamma(1/2)}{2\Gamma((d+1)/2)} = \frac{\sqrt{\pi}\Gamma(d/2)}{2\Gamma((d+1)/2)}$）</p>
+<p>因此归一化常数：
+$$C = \frac{1}{S_{d-1} I_d} = \frac{d \Gamma(d/2)}{2\pi^{d/2} / \Gamma(d/2)} \cdot \frac{1}{\text{(correction factor)}}$$</p>
+<p>实际应用中，可以直接验证积分为1的条件，或数值确定$C$。</p>
+<h3 id="_17">四、边界条件与初值/边值问题</h3>
+<h4 id="41-vs">4.1 初值问题 vs 边值问题</h4>
+<p><strong>初值问题（IVP, Initial Value Problem）</strong>：
+$$\begin{cases}
+\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}(t, \boldsymbol{x}), \quad t \in [t_0, T] \\
+\boldsymbol{x}(t_0) = \boldsymbol{x}_0
+\end{cases}$$</p>
+<p>特点：在初始时刻$t_0$给定状态$\boldsymbol{x}_0$，向前求解。</p>
+<p><strong>边值问题（BVP, Boundary Value Problem）</strong>：
+$$\begin{cases}
+\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}(t, \boldsymbol{x}), \quad t \in [t_0, T] \\
+\boldsymbol{g}(\boldsymbol{x}(t_0), \boldsymbol{x}(T)) = \boldsymbol{0}
+\end{cases}$$</p>
+<p>特点：在区间两端给定约束条件，如$\boldsymbol{x}(t_0) = \boldsymbol{x}_0$，$\boldsymbol{x}(T) = \boldsymbol{x}_T$。</p>
+<p>扩散模型中，我们既关心正向扩散过程（初值问题），也关心生成过程（可视为边值问题的一种）。</p>
+<h4 id="42">4.2 边界条件的类型</h4>
+<p>对于偏微分方程（如热方程、波动方程），边界条件分为：</p>
+<p><strong>（i）第一类边界条件（Dirichlet条件）</strong>：
+$$u(\boldsymbol{x}, t)|_{\partial\Omega} = g(\boldsymbol{x}, t)$$</p>
+<p>指定边界上的函数值。</p>
+<p><strong>（ii）第二类边界条件（Neumann条件）</strong>：
+$$\frac{\partial u}{\partial \boldsymbol{n}}\Big|_{\partial\Omega} = h(\boldsymbol{x}, t)$$</p>
+<p>指定边界上的法向导数。</p>
+<p><strong>（iii）第三类边界条件（Robin条件）</strong>：
+$$\left(\alpha u + \beta \frac{\partial u}{\partial \boldsymbol{n}}\right)\Big|_{\partial\Omega} = k(\boldsymbol{x}, t)$$</p>
+<p>是前两类的线性组合。</p>
+<p>在扩散模型中，边界条件体现为：
+- 初始分布$p_0(\boldsymbol{x}_0)$（数据分布）
+- 先验分布$p_T(\boldsymbol{x}_T)$（通常为简单分布，如高斯或柯西分布）</p>
+<h4 id="43">4.3 扩散模型的边界条件设定</h4>
+<p>对于扩散ODE：
+$$\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{f}_t(\boldsymbol{x}_t)$$</p>
+<p>配合连续性方程：
+$$\frac{\partial p_t}{\partial t} = -\nabla \cdot (\boldsymbol{f}_t p_t)$$</p>
+<p>边界条件包括：</p>
+<p><strong>（i）初始条件</strong>（$t=0$）：
+$$p_0(\boldsymbol{x}_0) = p_{\text{data}}(\boldsymbol{x}_0)$$</p>
+<p>这是数据分布，通常通过训练样本的经验分布来近似。</p>
+<p><strong>（ii）终端条件</strong>（$t=T$）：
+$$p_T(\boldsymbol{x}_T) \approx p_{\text{prior}}(\boldsymbol{x}_T)$$</p>
+<p>终端分布应该简单、易于采样。不同的扩散模型选择不同的先验：
+- DDPM：$p_T(\boldsymbol{x}_T) \approx \mathcal{N}(\boldsymbol{0}, \sigma_T^2\boldsymbol{I})$
+- 万有引力扩散：$p_T(\boldsymbol{x}_T) \propto \frac{T}{(T^2 + |\boldsymbol{x}_T|^2)^{(d+1)/2}}$（多维柯西分布）</p>
+<p><strong>（iii）无穷远处的渐近条件</strong>：
+$$\lim_{\|\boldsymbol{x}\| \to \infty} p_t(\boldsymbol{x}) = 0$$</p>
+<p>确保概率密度归一化。</p>
+<h4 id="44">4.4 自然边界条件与变分原理</h4>
+<p>某些边界条件不需要显式指定，而是从变分原理中自然导出，称为<strong>自然边界条件</strong>。</p>
+<p>例如，最小化泛函：
+$$J[u] = \int_{\Omega} \left[\frac{1}{2}\|\nabla u\|^2 - fu\right] d\boldsymbol{x}$$</p>
+<p>Euler-Lagrange方程为：
+$$-\Delta u = f, \quad \text{in } \Omega$$</p>
+<p>自然边界条件为：
+$$\frac{\partial u}{\partial n}\Big|_{\partial\Omega} = 0$$</p>
+<p>（即Neumann零边界条件）</p>
+<p>在扩散模型中，优化目标（如ELBO、得分匹配损失）的最小化也可能隐含某些边界条件。</p>
+<h3 id="_18">五、稳定性分析</h3>
+<h4 id="51-lyapunov">5.1 Lyapunov稳定性理论</h4>
+<p>考虑自治系统$\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}(\boldsymbol{x})$，设$\boldsymbol{x}^<em>$是平衡点（即$\boldsymbol{f}(\boldsymbol{x}^</em>) = \boldsymbol{0}$）。</p>
+<p><strong>定义（Lyapunov稳定）</strong>：平衡点$\boldsymbol{x}^<em>$称为稳定的，如果$\forall \epsilon &gt; 0$，$\exists \delta &gt; 0$，当$|\boldsymbol{x}(0) - \boldsymbol{x}^</em>| &lt; \delta$时，有$|\boldsymbol{x}(t) - \boldsymbol{x}^*| &lt; \epsilon$，$\forall t \geq 0$。</p>
+<p><strong>定义（渐近稳定）</strong>：如果$\boldsymbol{x}^<em>$稳定，且$\lim_{t\to\infty}\boldsymbol{x}(t) = \boldsymbol{x}^</em>$（对所有初值在某邻域内的解），则称$\boldsymbol{x}^*$渐近稳定。</p>
+<p><strong>Lyapunov第二方法（直接法）</strong>：如果存在函数$V(\boldsymbol{x})$（称为Lyapunov函数）满足：
+1. $V(\boldsymbol{x}^<em>) = 0$，且$V(\boldsymbol{x}) &gt; 0$，$\forall \boldsymbol{x} \neq \boldsymbol{x}^</em>$（正定性）
+2. $\dot{V}(\boldsymbol{x}) = \nabla V \cdot \boldsymbol{f}(\boldsymbol{x}) \leq 0$（半负定，沿轨迹非增）</p>
+<p>则$\boldsymbol{x}^<em>$稳定。若进一步有$\dot{V}(\boldsymbol{x}) &lt; 0$（$\forall \boldsymbol{x} \neq \boldsymbol{x}^</em>$），则$\boldsymbol{x}^*$渐近稳定。</p>
+<h4 id="52">5.2 线性化与特征值分析</h4>
+<p>对于非线性系统，在平衡点附近进行线性化：
+$$\boldsymbol{f}(\boldsymbol{x}) \approx \boldsymbol{f}(\boldsymbol{x}^*) + J(\boldsymbol{x}^*)(\boldsymbol{x} - \boldsymbol{x}^*)$$</p>
+<p>其中$J(\boldsymbol{x}^<em>) = \left.\frac{\partial \boldsymbol{f}}{\partial \boldsymbol{x}}\right|_{\boldsymbol{x}=\boldsymbol{x}^</em>}$是Jacobian矩阵。</p>
+<p>线性化系统为：
+$$\frac{d\boldsymbol{y}}{dt} = J(\boldsymbol{x}^*)\boldsymbol{y}, \quad \boldsymbol{y} = \boldsymbol{x} - \boldsymbol{x}^*$$</p>
+<p>解为：
+$$\boldsymbol{y}(t) = e^{tJ(\boldsymbol{x}^*)}\boldsymbol{y}(0)$$</p>
+<p><strong>稳定性判据</strong>：设$\lambda_1, \ldots, \lambda_d$是$J(\boldsymbol{x}^<em>)$的特征值，则：
+- 若所有$\text{Re}(\lambda_i) &lt; 0$，则$\boldsymbol{x}^</em>$渐近稳定
+- 若存在$\text{Re}(\lambda_i) &gt; 0$，则$\boldsymbol{x}^*$不稳定
+- 若所有$\text{Re}(\lambda_i) \leq 0$且存在$\text{Re}(\lambda_i) = 0$，需进一步分析</p>
+<h4 id="53">5.3 扩散过程的稳定性</h4>
+<p>对于扩散ODE$\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{f}_t(\boldsymbol{x}_t)$，考虑其作为非自治系统的稳定性。</p>
+<p>以高斯扩散为例，$\boldsymbol{f}<em _boldsymbol_x="\boldsymbol{x">t(\boldsymbol{x}_t) = -\frac{\dot{\sigma}_t}{\sigma_t}\nabla</em>_t)$。}_t}\log p_t(\boldsymbol{x</p>
+<p>若$p_t(\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{\mu}_t, \sigma_t^2\boldsymbol{I})$，则：
+$$\nabla_{\boldsymbol{x}_t}\log p_t(\boldsymbol{x}_t) = -\frac{\boldsymbol{x}_t - \boldsymbol{\mu}_t}{\sigma_t^2}$$</p>
+<p>因此：
+$$\boldsymbol{f}_t(\boldsymbol{x}_t) = \frac{\dot{\sigma}_t}{\sigma_t^3}(\boldsymbol{x}_t - \boldsymbol{\mu}_t)$$</p>
+<p>这是一个线性系统，Jacobian为$J_t = \frac{\dot{\sigma}_t}{\sigma_t^3}\boldsymbol{I}$。</p>
+<p>当$\dot{\sigma}_t &gt; 0$时（扩散阶段），$J_t &gt; 0$，系统是不稳定的（轨迹远离均值）。</p>
+<p>当反向运行时（$t \to -t$，生成阶段），$J_t &lt; 0$，系统稳定（轨迹收敛到数据分布）。</p>
+<h4 id="54">5.4 数值稳定性</h4>
+<p>数值求解ODE时，需要考虑数值方法的稳定性。</p>
+<p><strong>定义（数值稳定性）</strong>：数值方法称为稳定的，如果小的扰动不会导致解的指数增长。</p>
+<p>对于测试方程$\frac{dy}{dt} = \lambda y$（$\lambda &lt; 0$），数值方法
+$$y_{n+1} = R(h\lambda)y_n$$</p>
+<p>其中$R(z)$是稳定函数，$h$是步长。</p>
+<p><strong>稳定域</strong>：$S = {z \in \mathbb{C}: |R(z)| \leq 1}$。</p>
+<p>常见方法的稳定域：
+- 显式Euler：$S = {z: |1+z| \leq 1}$（圆盘，半径1，中心在$-1$）
+- 隐式Euler：$S = {z: |1-z| \geq 1}$（圆盘外部）
+- Runge-Kutta 4阶：更大的稳定域</p>
+<p>对于扩散模型，由于$\boldsymbol{f}_t$可能具有大的Lipschitz常数，需要选择稳定的数值格式（如隐式方法）或足够小的步长。</p>
+<h3 id="_19">六、特征线方法</h3>
+<h4 id="61">6.1 一阶偏微分方程的特征线法</h4>
+<p>考虑一阶拟线性PDE：
+$$a(x,y,u)\frac{\partial u}{\partial x} + b(x,y,u)\frac{\partial u}{\partial y} = c(x,y,u)$$</p>
+<p>特征线是空间中的曲线$(x(s), y(s), u(s))$，沿着它PDE退化为ODE：
+$$\frac{dx}{ds} = a(x,y,u), \quad \frac{dy}{ds} = b(x,y,u), \quad \frac{du}{ds} = c(x,y,u)$$</p>
+<p>这组ODE称为<strong>特征方程</strong>。</p>
+<p><strong>方法</strong>：
+1. 求解特征方程得到$x(s)$, $y(s)$, $u(s)$
+2. 消去参数$s$得到$u$关于$x$, $y$的隐式解
+3. 利用初始/边界条件确定积分常数</p>
+<h4 id="62">6.2 应用于连续性方程</h4>
+<p>连续性方程$\frac{\partial p}{\partial t} + \nabla \cdot (\boldsymbol{f}p) = 0$可以改写为：
+$$\frac{\partial p}{\partial t} + \boldsymbol{f} \cdot \nabla p + p(\nabla \cdot \boldsymbol{f}) = 0$$</p>
+<p>特征方程为：
+$$\frac{dt}{ds} = 1, \quad \frac{d\boldsymbol{x}}{ds} = \boldsymbol{f}(t, \boldsymbol{x}), \quad \frac{dp}{ds} = -p(\nabla \cdot \boldsymbol{f})$$</p>
+<p>第一、二个方程给出ODE $\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}(t, \boldsymbol{x})$（正是我们的扩散ODE）。</p>
+<p>第三个方程给出概率密度沿轨迹的变化：
+$$\frac{d\log p}{ds} = -\nabla \cdot \boldsymbol{f}$$</p>
+<p>积分得：
+$$\log p(t, \boldsymbol{x}(t)) - \log p(0, \boldsymbol{x}(0)) = -\int_0^t \nabla \cdot \boldsymbol{f}(\tau, \boldsymbol{x}(\tau)) d\tau$$</p>
+<p>即：
+$$p(t, \boldsymbol{x}(t)) = p(0, \boldsymbol{x}(0)) \exp\left(-\int_0^t \nabla \cdot \boldsymbol{f}(\tau, \boldsymbol{x}(\tau)) d\tau\right)$$</p>
+<p>这给出了概率密度的变换公式。</p>
+<h4 id="63">6.3 特征线法的几何意义</h4>
+<p>特征线法揭示了PDE与ODE的深刻联系：
+- <strong>ODE的解</strong>（轨迹）是特征线在物理空间$(t, \boldsymbol{x})$的投影
+- <strong>PDE的解</strong>（概率密度场）是沿着所有特征线的值的集合</p>
+<p>对于扩散模型：
+- 前向过程：特征线从数据点$\boldsymbol{x}<em _text_data="\text{data">0 \sim p</em>$出发，向外扩散
+- 后向过程：特征线从先验分布$\boldsymbol{x}}<em _text_prior="\text{prior">T \sim p</em>$出发，收敛到数据流形}</p>
+<h3 id="_20">七、分离变量法</h3>
+<h4 id="71">7.1 分离变量法的基本原理</h4>
+<p>对于偏微分方程，如果能将解写成若干个单变量函数的乘积：
+$$u(t, \boldsymbol{x}) = T(t)X(\boldsymbol{x})$$</p>
+<p>代入PDE可以将其分离为多个ODE，从而简化求解。</p>
+<h4 id="72">7.2 应用于时空分离的扩散模型</h4>
+<p>回顾文章中时空分离的假设，格林函数被分解为：
+$$\boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = (\phi_t(r), \varphi_t(r)(\boldsymbol{x}_t - \boldsymbol{x}_0))$$</p>
+<p>其中$r = |\boldsymbol{x}_t - \boldsymbol{x}_0|$。</p>
+<p>散度条件：
+$$\frac{\partial \phi_t}{\partial t} + \nabla_{\boldsymbol{x}_t} \cdot [\varphi_t(r)(\boldsymbol{x}_t - \boldsymbol{x}_0)] = 0$$</p>
+<p>利用$\nabla_{\boldsymbol{x}_t} r = \frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{r}$和散度的乘积法则：
+$$\nabla \cdot [\varphi_t(r)(\boldsymbol{x}_t - \boldsymbol{x}_0)] = \varphi_t(r) \nabla \cdot (\boldsymbol{x}_t - \boldsymbol{x}_0) + (\boldsymbol{x}_t - \boldsymbol{x}_0) \cdot \nabla \varphi_t(r)$$
+$$= d\varphi_t(r) + \varphi_t'(r)(\boldsymbol{x}_t - \boldsymbol{x}_0) \cdot \frac{\boldsymbol{x}_t - \boldsymbol{x}_0}{r} = d\varphi_t(r) + r\varphi_t'(r)$$</p>
+<p>因此：
+$$\frac{\partial \phi_t}{\partial t} + d\varphi_t(r) + r\varphi_t'(r) = 0$$</p>
+<p>改写为：
+$$\frac{\partial \phi_t}{\partial t} + \frac{1}{r^{d-1}}\frac{\partial}{\partial r}[r^d\varphi_t(r)] = 0$$</p>
+<p>这里实现了"时间-空间"的分离：左边只含$t$导数，右边只含$r$导数（但$\phi_t$, $\varphi_t$都依赖$t$）。</p>
+<p>给定$\phi_t(r)$后，可以积分求解$\varphi_t(r)$：
+$$r^d\varphi_t(r) = -\int \frac{\partial \phi_t}{\partial t} r^{d-1} dr + C(t)$$</p>
+<p>如果选择$C(t) = 0$：
+$$\varphi_t(r) = -\frac{1}{r^d}\int \frac{\partial \phi_t}{\partial t} r^{d-1} dr = -\frac{1}{r^d}\frac{\partial}{\partial t}\int \phi_t(r) r^{d-1} dr$$</p>
+<h4 id="73">7.3 高斯情形的精确解</h4>
+<p>设$\phi_t(r) = A_t e^{-r^2/2\sigma_t^2}$，其中$A_t = (2\pi\sigma_t^2)^{-d/2}$。</p>
+<p>计算：
+$$\frac{\partial \phi_t}{\partial t} = A_t e^{-r^2/2\sigma_t^2}\left[-\frac{d}{2\sigma_t^2}\dot{\sigma}_t + \frac{r^2\dot{\sigma}_t}{\sigma_t^3}\right] = \phi_t\left[-\frac{d\dot{\sigma}_t}{2\sigma_t^2} + \frac{r^2\dot{\sigma}_t}{\sigma_t^3}\right]$$</p>
+<p>积分$\int \frac{\partial \phi_t}{\partial t} r^{d-1} dr$涉及：
+$$\int \phi_t r^{d-1} dr = A_t \int_0^{\infty} e^{-r^2/2\sigma_t^2} r^{d-1} dr = A_t \sigma_t^d \int_0^{\infty} e^{-s^2/2} s^{d-1} ds \quad (s = r/\sigma_t)$$</p>
+<p>令$u = s^2/2$：
+$$\int_0^{\infty} e^{-s^2/2} s^{d-1} ds = 2^{d/2-1}\Gamma(d/2)$$</p>
+<p>因此：
+$$\int \phi_t r^{d-1} dr = A_t \sigma_t^d \cdot 2^{d/2-1}\Gamma(d/2) = \frac{1}{(2\pi)^{d/2}} \cdot 2^{d/2-1}\Gamma(d/2)$$</p>
+<p>（这是与$t$无关的常数，记为$C_d$）</p>
+<p>类似地计算$\int \phi_t r^{d+1} dr$，最终得到（通过Mathematica或手工计算）：
+$$\varphi_t(r) = \frac{\dot{\sigma}_t}{\sigma_t}\phi_t(r)$$</p>
+<p>这与文章中的结果一致。</p>
+<h3 id="_21">八、变分方法</h3>
+<h4 id="81">8.1 泛函与变分</h4>
+<p>设$J[u]$是泛函（函数的函数），其变分$\delta J$定义为：
+$$\delta J[u; v] = \lim_{\epsilon \to 0}\frac{J[u+\epsilon v] - J[u]}{\epsilon}$$</p>
+<p>其中$v$是任意测试函数。</p>
+<p>如果$\delta J[u; v] = 0$对所有$v$成立，则$u$是$J$的驻点（极值点）。</p>
+<h4 id="82-euler-lagrange">8.2 Euler-Lagrange方程</h4>
+<p>对于形如
+$$J[u] = \int_{\Omega} F(x, u, \nabla u) dx$$</p>
+<p>的泛函，其Euler-Lagrange方程为：
+$$\frac{\partial F}{\partial u} - \nabla \cdot \left(\frac{\partial F}{\partial(\nabla u)}\right) = 0$$</p>
+<p><strong>推导</strong>：设$u + \epsilon v$，计算变分：
+$$\begin{aligned}
+\delta J &= \frac{d}{d\epsilon}\Big|_{\epsilon=0} \int F(x, u+\epsilon v, \nabla u+\epsilon\nabla v) dx \\
+&= \int \left[\frac{\partial F}{\partial u}v + \frac{\partial F}{\partial(\nabla u)} \cdot \nabla v\right] dx
+\end{aligned}$$</p>
+<p>对第二项分部积分：
+$$\int \frac{\partial F}{\partial(\nabla u)} \cdot \nabla v dx = \int_{\partial\Omega} v \frac{\partial F}{\partial(\nabla u)} \cdot \boldsymbol{n} dS - \int v \nabla \cdot \left(\frac{\partial F}{\partial(\nabla u)}\right) dx$$</p>
+<p>若$v|_{\partial\Omega} = 0$（边界上为零），则边界项消失：
+$$\delta J = \int v\left[\frac{\partial F}{\partial u} - \nabla \cdot \left(\frac{\partial F}{\partial(\nabla u)}\right)\right] dx = 0$$</p>
+<p>由$v$的任意性，得Euler-Lagrange方程。</p>
+<h4 id="83">8.3 扩散模型的变分形式</h4>
+<p>扩散模型的目标可以写成变分形式。例如，得分匹配目标：
+$$\mathcal{L}_{\text{SM}} = \mathbb{E}_{t, \boldsymbol{x}_t}\left[\left\|\nabla_{\boldsymbol{x}_t}\log p_t(\boldsymbol{x}_t) - \boldsymbol{s}_{\theta}(t, \boldsymbol{x}_t)\right\|^2\right]$$</p>
+<p>这是关于$\boldsymbol{s}_{\theta}$的泛函，其极小值点满足：
+$$\boldsymbol{s}_{\theta}(t, \boldsymbol{x}_t) = \nabla_{\boldsymbol{x}_t}\log p_t(\boldsymbol{x}_t)$$</p>
+<p>另一个例子是最小作用量原理。对于轨迹$\boldsymbol{x}(t)$，定义作用量：
+$$S[\boldsymbol{x}] = \int_{t_0}^{T} L(t, \boldsymbol{x}(t), \dot{\boldsymbol{x}}(t)) dt$$</p>
+<p>其中$L$是Lagrangian。最小化$S$得到运动方程（Euler-Lagrange方程）：
+$$\frac{d}{dt}\left(\frac{\partial L}{\partial \dot{\boldsymbol{x}}}\right) - \frac{\partial L}{\partial \boldsymbol{x}} = 0$$</p>
+<p>对于扩散模型，可以定义"概率作用量"：
+$$S[p] = \int_0^T \int \frac{1}{2p_t}\left\|\frac{\partial p_t}{\partial t}\nabla_{\boldsymbol{x}_t} + \nabla_{\boldsymbol{x}_t} \cdot (\boldsymbol{f}_t p_t)\right\|^2 d\boldsymbol{x}_t dt$$</p>
+<p>最小化$S[p]$即要求满足连续性方程。</p>
+<h3 id="_22">九、数值解法</h3>
+<h4 id="91">9.1 有限差分法</h4>
+<p>有限差分法用离散的网格点近似连续的偏微分方程。</p>
+<p><strong>时间离散</strong>：将$[0, T]$分为$N$段，步长$\Delta t = T/N$，$t_n = n\Delta t$。</p>
+<p><strong>空间离散</strong>：将$\mathbb{R}^d$分为网格，步长$\Delta x$，网格点$\boldsymbol{x}_i$。</p>
+<p><strong>差分格式</strong>：</p>
+<ul>
+<li>前向差分：$\frac{\partial u}{\partial t} \approx \frac{u_{i}^{n+1} - u_i^n}{\Delta t}$</li>
+<li>中心差分：$\frac{\partial u}{\partial x} \approx \frac{u_{i+1}^n - u_{i-1}^n}{2\Delta x}$</li>
+<li>Laplacian：$\Delta u \approx \frac{u_{i+1}^n - 2u_i^n + u_{i-1}^n}{(\Delta x)^2}$</li>
+</ul>
+<p><strong>应用于连续性方程</strong>：
+$$\frac{p_i^{n+1} - p_i^n}{\Delta t} = -\nabla \cdot (\boldsymbol{f}_i^n p_i^n)$$</p>
+<p>离散化右边（使用通量形式）：
+$$\nabla \cdot (\boldsymbol{f}p) \approx \frac{(\boldsymbol{f}p)_{i+1/2} - (\boldsymbol{f}p)_{i-1/2}}{\Delta x}$$</p>
+<p>其中$(\boldsymbol{f}p)<em i_1="i+1">{i+1/2} = \frac{1}{2}[(\boldsymbol{f}p)_i + (\boldsymbol{f}p)</em>]$（中点法）。</p>
+<p><strong>稳定性条件（CFL条件）</strong>：
+$$\Delta t \leq \frac{\Delta x}{\max|\boldsymbol{f}|}$$</p>
+<h4 id="92-runge-kutta">9.2 Runge-Kutta方法</h4>
+<p>对于ODE $\frac{d\boldsymbol{x}}{dt} = \boldsymbol{f}(t, \boldsymbol{x})$，经典4阶Runge-Kutta方法（RK4）：
+$$\begin{aligned}
+\boldsymbol{k}_1 &= \boldsymbol{f}(t_n, \boldsymbol{x}_n) \\
+\boldsymbol{k}_2 &= \boldsymbol{f}(t_n + h/2, \boldsymbol{x}_n + h\boldsymbol{k}_1/2) \\
+\boldsymbol{k}_3 &= \boldsymbol{f}(t_n + h/2, \boldsymbol{x}_n + h\boldsymbol{k}_2/2) \\
+\boldsymbol{k}_4 &= \boldsymbol{f}(t_n + h, \boldsymbol{x}_n + h\boldsymbol{k}_3) \\
+\boldsymbol{x}_{n+1} &= \boldsymbol{x}_n + \frac{h}{6}(\boldsymbol{k}_1 + 2\boldsymbol{k}_2 + 2\boldsymbol{k}_3 + \boldsymbol{k}_4)
+\end{aligned}$$</p>
+<p><strong>局部截断误差</strong>：$O(h^5)$</p>
+<p><strong>全局误差</strong>：$O(h^4)$</p>
+<p>RK4在扩散模型采样中广泛应用（如DPM-Solver使用高阶ODE求解器）。</p>
+<h4 id="93-shooting-method">9.3 打靶法（Shooting Method）</h4>
+<p>打靶法用于求解边值问题。</p>
+<p><strong>问题</strong>：
+$$\begin{cases}
+\frac{d^2y}{dx^2} = f(x, y, y') \\
+y(a) = y_a, \quad y(b) = y_b
+\end{cases}$$</p>
+<p><strong>方法</strong>：
+1. 将二阶ODE化为一阶系统：$y_1 = y$, $y_2 = y'$
+   $$\frac{dy_1}{dx} = y_2, \quad \frac{dy_2}{dx} = f(x, y_1, y_2)$$</p>
+<ol>
+<li>
+<p>猜测初始斜率$s$，以$(y_1(a), y_2(a)) = (y_a, s)$为初值求解IVP</p>
+</li>
+<li>
+<p>检查终端值$y_1(b)$是否等于$y_b$；若不等，调整$s$重复（使用牛顿法或二分法）</p>
+</li>
+</ol>
+<p><strong>应用于扩散模型</strong>：生成过程可视为边值问题：
+- 起点：$\boldsymbol{x}<em _text_prior="\text{prior">T \sim p</em>$
+- 终点：$\boldsymbol{x}_0$应该在数据流形上}</p>
+<p>打靶法可以用来找到连接两者的轨迹。</p>
+<h4 id="94">9.4 谱方法</h4>
+<p>谱方法使用全局基函数（如Fourier级数、Chebyshev多项式）展开解：
+$$u(x) = \sum_{n=0}^{N} a_n \phi_n(x)$$</p>
+<p><strong>优点</strong>：对光滑函数，收敛速度快（指数收敛）</p>
+<p><strong>应用</strong>：对于周期性或在有界域上的问题，谱方法比有限差分更高效。</p>
+<p>例如，在傅里叶空间求解：
+$$\hat{u}(k) = \mathcal{F}[u](k)$$</p>
+<p>PDE $\frac{\partial u}{\partial t} = -\nabla \cdot (\boldsymbol{f}u)$在傅里叶空间变为：
+$$\frac{d\hat{u}}{dt} = -i\boldsymbol{k} \cdot \mathcal{F}[\boldsymbol{f}u]$$</p>
+<p>（卷积定理使得空间导数变为乘法）</p>
+<h3 id="ode">十、综合应用：构建扩散ODE的完整流程</h3>
+<p>综合以上理论，构建扩散ODE的一般步骤如下：</p>
+<h4 id="1">步骤1：选择格林函数的形式</h4>
+<p>根据物理或几何直觉，选择合适的格林函数假设：
+- 各向同性（时空统一）：$\boldsymbol{G} \propto \frac{(t, \boldsymbol{x}_t - \boldsymbol{x}_0)}{R^{d+1}}$
+- 时空分离（各向同性在空间）：$\boldsymbol{G} = (\phi_t(r), \varphi_t(r)(\boldsymbol{x}_t - \boldsymbol{x}_0))$
+- 更一般的形式：通过特征线法或变分法构造</p>
+<h4 id="2">步骤2：求解格林函数</h4>
+<p>利用散度条件$\nabla \cdot \boldsymbol{G} = 0$和边界条件：
+$$\begin{cases}
+\boldsymbol{G}_1(0, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) = \delta(\boldsymbol{x}_t - \boldsymbol{x}_0) \\
+\int \boldsymbol{G}_1(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) d\boldsymbol{x}_t = 1
+\end{cases}$$</p>
+<p>求出$\boldsymbol{G}$的显式表达式。</p>
+<h4 id="3">步骤3：构造向量场</h4>
+<p>通过格林函数积分得到向量场：
+$$\boldsymbol{u}(t, \boldsymbol{x}_t) = \int \boldsymbol{G}(t, 0; \boldsymbol{x}_t, \boldsymbol{x}_0) p_0(\boldsymbol{x}_0) d\boldsymbol{x}_0$$</p>
+<h4 id="4ode">步骤4：提取ODE</h4>
+<p>从向量场提取速度场：
+$$\boldsymbol{f}_t(\boldsymbol{x}_t) = \frac{\boldsymbol{u}_{>1}(t, \boldsymbol{x}_t)}{\boldsymbol{u}_1(t, \boldsymbol{x}_t)}$$</p>
+<p>得到扩散ODE：
+$$\frac{d\boldsymbol{x}_t}{dt} = \boldsymbol{f}_t(\boldsymbol{x}_t)$$</p>
+<h4 id="5">步骤5：验证解的性质</h4>
+<ul>
+<li><strong>存在唯一性</strong>：检验$\boldsymbol{f}_t$的连续性和Lipschitz条件</li>
+<li><strong>稳定性</strong>：分析Lyapunov函数或特征值</li>
+<li><strong>边界条件</strong>：验证初始分布$p_0$和先验分布$p_T$</li>
+</ul>
+<h4 id="6">步骤6：训练模型</h4>
+<p>构造损失函数（如得分匹配）：
+$$\mathcal{L} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{x}_t}\left[\left\|\boldsymbol{f}_t(\boldsymbol{x}_t) - \boldsymbol{f}_{\theta}(t, \boldsymbol{x}_t)\right\|^2\right]$$</p>
+<p>或：
+$$\mathcal{L} = \mathbb{E}_{t, \boldsymbol{x}_0, \boldsymbol{x}_t}\left[\left\|\frac{\boldsymbol{u}_{>1}(t, \boldsymbol{x}_t)}{\boldsymbol{u}_1(t, \boldsymbol{x}_t)} - \boldsymbol{u}_{\theta}(t, \boldsymbol{x}_t)\right\|^2\right]$$</p>
+<p>使用神经网络$\boldsymbol{u}<em _theta="\theta">{\theta}$或$\boldsymbol{f}</em>$拟合理论值。</p>
+<h4 id="7">步骤7：采样生成</h4>
+<p>使用数值ODE求解器（如RK4、DPM-Solver）从先验分布$\boldsymbol{x}_T \sim p_T$反向积分：
+$$\boldsymbol{x}_0 = \boldsymbol{x}_T - \int_T^0 \boldsymbol{f}_t(\boldsymbol{x}_t) dt$$</p>
+<p>（或正向积分，取决于ODE的方向定义）</p>
+<h3 id="_23">小结</h3>
+<p>本推导部分详细阐述了构建扩散ODE的数学理论基础，包括：</p>
+<ol>
+<li><strong>常微分方程理论</strong>：Picard-Lindelöf存在唯一性定理、Gronwall不等式、解对初值的依赖性</li>
+<li><strong>连续性方程与Fokker-Planck方程</strong>：从Liouville定理导出，物理意义为概率守恒</li>
+<li><strong>格林函数方法</strong>：构造点源响应，通过卷积得到任意源的解</li>
+<li><strong>边界条件</strong>：初值条件（数据分布）、终端条件（先验分布）、渐近条件</li>
+<li><strong>稳定性分析</strong>：Lyapunov方法、线性化、数值稳定性</li>
+<li><strong>特征线方法</strong>：揭示PDE与ODE的联系，概率密度沿轨迹的演化</li>
+<li><strong>分离变量法</strong>：时空分离假设下的求解，高斯扩散的精确解</li>
+<li><strong>变分方法</strong>：Euler-Lagrange方程，最小作用量原理</li>
+<li><strong>数值解法</strong>：有限差分、Runge-Kutta、打靶法、谱方法</li>
+<li><strong>完整流程</strong>：从格林函数到ODE到训练到采样的全流程</li>
+</ol>
+<p>这些数学工具共同构成了扩散模型的理论基础，为理解、设计和改进扩散模型提供了坚实的数学支撑。通过不同的假设（各向同性、时空分离等）和方法（格林函数、特征线、变分等），我们可以系统地构造各种扩散ODE，形成了真正的"扩散模型生产车间"。</p>
+        </div>
+    </div>
+</body>
+</html>

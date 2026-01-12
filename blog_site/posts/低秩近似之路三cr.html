@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>低秩近似之路（三）：CR</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>低秩近似之路（三）：CR</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 46.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10427">https://spaces.ac.cn/archives/10427</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在<a href="/archives/10407">《低秩近似之路（二）：SVD》</a>中，我们证明了SVD可以给出任意矩阵的最优低秩近似。那里的最优近似是无约束的，也就是说SVD给出的结果只管误差上的最小，不在乎矩阵的具体结构，而在很多应用场景中，出于可解释性或者非线性处理等需求，我们往往希望得到具有某些特殊结构的近似分解。</p>
+<p>因此，从这篇文章开始，我们将探究一些具有特定结构的低秩近似，而本文将聚焦于其中的CR近似（Column-Row Approximation），它提供了加速矩阵乘法运算的一种简单方案。</p>
+<h2 id="_1">问题背景</h2>
+<p>矩阵的最优$r$秩近似的一般提法是<br />
+\begin{equation}\mathop{\text{argmin}}_{\text{rank}(\tilde{\boldsymbol{M}})\leq r}\Vert \tilde{\boldsymbol{M}} - \boldsymbol{M}\Vert_F^2\label{eq:loss-m2}\end{equation}<br />
+其中$\boldsymbol{M},\tilde{\boldsymbol{M}}\in\mathbb{R}^{n\times m},r &lt; \min(n,m)$。在前两篇文章中，我们已经讨论了两种情况：</p>
+<blockquote>
+<p>1、如果$\tilde{\boldsymbol{M}}$不再有其他约束，那么$\tilde{\boldsymbol{M}}$的最优解就是$\boldsymbol{U}<em _:r_:r_="[:r,:r]">{[:,:r]}\boldsymbol{\Sigma}</em>$的奇异值分解（SVD）；}\boldsymbol{V}_{[:,:r]}^{\top}$，其中$\boldsymbol{M}=\boldsymbol{U}\boldsymbol{\Sigma} \boldsymbol{V}^{\top}$是$\boldsymbol{M</p>
+<p>2、如果约定$\tilde{\boldsymbol{M}}=\boldsymbol{A}\boldsymbol{B}$（$\boldsymbol{A}\in\mathbb{R}^{n\times r},\boldsymbol{B}\in\mathbb{R}^{r\times m}$），且$\boldsymbol{A}$（或$\boldsymbol{B}$）已经给定，那么$\tilde{\boldsymbol{M}}$的最优解是$\boldsymbol{A} \boldsymbol{A}^{\dagger} \boldsymbol{M}$（或$\boldsymbol{M} \boldsymbol{B}^{\dagger} \boldsymbol{B}$），这里的${}^\dagger$是“<a href="/archives/10366">伪逆</a>”。</p>
+</blockquote>
+<p>这两个结果都有很广泛的应用，但它们都没有显式地引入$\tilde{\boldsymbol{M}}$与$\boldsymbol{M}$结构上的关联，这就导致了很难直观地看到$\tilde{\boldsymbol{M}}$与$\boldsymbol{M}$的关联，换言之$\tilde{\boldsymbol{M}}$的可解释性不强。</p>
+<p>此外，如果目标中包含非线性运算如$\phi(\boldsymbol{X}\boldsymbol{W})$，通常也不允许我们使用任意实投影矩阵来降维，而是要求使用“选择矩阵（Selective Matrix）”，比如$\phi(\boldsymbol{X}\boldsymbol{W})\boldsymbol{S} = \phi(\boldsymbol{X}\boldsymbol{W}\boldsymbol{S})$对于任意矩阵$\boldsymbol{S}$不是恒成立的，但对于选择矩阵$\boldsymbol{S}$是恒成立的。</p>
+<p>所以，接下来我们关注选择矩阵约束下的低秩近似。具体来说，我们有$\boldsymbol{X}\in\mathbb{R}^{n\times l},\boldsymbol{Y}\in\mathbb{R}^{l\times m}$，然后选定$\boldsymbol{M}=\boldsymbol{X}\boldsymbol{Y}$，我们的任务是从$\boldsymbol{X}$中选出$r$列、从$\boldsymbol{Y}$中选出相应的$r$行来构建$\tilde{\boldsymbol{M}}$，即<br />
+\begin{equation}\mathop{\text{argmin}}<em _:_S_="[:,S]">S\Vert \underbrace{\boldsymbol{X}</em>}<em _S_:_="[S,:]">{\boldsymbol{C}}\underbrace{\boldsymbol{Y}</em>}<em _:_S_="[:,S]">{\boldsymbol{R}} - \boldsymbol{X}\boldsymbol{Y}\Vert_F^2\quad\text{s.t.}\quad S\subset \{0,1,\cdots,l-1\}, |S|=r\end{equation}<br />
+这里的$S$可以理解为slice，即按照Python的切片规则来理解，我们称$\boldsymbol{X}</em>}\boldsymbol{Y<em _:_S_="[:,S]">{[S,:]}$为$\boldsymbol{X}\boldsymbol{Y}$的“CR近似”。注意这种切片结果也可以用选择矩阵来等价描述，假设$\boldsymbol{X}</em>$：}$的第$1,2,\cdots,r$列分别为$\boldsymbol{X}$的第$s_1,s_2,\cdots,s_r$列，那么可以定义选择矩阵$\boldsymbol{S}\in\{0,1\}^{l\times r<br />
+\begin{equation}S_{i,j}=\left\{\begin{aligned}&amp;1, &amp;i = s_j \\\ &amp;0, &amp;i\neq s_j\end{aligned}\right.\end{equation}<br />
+即$\boldsymbol{S}$的第$j$列的第$s_j$个元素为1，其余都为0，这样一来就有$\boldsymbol{X}<em _S_:_="[S,:]">{[:,S]}=\boldsymbol{X}\boldsymbol{S}$以及$\boldsymbol{Y}</em>$。}=\boldsymbol{S}^{\top} \boldsymbol{Y</p>
+<h2 id="_2">初步近似</h2>
+<p>如果我们将$\boldsymbol{X},\boldsymbol{Y}$分别表示成<br />
+\begin{equation}\boldsymbol{X} = (\boldsymbol{x}<em i="1">1,\boldsymbol{x}_2,\cdots,\boldsymbol{x}_l),\quad \boldsymbol{Y}=\begin{pmatrix}\boldsymbol{y}_1^{\top} \\\ \boldsymbol{y}_2^{\top} \\\ \vdots \\\ \boldsymbol{y}_l^{\top}\end{pmatrix}\end{equation}<br />
+其中$\boldsymbol{x}_i\in\mathbb{R}^{n\times 1},\boldsymbol{y}_i\in\mathbb{R}^{m\times 1}$都是列向量，那么$\boldsymbol{X}\boldsymbol{Y}$可以写成<br />
+\begin{equation}\boldsymbol{X}\boldsymbol{Y} = \sum</em>}^l \boldsymbol{x<em _lambda_1_lambda_2_cdots_lambda_l_in_92_0_1_92_="\lambda_1,\lambda_2,\cdots,\lambda_l\in\{0,1\">i\boldsymbol{y}_i^{\top}\end{equation}<br />
+而找$\boldsymbol{X}\boldsymbol{Y}$的最优CR近似则可以等价地写成<br />
+\begin{equation}\mathop{\text{argmin}}</em>}}\left\Vert\sum_{i=1}^l \lambda_i \boldsymbol{x<em i="1">i\boldsymbol{y}_i^{\top} - \sum</em>}^l\boldsymbol{x<em i="1">i\boldsymbol{y}_i^{\top}\right\Vert_F^2\quad\text{s.t.}\quad \sum</em>}^l \lambda_i = r\label{eq:xy-l-k}\end{equation<br />
+我们知道，矩阵的$F$范数实际上就是将矩阵展平成向量来算模长，所以这个优化问题本质上就相当于给定$l$个向量$\boldsymbol{v}<em _lambda_1_lambda_2_cdots_lambda_l_in_92_0_1_92_="\lambda_1,\lambda_2,\cdots,\lambda_l\in\{0,1\">1,\boldsymbol{v}_2,\cdots,\boldsymbol{v}_l\in\mathbb{R}^d$，求<br />
+\begin{equation}\mathop{\text{argmin}}</em>}}\left\Vert\sum_{i=1}^l \lambda_i \boldsymbol{v<em i="1">i - \sum</em>}^l\boldsymbol{v<em i="1">i\right\Vert^2\quad\text{s.t.}\quad \sum</em>}^l \lambda_i = r\label{eq:v-l-k}\end{equation<br />
+其中$\boldsymbol{v}<em _gamma_1_gamma_2_cdots_gamma_l_in_92_0_1_92_="\gamma_1,\gamma_2,\cdots,\gamma_l\in\{0,1\">i = \text{vec}(\boldsymbol{x}_i \boldsymbol{y}_i^{\top})$，$d=nm$。记$\gamma_i = 1 - \lambda_i$，那么可以进一步简化成<br />
+\begin{equation}\mathop{\text{argmin}}</em>}}\left\Vert\sum_{i=1}^l \gamma_i \boldsymbol{v<em i="1">i\right\Vert^2\quad\text{s.t.}\quad \sum</em>}^l \gamma_i = l-r\label{eq:v-l-k-0}\end{equation<br />
+如果笔者没有理解错，这个优化问题的精确求解是NP-Hard的，所以一般情况下只能寻求近似算法。一个可精确求解的简单例子是$\boldsymbol{v}<em i="1">1,\boldsymbol{v}_2,\cdots,\boldsymbol{v}_l$两两垂直，此时<br />
+\begin{equation}\left\Vert\sum</em>}^l \gamma_i \boldsymbol{v<em i="1">i\right\Vert^2 = \sum</em>}^l \gamma_i^2 \Vert\boldsymbol{v}_i\Vert^2\end{equation<br />
+所以它的最小值就是最小的$l-r$个$\Vert\boldsymbol{v}_i\Vert^2$之和，即让模长最小的$l-r$个$\boldsymbol{v}_i$的$\gamma_i$等于1，剩下的$\gamma_i$则等于0。当两两正交的条件不严格成立时，我们依然可以将选择模长最小的$l-r$个$\boldsymbol{v}_i$作为一个近似解。回到原始的CR近似问题上，我们有$\Vert\boldsymbol{x}_i\boldsymbol{y}_i^{\top}\Vert_F = \Vert\boldsymbol{x}_i\Vert \Vert \boldsymbol{y}_i\Vert$，所以$\boldsymbol{X}\boldsymbol{Y}$的最优CR近似的一个baseline，就是保留$\boldsymbol{X}$的列向量与$\boldsymbol{Y}$对应的行向量模长乘积最大的$r$个列/行向量。</p>
+<h2 id="_3">采样视角</h2>
+<p>有一些场景允许我们将式$\eqref{eq:xy-l-k}$放宽为<br />
+\begin{equation}\mathop{\text{argmin}}<em i="1">{\lambda_1,\lambda_2,\cdots,\lambda_l\in\mathbb{R}}\left\Vert\sum</em>}^l \lambda_i \boldsymbol{x<em i="1">i\boldsymbol{y}_i^{\top} - \sum</em>}^l\boldsymbol{x<em i="1">i\boldsymbol{y}_i^{\top}\right\Vert_F^2\quad\text{s.t.}\quad \sum</em>}^l \#[\lambda_i\neq 0] = r\end{equation<br />
+其中$\#[\lambda_i\neq 0]$表示$\lambda_i\neq 0$时输出1，否则输出0。这个宽松版本其实就是将CR近似的形式从$\boldsymbol{C}\boldsymbol{R}$拓展成$\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R}$，其中$\boldsymbol{\Lambda}\in\mathbb{R}^{r\times r}$是对角阵，即允许我们调整对角阵$\boldsymbol{\Lambda}\in\mathbb{R}^{r\times r}$来达到更高的精度。相应地，式$\eqref{eq:v-l-k}$变为<br />
+\begin{equation}\mathop{\text{argmin}}<em i="1">{\lambda_1,\lambda_2,\cdots,\lambda_l\in\mathbb{R}}\left\Vert\sum</em>}^l \lambda_i \boldsymbol{v<em i="1">i - \sum</em>}^l\boldsymbol{v<em i="1">i\right\Vert^2\quad\text{s.t.}\quad \sum</em>}^l \#[\lambda_i\neq 0] = r\end{equation</p>
+<p>这样放宽之后，我们可以从采样视角来看待这个问题。首先我们引入任意$l$元分布$\boldsymbol{p}=(p_1,p_2,\cdots,p_l)$，然后我们就可以写出<br />
+\begin{equation}\sum_{i=1}^l\boldsymbol{v}<em i="1">i = \sum</em>}^l p_i\times\frac{\boldsymbol{v<em _boldsymbol_p="\boldsymbol{p" i_sim="i\sim">i}{p_i} = \mathbb{E}</em>}} \left[\frac{\boldsymbol{v<em>i}{p_i}\right] \end{equation}<br />
+也就是说，$\boldsymbol{v}_i/p_i$的数学期望正好是我们要逼近的目标，所以我们可以通过从$\boldsymbol{p}$分布 </em><strong>独立重复采样</strong><em i="1"> 来构建近似：<br />
+\begin{equation}\sum</em>}^l\boldsymbol{v<em _boldsymbol_p="\boldsymbol{p" i_sim="i\sim">i = \mathbb{E}</em>}} \left[\frac{\boldsymbol{v<em j="1">i}{p_i}\right] \approx \frac{1}{r}\sum</em>}^r \frac{\boldsymbol{v<em s_j="s_j">{s_j}}{p</em>}},\quad s_1,s_2,\cdots,s_r\sim \boldsymbol{p}\end{equation<br />
+这意味着当$i$是$s_1,s_2,\cdots,s_r$之一时有$\lambda_i = (r p_i)^{-1}$，否则$\lambda_i=0$。可能有读者疑问为什么要独立重复采样，而不是更符合逼近需求的不放回采样呢？无他，纯粹是因为独立重复采样使得后面的分析更简单。</p>
+<p>到目前为止，我们的理论结果跟分布$\boldsymbol{p}$的选择无关，也就是说对于任意$\boldsymbol{p}$都是成立的，这给我们提供了选择最优$\boldsymbol{p}$的可能性。那如何衡量$\boldsymbol{p}$的优劣呢？很显然我们希望每次采样估计的误差越小越好，因此可以用采样估计的误差<br />
+\begin{equation}\mathbb{E}<em i="1">{i\sim \boldsymbol{p}} \left[\left\Vert\frac{\boldsymbol{v}_i}{p_i} - \sum</em>}^l\boldsymbol{v<em i="1">i\right\Vert^2\right] = \left(\sum</em>}^l \frac{\Vert\boldsymbol{v<em i="1">i\Vert^2}{p_i}\right) - \left\Vert\sum</em>}^l\boldsymbol{v<em i="1">i\right\Vert^2 \end{equation}<br />
+来比较不同的$\boldsymbol{p}$之间的优劣。接着利用均值不等式有<br />
+\begin{equation}\sum</em>}^l \frac{\Vert\boldsymbol{v<em i="1">i\Vert^2}{p_i} = \left(\sum</em>}^l \frac{\Vert\boldsymbol{v<em i="1">i\Vert^2}{p_i} + p_i Z^2\right) - Z^2\geq \left(\sum</em>}^l 2\Vert\boldsymbol{v<em i="1">i\Vert Z\right) - Z^2\end{equation}<br />
+等号在$\Vert\boldsymbol{v}_i\Vert^2 / p_i = p_i Z^2$时取到，由此可得最优的$\boldsymbol{p}$为<br />
+\begin{equation}p_i^* = \frac{\Vert\boldsymbol{v}_i\Vert}{Z},\quad Z = \sum\limits</em>}^l \Vert\boldsymbol{v<em _boldsymbol_p="\boldsymbol{p" i_sim="i\sim">i\Vert\end{equation}<br />
+对应的误差为<br />
+\begin{equation}\mathbb{E}</em>}} \left[\left\Vert\frac{\boldsymbol{v<em i="1">i}{p_i} - \sum</em>}^l\boldsymbol{v<em i="1">i\right\Vert^2\right] = \left(\sum</em>}^l \Vert\boldsymbol{v<em i="1">i\Vert\right)^2 - \left\Vert\sum</em>}^l\boldsymbol{v}_i\right\Vert^2 \end{equation<br />
+最优的$p_i$正好正比于$\Vert\boldsymbol{v}_i\Vert$，所以概率最大的$r$个$\boldsymbol{v}_i$也正是模长最大的$r$个$\boldsymbol{v}_i$，这就跟上一节的近似联系起来了。该结果出自2006年的论文<a href="https://www.stat.berkeley.edu/~mmahoney/pubs/matrix1_SICOMP.pdf">《Fast Monte Carlo Algorithms for Matrices I: Approximating Matrix Multiplication》</a>，初衷是加速矩阵乘法，它表明只要按照$p_i\propto \Vert \boldsymbol{x}_i\boldsymbol{y}_i^{\top}\Vert_F = \Vert \boldsymbol{x}_i\Vert \Vert\boldsymbol{y}_i\Vert$来采样$\boldsymbol{X},\boldsymbol{Y}$对应的列/行，并乘以$(r p_i)^{-1/2}$，就可以得到$\boldsymbol{X}\boldsymbol{Y}$的一个CR近似，从而将乘法复杂度从$\mathcal{O}(lmn)$降低到$\mathcal{O}(rmn)$。</p>
+<h2 id="_4">延伸讨论</h2>
+<p>不管是按模长排序还是按$p_i\propto \Vert\boldsymbol{v}_i\Vert$随机采样，它们都允许我们在线性复杂度【即$\mathcal{O}(l)$】内构建一个CR近似，这对于实时计算来说当然是很理想的，但由于排序或采样都只依赖于$\Vert\boldsymbol{v}_i\Vert$，所以精度只能说一般。如果我们可以接受更高的复杂度，那么如何提高CR近似的精度呢？</p>
+<p>我们可以尝试将排序的单位改为$k$元组。简单起见，假设$k \leq l-r$是$l-r$的一个因数，$l$个向量$\boldsymbol{v}<em s_1="s_1">1,\boldsymbol{v}_2,\cdots,\boldsymbol{v}_l$选$k$个的组合数为$C_l^k$，对于每个组合$\{s_1,s_2,\cdots,s_k\}$我们都可以算出向量和的模长$\Vert \boldsymbol{v}</em>} + \boldsymbol{v<em s_k="s_k">{s_2} + \cdots + \boldsymbol{v}</em>$的近似解：}\Vert$。有了这些数据，我们就可以贪婪地构建$\eqref{eq:v-l-k-0</p>
+<blockquote>
+<p>初始化$\Omega = \{1,2,\cdots,l\},\Theta=\{\}$</p>
+<p>对于$t=1,2,\cdots,(l-r)/k$，执行：<br />
+ $\Theta = \Theta\,\cup\,\mathop{\text{argmin}}\limits_{\{s_1,s_2,\cdots,s_k\}\subset \Omega}\Vert \boldsymbol{v}<em s_2="s_2">{s_1} + \boldsymbol{v}</em>\Vert$；} + \cdots + \boldsymbol{v}_{s_k<br />
+ $\Omega = \Omega\,\backslash\,\Theta$；</p>
+<p>返回$\Theta$。</p>
+</blockquote>
+<p>说白了，就是每次都从剩下的向量中挑选和模长最小的$k$个向量，重复挑选$(l-r)/k$次即得到$l-r$个向量，它是按照单个向量模长来排序的自然推广，其复杂度为$\mathcal{O}(C_l^k)$，当$k &gt; 1$且$l$比较大时可能难以承受，这也侧面体现了原问题精确求解的复杂性。</p>
+<p>另一个值得思考的问题是如果允许CR近似放宽为$\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R}$，那么$\boldsymbol{\Lambda}$的最优解是什么呢？如果不限定$\boldsymbol{\Lambda}$的结构，那么答案可以由伪逆给出<br />
+\begin{equation}\boldsymbol{\Lambda}^<em> = \mathop{\text{argmin}}<em _lambda_1_lambda_2_cdots_lambda_r="\lambda_1,\lambda_2,\cdots,\lambda_r">{\boldsymbol{\Lambda}}\Vert \boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R} - \boldsymbol{X}\boldsymbol{Y}\Vert_F^2 = \boldsymbol{C}^{\dagger}\boldsymbol{X}\boldsymbol{Y}\boldsymbol{R}^{\dagger}\end{equation}<br />
+如果$\boldsymbol{\Lambda}$必须是对角阵呢？那可以先将问题重述为给定$\{\boldsymbol{u}_1,\boldsymbol{u}_2,\cdots,\boldsymbol{u}_r\}\subset\{\boldsymbol{v}_1,\boldsymbol{v}_2,\cdots,\boldsymbol{v}_l\}$，求<br />
+\begin{equation}\mathop{\text{argmin}}</em>}\left\Vert\sum_{i=1}^r \lambda_i \boldsymbol{u<em i="1">i - \sum</em>}^l\boldsymbol{v<em _boldsymbol_lambda="\boldsymbol{\lambda">i\right\Vert^2\end{equation}<br />
+我们记$\boldsymbol{U} = (\boldsymbol{u}_1,\boldsymbol{u}_2,\cdots,\boldsymbol{u}_r), \boldsymbol{V} = (\boldsymbol{v}_1,\boldsymbol{v}_2,\cdots,\boldsymbol{v}_l), \boldsymbol{\lambda}=(\lambda_1,\lambda_2,\cdots,\lambda_r)^{\top}$，那么优化目标可以写成<br />
+\begin{equation}\mathop{\text{argmin}}</em>}}\left\Vert\boldsymbol{U}\boldsymbol{\lambda} - \boldsymbol{V}\boldsymbol{1}_{l\times 1}\right\Vert^2\end{equation<br />
+这同样可以通过伪逆写出最优解<br />
+\begin{equation}\boldsymbol{\lambda}^</em> = \boldsymbol{U}^{\dagger}\boldsymbol{V}\boldsymbol{1}<em 1="1" l_times="l\times">{l\times 1} = (\boldsymbol{U}^{\top}\boldsymbol{U})^{-1}\boldsymbol{U}^{\top}\boldsymbol{V}\boldsymbol{1}</em>} \end{equation<br />
+最后一个等号假设了$\boldsymbol{U}^{\top}\boldsymbol{U}$可逆，这通常能满足，如果不满足的话$(\boldsymbol{U}^{\top}\boldsymbol{U})^{-1}$改$(\boldsymbol{U}^{\top}\boldsymbol{U})^{\dagger}$就行。</p>
+<p>现在的问题是直接套用上式的话对原始问题来说计算量太大，因为$\boldsymbol{v}<em i_j="i,j">i = \text{vec}(\boldsymbol{x}_i \boldsymbol{y}_i^{\top})$，即$\boldsymbol{v}_i$是$mn$维向量，所以$\boldsymbol{V}$大小为$mn\times l$、$\boldsymbol{U}$大小为$mn\times r$，这在$m,n$较大时比较难受。利用$\boldsymbol{v}_i = \text{vec}(\boldsymbol{x}_i \boldsymbol{y}_i^{\top})$能帮我们进一步化简上式。不妨设$\boldsymbol{u}_i = \text{vec}(\boldsymbol{c}_i \boldsymbol{r}_i^{\top})$，那么<br />
+\begin{equation}\begin{aligned}(\boldsymbol{U}^{\top}\boldsymbol{V})</em>} =&amp;\, \langle \boldsymbol{c<em i_j="i,j">i \boldsymbol{r}_i^{\top}, \boldsymbol{x}_j \boldsymbol{y}_j^{\top}\rangle_F = \text{Tr}(\boldsymbol{r}_i \boldsymbol{c}_i^{\top}\boldsymbol{x}_j \boldsymbol{y}_j^{\top}) = (\boldsymbol{c}_i^{\top}\boldsymbol{x}_j)(\boldsymbol{r}_i^{\top} \boldsymbol{y}_j) \\\[5pt]<br />
+=&amp;\, [(\boldsymbol{C}^{\top}\boldsymbol{X})\otimes (\boldsymbol{R}\boldsymbol{Y}^{\top})]</em><br />
+\end{aligned}\end{equation}<br />
+即$\boldsymbol{U}^{\top}\boldsymbol{V}=(\boldsymbol{C}^{\top}\boldsymbol{X})\otimes (\boldsymbol{R}\boldsymbol{Y}^{\top}),\boldsymbol{U}^{\top}\boldsymbol{U}=(\boldsymbol{C}^{\top}\boldsymbol{C})\otimes (\boldsymbol{R}\boldsymbol{R}^{\top})$，这里的$\otimes$是<a href="https://en.wikipedia.org/wiki/Hadamard_product_(matrices)">Hadamard积</a>，这样恒等变换之后$\boldsymbol{U}^{\top}\boldsymbol{V}$和$\boldsymbol{U}^{\top}\boldsymbol{U}$的计算量就降低了。</p>
+<h2 id="_5">文章小结</h2>
+<p>本文介绍了矩阵乘法的CR近似，这是一种具有特定行列结构的低秩近似，相比由SVD给出的最优低秩近似，CR近似具有更直观的物理意义以及更好的可解释性。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10427">https://spaces.ac.cn/archives/10427</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Oct. 11, 2024). 《低秩近似之路（三）：CR 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10427">https://spaces.ac.cn/archives/10427</a></p>
+<p>@online{kexuefm-10427,<br />
+title={低秩近似之路（三）：CR},<br />
+author={苏剑林},<br />
+year={2024},<br />
+month={Oct},<br />
+url={\url{https://spaces.ac.cn/archives/10427}},<br />
+} </p>
+<hr />
+<h2 id="_6">推导</h2>
+<h3 id="1-cr">1. CR分解的形式化定义</h3>
+<p>CR分解（Column-Row decomposition）是一种特殊的矩阵分解方法，它通过选择原矩阵的部分列和对应行来构造低秩近似。对于矩阵$\boldsymbol{M}\in\mathbb{R}^{n\times m}$，我们可以将其写成$\boldsymbol{M}=\boldsymbol{X}\boldsymbol{Y}$的形式，其中$\boldsymbol{X}\in\mathbb{R}^{n\times l}$，$\boldsymbol{Y}\in\mathbb{R}^{l\times m}$。</p>
+<p><strong>定义1</strong>（CR分解）：给定矩阵$\boldsymbol{M}=\boldsymbol{X}\boldsymbol{Y}$和秩参数$r &lt; l$，CR分解寻找索引集$S\subset{1,2,\cdots,l}$满足$|S|=r$，使得
+$$\boldsymbol{M}\approx \boldsymbol{C}\boldsymbol{R} = \boldsymbol{X}_{[:,S]}\boldsymbol{Y}_{[S,:]}$$
+其中$\boldsymbol{C}\in\mathbb{R}^{n\times r}$由$\boldsymbol{X}$的$r$列组成，$\boldsymbol{R}\in\mathbb{R}^{r\times m}$由$\boldsymbol{Y}$的对应$r$行组成。</p>
+<p>更一般地，我们可以引入权重矩阵$\boldsymbol{\Lambda}\in\mathbb{R}^{r\times r}$，得到加权CR分解：
+$$\boldsymbol{M}\approx \boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R}$$</p>
+<p><strong>命题1</strong>（选择矩阵表示）：令$\boldsymbol{S}\in{0,1}^{l\times r}$为选择矩阵，其中$S_{i,j}=1$当且仅当$i=s_j$（第$j$个被选中的索引），则有
+$$\boldsymbol{C} = \boldsymbol{X}\boldsymbol{S},\quad \boldsymbol{R} = \boldsymbol{S}^{\top}\boldsymbol{Y}$$</p>
+<p>证明：选择矩阵$\boldsymbol{S}$的第$j$列是一个单位向量，其第$s_j$个位置为1，其余为0。因此$\boldsymbol{X}\boldsymbol{S}$选择了$\boldsymbol{X}$的第$s_1,s_2,\cdots,s_r$列，$\boldsymbol{S}^{\top}\boldsymbol{Y}$选择了$\boldsymbol{Y}$的对应行。</p>
+<h3 id="2-column-subset-selection-problem">2. 列子集选择问题（Column Subset Selection Problem）</h3>
+<p><strong>定义2</strong>（CSSP）：列子集选择问题（Column Subset Selection Problem, CSSP）定义为：给定$\boldsymbol{A}\in\mathbb{R}^{n\times m}$和整数$r$，寻找$r$个列的索引集$S$，使得
+$$\min_{S:|S|=r}\min_{\boldsymbol{Z}\in\mathbb{R}^{r\times m}}\|\boldsymbol{A} - \boldsymbol{A}_{[:,S]}\boldsymbol{Z}\|_F$$</p>
+<p>这个问题在CR分解中有直接应用。当我们固定了列选择$\boldsymbol{C}$后，最优的$\boldsymbol{Z}$可以通过伪逆得到：
+$$\boldsymbol{Z}^* = \boldsymbol{C}^{\dagger}\boldsymbol{A} = (\boldsymbol{C}^{\top}\boldsymbol{C})^{-1}\boldsymbol{C}^{\top}\boldsymbol{A}$$</p>
+<p><strong>定理1</strong>（CSSP的复杂度）：CSSP问题是NP-hard的。</p>
+<p>证明思路：可以归约到组合优化问题。从$l$个列中选择$r$个的组合数为$\binom{l}{r}$，穷举搜索的复杂度为指数级。即使贪婪算法也无法保证常数近似比。</p>
+<p>因此，我们需要随机化算法和近似算法来处理CSSP。</p>
+<h3 id="3-leverage-score">3. Leverage Score采样理论</h3>
+<p>leverage score是一种重要的列重要性度量，它源于统计回归和数值线性代数。</p>
+<p><strong>定义3</strong>（Leverage Scores）：给定矩阵$\boldsymbol{A}\in\mathbb{R}^{n\times m}$，设其秩-$r$ SVD为$\boldsymbol{A}\approx\boldsymbol{U}_r\boldsymbol{\Sigma}_r\boldsymbol{V}_r^{\top}$，则第$i$列的leverage score定义为：
+$$\tau_i = \|\boldsymbol{U}_r^{\top}\boldsymbol{a}_i\|^2 = \sum_{j=1}^r U_{j,i}^2$$
+其中$\boldsymbol{a}_i$是$\boldsymbol{A}$的第$i$列，$\boldsymbol{U}_r$是左奇异向量矩阵的前$r$列。</p>
+<p><strong>性质</strong>：leverage scores满足：
+$$\sum_{i=1}^m \tau_i = \text{Tr}(\boldsymbol{U}_r^{\top}\boldsymbol{U}_r) = r$$</p>
+<p><strong>几何解释</strong>：$\tau_i$度量了第$i$列在前$r$个左奇异向量张成的子空间中的"影响力"。leverage score大的列对子空间贡献更多。</p>
+<p>对于CR分解，我们可以定义联合leverage score。设$\boldsymbol{M}=\boldsymbol{X}\boldsymbol{Y}$，令
+$$\boldsymbol{v}_i = \text{vec}(\boldsymbol{x}_i\boldsymbol{y}_i^{\top})\in\mathbb{R}^{nm}$$
+堆叠所有$\boldsymbol{v}_i$得到矩阵$\boldsymbol{V}=(\boldsymbol{v}_1,\cdots,\boldsymbol{v}_l)\in\mathbb{R}^{nm\times l}$。</p>
+<p><strong>定义4</strong>（CR的Leverage Scores）：对于CR分解，第$i$个列-行对的leverage score定义为：
+$$\ell_i = \|\boldsymbol{P}_r\boldsymbol{v}_i\|^2 / \|\boldsymbol{v}_i\|^2$$
+其中$\boldsymbol{P}_r$是$\boldsymbol{V}$的前$r$个主成分子空间的投影矩阵。</p>
+<p>然而，直接计算leverage scores需要SVD，代价为$\mathcal{O}(\min(nm^2l, n^2ml))$，这太昂贵。因此我们使用更简单的采样分布。</p>
+<h3 id="4">4. 基于模长的采样策略</h3>
+<p>回顾正文中的结果，最优采样分布为：
+$$p_i = \frac{\|\boldsymbol{v}_i\|}{\sum_{j=1}^l\|\boldsymbol{v}_j\|} = \frac{\|\boldsymbol{x}_i\|\cdot\|\boldsymbol{y}_i\|}{\sum_{j=1}^l\|\boldsymbol{x}_j\|\cdot\|\boldsymbol{y}_j\|}$$</p>
+<p>现在我们严格推导这个结果并给出误差界。</p>
+<p><strong>定理2</strong>（无偏估计）：定义采样估计
+$$\hat{\boldsymbol{M}} = \frac{1}{r}\sum_{j=1}^r \frac{\boldsymbol{x}_{s_j}\boldsymbol{y}_{s_j}^{\top}}{p_{s_j}}$$
+其中$s_1,\cdots,s_r$独立同分布地从分布$\boldsymbol{p}=(p_1,\cdots,p_l)$中采样，则
+$$\mathbb{E}[\hat{\boldsymbol{M}}] = \boldsymbol{M}$$</p>
+<p>证明：
+\begin{align}
+\mathbb{E}[\hat{\boldsymbol{M}}] &amp;= \frac{1}{r}\sum_{j=1}^r \mathbb{E}\left[\frac{\boldsymbol{x}<em s_j="s_j">{s_j}\boldsymbol{y}</em>\right] \
+&amp;= \frac{1}{r}\sum_{j=1}^r \sum_{i=1}^l p_i \cdot \frac{\boldsymbol{x}}^{\top}}{p_{s_j}<em j="1">i\boldsymbol{y}_i^{\top}}{p_i} \
+&amp;= \frac{1}{r}\sum</em>}^r \sum_{i=1}^l \boldsymbol{x<em i="1">i\boldsymbol{y}_i^{\top} \
+&amp;= \sum</em>
+\end{align}}^l \boldsymbol{x}_i\boldsymbol{y}_i^{\top} = \boldsymbol{M</p>
+<p><strong>定理3</strong>（方差界）：采样估计的方差为：
+$$\mathbb{E}\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F^2 = \frac{1}{r}\left(\sum_{i=1}^l \frac{\|\boldsymbol{v}_i\|^2}{p_i} - \|\boldsymbol{M}\|_F^2\right)$$</p>
+<p>证明：由于$s_1,\cdots,s_r$独立同分布，
+\begin{align}
+\mathbb{E}|\hat{\boldsymbol{M}} - \boldsymbol{M}|<em j="1">F^2 &amp;= \mathbb{E}\left|\frac{1}{r}\sum</em>}^r\left(\frac{\boldsymbol{v<em s_j="s_j">{s_j}}{p</em>\right)\right|^2 \
+&amp;= \frac{1}{r^2}\sum_{j=1}^r \mathbb{E}\left|\frac{\boldsymbol{v}}} - \boldsymbol{M<em s_j="s_j">{s_j}}{p</em>\right|^2 \
+&amp;= \frac{1}{r}\mathbb{E}\left|\frac{\boldsymbol{v}}} - \boldsymbol{M<em s_1="s_1">{s_1}}{p</em>\right|^2
+\end{align}
+其中第二行利用了独立性（交叉项期望为0），第三行利用了同分布性。}} - \boldsymbol{M</p>
+<p>继续计算：
+\begin{align}
+\mathbb{E}\left|\frac{\boldsymbol{v}<em s_1="s_1">{s_1}}{p</em>}} - \boldsymbol{M}\right|^2 &amp;= \mathbb{E}\left|\frac{\boldsymbol{v<em s_1="s_1">{s_1}}{p</em>|^2 \
+&amp;= \sum_{i=1}^l p_i \cdot \frac{|\boldsymbol{v}}}\right|^2 - |\boldsymbol{M<em i="1">i|^2}{p_i^2} - |\boldsymbol{M}|^2 \
+&amp;= \sum</em>|_F^2
+\end{align}}^l \frac{|\boldsymbol{v}_i|^2}{p_i} - |\boldsymbol{M</p>
+<p><strong>推论1</strong>（最优分布）：使方差最小的分布为
+$$p_i^* = \frac{\|\boldsymbol{v}_i\|}{\sum_{j=1}^l\|\boldsymbol{v}_j\|}$$
+对应的最小方差为：
+$$\mathbb{E}\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F^2 = \frac{1}{r}\left[\left(\sum_{i=1}^l\|\boldsymbol{v}_i\|\right)^2 - \|\boldsymbol{M}\|_F^2\right]$$</p>
+<p>证明：这是带约束$\sum_i p_i=1$的凸优化问题。构造拉格朗日函数：
+$$\mathcal{L} = \sum_{i=1}^l \frac{\|\boldsymbol{v}_i\|^2}{p_i} + \lambda\left(\sum_{i=1}^l p_i - 1\right)$$</p>
+<p>求导并令其为零：
+$$\frac{\partial\mathcal{L}}{\partial p_i} = -\frac{\|\boldsymbol{v}_i\|^2}{p_i^2} + \lambda = 0$$</p>
+<p>得到$p_i = |\boldsymbol{v}_i|/\sqrt{\lambda}$。代入约束$\sum_i p_i=1$得到$\sqrt{\lambda}=\sum_j|\boldsymbol{v}_j|$，因此
+$$p_i^* = \frac{\|\boldsymbol{v}_i\|}{\sum_{j=1}^l\|\boldsymbol{v}_j\|}$$</p>
+<h3 id="5">5. 概率误差界的推导</h3>
+<p>现在我们推导更精细的概率界，而不仅仅是期望误差。</p>
+<p><strong>定理4</strong>（Frobenius范数的概率界）：设$\hat{\boldsymbol{M}}$是按$p_i^*$采样$r$次得到的估计，则对任意$\delta\in(0,1)$，以至少$1-\delta$的概率有：
+$$\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F \leq \frac{1}{\sqrt{r}}\left(\sum_{i=1}^l\|\boldsymbol{v}_i\|\right)\sqrt{\frac{2\ln(2/\delta)}{1}}$$</p>
+<p>证明：定义独立随机变量
+$$\boldsymbol{Z}_j = \frac{\boldsymbol{v}_{s_j}}{p_{s_j}} - \boldsymbol{M}$$</p>
+<p>则$\mathbb{E}[\boldsymbol{Z}_j]=0$且$|\boldsymbol{Z}_j|$有界。我们有
+$$\hat{\boldsymbol{M}} - \boldsymbol{M} = \frac{1}{r}\sum_{j=1}^r \boldsymbol{Z}_j$$</p>
+<p>注意到
+$$\|\boldsymbol{Z}_j\| \leq \frac{\|\boldsymbol{v}_{s_j}\|}{p_{s_j}} + \|\boldsymbol{M}\| \leq \frac{\sum_i\|\boldsymbol{v}_i\|}{\min_i p_i} + \|\boldsymbol{M}\|$$</p>
+<p>由于$p_i^* = |\boldsymbol{v}<em _min="\min">i|/Z$（其中$Z=\sum_i|\boldsymbol{v}_i|$），我们有$\min_i p_i \geq |\boldsymbol{v}</em>|/Z$。</p>
+<p>应用矩阵Bernstein不等式（见参考文献[Tropp, 2012]），可得上述概率界。具体细节涉及复杂的集中不等式理论。</p>
+<p><strong>定理5</strong>（谱范数界）：以高概率，采样估计还满足谱范数界：
+$$\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_2 \leq \mathcal{O}\left(\frac{\sigma_{\max}(\boldsymbol{M})\sqrt{l\log l}}{\sqrt{r}}\right)$$
+其中$\sigma_{\max}(\boldsymbol{M})$是$\boldsymbol{M}$的最大奇异值。</p>
+<p>这个界说明：随着采样数$r$增加，误差以$1/\sqrt{r}$的速度下降。</p>
+<h3 id="6-svd">6. 与截断SVD的误差对比</h3>
+<p>回顾截断SVD给出的最优秩-$r$近似：
+$$\boldsymbol{M}_r^{\text{SVD}} = \boldsymbol{U}_r\boldsymbol{\Sigma}_r\boldsymbol{V}_r^{\top}$$</p>
+<p>其误差为：
+$$\|\boldsymbol{M} - \boldsymbol{M}_r^{\text{SVD}}\|_F = \sqrt{\sum_{i=r+1}^{\min(n,m)}\sigma_i^2}$$</p>
+<p>这是所有秩-$r$矩阵中的最优误差（Eckart-Young定理）。</p>
+<p><strong>定理6</strong>（CR vs SVD误差比较）：对于CR采样估计$\hat{\boldsymbol{M}}$，期望误差满足
+$$\mathbb{E}\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F^2 \geq \|\boldsymbol{M} - \boldsymbol{M}_r^{\text{SVD}}\|_F^2$$</p>
+<p>这是因为SVD提供了全局最优解，而CR受到列选择的约束。</p>
+<p><strong>定量比较</strong>：设$\boldsymbol{M}$的奇异值为$\sigma_1\geq\sigma_2\geq\cdots$，则
+- SVD误差：$|\boldsymbol{M} - \boldsymbol{M}<em i_r="i&gt;r">r^{\text{SVD}}|_F^2 = \sum</em>\sigma_i^2$
+- CR期望误差：$\mathbb{E}|\hat{\boldsymbol{M}} - \boldsymbol{M}|_F^2 = \frac{1}{r}\left[(\sum_i|\boldsymbol{v}_i|)^2 - |\boldsymbol{M}|_F^2\right]$</p>
+<p><strong>例子</strong>：假设$\boldsymbol{M}$的奇异值呈快速衰减，即$\sigma_i \approx \sigma_1 e^{-\alpha i}$，则：
+- SVD能捕获主要能量，误差小
+- CR的性能依赖于列之间的相关性：如果$\boldsymbol{v}_i$之间正交性强，CR表现接近SVD；如果相关性强，CR误差可能显著大于SVD</p>
+<p><strong>近似比</strong>：在最坏情况下，可以证明存在常数$c$使得
+$$\mathbb{E}\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F^2 \leq c\cdot r\cdot \|\boldsymbol{M} - \boldsymbol{M}_r^{\text{SVD}}\|_F^2$$</p>
+<p>但在实际应用中，通过leverage score采样可以获得更好的常数$c$。</p>
+<h3 id="7-determinantal-point-process-dpp">7. Determinantal Point Process (DPP) 采样</h3>
+<p>DPP是一种优雅的采样方法，它能自然地捕获多样性，在CR分解中表现出色。</p>
+<p><strong>定义5</strong>（DPP）：一个离散DPP由核矩阵$\boldsymbol{L}\in\mathbb{R}^{l\times l}$（半正定）定义。子集$S\subseteq{1,\cdots,l}$的采样概率为：
+$$\mathbb{P}(S) \propto \det(\boldsymbol{L}_{S,S})$$
+其中$\boldsymbol{L}_{S,S}$是$\boldsymbol{L}$的子矩阵，索引为$S$。</p>
+<p>归一化常数为：
+$$\sum_{S\subseteq\{1,\cdots,l\}}\det(\boldsymbol{L}_{S,S}) = \det(\boldsymbol{I} + \boldsymbol{L})$$</p>
+<p><strong>DPP用于CR分解</strong>：定义核矩阵
+$$\boldsymbol{L}_{ij} = \langle \boldsymbol{v}_i, \boldsymbol{v}_j\rangle = \text{Tr}(\boldsymbol{y}_i\boldsymbol{x}_i^{\top}\boldsymbol{x}_j\boldsymbol{y}_j^{\top})$$</p>
+<p>即$\boldsymbol{L} = \boldsymbol{V}^{\top}\boldsymbol{V}$，其中$\boldsymbol{V}=(\boldsymbol{v}_1,\cdots,\boldsymbol{v}_l)$。</p>
+<p><strong>k-DPP</strong>：为了精确采样大小为$r$的子集，我们使用$k$-DPP，它条件化在$|S|=r$：
+$$\mathbb{P}(S \mid |S|=r) \propto \det(\boldsymbol{L}_{S,S})$$</p>
+<p><strong>定理7</strong>（DPP的期望投影）：如果$S$从$k$-DPP采样（$k=r$），定义投影
+$$\boldsymbol{P}_S = \boldsymbol{V}_S(\boldsymbol{V}_S^{\top}\boldsymbol{V}_S)^{-1}\boldsymbol{V}_S^{\top}$$
+其中$\boldsymbol{V}<em s_1="s_1">S = (\boldsymbol{v}</em>)$，则
+$$\mathbb{E}[\boldsymbol{P}_S] = \boldsymbol{U}_r\boldsymbol{U}_r^{\top}$$
+其中$\boldsymbol{U}_r$是$\boldsymbol{V}$的前$r$个左奇异向量。},\cdots,\boldsymbol{v}_{s_r</p>
+<p>这表明DPP自动"瞄准"主要子空间！</p>
+<p><strong>DPP采样算法</strong>：
+1. 计算$\boldsymbol{L} = \boldsymbol{V}^{\top}\boldsymbol{V}$的特征分解：$\boldsymbol{L} = \boldsymbol{Q}\boldsymbol{\Lambda}\boldsymbol{Q}^{\top}$
+2. 对每个特征值$\lambda_i$，以概率$\lambda_i/(\lambda_i+1)$选入集合$J$
+3. 从$J$中采样基向量，构造子集$S$</p>
+<p>复杂度为$\mathcal{O}(l^3)$（特征分解）$+$ $\mathcal{O}(lr^2)$（采样）。</p>
+<p><strong>定理8</strong>（DPP的误差界）：使用DPP采样的CR近似满足：
+$$\mathbb{E}\|\boldsymbol{M} - \boldsymbol{C}\boldsymbol{C}^{\dagger}\boldsymbol{M}\|_F^2 \leq \frac{r}{r-k+1}\|\boldsymbol{M} - \boldsymbol{M}_k^{\text{SVD}}\|_F^2$$
+对于$k\leq r$。</p>
+<p>这给出了与最优SVD近似的相对误差保证。</p>
+<p><strong>DPP的优势</strong>：
+1. 多样性：自动选择"分散"的列，避免冗余
+2. 理论保证：有严格的误差界
+3. 无需调参：不需要手工设计采样分布</p>
+<p><strong>DPP的劣势</strong>：
+1. 计算代价：需要$\mathcal{O}(l^3)$时间
+2. 对于超大规模问题，仍需近似DPP方法</p>
+<h3 id="8-qr">8. QR分解的列主元策略</h3>
+<p>列主元QR（Column-Pivoted QR, CPQR）是一种经典的确定性列选择方法。</p>
+<p><strong>定义6</strong>（列主元QR）：给定$\boldsymbol{A}\in\mathbb{R}^{n\times m}$，CPQR寻找置换矩阵$\boldsymbol{\Pi}$和正交矩阵$\boldsymbol{Q}$、上三角矩阵$\boldsymbol{R}$使得
+$$\boldsymbol{A}\boldsymbol{\Pi} = \boldsymbol{Q}\boldsymbol{R}$$
+其中$\boldsymbol{\Pi}$的选择使得$\boldsymbol{R}$的对角元素递减：$|R_{11}|\geq |R_{22}|\geq\cdots\geq |R_{mm}|$。</p>
+<p><strong>贪婪列主元算法</strong>：</p>
+<div class="codehilite"><pre><span></span><code>初始化：剩余矩阵 A_res = A
+for k = 1 to r:
+    选择列 j = argmax_i ||A_res[:,i]||
+    交换 A[:, k] 和 A[:, j]
+    Householder变换消去 A[k:, k] 下方元素
+    更新 A_res
+</code></pre></div>
+
+<p>复杂度：$\mathcal{O}(nmr)$。</p>
+<p><strong>定理9</strong>（CPQR的误差界）：设$\boldsymbol{R}_{11}\in\mathbb{R}^{r\times r}$是前$r$步的子矩阵，则
+$$\sigma_{\min}(\boldsymbol{R}_{11}) \geq \sigma_r(\boldsymbol{A})/\sqrt{1 + r(m-r)}$$</p>
+<p>这保证了选出的列具有良好的数值性质。</p>
+<p><strong>秩揭示性质</strong>：CPQR能有效识别矩阵的数值秩。如果$\sigma_{r+1}(\boldsymbol{A}) \ll \sigma_r(\boldsymbol{A})$，则$|R_{r+1,r+1}|$会显著小于$|R_{rr}|$。</p>
+<h3 id="9-qrrrqr">9. 强秩揭示QR分解（RRQR）</h3>
+<p>标准CPQR的秩揭示能力有限。强秩揭示QR（Rank-Revealing QR, RRQR）通过后处理改进。</p>
+<p><strong>定义7</strong>（RRQR条件）：QR分解$\boldsymbol{A}\boldsymbol{\Pi}=\boldsymbol{Q}\boldsymbol{R}$是$(f,g)$-RRQR，如果存在常数$f,g$使得
+$$\sigma_i(\boldsymbol{R}_{11}) \leq f\sigma_i(\boldsymbol{A}), \quad i=1,\cdots,r$$
+$$\sigma_i(\boldsymbol{R}_{22}) \geq g\sigma_{r+i}(\boldsymbol{A}), \quad i=1,\cdots,m-r$$
+其中$\boldsymbol{R} = \begin{pmatrix}\boldsymbol{R}<em 12="12">{11} &amp; \boldsymbol{R}</em>$。} \ 0 &amp; \boldsymbol{R}_{22}\end{pmatrix</p>
+<p><strong>Gu-Eisenstat RRQR算法</strong>：
+1. 执行标准CPQR得到初始$\boldsymbol{Q},\boldsymbol{R},\boldsymbol{\Pi}$
+2. while 未收敛:
+   - 检查$\boldsymbol{R}<em ij="ij">{12}$中的大元素
+   - 如果存在$(i,j)$使得$|R</em>|$（$\tau$是阈值），交换列$i$和$r+j$
+   - 更新QR分解
+3. 返回$\boldsymbol{Q},\boldsymbol{R},\boldsymbol{\Pi}$}| &gt; \tau\cdot|R_{ii</p>
+<p><strong>定理10</strong>（RRQR的近似性能）：使用RRQR选出的前$r$列构造的近似满足
+$$\|\boldsymbol{A} - \boldsymbol{A}_{[:,S]}\boldsymbol{A}_{[:,S]}^{\dagger}\boldsymbol{A}\|_F^2 \leq (1+f^2r(m-r))\|\boldsymbol{A} - \boldsymbol{A}_r^{\text{SVD}}\|_F^2$$</p>
+<p>对于$f=2$，这给出了可控的近似比。</p>
+<p><strong>复杂度</strong>：RRQR的复杂度为$\mathcal{O}(nmr)$ + 迭代次数$\times$ $\mathcal{O}(nmr)$。实际中迭代次数很少（通常&lt;5）。</p>
+<h3 id="10">10. 计算复杂度优势分析</h3>
+<p>现在我们系统地比较不同方法的计算复杂度。</p>
+<p><strong>方法对比表</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>列选择复杂度</th>
+<th>近似构造复杂度</th>
+<th>总复杂度</th>
+<th>误差保证</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>截断SVD</td>
+<td>$\mathcal{O}(\min(nm^2,n^2m))$</td>
+<td>$\mathcal{O}(nmr)$</td>
+<td>$\mathcal{O}(\min(nm^2,n^2m))$</td>
+<td>最优</td>
+</tr>
+<tr>
+<td>模长排序</td>
+<td>$\mathcal{O}(l)$</td>
+<td>$\mathcal{O}(rmn)$</td>
+<td>$\mathcal{O}(l+rmn)$</td>
+<td>无保证</td>
+</tr>
+<tr>
+<td>随机采样</td>
+<td>$\mathcal{O}(l)$</td>
+<td>$\mathcal{O}(rmn)$</td>
+<td>$\mathcal{O}(l+rmn)$</td>
+<td>期望界</td>
+</tr>
+<tr>
+<td>DPP采样</td>
+<td>$\mathcal{O}(l^3)$</td>
+<td>$\mathcal{O}(rmn)$</td>
+<td>$\mathcal{O}(l^3+rmn)$</td>
+<td>相对误差</td>
+</tr>
+<tr>
+<td>CPQR</td>
+<td>$\mathcal{O}(lmn)$</td>
+<td>已包含</td>
+<td>$\mathcal{O}(lmn)$</td>
+<td>弱保证</td>
+</tr>
+<tr>
+<td>RRQR</td>
+<td>$\mathcal{O}(lmn)$</td>
+<td>已包含</td>
+<td>$\mathcal{O}(lmn)$</td>
+<td>强保证</td>
+</tr>
+</tbody>
+</table>
+<p><strong>详细分析</strong>：</p>
+<ol>
+<li><strong>截断SVD</strong>：</li>
+<li>对于矩阵$\boldsymbol{M}\in\mathbb{R}^{n\times m}$（$n\geq m$），标准SVD复杂度为$\mathcal{O}(nm^2)$</li>
+<li>如果只需前$r$个奇异值/向量，可用Lanczos或随机化SVD降到$\mathcal{O}(nmr)$</li>
+<li>优点：最优误差</li>
+<li>
+<p>缺点：无CR结构、不可解释、对非线性映射不友好</p>
+</li>
+<li>
+<p><strong>模长排序/采样</strong>：</p>
+</li>
+<li>计算$|\boldsymbol{x}_i||\boldsymbol{y}_i|$需要$\mathcal{O}(n+m)$每列，总计$\mathcal{O}(l(n+m))$</li>
+<li>排序/采样$\mathcal{O}(l\log l)$或$\mathcal{O}(l)$</li>
+<li>构造$\boldsymbol{C}\boldsymbol{R}$：$\mathcal{O}(rmn)$（矩阵乘法）</li>
+<li>优点：极快、易实现</li>
+<li>
+<p>缺点：误差无理论保证、可能选到冗余列</p>
+</li>
+<li>
+<p><strong>DPP采样</strong>：</p>
+</li>
+<li>计算核$\boldsymbol{L}$：需要$\boldsymbol{V}^{\top}\boldsymbol{V}$，若直接做是$\mathcal{O}(l^2nm)$</li>
+<li>可以通过$\boldsymbol{L}_{ij} = \boldsymbol{x}_i^{\top}\boldsymbol{x}_j\cdot\boldsymbol{y}_i^{\top}\boldsymbol{y}_j$降到$\mathcal{O}(l^2(n+m))$</li>
+<li>特征分解$\boldsymbol{L}$：$\mathcal{O}(l^3)$</li>
+<li>DPP采样：$\mathcal{O}(lr^2)$</li>
+<li>优点：理论保证强、自动多样性</li>
+<li>
+<p>缺点：$l$很大时$\mathcal{O}(l^3)$不可承受</p>
+</li>
+<li>
+<p><strong>CPQR/RRQR</strong>：</p>
+</li>
+<li>对$\boldsymbol{X}\boldsymbol{Y}$做QR：需要先形成乘积，$\mathcal{O}(lmn)$</li>
+<li>QR分解：$\mathcal{O}(m^2n)$或$\mathcal{O}(n^2m)$（取决于形状）</li>
+<li>对于CR分解，可以在不显式形成$\boldsymbol{X}\boldsymbol{Y}$的情况下做CPQR，这需要隐式矩阵-向量乘法</li>
+<li>优点：确定性、数值稳定</li>
+<li>缺点：比简单采样慢</li>
+</ol>
+<p><strong>大规模场景（$l,m,n$都很大）</strong>：
+- 如果$l$不太大（$l&lt;10^4$）：优先DPP或RRQR
+- 如果$l$很大（$l&gt;10^6$）：只能用简单采样
+- 如果需要在线更新：随机采样是唯一选择
+- 如果$r\ll l$且需要高精度：随机化SVD + RRQR后处理</p>
+<h3 id="11">11. 在大规模矩阵中的应用</h3>
+<p><strong>应用1：加速矩阵乘法</strong>
+给定$\boldsymbol{X}\in\mathbb{R}^{n\times l}$，$\boldsymbol{Y}\in\mathbb{R}^{l\times m}$，直接计算$\boldsymbol{X}\boldsymbol{Y}$需要$\mathcal{O}(lmn)$。</p>
+<p>使用CR近似：
+$$\boldsymbol{X}\boldsymbol{Y} \approx \boldsymbol{X}_{[:,S]}\boldsymbol{\Lambda}\boldsymbol{Y}_{[S,:]}$$</p>
+<p>计算步骤：
+1. 采样列/行（$\mathcal{O}(l)$）
+2. 计算$\boldsymbol{C}=\boldsymbol{X}<em _S_:_="[S,:]">{[:,S]}$（已有）
+3. 计算$\boldsymbol{R}=\boldsymbol{Y}</em>$（已有）
+4. 计算$\boldsymbol{\Lambda}$（$\mathcal{O}(r^2(n+m))$）
+5. 计算$\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R}$（$\mathcal{O}(rmn + r^2n + r^2m)$）</p>
+<p>总复杂度：$\mathcal{O}(rmn)$，当$r\ll l$时显著加速。</p>
+<p><strong>误差分析</strong>：设真实乘积为$\boldsymbol{M}=\boldsymbol{X}\boldsymbol{Y}$，近似为$\hat{\boldsymbol{M}}$，则相对误差
+$$\epsilon = \frac{\|\hat{\boldsymbol{M}} - \boldsymbol{M}\|_F}{\|\boldsymbol{M}\|_F}$$</p>
+<p>根据定理4，期望相对误差满足
+$$\mathbb{E}[\epsilon^2] = \frac{1}{r}\left[\frac{(\sum_i\|\boldsymbol{v}_i\|)^2}{\|\boldsymbol{M}\|_F^2} - 1\right]$$</p>
+<p>定义"相干性"指标
+$$\mu = \frac{(\sum_i\|\boldsymbol{v}_i\|)^2}{l\|\boldsymbol{M}\|_F^2}$$</p>
+<p>则$\mathbb{E}[\epsilon^2] = \frac{\mu l - 1}{r}$。</p>
+<p>当$\mu\approx 1$（列-行对近似正交）时，只需$r=\mathcal{O}(l/\epsilon^2)$即可达到误差$\epsilon$。</p>
+<p><strong>应用2：推荐系统中的矩阵补全</strong>
+用户-物品评分矩阵$\boldsymbol{R}\in\mathbb{R}^{n\times m}$（$n$个用户，$m$个物品），通常是低秩的。</p>
+<p>使用CR分解$\boldsymbol{R}\approx\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R}<em _text_rows="\text{rows">{\text{rows}}$：
+- $\boldsymbol{C}$：选出的代表性用户组
+- $\boldsymbol{R}</em>$：选出的代表性物品组
+- $\boldsymbol{\Lambda}$：用户组-物品组的交互矩阵}</p>
+<p>优点：
+1. 可解释性：可以识别"原型用户"和"原型物品"
+2. 冷启动：新用户只需与代表性物品比较
+3. 实时推荐：只需计算$r$维向量内积</p>
+<p><strong>应用3：神经网络压缩</strong>
+全连接层的权重矩阵$\boldsymbol{W}\in\mathbb{R}^{d_{\text{out}}\times d_{\text{in}}}$可以用CR近似：
+$$\boldsymbol{W} \approx \boldsymbol{W}_{[:,S]}\boldsymbol{\Lambda}\boldsymbol{W}_{[S,:]}$$</p>
+<p>这相当于在输入-输出之间插入一个$r$维的"瓶颈层"，且瓶颈层的基是从原始权重中选出的。</p>
+<p>前向传播：
+$$\boldsymbol{y} = \boldsymbol{W}\boldsymbol{x} \approx \boldsymbol{W}_{[:,S]}(\boldsymbol{\Lambda}(\boldsymbol{W}_{[S,:]}\boldsymbol{x}))$$</p>
+<p>计算量从$\mathcal{O}(d_{\text{in}}d_{\text{out}})$降到$\mathcal{O}(r(d_{\text{in}}+d_{\text{out}}))$。</p>
+<p>与Tucker分解等方法相比，CR的优势是保留了原始神经元的语义。</p>
+<p><strong>应用4：大规模核方法</strong>
+核矩阵$\boldsymbol{K}\in\mathbb{R}^{n\times n}$，$K_{ij}=k(\boldsymbol{x}_i,\boldsymbol{x}_j)$，通常$n$很大（$&gt;10^6$）。</p>
+<p>Nyström方法：选择$r$个"地标点"$S$，近似
+$$\boldsymbol{K} \approx \boldsymbol{K}_{[:,S]}\boldsymbol{K}_{S,S}^{-1}\boldsymbol{K}_{[S,:]}$$</p>
+<p>这正是CR分解的一个特例（$\boldsymbol{\Lambda}=\boldsymbol{K}_{S,S}^{-1}$）。</p>
+<p>使用leverage score采样选择地标点可以保证
+$$\|\boldsymbol{K} - \boldsymbol{K}_{[:,S]}\boldsymbol{K}_{S,S}^{-1}\boldsymbol{K}_{[S,:]} \|_F \leq \epsilon\|\boldsymbol{K}\|_F$$
+只需$r=\mathcal{O}(k/\epsilon^2)$个地标点（$k$是有效秩）。</p>
+<p>复杂度：
+- 构造近似：$\mathcal{O}(nr^2 + r^3)$
+- 矩阵向量乘法：从$\mathcal{O}(n^2)$降到$\mathcal{O}(nr)$</p>
+<p><strong>应用5：张量分解的初始化</strong>
+高阶张量$\mathcal{T}\in\mathbb{R}^{n_1\times n_2\times n_3}$的CP分解需要良好初始化。</p>
+<p>将张量展开为矩阵$\boldsymbol{T}^{(1)}\in\mathbb{R}^{n_1\times n_2n_3}$，应用CR分解选择代表性"纤维"，然后在低维空间中初始化CP分解。</p>
+<p>这比随机初始化收敛更快，且避免局部极小值。</p>
+<h3 id="12-cr">12. 加权CR分解的最优权重</h3>
+<p>回到加权CR分解$\boldsymbol{M}\approx\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R}$，我们已经知道当$\boldsymbol{C},\boldsymbol{R}$固定时，
+$$\boldsymbol{\Lambda}^* = \boldsymbol{C}^{\dagger}\boldsymbol{M}\boldsymbol{R}^{\dagger}$$</p>
+<p>现在推导对角$\boldsymbol{\Lambda}$的情况。</p>
+<p><strong>定理11</strong>（对角权重的最优解）：设$\boldsymbol{C},\boldsymbol{R}$已固定，求解
+$$\min_{\boldsymbol{\Lambda}=\text{diag}(\lambda_1,\cdots,\lambda_r)}\|\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R} - \boldsymbol{M}\|_F^2$$</p>
+<p>令$\boldsymbol{c}_i$为$\boldsymbol{C}$的第$i$列，$\boldsymbol{r}_i$为$\boldsymbol{R}$的第$i$行，则最优解满足：
+$$\lambda_i^* = \frac{\langle\boldsymbol{c}_i\boldsymbol{r}_i, \boldsymbol{M}\rangle_F}{\|\boldsymbol{c}_i\|^2\|\boldsymbol{r}_i\|^2}$$</p>
+<p>证明：目标函数可以写成
+\begin{align}
+|\boldsymbol{C}\boldsymbol{\Lambda}\boldsymbol{R} - \boldsymbol{M}|<em i="1">F^2 &amp;= \left|\sum</em>}^r \lambda_i\boldsymbol{c<em i="1">i\boldsymbol{r}_i - \boldsymbol{M}\right|_F^2 \
+&amp;= \sum</em>}^r\lambda_i^2|\boldsymbol{c<em i="1">i|^2|\boldsymbol{r}_i|^2 - 2\sum</em>|_F^2
+\end{align}}^r\lambda_i\langle\boldsymbol{c}_i\boldsymbol{r}_i,\boldsymbol{M}\rangle_F + |\boldsymbol{M</p>
+<p>这是关于$\lambda_i$的二次函数（假设$\boldsymbol{c}_i\boldsymbol{r}_i$相互正交，否则需要联合优化）。对$\lambda_i$求导：
+$$\frac{\partial}{\partial\lambda_i}\|\cdots\|_F^2 = 2\lambda_i\|\boldsymbol{c}_i\|^2\|\boldsymbol{r}_i\|^2 - 2\langle\boldsymbol{c}_i\boldsymbol{r}_i,\boldsymbol{M}\rangle_F$$</p>
+<p>令其为零得到$\lambda_i^*$。</p>
+<p><strong>推论2</strong>：对于采样方法，$\lambda_i=(rp_i)^{-1}$对应的权重正是使得估计无偏的选择。</p>
+<h3 id="13">13. 实用算法总结</h3>
+<p>基于以上理论，我们总结实用的CR分解算法：</p>
+<p><strong>算法1：快速CR近似（基于模长）</strong></p>
+<div class="codehilite"><pre><span></span><code>输入：X ∈ R^{n×l}, Y ∈ R^{l×m}, 秩 r
+输出：C, Λ, R
+
+1. 计算 w_i = ||x_i|| · ||y_i|| for i=1,...,l
+2. 选择 S = top-r indices by w
+3. C = X[:, S], R = Y[S, :]
+4. 计算 Λ = diag(λ_1,...,λ_r) 其中
+   λ_i = &lt;c_i r_i, XY&gt;_F / (||c_i||^2 ||r_i||^2)
+5. 返回 C, Λ, R
+</code></pre></div>
+
+<p>复杂度：$\mathcal{O}(l(n+m) + lmn + r(nm))$</p>
+<p><strong>算法2：随机CR近似（leverage score采样）</strong></p>
+<div class="codehilite"><pre><span></span><code>输入：X, Y, r, 采样数 s &gt; r
+输出：C, Λ, R
+
+1. 计算 p_i = ||x_i|| · ||y_i|| / Σ_j ||x_j|| · ||y_j||
+2. 采样 S = {s_1,...,s_s} ~ p (有放回)
+3. C = X[:, S] · diag(1/√(s·p_{s_i}))
+4. R = diag(1/√(s·p_{s_i})) · Y[S, :]
+5. (可选) 正交化: C ← orth(C)
+6. 计算 Λ = C^† · XY · R^†
+7. 返回 C, Λ, R
+</code></pre></div>
+
+<p>复杂度：$\mathcal{O}(l(n+m) + s(nm))$</p>
+<p><strong>算法3：RRQR-based CR近似</strong></p>
+<div class="codehilite"><pre><span></span><code>输入：X, Y, r
+输出：C, R, Π
+
+1. M = XY  (或使用隐式矩阵-向量乘法)
+2. [Q, R, Π] = rrqr(M, r)  (RRQR分解)
+3. C = M[:, Π[:r]]
+4. R = C^† · M
+5. 返回 C, R
+</code></pre></div>
+
+<p>复杂度：$\mathcal{O}(lmn + nmr)$</p>
+<p>这三个算法代表了速度-精度的权衡：
+- 算法1最快但精度最低
+- 算法2中等速度、有理论保证
+- 算法3较慢但精度最高、数值最稳定</p>
+<h3 id="14">14. 数值稳定性考虑</h3>
+<p>在实际实现中，数值稳定性至关重要。</p>
+<p><strong>问题1：伪逆计算</strong>
+计算$\boldsymbol{C}^{\dagger}$时，如果$\boldsymbol{C}$接近秩亏，直接用$(\boldsymbol{C}^{\top}\boldsymbol{C})^{-1}\boldsymbol{C}^{\top}$会数值不稳定。</p>
+<p><strong>解决方案</strong>：使用SVD计算伪逆：
+$$\boldsymbol{C} = \boldsymbol{U}_C\boldsymbol{\Sigma}_C\boldsymbol{V}_C^{\top}$$
+$$\boldsymbol{C}^{\dagger} = \boldsymbol{V}_C\boldsymbol{\Sigma}_C^{-1}\boldsymbol{U}_C^{\top}$$
+其中$\boldsymbol{\Sigma}_C^{-1}$中对于$\sigma_i &lt; \epsilon$的奇异值，设$1/\sigma_i=0$。</p>
+<p><strong>问题2：重复采样</strong>
+独立重复采样可能选到同一列多次，导致$\boldsymbol{C}$秩亏。</p>
+<p><strong>解决方案1</strong>：使用无放回采样（但理论分析变复杂）
+<strong>解决方案2</strong>：过采样，即采样$s=\omega(r)$个列，然后用RRQR选出其中最好的$r$个
+<strong>解决方案3</strong>：采样后正交化</p>
+<p><strong>问题3：权重尺度</strong>
+当采样概率$p_i$很小时，权重$1/p_i$很大，导致数值不稳定。</p>
+<p><strong>解决方案</strong>：归一化权重，或使用对数空间计算。</p>
+<p><strong>推荐实现</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.linalg</span><span class="w"> </span><span class="kn">import</span> <span class="n">qr</span><span class="p">,</span> <span class="n">svd</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">stable_pinv</span><span class="p">(</span><span class="n">C</span><span class="p">,</span> <span class="n">tol</span><span class="o">=</span><span class="mf">1e-10</span><span class="p">):</span>
+    <span class="n">U</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">Vt</span> <span class="o">=</span> <span class="n">svd</span><span class="p">(</span><span class="n">C</span><span class="p">,</span> <span class="n">full_matrices</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">s_inv</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">s</span> <span class="o">&gt;</span> <span class="n">tol</span><span class="p">,</span> <span class="mi">1</span><span class="o">/</span><span class="n">s</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">Vt</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">(</span><span class="n">s_inv</span><span class="p">)</span> <span class="o">@</span> <span class="n">U</span><span class="o">.</span><span class="n">T</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">cr_decomp_stable</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">r</span><span class="p">):</span>
+    <span class="c1"># 计算采样概率</span>
+    <span class="n">w</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">Y</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">w</span> <span class="o">/</span> <span class="n">w</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+
+    <span class="c1"># 过采样</span>
+    <span class="n">s</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="mi">3</span> <span class="o">*</span> <span class="n">r</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">p</span><span class="p">))</span>
+    <span class="n">S</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">p</span><span class="p">),</span> <span class="n">s</span><span class="p">,</span> <span class="n">replace</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="n">p</span><span class="p">)</span>
+
+    <span class="c1"># 构造加权矩阵</span>
+    <span class="n">C</span> <span class="o">=</span> <span class="n">X</span><span class="p">[:,</span> <span class="n">S</span><span class="p">]</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">s</span> <span class="o">*</span> <span class="n">p</span><span class="p">[</span><span class="n">S</span><span class="p">])</span>
+    <span class="n">R</span> <span class="o">=</span> <span class="n">Y</span><span class="p">[</span><span class="n">S</span><span class="p">,</span> <span class="p">:]</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">s</span> <span class="o">*</span> <span class="n">p</span><span class="p">[</span><span class="n">S</span><span class="p">])[:,</span> <span class="kc">None</span><span class="p">]</span>
+
+    <span class="c1"># 正交化并降秩</span>
+    <span class="n">Q</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">qr</span><span class="p">(</span><span class="n">C</span><span class="p">)</span>
+    <span class="n">C</span> <span class="o">=</span> <span class="n">Q</span><span class="p">[:,</span> <span class="p">:</span><span class="n">r</span><span class="p">]</span>
+
+    <span class="c1"># 稳定计算权重</span>
+    <span class="n">M</span> <span class="o">=</span> <span class="n">X</span> <span class="o">@</span> <span class="n">Y</span>
+    <span class="n">Lambda</span> <span class="o">=</span> <span class="n">stable_pinv</span><span class="p">(</span><span class="n">C</span><span class="p">)</span> <span class="o">@</span> <span class="n">M</span> <span class="o">@</span> <span class="n">stable_pinv</span><span class="p">(</span><span class="n">R</span><span class="o">.</span><span class="n">T</span><span class="p">)</span><span class="o">.</span><span class="n">T</span>
+
+    <span class="k">return</span> <span class="n">C</span><span class="p">,</span> <span class="n">Lambda</span><span class="p">,</span> <span class="n">R</span><span class="p">[:</span><span class="n">r</span><span class="p">,</span> <span class="p">:]</span>
+</code></pre></div>
+
+<h3 id="15">15. 理论与实践的差距</h3>
+<p>最后，我们讨论理论结果与实际性能的差距。</p>
+<p><strong>理论假设 vs 实际情况</strong>：</p>
+<ol>
+<li><strong>独立采样 vs 无放回采样</strong></li>
+<li>理论：独立重复采样便于分析</li>
+<li>实际：无放回采样性能更好（无重复、更多样性）</li>
+<li>
+<p>差距：实际误差通常小于理论上界</p>
+</li>
+<li>
+<p><strong>最坏情况 vs 平均情况</strong></p>
+</li>
+<li>理论界：针对最坏情况矩阵</li>
+<li>实际矩阵：通常有更好的结构（如快速衰减的奇异值）</li>
+<li>
+<p>差距：实际中$r$远小于理论要求</p>
+</li>
+<li>
+<p><strong>Frobenius范数 vs 谱范数</strong></p>
+</li>
+<li>理论：Frobenius范数界更紧</li>
+<li>实际：有时更关心谱范数或元素级误差</li>
+<li>
+<p>差距：不同范数下的性能可能差异很大</p>
+</li>
+<li>
+<p><strong>固定秩 vs 自适应秩</strong></p>
+</li>
+<li>理论：假设$r$已知</li>
+<li>实际：需要自适应选择$r$（如通过交叉验证）</li>
+<li>方法：绘制误差-秩曲线，选择拐点</li>
+</ol>
+<p><strong>改进方向</strong>：</p>
+<ol>
+<li><strong>混合方法</strong>：结合多种采样策略（如先leverage score粗选，再DPP精选）</li>
+<li><strong>迭代refinement</strong>：初始CR分解后，迭代更新$\boldsymbol{C},\boldsymbol{R},\boldsymbol{\Lambda}$</li>
+<li><strong>自适应采样</strong>：根据当前残差调整采样分布</li>
+<li><strong>分层采样</strong>：对不同奇异值区间使用不同策略</li>
+</ol>
+<p><strong>实验建议</strong>：</p>
+<p>对于新应用，建议按以下顺序尝试：
+1. 模长排序（baseline，最快）
+2. 随机leverage score采样（理论保证，较快）
+3. RRQR（确定性，高精度）
+4. DPP采样（如果$l$不太大且需要多样性）
+5. 混合/迭代方法（如果上述方法不够好）</p>
+<p>同时跟踪多个指标：
+- 计算时间
+- 近似误差（Frobenius范数、谱范数、相对误差）
+- 列的多样性（如条件数、最小奇异值）
+- 任务性能（如果用于下游任务）</p>
+<p>通过这些详细推导，我们建立了CR分解从理论到实践的完整图景，涵盖了算法设计、误差分析、复杂度优化和数值稳定性等多个方面。CR分解作为一种兼顾效率与可解释性的低秩近似方法，在大规模数据处理中有广阔的应用前景。</p>
+        </div>
+    </div>
+</body>
+</html>

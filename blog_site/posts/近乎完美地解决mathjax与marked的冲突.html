@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>近乎完美地解决MathJax与Marked的冲突</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>近乎完美地解决MathJax与Marked的冲突</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 11.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10332">https://spaces.ac.cn/archives/10332</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在<a href="/archives/10320">《让MathJax更好地兼容谷歌翻译和延时加载》</a>我们提到<a href="https://papers.cool/">Cool Papers</a>加入了MathJax来解析LaTeX公式，不过万万没想到引发了诸多兼容性问题，虽然部分问题纯粹是笔者的强迫症作祟，但一个尽可能完美的解决方案终究是让人赏心悦目的，所以还是愿意在上面花一点心思。</p>
+<p>上一篇文章我们已经解决了MathJax与谷歌翻译、延时加载的兼容性，这篇文章我们则来解决MathJax与Marked的冲突。</p>
+<h2 id="_1">问题简述</h2>
+<p>Markdown是一种轻量级标记语言，允许人们使用易读易写的纯文本格式编写文档，可谓是目前最流行的写作语法之一，Cool Papers中的[Kimi]功能，基本上也是按照Markdown语法输出。然而。Markdown并不是直接面向浏览器的语言，面向浏览器的语言叫做HTML，所以在展示给用户之前，有一个Markdown转HTML的过程（渲染）。</p>
+<p>Markdown转HTML也分为两种方式，一种是在后端有服务器将Markdown转好HTML再发送给用户，一种是用户接受到Markdown后再在前端由浏览器转为HTML，本文的例子主要用于后者，但原则上相同思路应该也能简单修改后用于前者。在前端对Markdown进行转换的库有很多，Cool Papers用的是<a href="https://github.com/markedjs/marked">Marked</a>，这是一个比较轻量级的选择。</p>
+<p>Marked渲染Markdown的方法很简单，直接对字符串<code>marked.parse</code>一下就行，此时再配合上一节介绍的<a href="/archives/10320#%E5%85%AC%E5%BC%8F%E6%B8%B2%E6%9F%93">MathJax</a>，就可以对LaTeX代码进行解析了。然而，Markdown与LaTeX在语法上有一些相交之处，所以Marked可能会先按照Markdown规则对LaTeX代码（如果有的话）进行转换，于是后面的MathJax无法获取原始的LaTeX代码，导致渲染失败。</p>
+<p>一个可复现的代码如下：</p>
+<div class="codehilite"><pre><span></span><code><span class="o">&lt;</span><span class="n">div</span><span class="w"> </span><span class="kt">id</span><span class="o">=</span><span class="s">&quot;content&quot;</span><span class="o">&gt;&lt;/</span><span class="n">div</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="w"> </span><span class="n">src</span><span class="o">=</span><span class="s">&quot;https://cdn.jsdelivr.net/npm/marked/marked.min.js&quot;</span><span class="o">&gt;&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="w"> </span><span class="n">src</span><span class="o">=</span><span class="s">&quot;https://cdn.jsdelivr.net/npm/mathjax@2.7.9/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot;</span><span class="o">&gt;&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="w">    </span><span class="n">var</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">document</span><span class="p">.</span><span class="n">getElementById</span><span class="p">(</span><span class="err">&#39;</span><span class="n">content</span><span class="err">&#39;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">div</span><span class="p">.</span><span class="n">innerHTML</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">marked</span><span class="p">.</span><span class="n">parse</span><span class="p">(</span><span class="err">&#39;</span><span class="o">**</span><span class="n">cannot</span><span class="o">**</span><span class="w"> </span><span class="n">render</span><span class="o">:</span><span class="w"> </span><span class="err">\\</span><span class="p">(</span><span class="n">a</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="o">^</span><span class="mi">2</span><span class="err">\\</span><span class="p">),</span><span class="w"> </span><span class="o">**</span><span class="n">can</span><span class="o">**</span><span class="w"> </span><span class="n">render</span><span class="o">:</span><span class="w"> </span><span class="o">---</span><span class="n">MATHPLACEHOLDER0</span><span class="o">---</span><span class="err">\</span><span class="p">(</span><span class="n">c</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">d</span><span class="o">^</span><span class="mi">2</span><span class="o">---</span><span class="n">MATHPLACEHOLDER1</span><span class="o">---</span><span class="err">\</span><span class="p">)</span><span class="err">&#39;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">.</span><span class="n">Typeset</span><span class="p">(</span><span class="n">div</span><span class="p">);</span>
+<span class="o">&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+</code></pre></div>
+
+<h2 id="_2">已有方案</h2>
+<p>值得一提的是，流行的博客框架Hexo默认也是用Marked来渲染Markdown，所以如果我们搜索“MathJax Marked 冲突”，能找到不少资料，大部份都是以Hexo为背景展开的，其中总结的比较详细的一篇是<a href="https://www.lizhechen.com/2017/03/08/Hexo%E4%B8%8EMathjax%E7%9A%84%E5%86%B2%E7%AA%81%E5%8F%8A%EF%BC%88%E9%83%A8%E5%88%86%EF%BC%89%E8%A7%A3%E5%86%B3/">《调教Hexo[2]——Hexo与Mathjax的冲突及解决方案》</a>，它将解决思路总结为以下四种：</p>
+<blockquote>
+<p>1、<strong>手动转义</strong> ：即在写公式时不要写正确的LaTeX代码，而是写“被Marked渲染后才正确”的LaTeX代码，比如原本LaTeX代码是双斜杠\\\，经过Marked后会变成单斜杆\，所以干脆一开始就写四斜杆\\\\\\\，经过Marked就变成双斜杠\\\了；</p>
+<p>2、<strong>保护公式</strong> ：这个思路就更简单了，利用Marked不会渲染代码的特性，通过代码块标记来将公式保护起来，经过Marked渲染后再把公式提取出来用MathJax解析，如<a href="https://liam0205.me/2015/09/09/fix-conflict-between-mathjax-and-markdown/">《解决 MathJax 与 Markdown 的冲突》</a>，该思路的问题就是比较容易跟正常代码块混淆；</p>
+<p>3、<strong>更换引擎</strong> ：换用更好地支持Markdown与LaTeX混排的渲染引擎，比如在Hexo下通常推荐Pandoc，如<a href="https://piggerzzm.github.io/2019/04/22/%E8%A7%A3%E5%86%B3Hexo%E5%92%8CMathjax%E7%9A%84%E5%86%B2%E7%AA%81/">《解决 Hexo 和 Mathjax 的冲突》</a>，但Pandoc是个后端渲染引擎，而对于前端渲染，笔者并没有找到更好的替代方案；</p>
+<p>4、<strong>修改引擎</strong> ：就是修改Marked的代码，让它不要渲染某些LaTeX代码，从而一定程度上解决问题，如<a href="https://qinjiangbo.com/solution-to-coexistance-of-markerjs-and-mathjax.html">《Hexo中Marked.js与MathJax共存问题》</a>，这需要我们总结出一些容易被Marked误渲染的规则来逐一处理。</p>
+</blockquote>
+<p>第1、第2个方案需要人为修改公式代码，但Cool Papers的公式是Kimi生成的，不能修改，所以基本上可以否定；由于笔者也没找到更好的Markdown前端渲染引擎，所以方案3也被否定了；方案4虽然一定程度上能解决问题，但过于规则化，不够优雅，而且也只能“头痛医头，脚痛医脚”，没法判断是否还有遗漏的规则没处理好。</p>
+<h2 id="_3">逆向思路</h2>
+<p>事实上，这个问题有一个非常简单的解决方案：这本质上就是先Marked后MathJax带来的语法冲突，那我们不反过来，先用MathJax渲染公式，然后再用Marked来渲染Markdown呢？因为MathJax能比较严格地识别出数学公式，并且渲染结果几乎不会再出现Markdown语法，所以先MathJax后Marked可以从根本上解决冲突。</p>
+<p>参考代码如下：</p>
+<div class="codehilite"><pre><span></span><code><span class="o">&lt;</span><span class="n">div</span><span class="w"> </span><span class="kt">id</span><span class="o">=</span><span class="s">&quot;content&quot;</span><span class="o">&gt;&lt;/</span><span class="n">div</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="w"> </span><span class="n">src</span><span class="o">=</span><span class="s">&quot;https://cdn.jsdelivr.net/npm/marked/marked.min.js&quot;</span><span class="o">&gt;&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="w"> </span><span class="n">src</span><span class="o">=</span><span class="s">&quot;https://cdn.jsdelivr.net/npm/mathjax@2.7.9/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot;</span><span class="o">&gt;&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="w">    </span><span class="n">var</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">document</span><span class="p">.</span><span class="n">getElementById</span><span class="p">(</span><span class="err">&#39;</span><span class="n">content</span><span class="err">&#39;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">div</span><span class="p">.</span><span class="n">innerHTML</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">&#39;</span><span class="o">**</span><span class="n">can</span><span class="o">**</span><span class="w"> </span><span class="n">render</span><span class="o">:</span><span class="w"> </span><span class="err">\\</span><span class="p">(</span><span class="n">a</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="o">^</span><span class="mi">2</span><span class="err">\\</span><span class="p">)</span><span class="err">&#39;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">.</span><span class="n">Queue</span><span class="p">(</span>
+<span class="w">        </span><span class="p">[</span><span class="err">&#39;</span><span class="n">Typeset</span><span class="err">&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">,</span><span class="w"> </span><span class="n">div</span><span class="p">],</span>
+<span class="w">        </span><span class="n">function</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">div</span><span class="p">.</span><span class="n">innerHTML</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">marked</span><span class="p">.</span><span class="n">parse</span><span class="p">(</span><span class="n">div</span><span class="p">.</span><span class="n">innerHTML</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">);</span>
+<span class="o">&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+</code></pre></div>
+
+<h2 id="_4">强迫之症</h2>
+<p>上述代码的最终显示效果已经是我们所期望的了，但对于有强迫症的读者来说还差点意思，它有两个小缺陷。</p>
+<p>第一个缺陷，是它会把原始Markdown文本先显示出来，隔一小会（取决于渲染速度）才会显示最终的渲染效果，注意原始Markdown直接输出到浏览器中，其效果是近乎乱码的，也就是说用户先看到一个近乎乱码的页面，一小会后才看到正式页面，这会影响阅读体验。为此我们可以另外创建一个元素用来渲染，渲染完后才赋值给当前页面：</p>
+<div class="codehilite"><pre><span></span><code><span class="o">&lt;</span><span class="n">div</span><span class="w"> </span><span class="kt">id</span><span class="o">=</span><span class="s">&quot;content&quot;</span><span class="o">&gt;&lt;/</span><span class="n">div</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="w"> </span><span class="n">src</span><span class="o">=</span><span class="s">&quot;https://cdn.jsdelivr.net/npm/marked/marked.min.js&quot;</span><span class="o">&gt;&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="w"> </span><span class="n">src</span><span class="o">=</span><span class="s">&quot;https://cdn.jsdelivr.net/npm/mathjax@2.7.9/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot;</span><span class="o">&gt;&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="w">    </span><span class="n">var</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">document</span><span class="p">.</span><span class="n">getElementById</span><span class="p">(</span><span class="err">&#39;</span><span class="n">content</span><span class="err">&#39;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">var</span><span class="w"> </span><span class="n">div2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">document</span><span class="p">.</span><span class="n">createElement</span><span class="p">(</span><span class="err">&#39;</span><span class="n">div</span><span class="err">&#39;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">div2</span><span class="p">.</span><span class="n">innerHTML</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">&#39;</span><span class="o">**</span><span class="n">can</span><span class="o">**</span><span class="w"> </span><span class="n">render</span><span class="o">:</span><span class="w"> </span><span class="err">\\</span><span class="p">(</span><span class="n">a</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="o">^</span><span class="mi">2</span><span class="err">\\</span><span class="p">)</span><span class="err">&#39;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">.</span><span class="n">Queue</span><span class="p">(</span>
+<span class="w">        </span><span class="p">[</span><span class="err">&#39;</span><span class="n">Typeset</span><span class="err">&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">,</span><span class="w"> </span><span class="n">div2</span><span class="p">],</span>
+<span class="w">        </span><span class="n">function</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">div</span><span class="p">.</span><span class="n">innerHTML</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">marked</span><span class="p">.</span><span class="n">parse</span><span class="p">(</span><span class="n">div2</span><span class="p">.</span><span class="n">innerHTML</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">);</span>
+<span class="o">&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+</code></pre></div>
+
+<p>这样一来用户直接看到的就是渲染完成后的效果，不会出现看上去乱码的过渡内容。第二个缺陷是我们可以发现此时右击公式不会显示如下的MathJax菜单了：  </p>
+<p><a href="/usr/uploads/2024/08/692170630.png" title="点击查看原图"><img alt="正常来说右击公式会显示MathJax的菜单" src="/usr/uploads/2024/08/692170630.png" /></a></p>
+<p>正常来说右击公式会显示MathJax的菜单</p>
+<p>这个稍微了解一下自定义右键菜单的原理就明白了。简单来说，自定义右键菜单需要给元素绑定一个事件监听器，但当我们编辑了元素的innerHTML后，事件监听器就会失效。这个问题笔者也想了很久，最终意外发现当我们再次<code>MathJax.Hub.Typeset</code>命令时，MathJax会自动把公式重新渲染，所以我们只需要在上述代码基础上，先删除原有的公式，然后重新渲染一下公式就行了：</p>
+<div class="codehilite"><pre><span></span><code><span class="o">&lt;</span><span class="n">div</span><span class="w"> </span><span class="kt">id</span><span class="o">=</span><span class="s">&quot;content&quot;</span><span class="o">&gt;&lt;/</span><span class="n">div</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="w"> </span><span class="n">src</span><span class="o">=</span><span class="s">&quot;https://cdn.jsdelivr.net/npm/marked/marked.min.js&quot;</span><span class="o">&gt;&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="w"> </span><span class="n">src</span><span class="o">=</span><span class="s">&quot;https://cdn.jsdelivr.net/npm/mathjax@2.7.9/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot;</span><span class="o">&gt;&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="w">    </span><span class="n">var</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">document</span><span class="p">.</span><span class="n">getElementById</span><span class="p">(</span><span class="err">&#39;</span><span class="n">content</span><span class="err">&#39;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">var</span><span class="w"> </span><span class="n">div2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">document</span><span class="p">.</span><span class="n">createElement</span><span class="p">(</span><span class="err">&#39;</span><span class="n">div</span><span class="err">&#39;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">div2</span><span class="p">.</span><span class="n">innerHTML</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">&#39;</span><span class="o">**</span><span class="n">can</span><span class="o">**</span><span class="w"> </span><span class="n">render</span><span class="o">:</span><span class="w"> </span><span class="err">\\</span><span class="p">(</span><span class="n">a</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">b</span><span class="o">^</span><span class="mi">2</span><span class="err">\\</span><span class="p">)</span><span class="err">&#39;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">.</span><span class="n">Queue</span><span class="p">(</span>
+<span class="w">        </span><span class="p">[</span><span class="err">&#39;</span><span class="n">Typeset</span><span class="err">&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">,</span><span class="w"> </span><span class="n">div2</span><span class="p">],</span>
+<span class="w">        </span><span class="n">function</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">div</span><span class="p">.</span><span class="n">innerHTML</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">marked</span><span class="p">.</span><span class="n">parse</span><span class="p">(</span><span class="n">div2</span><span class="p">.</span><span class="n">innerHTML</span><span class="p">);</span>
+<span class="w">            </span><span class="n">div</span><span class="p">.</span><span class="n">querySelectorAll</span><span class="p">(</span><span class="err">&#39;</span><span class="p">.</span><span class="n">MathJax</span><span class="err">&#39;</span><span class="p">).</span><span class="n">forEach</span><span class="p">(</span><span class="n">e</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">remove</span><span class="p">());</span>
+<span class="w">            </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">.</span><span class="n">Typeset</span><span class="p">(</span><span class="n">div</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">);</span>
+<span class="o">&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+</code></pre></div>
+
+<p>这样就恢复了右键菜单。但这还没完，笔者研究了一下其中的原理，发现第一次<code>Typeset</code>后，公式原始代码就被存在一个<code>script</code>标签中，所以后面删除公式可以重复调用<code>Typeset</code>来渲染。但是，笔者发现Marked居然会渲染<code>script</code>的内容！！为了避免Marked修改公式，我们可以在<code>marked.parse</code>之前，把公式的原始代码保存下来，<code>marked.parse</code>之后再覆盖回去：</p>
+<div class="codehilite"><pre><span></span><code><span class="o">&lt;</span><span class="n">div</span><span class="w"> </span><span class="kt">id</span><span class="o">=</span><span class="s">&quot;content&quot;</span><span class="o">&gt;&lt;/</span><span class="n">div</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="w"> </span><span class="n">src</span><span class="o">=</span><span class="s">&quot;https://cdn.jsdelivr.net/npm/marked/marked.min.js&quot;</span><span class="o">&gt;&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="w"> </span><span class="n">src</span><span class="o">=</span><span class="s">&quot;https://cdn.jsdelivr.net/npm/mathjax@2.7.9/MathJax.js?config=TeX-AMS-MML_HTMLorMML&quot;</span><span class="o">&gt;&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="o">&lt;</span><span class="n">script</span><span class="o">&gt;</span>
+<span class="w">    </span><span class="n">function</span><span class="w"> </span><span class="n">parseMarkdown</span><span class="p">(</span><span class="n">text</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">var</span><span class="w"> </span><span class="n">scripts</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">text</span><span class="p">.</span><span class="n">match</span><span class="p">(</span><span class="o">/&lt;</span><span class="n">script</span><span class="p">[</span><span class="o">^&gt;</span><span class="p">]</span><span class="o">*&gt;</span><span class="p">([</span><span class="err">\</span><span class="n">s</span><span class="err">\</span><span class="n">S</span><span class="p">]</span><span class="o">*?</span><span class="p">)</span><span class="o">&lt;</span><span class="err">\</span><span class="o">/</span><span class="n">script</span><span class="o">&gt;/</span><span class="n">gi</span><span class="p">);</span>
+<span class="w">        </span><span class="n">text</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">marked</span><span class="p">.</span><span class="n">parse</span><span class="p">(</span><span class="n">text</span><span class="p">);</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">text</span><span class="p">.</span><span class="n">replace</span><span class="p">(</span><span class="o">/&lt;</span><span class="n">script</span><span class="p">[</span><span class="o">^&gt;</span><span class="p">]</span><span class="o">*&gt;</span><span class="p">([</span><span class="err">\</span><span class="n">s</span><span class="err">\</span><span class="n">S</span><span class="p">]</span><span class="o">*?</span><span class="p">)</span><span class="o">&lt;</span><span class="err">\</span><span class="o">/</span><span class="n">script</span><span class="o">&gt;/</span><span class="n">gi</span><span class="p">,</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">scripts</span><span class="p">.</span><span class="n">shift</span><span class="p">());</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">var</span><span class="w"> </span><span class="n">div</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">document</span><span class="p">.</span><span class="n">getElementById</span><span class="p">(</span><span class="err">&#39;</span><span class="n">content</span><span class="err">&#39;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">var</span><span class="w"> </span><span class="n">div2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">document</span><span class="p">.</span><span class="n">createElement</span><span class="p">(</span><span class="err">&#39;</span><span class="n">div</span><span class="err">&#39;</span><span class="p">);</span>
+<span class="w">    </span><span class="n">div2</span><span class="p">.</span><span class="n">innerHTML</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">&#39;</span><span class="o">**</span><span class="n">can</span><span class="o">**</span><span class="w"> </span><span class="n">render</span><span class="o">:</span><span class="w"> </span><span class="err">\\</span><span class="p">(</span><span class="n">J</span><span class="err">\&#39;</span><span class="n">_</span><span class="err">\\</span><span class="n">theta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">J_</span><span class="err">\\</span><span class="n">theta</span><span class="err">\\</span><span class="p">)</span><span class="err">&#39;</span><span class="p">;</span>
+<span class="w">    </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">.</span><span class="n">Queue</span><span class="p">(</span>
+<span class="w">        </span><span class="p">[</span><span class="err">&#39;</span><span class="n">Typeset</span><span class="err">&#39;</span><span class="p">,</span><span class="w"> </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">,</span><span class="w"> </span><span class="n">div2</span><span class="p">],</span>
+<span class="w">        </span><span class="n">function</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">div</span><span class="p">.</span><span class="n">innerHTML</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">parseMarkdown</span><span class="p">(</span><span class="n">div2</span><span class="p">.</span><span class="n">innerHTML</span><span class="p">);</span>
+<span class="w">            </span><span class="n">div</span><span class="p">.</span><span class="n">querySelectorAll</span><span class="p">(</span><span class="err">&#39;</span><span class="p">.</span><span class="n">MathJax</span><span class="err">&#39;</span><span class="p">).</span><span class="n">forEach</span><span class="p">(</span><span class="n">e</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="n">remove</span><span class="p">());</span>
+<span class="w">            </span><span class="n">MathJax</span><span class="p">.</span><span class="n">Hub</span><span class="p">.</span><span class="n">Typeset</span><span class="p">(</span><span class="n">div</span><span class="p">);</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">);</span>
+<span class="o">&lt;/</span><span class="n">script</span><span class="o">&gt;</span>
+</code></pre></div>
+
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10332">https://spaces.ac.cn/archives/10332</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Aug. 26, 2024). 《近乎完美地解决MathJax与Marked的冲突 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10332">https://spaces.ac.cn/archives/10332</a></p>
+<p>@online{kexuefm-10332,<br />
+title={近乎完美地解决MathJax与Marked的冲突},<br />
+author={苏剑林},<br />
+year={2024},<br />
+month={Aug},<br />
+url={\url{https://spaces.ac.cn/archives/10332}},<br />
+} </p>
+<hr />
+<h2 id="_5">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

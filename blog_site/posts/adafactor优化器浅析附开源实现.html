@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AdaFactor优化器浅析（附开源实现）</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>AdaFactor优化器浅析（附开源实现）</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 18.1 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7302">https://spaces.ac.cn/archives/7302</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>自从GPT、BERT等预训练模型流行起来后，其中一个明显的趋势是模型越做越大，因为更大的模型配合更充分的预训练通常能更有效地刷榜。不过，理想可以无限远，现实通常很局促，有时候模型太大了，大到哪怕你拥有了大显存的GPU甚至TPU，依然会感到很绝望。比如GPT2最大的版本有15亿参数，最大版本的T5模型参数量甚至去到了110亿，这等规模的模型，哪怕在TPU集群上也没法跑到多大的batch size。</p>
+<p>这时候通常要往优化过程着手，比如使用混合精度训练（tensorflow下还可以使用一种叫做bfloat16的新型浮点格式），即省显存又加速训练；又或者使用更省显存的优化器，比如RMSProp就比Adam更省显存。本文则介绍<strong>AdaFactor</strong> ，一个由Google提出来的新型优化器，首发论文为<a href="https://papers.cool/arxiv/1804.04235">《Adafactor: Adaptive Learning Rates with Sublinear Memory Cost》</a>。 <em>AdaFactor具有自适应学习率的特性，但比RMSProp还要省显存，并且还针对性地解决了Adam的一些缺陷。</em></p>
+<h2 id="adam">Adam</h2>
+<p>首先我们来回顾一下常用的Adam优化器的更新过程。设$t$为迭代步数，$\alpha_t$为当前学习率，$L(\theta)$是损失函数，$\theta$是待优化参数，$\epsilon$则是防止溢出的小正数，那么Adam的更新过程为<br />
+\begin{equation}\left\{\begin{aligned}&amp;g_t = \nabla_{\theta} L(\theta_{t-1})\\\<br />
+&amp;m_t = \beta_1 m_{t-1} + \left(1 - \beta_1\right) g_t\\\<br />
+&amp;v_t = \beta_2 v_{t-1} + \left(1 - \beta_2\right) g_t^2\\\<br />
+&amp;\hat{m}<em t-1="t-1">t = m_t\left/\left(1 - \beta_1^t\right)\right.\\\<br />
+&amp;\hat{v}_t = v_t\left/\left(1 - \beta_2^t\right)\right.\\\<br />
+&amp;\theta_t = \theta</em> + \epsilon\right)\right.} - \alpha_t \hat{m}_t\left/\left(\sqrt{\hat{v}_t<br />
+\end{aligned}\right.\end{equation}</p>
+<p>要省显存，就首先得知道显存花在哪里的。首先，计算量和显存的大头肯定都是$\nabla_{\theta} L(\theta_{t-1})$，也就是说，计算梯度是很费资源的，这也是为啥“ALBERT相比BERT参数量虽然少了那么多，但训练速度也没见快多少”的原因了；除此之外，显存的消耗主要是$m,v$了，我们要维护两组缓存变量，来滑动计算梯度的前两阶矩（也就是$m$和$v$），用以计算参数的更新量。这两组变量每一组都跟训练参数本身一样大，因此对于参数比较多的模型，两组缓存变量所消耗的显存也不少。</p>
+<h2 id="adafactor">AdaFactor</h2>
+<p>在这一节中，我们会相对详细地介绍一些AdaFactor优化器，介绍中会设计比较多的公式和推导。如果只求一个大致了解的读者，可以自行跳过部分数学内容～</p>
+<h3 id="_1">抛弃动量</h3>
+<p>我们知道，CV模型很多时候要靠“SGD+动量”来炼出最优效果来，自适应学习率优化器通常训练不出最好的效果。但对于NLP模型来说，情况有点相反，自适应学习率显得更重要一些，很少听到由纯靠SGD调NLP模型的案例。因此，作为省显存的第一步，我们可以抛弃Adam里边的动量，这样就少一组缓存参数了，自然也就省了显存：<br />
+\begin{equation}\left\{\begin{aligned}&amp;g_t = \nabla_{\theta} L(\theta_{t-1})\\\<br />
+&amp;v_t = \beta_2 v_{t-1} + \left(1 - \beta_2\right) g_t^2\\\<br />
+&amp;\hat{v}<em t-1="t-1">t = v_t\left/\left(1 - \beta_2^t\right)\right.\\\<br />
+&amp;\theta_t = \theta</em>\right.} - \alpha_t g_t\left/\sqrt{\hat{v}_t + \epsilon<br />
+\end{aligned}\right.\end{equation}<br />
+这其实就是RMSProp的变种，比RMSProp多了$\hat{v}_t = v_t\left/\left(1 - \beta_2^t\right)\right.$这一步。</p>
+<h3 id="_2">低秩分解</h3>
+<p>去掉$m$之后，缓存变量直接减少了一半，但AdaFactor还不满意，它希望保留自适应学习率功能，但把缓存变量$v$的参数量再压一压。这一次，它用到了矩阵的低秩分解。</p>
+<h4 id="kl">广义KL散度</h4>
+<p>在SGD中，所有参数都是共用一个标量学习率；在Adam中，则是每一个参数都有自己的学习率$\alpha_t\left/\sqrt{\hat{v}_t + \epsilon}\right.$。我们知道通过精调学习率，SGD其实也能有不错的效果，这表明“每一个参数都有自己的学习率”这件事情都不是特别重要，或者换一种说法，就是“精调每一个参数自己的学习率”并不是特别重要。</p>
+<p>这启发我们，将$\hat{v}<em i="1">t$换一种参数更少的近似可能也就足够了。而“参数更少的近似”，我们就不难想到低秩分解了。对于$m\times n$的矩阵$C$，我们希望找到$m\times k$的矩阵$A$和$k\times n$的矩阵$B$，使得<br />
+\begin{equation}AB \approx C\end{equation}<br />
+当$k$足够小时，$A$、$B$的参数总量就小于$C$的参数量。为了“省”到极致，AdaFactor直接让$k=1$，即寻找$\{a_i\}</em>}^m$和$\{b_j\<em i_j="i,j">{j=1}^n$，使得<br />
+\begin{equation}a_i b_j \approx c</em>}\end{equation<br />
+既然要近似，就要有一个度量的标准。很容易想到的标准是欧氏距离，即<br />
+\begin{equation}\sum_{i,j} (a_i b_j - c_{i,j})^2\end{equation}<br />
+但在这个距离之下，$a_i,b_j$并没有解析解；此外，在优化过程中$c_{i,j}$（即$\hat{v}_t$）是非负的，而通过上述目标优化出来的$a_i b_j$无法保证非负，因此很可能扰乱优化过程。</p>
+<p>原论文的作者们很机智地换了一个度量标准，使得$a_i,b_j$有解析解。具体来说，它使用了“广义KL散度”，又称“I散度（<a href="https://arxiv.org/abs/math/0412070">I-Divergence</a>）”，其形式为：<br />
+\begin{equation}l = \sum_{i,j} c_{i,j}\log \frac{c_{i,j}}{a_i b_j} - c_{i,j} + a_i b_j \label{eq:i-div}\end{equation}<br />
+这个度量源自不等式$x\log x\geq x - 1(\forall x &gt; 0)$，当且仅当$x=1$时等号成立。所以代入$x = p / q\,(p,q &gt; 0)$，然后两端乘以$q$，我们有<br />
+\begin{equation}p\log \frac{p}{q} - p + q \geq 0\end{equation}<br />
+当且仅当$p=q$成立，如果$p,q$有多个分量，那么对多个分量的结果求和即可，这就得到了度量$\eqref{eq:i-div}$</p>
+<p>显然，广义KL散度是概率的KL散度的自然推广，但它不要求$c_{i,j}$和$a_i b_j$满足归一化，只要求它们非负，这正好对应了AdaFactor的场景。而且巧妙的是，这种情形配上这个目标，刚好有解析解：<br />
+\begin{equation}a_i = \sum\limits_{j}c_{i,j},\quad b_j = \frac{\sum\limits_{i}c_{i,j}}{\sum\limits_{i,j}c_{i,j}}\label{eq:aibj}\end{equation}<br />
+其实这个解析解也很形象，就是行、列分别求和，然后相乘，再除以全体的和。</p>
+<h4 id="_3">推导过程</h4>
+<p>直接对$\eqref{eq:i-div}$求偏导数并让偏导数等于0，得<br />
+\begin{equation}\left\{\begin{aligned}<br />
+&amp;\frac{\partial l}{\partial a_i}=\sum_j -\frac{c_{i,j}}{a_i} + b_j = 0\\\<br />
+&amp;\frac{\partial l}{\partial b_j}=\sum_i -\frac{c_{i,j}}{b_j} + a_i = 0<br />
+\end{aligned}\right.\end{equation}<br />
+整理得<br />
+\begin{equation}\left\{\begin{aligned}<br />
+&amp;a_i \sum_{j} b_j = \sum_j c_{i,j}\\\<br />
+&amp;b_j \sum_{i} a_i = \sum_i c_{i,j}<br />
+\end{aligned}\right.\end{equation}<br />
+注意到如果$(a_i,b_j)$是一组最优解，那么$(\lambda a_i,b_j/\lambda)$也是，说白了，所有的$a_i$乘以一个常数，所有的$b_j$也除以这个常数，$a_i b_j$是不变的。那么我们就可以随意指定$\sum\limits_{i} a_i$或$\sum\limits_{j} b_j$，因为它们就只是一个缩放标量而已。不失一般性，我们指定$\sum\limits_{j} b_j=1$，那么就解得$\eqref{eq:aibj}$。</p>
+<h4 id="_4">直观理解</h4>
+<p>我们也可以从另一个角度理解结果$\eqref{eq:aibj}$。由于$c_{i,j}$是非负的，我们可以将它归一化，变成具有概率分布的特性，即$\hat{c}<em i_j="i,j">{i,j}=\frac{c</em>}}{\sum\limits_{i,j}c_{i,j}}$，然后我们试图完成分解$\hat{c<em i_j="i,j">{i,j}\approx \hat{a}_i \hat{b}_j$，由于$\hat{c}</em>}$现在相当于一个二元联合概率分布，那么$\hat{a<em i_j="i,j">i,\hat{b}_j$就相当于它们的边缘分布，即<br />
+\begin{equation}\hat{a}_i = \sum_j \hat{c}</em>} = \frac{\sum\limits_{j}c_{i,j}}{\sum\limits_{i,j} c_{i,j}},\quad \hat{b<em i_j="i,j">j = \sum_i \hat{c}</em>} = \frac{\sum\limits_{i}c_{i,j}}{\sum\limits_{i,j}c_{i,j}}\end{equation<br />
+现在$\hat{c}<em i_j="i,j">{i,j}$到$c</em>$。}$还需要乘上一个$\sum\limits_{i,j}c_{i,j}$，我们可以把它乘到$\hat{a}_i$或$\hat{b}_j$中，不失一般性，我们假设乘到$\hat{a}_i$上，那么就得到$\eqref{eq:aibj</p>
+<h4 id="adafactor_1">AdaFactor雏形</h4>
+<p>有了结果$\eqref{eq:aibj}$后，我们就可以用它来构建更省内存的优化器了，这就是AdaFactor的雏形。简单来说，当参数$\theta$是普通一维向量时，优化过程保持不变；但$\theta$是$m\times n$的矩阵时，算出来的梯度$g_t$也是矩阵，从而$g_t^2$也是矩阵，这时候我们对$g_t^2$做低秩分解，然后维护两组缓存变量$v^{(r)}<em i_j_t="i,j;t">t\in \mathbb{R}^m,v^{(c)}_t\in\mathbb{R}^n$，分别滑动平均低秩分解后的结果，最后用$v^{(r)}_t,v^{(c)}_t$共同调整学习率：<br />
+\begin{equation}\left\{\begin{aligned}&amp;g</em>)\\\} = \nabla_{\theta} L(\theta_{i,j;t-1<br />
+&amp;v^{(r)}<em t-1_i="t-1;i">{i;t} = \beta_2 v^{(r)}</em>^2+\epsilon\right)\\\} + \left(1 - \beta_2\right) \sum\limits_{j}\left(g_{i,j;t<br />
+&amp;v^{(c)}<em t-1_j="t-1;j">{j;t} = \beta_2 v^{(c)}</em>^2+\epsilon\right)\\\} + \left(1 - \beta_2\right) \sum\limits_{i}\left(g_{i,j;t<br />
+&amp;v_{i,j;t} = v^{(r)}<em j_t="j;t">{i;t} v^{(c)}</em>}\left/\sum\limits_{j}v^{(c)<em t-1="t-1">{j;t}\right.\\\<br />
+&amp;\hat{v}_t = v_t\left/\left(1 - \beta_2^t\right)\right.\\\<br />
+&amp;\theta_t = \theta</em>\right.} - \alpha_t g_t\left/\sqrt{\hat{v}_t<br />
+\end{aligned}\right.\end{equation}<br />
+（把$\epsilon$加到$g_t^2$上去而不是$\hat{v}_t$上去，这是AdaFactor整出来的形式，不是笔者的锅～）</p>
+<h3 id="_5">滑动权重</h3>
+<p>在Adam以及上述AdaFactor雏形中，滑动权重$\beta_2$都是恒为常数，AdaFactor指出这是不科学的，并提出新的策略。</p>
+<h4 id="_6">等价形式</h4>
+<p>为了认识到这一点，我们重写一下Adam的$\hat{v}<em t-1="t-1">t$的更新过程：<br />
+\begin{equation}\begin{aligned}<br />
+\hat{v}_t =&amp; v_t\left/\left(1 - \beta_2^t\right)\right.\\\<br />
+=&amp;\frac{\beta_2 v</em>\\\} + (1-\beta_2) g_t^2}{1 - \beta_2^t<br />
+=&amp;\frac{\beta_2 \hat{v}<em t-1="t-1">{t-1}\left(1 - \beta_2^{t-1}\right) + (1-\beta_2) g_t^2}{1 - \beta_2^t}\\\<br />
+=&amp;\beta_2\frac{1 - \beta_2^{t-1}}{1 - \beta_2^t}\hat{v}</em>\right)g_t^2} + \left(1 - \beta_2\frac{1 - \beta_2^{t-1}}{1 - \beta_2^t<br />
+\end{aligned}\end{equation}<br />
+所以如果设$\hat{\beta}<em 2_t="2,t">{2,t}=\beta_2\frac{1 - \beta_2^{t-1}}{1 - \beta_2^t}$，那么更新公式就是<br />
+\begin{equation}\hat{v}_t =\hat{\beta}</em>}\hat{v<em 2_t="2,t">{t-1} + \left(1 - \hat{\beta}</em>}\right)g_t^2\end{equation<br />
+问题是这个$\hat{\beta}<em 2_t="2,t">{2,t}$够不够合理呢？答案是可能不大够。当$t=1$时$\hat{\beta}</em>}=0$，这时候$\hat{v<em 2_t="2,t">t$就是$g_t^2$，也就是用实时梯度来校正学习率，这时候校正力度最大；当$t\to\infty$时，$\hat{\beta}</em>\to 1$。}\to \beta_2$，这时候$v_t$是累积梯度平方与当前梯度平方的加权平均，由于$\beta_2 &lt; 1$，所以意味着当前梯度的权重$1 - \beta_2$不为0，这可能导致训练不稳定，因为训练后期梯度变小，训练本身趋于稳定，校正学习率的意义就不大了，因此学习率的校正力度应该变小，并且$t\to\infty$，学习率最好恒定为常数（这时候相当于退化为SGD），这就要求$t\to\infty$时，$\hat{\beta}_{2,t</p>
+<h4 id="_7">新的衰减策略</h4>
+<p>为了达到这个目的，AdaFactor采用如下的衰减策略<br />
+\begin{equation}\hat{\beta}<em 2_1="2,1">{2,t} =1 - \frac{1}{t^c}\label{eq:beta2}\end{equation}<br />
+它满足$\hat{\beta}</em>=1$。但即便如此，也不是任何$c$都适合，必须有$0 &lt; c &lt;1$。$c &gt; 0$好理解，那为什么要$c &lt; 1$呢？原论文包含了对它的分析，大家可以去读读，但笔者觉得原论文的推导过于晦涩，所以这里给出自己的理解。}=0,\lim\limits_{t\to\infty} \hat{\beta}_{2,t</p>
+<p>首先，对于$\hat{v}<em i="1">t$来说，一个很容易想到的方案是所有梯度平方的平均，即：<br />
+\begin{equation}\hat{v}_t = \frac{1}{t}\sum</em>}^t g_i^2=\frac{t-1}{t}\hat{v<em 2_t="2,t">{t-1} + \frac{1}{t}g_t^2\end{equation}<br />
+所以这等价于让$\hat{\beta}</em>$中取$c &lt; 1$，AdaFactor默认的$c$是$0.8$。} =1 - \frac{1}{t}$。这个方案美中不足的一点是，每一步梯度都是平权的，这不符合直觉，因为正常来说越久远的梯度应该越不重要才对，所以应该适当降低历史部分权重，而当$c &lt; 1$时，$1 - \frac{1}{t^c} &lt; 1 - \frac{1}{t}$，因此一个简洁的方案是在式$\eqref{eq:beta2</p>
+<h3 id="_8">层自适应</h3>
+<p>最后，我们还可以进一步根据参数的模长来校正更新量，这个思路来自<a href="https://papers.cool/arxiv/1904.00962">LAMB优化器</a>，在之前的文章<a href="/archives/7094#%E5%B1%82%E8%87%AA%E9%80%82%E5%BA%94">《6个派生优化器的简单介绍及其实现》</a>中也介绍过。简单来说，它就是将最后的更新量标准化，然后乘以参数的模长，说白了，就是不管你怎么折腾，最后的更新量我只要你的方向，而大小由参数本身的模长和预先设置学习率共同决定，使得所有层所有参数的相对变化程度保持一致。</p>
+<h3 id="adafactor_2">AdaFactor完整版</h3>
+<p>至此，我们终于可以写出完整版AdaFactor的更新过程了：<br />
+\begin{equation}\left\{\begin{aligned}&amp;g_{i,j;t} = \nabla_{\theta} L(\theta_{i,j;t-1})\\\<br />
+&amp;\hat{\beta}<em i_t="i;t">{2,t} =1 - t^{-c}\\\<br />
+&amp;v^{(r)}</em>} = \hat{\beta<em t-1_i="t-1;i">{2,t} v^{(r)}</em>} + \left(1 - \hat{\beta<em j="j">{2,t}\right) \sum\limits</em>^2+\epsilon_1\right)\\\}\left(g_{i,j;t<br />
+&amp;v^{(c)}<em 2_t="2,t">{j;t} = \hat{\beta}</em>} v^{(c)<em 2_t="2,t">{t-1;j} + \left(1 - \hat{\beta}</em>^2+\epsilon_1\right)\\\}\right) \sum\limits_{i}\left(g_{i,j;t<br />
+&amp;\hat{v}<em i_t="i;t">{i,j;t} = v^{(r)}</em>} v^{(c)<em j="j">{j;t}\left/\sum\limits</em>}v^{(c)<em t-1="t-1">{j;t}\right.\\\<br />
+&amp;u_t = g_t\left/\sqrt{\hat{v}_t}\right.\\\<br />
+&amp;\hat{u}_t = u_t \left/\max\left(1, \left. RMS(u_t)\right/d\right)\right.\times \max\left(\epsilon_2, RMS(\theta</em>)\right)\\\<br />
+&amp;\theta_t = \theta_{t-1} - \alpha_t \hat{u}<em i="1">t<br />
+\end{aligned}\right.\end{equation}<br />
+其中$RMS(x)=\sqrt{\frac{1}{n}\sum\limits</em>$是模长的变种，$\max\left(1, \left. RMS(u_t)\right/d\right)$这一步相当于做了个截断，即$RMS(u_t) &gt; d$时才执行归一化。原论文中的默认参数为}^n x_i^2<br />
+$$\begin{array}{c|c}  
+\hline  
+\epsilon_1 & 10^{-30}\\\  
+\hline  
+\epsilon_2 & 10^{-3}\\\  
+\hline  
+d & 1\\\  
+\hline  
+\hat{\beta}_{2,t} & 1 - t^{-0.8}\\\  
+\hline  
+\end{array}$$<br />
+如果参数是一维向量而不是矩阵，那么$\hat{v}<em 2_t="2,t">t$使用普通的更新公式$\hat{v}_t = \hat{\beta}</em>\right)$为默认学习率，但笔者看源码的时候发现这个默认学习率很少使用，基本上还是需要自己传入学习率的。} v_{t-1} + \left(1 - \hat{\beta}_{2,t}\right) \left(g_t^2+\epsilon_1\right)$就行了。此外，论文还提出如果没有传入学习率，那么可以使用$a_t = \min\left(10^{-2},\frac{1}{\sqrt{t}</p>
+<h2 id="_9">开源实现</h2>
+<p>为了方便大家使用，笔者开源了自己实现的AdaFactor：</p>
+<blockquote>
+<p><strong>Github地址：<a href="https://github.com/bojone/adafactor">https://github.com/bojone/adafactor</a></strong></p>
+</blockquote>
+<p>开源包括纯keras版和tf.keras版，使用方法跟普通keras优化器一样，tf.keras版也可以当做一个普通的tensorflow优化器使用。开源实现参考了<a href="https://github.com/tensorflow/mesh/blob/63754cf4524cb96282ac0dfe453a15076a76589f/mesh_tensorflow/optimize.py#L204">mesh_tensorflow版的源码</a>，在此表示感谢。优化器也已经内置在<a href="https://github.com/bojone/bert4keras/blob/master/bert4keras/optimizers.py">bert4keras</a>中，方便大家调用。</p>
+<p>需要提醒的是，用AdaFactor的时候，batch_size最好大一些，因为本身低秩分解会带来误差，而如果batch_size过小，那么梯度估算本身也带来较大的误差，两者叠加优化过程可能还不收敛。对于预训练模型来说，batch_size通常还是很大的，所以现在不少预训练模型开始用AdaFactor优化器了；对于普通的下游任务来说，AdaFactor也可以尝试，但可能需要多炼炼丹，才能搞出优于无脑Adam的效果。对了，还要提醒一下，用AdaFactor的时候，学习率要设大一点，大概是$10^{-3}$级别为好，哪怕是finetune阶段也是如此。</p>
+<h2 id="_10">文章小结</h2>
+<p>本文介绍了Google提出来的AdaFactor优化器，一个旨在减少显存占用的优化器，并且针对性地分析并解决了Adam的一些缺陷。笔者认为，AdaFactor针对Adam所做的分析相当经典，值得我们认真琢磨体味，对有兴趣研究优化问题的读者来说，更是一个不可多得的分析案例。</p>
+<p>当然，没有什么绝对能有效的方法，有的只是</p>
+<blockquote>
+<p>方法虽好，要想实际有效，依然要用心炼丹。</p>
+</blockquote>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7302">https://spaces.ac.cn/archives/7302</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Mar. 23, 2020). 《AdaFactor优化器浅析（附开源实现） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7302">https://spaces.ac.cn/archives/7302</a></p>
+<p>@online{kexuefm-7302,<br />
+title={AdaFactor优化器浅析（附开源实现）},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={Mar},<br />
+url={\url{https://spaces.ac.cn/archives/7302}},<br />
+} </p>
+<hr />
+<h2 id="_11">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

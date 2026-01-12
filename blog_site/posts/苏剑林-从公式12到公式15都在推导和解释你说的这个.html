@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成扩散模型漫谈（五）：一般框架之SDE篇</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>生成扩散模型漫谈（五）：一般框架之SDE篇</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 22.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9209">https://spaces.ac.cn/archives/9209</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在写<a href="/search/%E7%94%9F%E6%88%90%E6%89%A9%E6%95%A3%E6%A8%A1%E5%9E%8B/">生成扩散模型</a>的第一篇文章时，就有读者在评论区推荐了宋飏博士的论文<a href="https://papers.cool/arxiv/2011.13456">《Score-Based Generative Modeling through Stochastic Differential Equations》</a>，可以说该论文构建了一个相当一般化的生成扩散模型理论框架，将DDPM、SDE、ODE等诸多结果联系了起来。诚然，这是一篇好论文，但并不是一篇适合初学者的论文，里边直接用到了随机微分方程（SDE）、Fokker-Planck方程、得分匹配等大量结果，上手难度还是颇大的。</p>
+<p>不过，在经过了前四篇文章的积累后，现在我们可以尝试去学习一下这篇论文了。在接下来的文章中，笔者将尝试从尽可能少的理论基础出发，尽量复现原论文中的推导结果。</p>
+<h2 id="_1">随机微分</h2>
+<p>在DDPM中，扩散过程被划分为了固定的$T$步，还是用<a href="/archives/9119">《生成扩散模型漫谈（一）：DDPM = 拆楼 + 建楼》</a>的类比来说，就是“拆楼”和“建楼”都被事先划分为了$T$步，这个划分有着相当大的人为性。事实上，真实的“拆”、“建”过程应该是没有刻意划分的步骤的，我们可以将它们理解为一个在时间上连续的变换过程，可以用随机微分方程（Stochastic Differential Equation，SDE）来描述。</p>
+<p>为此，我们用下述SDE描述前向过程（“拆楼”）：<br />
+\begin{equation}d\boldsymbol{x} = \boldsymbol{f}<em t="t" t_Delta="t+\Delta">t(\boldsymbol{x}) dt + g_t d\boldsymbol{w}\label{eq:sde-forward}\end{equation}<br />
+相信很多读者都对SDE很陌生，笔者也只是在硕士阶段刚好接触过一段时间，略懂皮毛。不过不懂不要紧，我们只需要将它看成是下述离散形式在$\Delta t\to 0$时的极限：<br />
+\begin{equation}\boldsymbol{x}</em>} - \boldsymbol{x}_t = \boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t + g_t \sqrt{\Delta t}\boldsymbol{\varepsilon},\quad \boldsymbol{\varepsilon}\sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})\label{eq:sde-discrete}\end{equation<br />
+再直白一点，如果假设拆楼需要$1$天，那么拆楼就是$\boldsymbol{x}$从$t=0$到$t=1$的变化过程，每一小步的变化我们可以用上述方程描述。至于时间间隔$\Delta t$，我们并没有做特殊限制，只是越小的$\Delta t$意味着是对原始SDE越好的近似，如果取$\Delta t=0.001$，那就对应于原来的$T=1000$，如果是$\Delta t = 0.01$则对应于$T=100$，等等。也就是说，在连续时间的SDE视角之下，不同的$T$是SDE不同的离散化程度的体现，它们会自动地导致相似的结果，我们不需要事先指定$T$，而是根据实际情况下的精确度来取适当的$T$进行数值计算。</p>
+<p>所以，引入SDE形式来描述扩散模型的本质好处是“将理论分析和代码实现分离开来”，我们可以借助连续性SDE的数学工具对它做分析，而实践的时候，则只需要用任意适当的离散化方案对SDE进行数值计算。</p>
+<p>对于式$\eqref{eq:sde-discrete}$，读者可能比较有疑惑的是为什么右端第一项是$\mathcal{O}(\Delta t)$的，而第二项是$\mathcal{O}(\sqrt{\Delta t})$的？也就是说为什么随机项的阶要比确定项的阶要高？这个还真不是那么容易解释，也是SDE比较让人迷惑的地方之一。简单来说，就是$\boldsymbol{\varepsilon}$一直服从标准正态分布，如果随机项的权重也是$\mathcal{O}(\Delta t)$，那么由于标准正态分布的均值为$\boldsymbol{0}$、协方差为$ \boldsymbol{I}$，临近的随机效应会相互抵消掉，要放大到$\mathcal{O}(\sqrt{\Delta t})$才能在长期结果中体现出随机效应的作用。</p>
+<h2 id="_2">逆向方程</h2>
+<p>用概率的语言，式$\eqref{eq:sde-discrete}$意味着条件概率为<br />
+\begin{equation}\begin{aligned}<br />
+p(\boldsymbol{x}<em t="t" t_Delta="t+\Delta">{t+\Delta t}|\boldsymbol{x}_t) =&amp;\, \mathcal{N}\left(\boldsymbol{x}</em>};\boldsymbol{x<em t="t" t_Delta="t+\Delta">t + \boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t, g_t^2\Delta t \,\boldsymbol{I}\right)\\\<br />
+\propto&amp;\, \exp\left(-\frac{\Vert\boldsymbol{x}</em>} - \boldsymbol{x<em t="t" t_Delta="t+\Delta">t - \boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t\Vert^2}{2 g_t^2\Delta t}\right)<br />
+\end{aligned}\label{eq:sde-proba}\end{equation}<br />
+简单起见，这里没有写出无关紧要的归一化因子。按照DDPM的思想，我们最终是想要从“拆楼”的过程中学会“建楼”，即得到$p(\boldsymbol{x}_t|\boldsymbol{x}</em>)$，为此，我们像<a href="/archives/9164">《生成扩散模型漫谈（三）：DDPM = 贝叶斯 + 去噪》</a>一样，用贝叶斯定理：<br />
+\begin{equation}\begin{aligned}<br />
+p(\boldsymbol{x}<em t="t" t_Delta="t+\Delta">t|\boldsymbol{x}</em>}) =&amp;\, \frac{p(\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t}|\boldsymbol{x}_t)p(\boldsymbol{x}_t)}{p(\boldsymbol{x}</em>})} = p(\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t}|\boldsymbol{x}_t) \exp\left(\log p(\boldsymbol{x}_t) - \log p(\boldsymbol{x}</em>)\right)\\\<br />
+\propto&amp;\, \exp\left(-\frac{\Vert\boldsymbol{x}<em t="t" t_Delta="t+\Delta">{t+\Delta t} - \boldsymbol{x}_t - \boldsymbol{f}_t(\boldsymbol{x}_t) \Delta t\Vert^2}{2 g_t^2\Delta t} + \log p(\boldsymbol{x}_t) - \log p(\boldsymbol{x}</em>)\right)<br />
+\end{aligned}\label{eq:bayes-dt}\end{equation}<br />
+不难发现，当$\Delta t$足够小时，只有当$\boldsymbol{x}<em t="t" t_Delta="t+\Delta">{t+\Delta t}$与$\boldsymbol{x}_t$足够接近时，$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t="t" t_Delta="t+\Delta">t)$才会明显不等于0，反过来也只有这种情况下$p(\boldsymbol{x}_t|\boldsymbol{x}</em>})$才会明显不等于0。因此，我们只需要对$\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t}$与$\boldsymbol{x}_t$足够接近时的情形做近似分析，为此，我们可以用泰勒展开：<br />
+\begin{equation}\log p(\boldsymbol{x}</em>})\approx \log p(\boldsymbol{x<em t="t" t_Delta="t+\Delta">t) + (\boldsymbol{x}</em>} - \boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)\cdot \nabla</em><em t="t" t_Delta="t+\Delta">t}\log p(\boldsymbol{x}_t) + \Delta t \frac{\partial}{\partial t}\log p(\boldsymbol{x}_t)\end{equation}<br />
+注意不要忽略了$\frac{\partial}{\partial t}$项，因为$p(\boldsymbol{x}_t)$实际上是“$t$时刻随机变量等于$\boldsymbol{x}_t$的概率密度”，而$p(\boldsymbol{x}</em>})$实际上是“$t+\Delta t$时刻随机变量等于$\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t}$的概率密度”，也就是说$p(\boldsymbol{x}_t)$实际上同时是$t$和$\boldsymbol{x}_t$的函数，所以要多一项$t$的偏导数。代入到式$\eqref{eq:bayes-dt}$后，配方得到<br />
+\begin{equation}p(\boldsymbol{x}_t|\boldsymbol{x}</em>}) \propto \exp\left(-\frac{\Vert\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">{t+\Delta t} - \boldsymbol{x}_t - \left[\boldsymbol{f}_t(\boldsymbol{x}_t) - g_t^2\nabla</em><em t="t" t_Delta="t+\Delta">t}\log p(\boldsymbol{x}_t) \right]\Delta t\Vert^2}{2 g_t^2\Delta t} + \mathcal{O}(\Delta t)\right)\end{equation}<br />
+当$\Delta t\to 0$时，$\mathcal{O}(\Delta t)\to 0$不起作用，因此<br />
+\begin{equation}\begin{aligned}<br />
+p(\boldsymbol{x}_t|\boldsymbol{x}</em>}) \propto&amp;\, \exp\left(-\frac{\Vert\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">{t+\Delta t} - \boldsymbol{x}_t - \left[\boldsymbol{f}_t(\boldsymbol{x}_t) - g_t^2\nabla</em><em t="t" t_Delta="t+\Delta">t}\log p(\boldsymbol{x}_t) \right]\Delta t\Vert^2}{2 g_t^2\Delta t}\right) \\\<br />
+\approx&amp;\,\exp\left(-\frac{\Vert \boldsymbol{x}_t - \boldsymbol{x}</em>} + \left[\boldsymbol{f<em t="t" t_Delta="t+\Delta">{t+\Delta t}(\boldsymbol{x}</em>}) - g_{t+\Delta t}^2\nabla_{\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t}}\log p(\boldsymbol{x}</em>\right)}) \right]\Delta t\Vert^2}{2 g_{t+\Delta t}^2\Delta t<br />
+\end{aligned}\end{equation}<br />
+即$p(\boldsymbol{x}<em t="t" t_Delta="t+\Delta">t|\boldsymbol{x}</em>})$近似一个均值为$\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t} - \left[\boldsymbol{f}</em>}(\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t}) - g</em>}^2\nabla_{\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t}}\log p(\boldsymbol{x}</em>$的正态分布，取$\Delta t\to 0$的极限，那么对应于SDE：}) \right]\Delta t$、协方差为$g_{t+\Delta t}^2\Delta t\,\boldsymbol{I<br />
+\begin{equation}d\boldsymbol{x} = \left[\boldsymbol{f}<em _boldsymbol_x="\boldsymbol{x">t(\boldsymbol{x}) - g_t^2\nabla</em>}}\log p_t(\boldsymbol{x}) \right] dt + g_t d\boldsymbol{w}\label{eq:reverse-sde}\end{equation<br />
+这就是反向过程对应的SDE，最早出现在<a href="https://www.sciencedirect.com/science/article/pii/0304414982900515">《Reverse-Time Diffusion Equation Models》</a>中。这里我们特意在$p$处标注了下标$t$，以突出这是$t$时刻的分布。</p>
+<h2 id="_3">得分匹配</h2>
+<p>现在我们已经得到了逆向的SDE为$\eqref{eq:reverse-sde}$，如果进一步知道$\nabla_{\boldsymbol{x}}\log p_t(\boldsymbol{x})$，那么就可以通过离散化格式<br />
+\begin{equation}\boldsymbol{x}<em t="t" t_Delta="t+\Delta">t - \boldsymbol{x}</em>} = - \left[\boldsymbol{f<em t="t" t_Delta="t+\Delta">{t+\Delta t}(\boldsymbol{x}</em>}) - g_{t+\Delta t}^2\nabla_{\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t}}\log p(\boldsymbol{x}</em>}) \right]\Delta t - g_{t+\Delta t} \sqrt{\Delta t}\boldsymbol{\varepsilon}\label{eq:reverse-sde-discrete}\end{equation<br />
+来逐步完成“建楼”的生成过程【其中$\boldsymbol{\varepsilon}\sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$】，从而完成一个生成扩散模型的构建。</p>
+<p>那么如何得到$\nabla_{\boldsymbol{x}}\log p_t(\boldsymbol{x})$呢？$t$时刻的$p_t(\boldsymbol{x})$就是前面的$p(\boldsymbol{x}<em 0="0" _Delta="\Delta" t_to="t\to">t)$，它的含义就是$t$时刻的边缘分布。在实际使用时，我们一般会设计能找到$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$解析解的模型，这意味着<br />
+\begin{equation}\small p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \lim</em>}\int\cdots\iint p(\boldsymbol{x<em t="t" t-_Delta="t-\Delta">t|\boldsymbol{x}</em>})p(\boldsymbol{x<em t="t" t-2_Delta="t-2\Delta">{t-\Delta t}|\boldsymbol{x}</em>})\cdots p(\boldsymbol{x<em t="t" t-_Delta="t-\Delta">{\Delta t}|\boldsymbol{x}_0) d\boldsymbol{x}</em>} d\boldsymbol{x<em _Delta="\Delta" t="t">{t-2\Delta t}\cdots d\boldsymbol{x}</em>}\end{equation<br />
+是可以直接求出的，比如当$\boldsymbol{f}<em _boldsymbol_x="\boldsymbol{x">t(\boldsymbol{x})$是关于$\boldsymbol{x}$的线性函数时，$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$就可以解析求解。在此前提下，有<br />
+\begin{equation}p(\boldsymbol{x}_t) = \int p(\boldsymbol{x}_t|\boldsymbol{x}_0)\tilde{p}(\boldsymbol{x}_0)d\boldsymbol{x}_0=\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0}\left[p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right]\end{equation}<br />
+于是<br />
+\begin{equation}\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\log p(\boldsymbol{x}_t) = \frac{\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0}\left[\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right]}{\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0}\left[p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right]} = \frac{\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0}\left[p(\boldsymbol{x}_t|\boldsymbol{x}_0)\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right]}{\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0}\left[p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right]}\end{equation}<br />
+可以看到最后的式子具有“$\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)$的加权平均”的形式，由于假设了$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$有解析解，因此上式实际上是能够直接估算的，然而它涉及到对全体训练样本$\boldsymbol{x}_0$的平均，一来计算量大，二来泛化能力也不够好。因此，我们希望用神经网络学一个函数$\boldsymbol{s}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t)$，使得它能够直接计算$\nabla</em>_t)$。}_t}\log p(\boldsymbol{x</p>
+<p>很多读者应该对如下结果并不陌生（或者推导一遍也不困难）：<br />
+\begin{equation}\mathbb{E}[\boldsymbol{x}] = \mathop{\text{argmin}}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\mu}}\mathbb{E}</em>}}\left[\Vert \boldsymbol{\mu} - \boldsymbol{x}\Vert^2\right]\end{equation<br />
+即要让$\boldsymbol{\mu}$等于$\boldsymbol{x}$的均值，只需要最小化$\Vert \boldsymbol{\mu} - \boldsymbol{x}\Vert^2$的均值。同理，要让$\boldsymbol{s}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$等于$\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)$的加权平均【即$\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t}\log p(\boldsymbol{x}_t)$】，则只需要最小化$\left\Vert \boldsymbol{s}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) - \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right\Vert^2$的加权平均，即<br />
+\begin{equation} \frac{\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0}\left[p(\boldsymbol{x}_t|\boldsymbol{x}_0)\left\Vert \boldsymbol{s}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) - \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right\Vert^2\right]}{\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0}\left[p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right]}\end{equation}<br />
+分母的$\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0}\left[p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right]$只是起到调节Loss权重的作用，简单起见我们可以直接去掉它，这不会影响最优解的结果。最后我们再对$\boldsymbol{x}_t$积分（相当于对于每一个$\boldsymbol{x}_t$都要最小化上述损失），得到最终的损失函数<br />
+\begin{equation}\begin{aligned}&amp;\,\int \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0}\left[p(\boldsymbol{x}_t|\boldsymbol{x}_0)\left\Vert \boldsymbol{s}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) - \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right\Vert^2\right] d\boldsymbol{x}_t \\\<br />
+=&amp;\, \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0,\boldsymbol{x}_t \sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)\tilde{p}(\boldsymbol{x}_0)}\left[\left\Vert \boldsymbol{s}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) - \nabla</em>_0)\right\Vert^2\right]}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x<br />
+\end{aligned}\label{eq:score-match}\end{equation}<br />
+这就是“（条件）得分匹配”的损失函数，之前我们在<a href="/archives/7038">《从去噪自编码器到生成模型》</a>推导的去噪自编码器的解析解，也是它的一个特例。得分匹配的最早出处可以追溯到2005年的论文<a href="https://www.jmlr.org/papers/v6/hyvarinen05a.html">《Estimation of Non-Normalized Statistical Models by Score Matching》</a>，至于条件得分匹配的最早出处，笔者追溯到的是2011年的论文<a href="https://www.iro.umontreal.ca/~vincentp/Publications/DenoisingScoreMatching_NeuralComp2011.pdf">《A Connection Between Score Matching and Denoising Autoencoders》</a>。</p>
+<p>不过，虽然该结果跟得分匹配是一样的，但其实在这一节的推导中，我们已经抛开了“得分”的概念了，纯粹是由目标自然地引导出来的答案，笔者认为这样的处理过程更有启发性，希望这一推导能降低大家对得分匹配的理解难度。</p>
+<h2 id="_4">结果倒推</h2>
+<p>至此，我们构建了生成扩散模型的一般流程：</p>
+<blockquote>
+<p>1、通过随机微分方程$\eqref{eq:sde-forward}$定义“拆楼”（前向过程）；</p>
+<p>2、求$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$的表达式；</p>
+<p>3、通过损失函数$\eqref{eq:score-match}$训练$\boldsymbol{s}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$（得分匹配）；</p>
+<p>4、用$\boldsymbol{s}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)$替换式$\eqref{eq:reverse-sde}$的$\nabla</em>)$，完成“建楼”（反向过程）。}}\log p_t(\boldsymbol{x</p>
+</blockquote>
+<p>可能大家看到SDE、微分方程等字眼，天然就觉得“恐慌”，但本质上来说，SDE只是个“幌子”，实际上将对SDE的理解转换到式$\eqref{eq:sde-discrete}$和式$\eqref{eq:sde-proba}$上后，完全就可以抛开SDE的概念了，因此概念上其实是没有太大难度的。</p>
+<p>不难发现，定义一个随机微分方程$\eqref{eq:sde-forward}$是很容易的，但是从$\eqref{eq:sde-forward}$求解$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$却是不容易的。原论文的剩余篇幅，主要是对两个有实用性的例子推导和实验。然而，既然求解$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$不容易，那么按照笔者的看法，与其先定义$\eqref{eq:sde-forward}$再求解$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$，倒不如像<a href="/archives/9181">DDIM</a>一样，先定义$p(\boldsymbol{x}_t|\boldsymbol{x}_0)$，然后再来反推对应的SDE？</p>
+<p>例如，我们先定义<br />
+\begin{equation} p(\boldsymbol{x}_t|\boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t \boldsymbol{x}_0,\bar{\beta}_t^2 \boldsymbol{I})\end{equation}<br />
+并且不失一般性假设起点是$t=0$，终点是$t=1$，那么$\bar{\alpha}_t,\bar{\beta}_t$要满足的边界就是<br />
+\begin{equation} \bar{\alpha}_0 = 1,\quad \bar{\alpha}_1 = 0,\quad \bar{\beta}_0 = 0,\quad \bar{\beta}_1 = 1\end{equation}<br />
+当然，上述边界条件理论上足够近似就行，也不一定非要精确相等，比如上一篇文章我们分析过DDPM相当于选择了$\bar{\alpha}_t = e^{-5t^2}$，当$t=1$时结果为$e^{-5}\approx 0$。</p>
+<p>有了$p(\boldsymbol{x}<em t="t" t_Delta="t+\Delta">t|\boldsymbol{x}_0)$，我们去反推$\eqref{eq:sde-forward}$，本质上就是要求解$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t="t" t_Delta="t+\Delta">t)$，它要满足<br />
+\begin{equation} p(\boldsymbol{x}</em>}|\boldsymbol{x<em t="t" t_Delta="t+\Delta">0) = \int p(\boldsymbol{x}</em>}|\boldsymbol{x<em t="t" t_Delta="t+\Delta">t) p(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x}_t\end{equation}<br />
+我们考虑线性的解，即<br />
+\begin{equation}d\boldsymbol{x} = f_t\boldsymbol{x} dt + g_t d\boldsymbol{w}\end{equation}<br />
+跟<a href="/archives/9181#%E5%BE%85%E5%AE%9A%E7%B3%BB%E6%95%B0">《生成扩散模型漫谈（四）：DDIM = 高观点DDPM》</a>一样，我们写出<br />
+\begin{array}{c|c|c}<br />
+\hline<br />
+\text{记号} &amp; \text{含义} &amp; \text{采样}\\\<br />
+\hline<br />
+p(\boldsymbol{x}</em>}|\boldsymbol{x<em t="t" t_Delta="t+\Delta">0) &amp; \mathcal{N}(\boldsymbol{x}_t;\bar{\alpha}</em>} \boldsymbol{x<em t="t" t_Delta="t+\Delta">0,\bar{\beta}</em>}^2 \boldsymbol{I}) &amp; \boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t} = \bar{\alpha}</em>} \boldsymbol{x<em t="t" t_Delta="t+\Delta">0 + \bar{\beta}</em> \\\} \boldsymbol{\varepsilon<br />
+\hline<br />
+p(\boldsymbol{x}<em t="t" t_Delta="t+\Delta">t|\boldsymbol{x}_0) &amp; \mathcal{N}(\boldsymbol{x}_t;\bar{\alpha}_t \boldsymbol{x}_0,\bar{\beta}_t^2 \boldsymbol{I}) &amp; \boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}_1 \\\<br />
+\hline<br />
+p(\boldsymbol{x}</em>}|\boldsymbol{x<em t="t" t_Delta="t+\Delta">t) &amp; \mathcal{N}(\boldsymbol{x}</em>}; (1 + f_t\Delta t) \boldsymbol{x<em t="t" t_Delta="t+\Delta">t, g_t^2 \Delta t\, \boldsymbol{I}) &amp; \boldsymbol{x}</em>} = (1 + f_t\Delta t) \boldsymbol{x<em t="t" t_Delta="t+\Delta">t + g_t\sqrt{\Delta t}\boldsymbol{\varepsilon}_2 \\\<br />
+\hline<br />
+{\begin{array}{c}\int p(\boldsymbol{x}</em>}|\boldsymbol{x<em t="t" t_Delta="t+\Delta">t) \\\<br />
+p(\boldsymbol{x}_t|\boldsymbol{x}_0) d\boldsymbol{x}_t\end{array}} &amp; &amp; {\begin{aligned}&amp;\,\boldsymbol{x}</em> \\\<br />
+=&amp;\, (1 + f_t\Delta t) \boldsymbol{x}<em t="t" t_Delta="t+\Delta">t + g_t\sqrt{\Delta t} \boldsymbol{\varepsilon}_2 \\\<br />
+=&amp;\, (1 + f_t\Delta t) (\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}_1) + g_t\sqrt{\Delta t} \boldsymbol{\varepsilon}_2 \\\<br />
+=&amp;\, (1 + f_t\Delta t) \bar{\alpha}_t \boldsymbol{x}_0 + ((1 + f_t\Delta t)\bar{\beta}_t \boldsymbol{\varepsilon}_1 + g_t\sqrt{\Delta t} \boldsymbol{\varepsilon}_2) \\\<br />
+\end{aligned}} \\\<br />
+\hline<br />
+\end{array}<br />
+由此可得<br />
+\begin{equation}\begin{aligned}<br />
+\bar{\alpha}</em>} =&amp;\, (1 + f_t\Delta t) \bar{\alpha<em t="t" t_Delta="t+\Delta">t \\\<br />
+\bar{\beta}</em>_t^2 + g_t^2\Delta t}^2 =&amp;\, (1 + f_t\Delta t)^2\bar{\beta<br />
+\end{aligned}\end{equation}<br />
+令$\Delta t\to 0$，分别解得<br />
+\begin{equation}<br />
+f_t = \frac{d}{dt} \left(\ln \bar{\alpha}_t\right) = \frac{1}{\bar{\alpha}_t}\frac{d\bar{\alpha}_t}{dt}, \quad g_t^2 = \bar{\alpha}_t^2 \frac{d}{dt}\left(\frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\right) = 2\bar{\alpha}_t \bar{\beta}_t \frac{d}{dt}\left(\frac{\bar{\beta}_t}{\bar{\alpha}_t}\right)\end{equation}<br />
+取$\bar{\alpha}_t\equiv 1$时，结果就是论文中的VE-SDE（Variance Exploding SDE）；而如果取$\bar{\alpha}_t^2 + \bar{\beta}_t^2=1$时，结果就是原论文中的VP-SDE（Variance Preserving SDE）。</p>
+<p>至于损失函数，此时我们可以算得<br />
+\begin{equation}\nabla_{\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0) = -\frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t^2}=-\frac{\boldsymbol{\varepsilon}}{\bar{\beta}_t}\end{equation}<br />
+第二个等号是因为$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$，为了跟以往的结果对齐，我们设$\boldsymbol{s}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t) = -\frac{\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t)}{\bar{\beta}_t}$，此时式$\eqref{eq:score-match}$为<br />
+\begin{equation}\frac{1}{\bar{\beta}_t^2}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim \tilde{p}(\boldsymbol{x}_0),\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})}\left[\left\Vert \boldsymbol{\epsilon}</em>}}(\bar{\alpha<em _boldsymbol_theta="\boldsymbol{\theta">t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}, t) - \boldsymbol{\varepsilon}\right\Vert^2\right]\end{equation}<br />
+忽略系数后就是DDPM的损失函数，而用$-\frac{\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t}, t+\Delta t)}{\bar{\beta}</em>}}$替换掉式$\eqref{eq:reverse-sde-discrete}$的$\nabla_{\boldsymbol{x<em t="t" t_Delta="t+\Delta">{t+\Delta t}}\log p(\boldsymbol{x}</em>)$后，结果与DDPM的采样过程具有相同的一阶近似（意味着$\Delta t\to 0$时两者等价）。</p>
+<h2 id="_5">文章小结</h2>
+<p>本文主要介绍了宋飏博士建立的利用SDE理解扩散模型的一般框架，其中包括以尽可能直观的语言推导了反向SDE、得分匹配等结果，并对方程的求解给出了自己的想法。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9209">https://spaces.ac.cn/archives/9209</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Aug. 03, 2022). 《生成扩散模型漫谈（五）：一般框架之SDE篇 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9209">https://spaces.ac.cn/archives/9209</a></p>
+<p>@online{kexuefm-9209,<br />
+title={生成扩散模型漫谈（五）：一般框架之SDE篇},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Aug},<br />
+url={\url{https://spaces.ac.cn/archives/9209}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

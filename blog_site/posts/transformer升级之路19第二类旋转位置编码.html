@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer升级之路：19、第二类旋转位置编码</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>Transformer升级之路：19、第二类旋转位置编码</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 11.1 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10862">https://spaces.ac.cn/archives/10862</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>持续将“Transformer升级之路”系列关注到本篇的读者，想必都已经对<a href="/archives/8265">旋转位置编码（RoPE）</a>有所了解。简单来说，RoPE是施加在Attention的Query（$\boldsymbol{Q}$）和Key（$\boldsymbol{K}$）上的旋转变换，形式上属于绝对位置编码，但结合Attention的内积（Dot-Product）特性，能够自动实现相对位置的效果。</p>
+<p>那么，RoPE可以加在Value（$\boldsymbol{V}$）上吗？看上去不可以，因为对$\boldsymbol{V}$旋转后就不是相对位置编码了。然而事情并没有那么绝对，本文就来讨论加在$\boldsymbol{V}$上RoPE，我们可以称之为“第二类旋转位置编码”。</p>
+<h2 id="_1">基础回顾</h2>
+<p>我们将<a href="/archives/4765">Dot-Product Attention</a>分解为<br />
+\begin{equation}\boldsymbol{o}<em i_j="i,j">i = \sum_j a</em>}\boldsymbol{v<em i_j="i,j">j,\qquad a</em>} = \frac{e^{s_{i,j}}}{\sum\limits_j e^{s_{i,j}}},\qquad s_{i,j} = \boldsymbol{q<em i_j="i,j">i^{\top}\boldsymbol{k}_j\end{equation}<br />
+简单起见，这里省去了$s</em>}$的缩放因子。RoPE应用在$\boldsymbol{q<em i_j="i,j">i,\boldsymbol{k}_j$上：<br />
+\begin{equation}\boldsymbol{q}_i \to \boldsymbol{\mathcal{R}}_i\boldsymbol{q}_i,\qquad \boldsymbol{k}_j \to \boldsymbol{\mathcal{R}}_j\boldsymbol{k}_j\end{equation}<br />
+这将导致Attention Logits也就是$s</em>$变成<br />
+\begin{equation}s_{i,j} = (\boldsymbol{\mathcal{R}}<em j-i="j-i">i\boldsymbol{q}_i)^{\top} (\boldsymbol{\mathcal{R}}_j\boldsymbol{k}_j) = \boldsymbol{q}_i^{\top}\boldsymbol{\mathcal{R}}_i^{\top}\boldsymbol{\mathcal{R}}_j\boldsymbol{k}_j=\boldsymbol{q}_i^{\top}\boldsymbol{\mathcal{R}}</em>}\boldsymbol{k<em i_j="i,j">j\end{equation}<br />
+也就是说$s</em>}$只依赖于相对位置$j-i$，从而通过绝对位置形式达到相对位置的效果。这个变换过程利用了旋转矩阵的特性$\boldsymbol{\mathcal{R}<em j-i="j-i">i^{\top}\boldsymbol{\mathcal{R}}_j=\boldsymbol{\mathcal{R}}</em>$。</p>
+<p>除了旋转矩阵外，在<a href="/archives/8397">《Transformer升级之路：4、二维位置的旋转式位置编码》</a>中我们证明了它的一般解是$\boldsymbol{\mathcal{R}}_i = \boldsymbol{O}^i$，其中$\boldsymbol{O}$是任意正交矩阵，上标是矩阵的幂运算。不过后来我们在<a href="/archives/9403">《Transformer升级之路：6、旋转位置编码的完备性分析》</a>也证明了其实一般的正交矩阵解本质上也同构于旋转矩阵解。</p>
+<h2 id="_2">新的用法</h2>
+<p>如果将RoPE加在$\boldsymbol{v}<em i_j="i,j">j$上，即$\boldsymbol{v}_j\to\boldsymbol{\mathcal{R}}_j\boldsymbol{v}_j$，那又如何呢？显然Attention的结果是<br />
+\begin{equation}\boldsymbol{o}_i = \sum_j a</em>} \boldsymbol{\mathcal{R}}_j\boldsymbol{v}_j\label{eq:v-rope-abs}\end{equation<br />
+这将会导致Attention显式依赖于绝对位置$j$。如果我们只想要一种位置编码，那么也许问题不大，但如果我们是想要一种相对位置编码，那么它就不能满足我们的目的。</p>
+<p>然而，有一个简单的技巧可以解决这个缺陷！我们可以给$\boldsymbol{o}<em i_j="i,j">i$再加一次逆向的RoPE：<br />
+\begin{equation}\boldsymbol{o}_i = \boldsymbol{\mathcal{R}}_i^{\top}\left(\sum_j a</em>} \boldsymbol{\mathcal{R}<em i_j="i,j">j\boldsymbol{v}_j\right)=\sum_j a</em>} \boldsymbol{\mathcal{R}<em i_j="i,j">i^{\top}\boldsymbol{\mathcal{R}}_j\boldsymbol{v}_j=\sum_j a</em>} \boldsymbol{\mathcal{R}}_{j-i}\boldsymbol{v}_j\label{eq:vo-rope}\end{equation<br />
+这样它再次变成了一个相对位置编码！而形式上同样也是两次绝对位置编码，跟已有的RoPE异曲同工，所以我们称之为“第二类旋转位置编码”，也可以更直观地称为“VO-RoPE”，因为它分别在Value和Output都加了一次RoPE，相应地，标准的RoPE我们可以称之为“QK-RoPE”。</p>
+<h2 id="_3">简单实验</h2>
+<p>在一个1B左右的类LLAMA模型上快速做了一波实验，对比的几个设置为：</p>
+<blockquote>
+<p>1、NoPE：完全不加位置编码；</p>
+<p>2、QK-RoPE：标准的旋转位置编码；</p>
+<p>3、VO-RoPE：本文新提出的第二类旋转位置编码；</p>
+<p>4、Q/K/V/O-RoPE：单独在Q、K、V、O之一加旋转位置编码；</p>
+<p>5、QKV-RoPE：Q、K、V都加上旋转位置编码；</p>
+<p>6、QKVO-RoPE：Q、K、V、O都加上旋转位置编码。</p>
+</blockquote>
+<p>注意，第4、5点都算是绝对位置编码。大致结论是：<br />
+$$\text{QK-RoPE}\approx \text{QKVO-RoPE} > \text{K-RoPE}\approx \text{VO-RoPE} > \text{QKV-RoPE} > \text{NoPE} > \text{Q/V/O-RoPE}$$</p>
+<p>具体损失函数差异是：<br />
+\begin{array}{c|c}<br />
+\hline<br />
+&amp; \text{Loss} \\\<br />
+\hline<br />
+\text{QK-RoPE} &amp; 2.712 \\\<br />
+\text{QKVO-RoPE} &amp; 2.719 \\\<br />
+\text{K-RoPE} &amp; 2.769 \\\<br />
+\text{VO-RoPE} &amp; 2.770 \\\<br />
+\text{QKV-RoPE} &amp; 2.783 \\\<br />
+\text{NoPE} &amp; 2.795 \\\<br />
+\text{O-RoPE} &amp; 2.841 \\\<br />
+\text{Q-RoPE} &amp; 2.851 \\\<br />
+\text{V-RoPE} &amp; 2.856 \\\<br />
+\hline<br />
+\end{array}</p>
+<h2 id="_4">一些思考</h2>
+<p>从上述结果可以看出，VO-RoPE优于NoPE，但不如QK-RoPE，而且VO-RoPE和QK-RoPE叠加并不没有增益。这样看来，VO-RoPE似乎没有提出的必要了？</p>
+<p>在笔者看来，将RoPE的用法补充完整，回答“RoPE可以加在Value上吗”这个问题，然后实验清楚“没有什么收益”这件事，本身就很有价值。而且，从长远来看它不见得就一直没有收益，只是在我们当前主流言语模型设置下它可能体现不出什么作用。当时笔者提出RoPE时，动机也单纯是好玩而已，并没有期望它是有竞争力的位置编码（后来的事则是幸运了）。</p>
+<p>就当前来看，VO-RoPE也有一个潜在应用场景，它跟<a href="/archives/10091">《缓存与效果的极限拉扯：从MHA、MQA、GQA到MLA》</a>介绍的MLA有关。我们知道，MLA在推理阶段约等于一个K、V共享的MQA：<br />
+\begin{equation}\boldsymbol{o}<em j="1">i = \sum</em>}^i a_{i,j}\boldsymbol{c<em i_j="i,j">j,\qquad a</em>} = \frac{e^{s_{i,j}}}{\sum\limits_{j=1}^i e^{s_{i,j}}},\qquad s_{i,j} = \exp(\boldsymbol{q}_i^{\top}\boldsymbol{c}_j)\end{equation<br />
+这个特性使得它的KV Cache只有一个$\boldsymbol{c}$。然而，这个重要特性与QK-RoPE并不兼容，因为一旦给Attention矩阵里边的$\boldsymbol{c}_j$加上RoPE，那么就有两种结果：</p>
+<blockquote>
+<p>1、Value这边的$\boldsymbol{c}_j$不加RoPE，那么K、V就不完全共享了，这就导致了要不KV Cache翻倍（RoPE前后都要Cache），要不K实时注入RoPE（带来了延迟）；</p>
+<p>2、如果Value这边的$\boldsymbol{c}_j$加RoPE，倒是可以达到K、V共享的效果，但此时就不是相对位置编码了。</p>
+</blockquote>
+<p>MLA为了解决这个问题，采用了“大部分NoPE+小部分RoPE”拼接的做法。但是，从本文的第二类旋转位置编码我们知道，只需要再给Output加一次O-RoPE就行了：<br />
+\begin{equation}\boldsymbol{o}<em j="1">i = \boldsymbol{\mathcal{R}}_i^{\top}\sum</em>}^i a_{i,j}(\boldsymbol{\mathcal{R}<em i_j="i,j">j\boldsymbol{c}_j),\qquad a</em>} = \frac{e^{s_{i,j}}}{\sum\limits_{j=1}^i e^{s_{i,j}}},\qquad s_{i,j} = (\boldsymbol{\mathcal{R}}_i\boldsymbol{q}_i)^{\top} (\boldsymbol{\mathcal{R}}_j\boldsymbol{c}_j)\end{equation<br />
+不过，这个思路还没完全走通，还无法直接用在MLA的训练形式上，只是先写出来给大家参考。</p>
+<h2 id="_5">相关工作</h2>
+<p>事实上，VO-RoPE还巧妙地提供了一个从Attention到复线性RNN（如<a href="/archives/9554">LRU</a>、<a href="https://papers.cool/arxiv/2307.08621">RetNet</a>）的中间形式。我们从式$\eqref{eq:vo-rope}$出发，考虑Causal场景，然后取一个特殊例子$a_{i,j}=\gamma^{i-j}$，其中$0 &lt; \gamma &lt; 1$，那么得到<br />
+\begin{equation}\boldsymbol{o}<em j="1">i = \sum</em>}^i \gamma^{i-j} \boldsymbol{\mathcal{R}<em j-i="j-i">{j-i}\boldsymbol{v}_j\end{equation}<br />
+我们知道旋转矩阵$\boldsymbol{\mathcal{R}}</em>$。这样一来，上式相当于}$用复数形式写其实就是$e^{\mathbb{I}\theta (j - i)}$的对角阵，其中$\mathbb{I}$是虚数单位（即$\mathbb{I}^2=-1$)，为了区别$i,j$的$i$这里写成了$\mathbb{I<br />
+\begin{equation}\boldsymbol{o}<em j="1">i = \sum</em>}^i \gamma^{i-j} e^{\mathbb{I}\theta (j - i)} \boldsymbol{v<em j="1">j = \sum</em>}^i (\gamma e^{-\mathbb{I}\theta})^{i-j} \boldsymbol{v}_j\end{equation<br />
+这其实就是最简单的带有复数Decay的线性RNN。从<a href="/archives/9554">《Google新作试图“复活”RNN：RNN能否再次辉煌？》</a>的推导来看，这种RNN在理论上比纯实数Decay的RNN更完备。</p>
+<p>所以说，给RoPE补上VO-RoPE形式，相当于从实线性RNN到复线性RNN的一般推广，理论上能让它能力更完整，尽管这种更完整在语言模型任务上不见得有什么帮助，正如引入复数的LRU并没有比纯实数的RWKV有优势。但，理论上的完备也许隐含着某些场景的特殊价值，谁知道呢～</p>
+<blockquote>
+<p><strong>番外</strong> ：在推特分享本文后，有一些读者反馈他们曾经尝试过VO-RoPE，包括</p>
+<p>1、<a href="https://x.com/gharik/status/1913379569870213200">@gharik</a> 表示他在之前曾尝试过QKVO-RoPE，并取得了一些正面的结果，他当时命名为“RoPER”，更多细节可以参考<a href="https://research.labml.ai/RoPER.html">这里</a>和<a href="https://nn.labml.ai/transformers/rope/value_pe/index.html">这里</a>；</p>
+<p>2、<a href="https://x.com/vinam_arora/status/1913714691408343457">@vinam_arora</a> 指出他在“脑部解码任务”尝试过VO-RoPE，并且结果也是正面的，论文为<a href="https://papers.cool/arxiv/2310.16046">《A Unified, Scalable Framework for Neural Population Decoding》</a>。</p>
+</blockquote>
+<h2 id="_6">文章小结</h2>
+<p>本文围绕着“RoPE可以加在V上吗”进行展开，讨论了RoPE的第二种用法。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10862">https://spaces.ac.cn/archives/10862</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Apr. 18, 2025). 《Transformer升级之路：19、第二类旋转位置编码 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10862">https://spaces.ac.cn/archives/10862</a></p>
+<p>@online{kexuefm-10862,<br />
+title={Transformer升级之路：19、第二类旋转位置编码},<br />
+author={苏剑林},<br />
+year={2025},<br />
+month={Apr},<br />
+url={\url{https://spaces.ac.cn/archives/10862}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

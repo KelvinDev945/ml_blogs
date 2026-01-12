@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>“闭门造车”之多模态思路浅谈（三）：位置编码</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>“闭门造车”之多模态思路浅谈（三）：位置编码</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 37.9 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10352">https://spaces.ac.cn/archives/10352</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在前面的文章中，我们曾表达过这样的观点：多模态LLM相比纯文本LLM的主要差异在于，前者甚至还没有形成一个公认为标准的方法论。这里的方法论，不仅包括之前讨论的生成和训练策略，还包括一些基础架构的设计，比如本文要谈的“多模态位置编码”。</p>
+<p>对于这个主题，我们之前在<a href="/archives/10040">《Transformer升级之路：17、多模态位置编码的简单思考》</a>就已经讨论过一遍，并且提出了一个方案（RoPE-Tie）。然而，当时笔者对这个问题的思考仅处于起步阶段，存在细节考虑不周全、认识不够到位等问题，所以站在现在的角度回看，当时所提的方案与完美答案还有明显的距离。</p>
+<p>因此，本文我们将自上而下地再次梳理这个问题，并且给出一个自认为更加理想的结果。</p>
+<h2 id="_1">多模位置</h2>
+<p>多模态模型居然连位置编码都没有形成共识，这一点可能会让很多读者意外，但事实上确实如此。对于文本LLM，目前主流的位置编码是<a href="/archives/8265">RoPE</a>（RoPE就不展开介绍了，假设读者已经熟知），更准确来说是RoPE-1D，因为原始设计只适用于1D序列。后来我们推导了<a href="/archives/8397">RoPE-2D</a>，这可以用于图像等2D序列，按照RoPE-2D的思路我们可以平行地推广到RoPE-3D，用于视频等3D序列。</p>
+<p>然而，以上说的只是单一模态输入，当多种模态混合输入时，困难就出现了：文本是1D序列，所以它的位置只是一个标量$n$；图像是2D的（“宽”和“高”），所以表达它的位置需要一个二维向量$(x,y)$；视频则在图像的基础上新增了一个时间维度（或者说“帧”），所以它的位置是一个三维向量$(x,y,z)$。当我们希望用同一个模型去处理三种模态的数据时，就要想办法糅合这三种不同形式的位置信息。</p>
+<p>大家都知道，RoPE在实现上是绝对位置编码，但结合基于内积的Attention来用时，内积之后位置会自动作差，从而实现了相对位置编码的效果。可同一大小的向量可以作差，不同大小的向量怎么作差呢？这就是多模态位置编码的困难所在。</p>
+<p>不少工作选择“逃避”这个困难，直接Flatten所有模态然后使用RoPE-1D，这不失为一种解决办法，但终究显得不够优雅。此外，强行Flatten也可能会降低模型性能的天花板，因为<a href="https://papers.cool/arxiv/2403.00522">《VisionLLaMA: A Unified LLaMA Backbone for Vision Tasks》</a>等工作已经表明，RoPE-2D的引入有助于提升模型效果尤其是变分辨率输入的效果。</p>
+<h2 id="_2">向后兼容</h2>
+<p>所以，我们希望设计一种多模态位置编码，它既可以多模态混合使用，在单模态下又能退化为对应的RoPE-1D/2D/3D，以充分解锁每个模态的能力。</p>
+<p>刚才我们说，多模态位置编码的主要困难是不同大小的位置向量无法作差，既要保留完整的位置信息又要允许作差，那么我们就只能统一升维到最高维度。下面我们以 <em>图文混合模态</em> 为例，由于图像是2D的，所以我们将文本的位置编码也提升到二维，然后统一用RoPE-2D。怎么升维都可以吗？并不是，我们希望它具有向后的<strong>兼容性</strong> ，即当输入是纯文本时，它跟RoPE-1D完全等价。</p>
+<p>为此，我们对比一下RoPE-1D与RoPE-2D：<br />
+$$\scriptsize{\begin{array}{c}\begin{array}{c}\text{RoPE-1D}\\\ (\boldsymbol{\mathcal{R}}_n)\end{array}= \begin{pmatrix}  
+\cos \bbox[yellow]{n}\theta_0 & -\sin \bbox[yellow]{n}\theta_0 & 0 & 0 & \cdots & 0 & 0 & 0 & 0 \\\  
+\sin \bbox[yellow]{n}\theta_0 & \cos \bbox[yellow]{n}\theta_0 & 0 & 0 & \cdots & 0 & 0 & 0 & 0 \\\  
+0 & 0 & \cos \bbox[yellow]{n}\theta_1 & -\sin \bbox[yellow]{n}\theta_1 & \cdots & 0 & 0 & 0 & 0 \\\  
+0 & 0 & \sin \bbox[yellow]{n}\theta_1 & \cos \bbox[yellow]{n}\theta_1 & \cdots & 0 & 0 & 0 & 0 \\\  
+\vdots & \vdots & \vdots & \vdots & \ddots & \vdots & \vdots & \vdots & \vdots \\\  
+0 & 0 & 0 & 0 & \cdots & \cos \bbox[yellow]{n}\theta_{d/2-2} & -\sin \bbox[yellow]{n}\theta_{d/2-2} & 0 & 0 \\\  
+0 & 0 & 0 & 0 & \cdots & \sin \bbox[yellow]{n}\theta_{d/2-2} & \cos \bbox[yellow]{n}\theta_{d/2-2} & 0 & 0 \\\  
+0 & 0 & 0 & 0 & \cdots & 0 & 0 & \cos \bbox[yellow]{n}\theta_{d/2-1} & -\sin \bbox[yellow]{n}\theta_{d/2-1} \\\  
+0 & 0 & 0 & 0 & \cdots & 0 & 0 & \sin \bbox[yellow]{n}\theta_{d/2-1} & \cos \bbox[yellow]{n}\theta_{d/2-1} \\\  
+\end{pmatrix} \\\\[16pt]  
+\begin{array}{c}\text{RoPE-2D}\\\ (\boldsymbol{\mathcal{R}}_{x,y})\end{array}= \begin{pmatrix}  
+\cos \bbox[yellow]{x}\theta_0 & -\sin \bbox[yellow]{x}\theta_0 & 0 & 0 & \cdots & 0 & 0 & 0 & 0 \\\  
+\sin \bbox[yellow]{x}\theta_0 & \cos \bbox[yellow]{x}\theta_0 & 0 & 0 & \cdots & 0 & 0 & 0 & 0 \\\  
+0 & 0 & \cos \bbox[yellow]{y}\theta_1 & -\sin \bbox[yellow]{y}\theta_1 & \cdots & 0 & 0 & 0 & 0 \\\  
+0 & 0 & \sin \bbox[yellow]{y}\theta_1 & \cos \bbox[yellow]{y}\theta_1 & \cdots & 0 & 0 & 0 & 0 \\\  
+\vdots & \vdots & \vdots & \vdots & \ddots & \vdots & \vdots & \vdots & \vdots \\\  
+0 & 0 & 0 & 0 & \cdots & \cos \bbox[yellow]{x}\theta_{d/2-2} & -\sin \bbox[yellow]{x}\theta_{d/2-2} & 0 & 0 \\\  
+0 & 0 & 0 & 0 & \cdots & \sin \bbox[yellow]{x}\theta_{d/2-2} & \cos \bbox[yellow]{x}\theta_{d/2-2} & 0 & 0 \\\  
+0 & 0 & 0 & 0 & \cdots & 0 & 0 & \cos \bbox[yellow]{y}\theta_{d/2-1} & -\sin \bbox[yellow]{y}\theta_{d/2-1} \\\  
+0 & 0 & 0 & 0 & \cdots & 0 & 0 & \sin \bbox[yellow]{y}\theta_{d/2-1} & \cos \bbox[yellow]{y}\theta_{d/2-1} \\\  
+\end{pmatrix}\end{array}}$$</p>
+<p>发现什么共同点了吗？如果单看这个形式，可以发现其实有$\boldsymbol{\mathcal{R}}<em n_n="n,n">n=\boldsymbol{\mathcal{R}}</em>$，即位置为$n$的RoPE-1D跟位置为$(n,n)$的RoPE-2D其实是等价的，所以要想在图文混合中统一用RoPE-2D，并且对于纯文本能退化为RoPE-1D，那么就要将文本部分的位置坐标取为$(n,n)$的形式。</p>
+<p>当然，实际上它们还是有少许不同的，我们知道对于RoPE-1D有$\theta_i = b^{-2i/d}$，也就是$\theta_{2j}$跟$\theta_{2j+1}$是不同的，但对于RoPE-2D来说，为了确保$x,y$的对称性，通常的选择是确保$\theta_{2j}=\theta_{2j+1}$，这就产生了矛盾之处。对此，我们有两种选择：一是放弃RoPE-2D中$x,y$的对称性，依旧取$\theta_i = b^{-2i/d}$；二是取$\theta_{2j}=\theta_{2j+1}=b^{-4j/d}$，此时纯文本部分的位置编码就跟已有RoPE-1D略有不同。对于$\theta_i = b^{-2i/d}$来说，$\theta_i$与$\theta_{i+1}$差别不大，所以两种方案其实都差不多，选哪一种取决于个人的审美，笔者倾向于选择第一种。</p>
+<h2 id="_3">等价对称</h2>
+<p>通过上述分析，我们确定了图文混合模态统一用RoPE-2D的方案，并且由向后兼容性确定了位置$n$的文本Token的二维位置应该取$(n,n)$，从而完成了文本部分的位置编码设计。接下来，我们需要构思的是图像部分的位置编码。</p>
+<p>如果输入只有一张$w\times h$个Patch的图像，那么它的位置坐标自然就是各个Patch本身的坐标，即<br />
+\begin{equation}\left[\begin{matrix}<br />
+(1,1) &amp; (1,2) &amp; \cdots &amp; (1, w) \\\<br />
+(2,1) &amp; (2,2) &amp; \cdots &amp; (2, w) \\\<br />
+\vdots &amp; \vdots &amp; \ddots &amp; \vdots \\\<br />
+(h,1) &amp; (h,2) &amp; \cdots &amp; (h, w) \\\<br />
+\end{matrix}\right]\label{eq:rope2d}\end{equation}<br />
+我们这展示的是绝对位置，但实际的效果是相对位置，相对位置的特点是跟位置偏置无关，所以我们可以给每个坐标都加上$(\beta_1,\beta_2)$而不改变效果；其次，我们可以给每个坐标都乘以$(\gamma_1,\gamma_2)$，这样允许我们按需调整相邻位置的间隔。将这两点结合起来，我们可以得到图像的一般化二维位置为<br />
+\begin{equation}\left[\begin{matrix}<br />
+(\beta_1 + \gamma_1,\beta_2 + \gamma_2) &amp; (\beta_1 + \gamma_1,\beta_2 + 2\gamma_2) &amp; \cdots &amp; (\beta_1 + \gamma_1,\beta_2 + w\gamma_2) \\\[8pt]<br />
+(\beta_1 + 2\gamma_1,\beta_2 + \gamma_2) &amp; (\beta_1 + 2\gamma_1,\beta_2 + 2\gamma_2) &amp; \cdots &amp; (\beta_1 + 2\gamma_1,\beta_2 + w\gamma_2) \\\[8pt]<br />
+\vdots &amp; \vdots &amp; \ddots &amp; \vdots \\\[8pt]<br />
+(\beta_1 + h\gamma_1,\beta_2 + \gamma_2) &amp; (\beta_1 + h\gamma_1,\beta_2 + 2\gamma_2) &amp; \cdots &amp; (\beta_1 + h\gamma_1,\beta_2 + w\gamma_2)<br />
+\end{matrix}\right]\end{equation}<br />
+现在我们考虑左右两段文本夹着中间一张图像时，$\beta_1,\beta_2,\gamma_1,\gamma_2$该怎么选取。</p>
+<p>首先，我们假设文本的Token和Patch具有一定的<strong>等价性</strong> ：经过合理的<a href="/archives/10197">Patchify</a>后每个Patch的地位跟Token等价（An Image is Worth xxx Tokens），这意味着对于两段文本来说，它们相当于夹着一个$wh$个Token的句子，所以如果左段文本最后一个Token的位置是$(L,L)$，那么右段文本第一个Token的位置就是$(L+wh+1, L + wh + 1)$。</p>
+<p>接着，我们还需要引入<strong>对称性</strong> ——具体来说，图像的第一个Patch的位置是$(\beta_1 + \gamma_1,\beta_2 + \gamma_2)$，最后一个Patch的位置是$(\beta_1 + h\gamma_1,\beta_2 + w\gamma_2)$，我们认为【图像第一个Patch】与【左段文本最后一个Token】的位置差，等于【右段文本第一个Token】与【图像最后一个Patch】的位置差，即<br />
+\begin{equation}\begin{pmatrix}\beta_1 + \gamma_1 \\\ \beta_2 + \gamma_2\end{pmatrix} - \begin{pmatrix}L \\\ L\end{pmatrix} = \begin{pmatrix}L+wh+1 \\\ L+wh+1\end{pmatrix} - \begin{pmatrix}\beta_1 + h\gamma_1 \\\ \beta_2 + w\gamma_2\end{pmatrix}\label{eq:beta-gamma}\end{equation}<br />
+这里边有四个未知数$\beta_1,\beta_2,\gamma_1,\gamma_2$，但只有两个等式，所以有无穷多组解。我们可以简单地取$\gamma_1=\gamma_2=1$，继而解得<br />
+\begin{equation}\beta_1 = L + \frac{1}{2}(wh - h),\quad \beta_2 = L + \frac{1}{2}(wh - w)\end{equation}<br />
+这个方案我们暂时可以称之为RoPE-Tie-v2或者RoPE-TV（RoPE for Text and Vision）吧。</p>
+<h2 id="_4">优劣分析</h2>
+<p>根据这个结果，当句子后面接一张$w\times h$的图像时，只需要按照上述计算计算出$(\beta_1,\beta_2)$，然后加到常规的二维RoPE $\eqref{eq:rope2d}$中去，就得到了图像部分的位置坐标了，如下图所示  </p>
+<p><a href="/usr/uploads/2024/09/2781465051.png" title="点击查看原图"><img alt="新版RoPE-TV（RoPE-Tie-v2）示意图" src="/usr/uploads/2024/09/2781465051.png" /></a></p>
+<p>新版RoPE-TV（RoPE-Tie-v2）示意图</p>
+<p>作为对比，我们在<a href="/archives/10040">《Transformer升级之路：17、多模态位置编码的简单思考》</a>提出的旧版RoPE-Tie，其位置坐标如下图所示：  </p>
+<p><a href="/usr/uploads/2024/09/2581235844.png" title="点击查看原图"><img alt="旧版RoPE-Tie示意图" src="/usr/uploads/2024/09/2581235844.png" /></a></p>
+<p>旧版RoPE-Tie示意图</p>
+<p>事实上，RoPE-Tie的出发点同样包括<strong>兼容性</strong> 和<strong>对称性</strong> ，但没有严格遵循<strong>等价性</strong> ，并且RoPE-Tie默认了$\beta_1=\beta_2=L$，以及没有限定$w\times h$个Patch等价于$wh$个Token，最终推出了一组整数解（如果不要求整数解也可以满足<strong>等价性</strong> ）：<br />
+\begin{equation}\gamma_1 = w+1,\quad\gamma_2=h+1\end{equation}<br />
+从如今的视角来看，RoPE-Tie的默认设置其实并不是很理想，所以本文重新选择了$\gamma_1=\gamma_2=1$，并确保<strong>等价性</strong> ，然后反推出$\beta_1,\beta_2$。</p>
+<p>那新方案有什么好处呢？首先，RoPE-Tie中图像内的相对位置跟它的大小有关，而新方案中Patch的间隔是固定的$(0,1)$和$(1,0)$，这可以让Patch的尺度更为一致。举个例子，一张128<em>128的图像以及该图的上半部份（即128</em>64的子图），由于两者高度不一样，所以RoPE-Tie后它们横向的位置间隔并不一样，这意味着同样位置、同样含义的两个Patch在加了RoPE-Tie后的距离（尺度）变得不一致了，这看起来并不合理，而新方案没有这个问题。</p>
+<p>其次，RoPE-Tie中图像与左右文本的间隔，跟图像内部Patch的间隔一样都是$(\gamma_1,\gamma_2)$，而新方案中文本到图像、图像到文本之间会出现一个比较大的间隔$\frac{1}{2}(wh - h, wh-w)$，然后文本内部、图像内部则都是固定的均匀间隔。直觉上，这种不同模态之间比较大的位置跳跃，可以更好地实现“模态隔离”，让单个模型既能更好地处理单模态内容，又保留了多模态之间的交互，这跟我们通常在左右加[IMG]和[/IMG]两个Special Token来标记出图像具有异曲同工之处。</p>
+<h2 id="_5">三维困境</h2>
+<p>在RoPE-Tie的文章中，并没有讨论到“文本-视频”混合模态的位置编码，这一节我们来补充讨论完整。</p>
+<p>直观来看，对于视频输入我们可以有两种处理方式。第一种方式就是简单地将视频当成多张图片处理（必要时加个[VIDEO]、[/VIDEO]的标记），这样我们就不需要针对视频提出新的位置编码了，沿用“文本-图像”的混合位置编码结果就行，但这样丧失了同一视频不同帧之间的对齐关系，可能不是太完美，例如“第1帧的第1个Patch”跟“第2帧的第1个Patch”和“第1帧的第2个Patch”，应该有差不多的邻近关系，但展平当多张图片处理就体现不出这一点。</p>
+<p>第二种方式则是将“文本-图像”的结果平行地推广到“文本-视频”中。对于一个$w\times h\times t$的视频（画面为$w\times h$，一共$t$帧），它的位置坐标是三维的$(x,y,z)$，根据相同的<strong>兼容性</strong> 、<strong>等价性</strong> 和<strong>对称性</strong> ，我们可以将方程$\eqref{eq:beta-gamma}$推广成<br />
+\begin{equation}\begin{pmatrix}\beta_1 + \gamma_1 \\\ \beta_2 + \gamma_2 \\\ \beta_3 + \gamma_3\end{pmatrix} - \begin{pmatrix}L \\\ L \\\ L\end{pmatrix} = \begin{pmatrix}L+wht+1 \\\ L+wht+1 \\\ L+wht+1\end{pmatrix} - \begin{pmatrix}\beta_1 + h\gamma_1 \\\ \beta_2 + w\gamma_2 \\\ \beta_3 + t\gamma_3\end{pmatrix}\end{equation}<br />
+如果还是设$\gamma_1=\gamma_2=\gamma_3=1$，我们得到<br />
+\begin{equation}\beta_1 = L + \frac{1}{2}(wht - h),\quad \beta_2 = L + \frac{1}{2}(wht - w),\quad \beta_3 = L + \frac{1}{2}(wht - t)\end{equation}</p>
+<p>这样做完整了保留了视频位置的三维性，看起来会更优雅一些，但笔者认为它仍有一些美中不足之处。</p>
+<p>这个美中不足源于笔者对视频的时间维度的不同理解：视频的三维，实际上是“2个空间维度+1个时间维度”，跟真实世界的三维立体的“3个空间维度”不一样。按照笔者的观点，视频的时间维度跟两个空间维度是不平权的，时间维度更像是文本从左往右的书写方向，所以笔者想象中的完美多模态LLM，应该能像文本LLM续写文本一样，理论上能够以自回归的方式无限地续作视频，直到出现[EOS]标记。</p>
+<p>刚才我们提了两种“文本-视频”混合编码方案，第一种直接当作多张图片处理，这种方案是可以无限自回归生成视频的，但第二种看上去更完美的方案反而不行，因为它的$\beta_1,\beta_2,\beta_3$是依赖于$t$的，这意味着我们需要提前知道生成多少帧的视频，换句话说，第二种方案并不是不能用自回归的方式生成视频，而是需要提前确定帧数，这在笔者看来是不符合时间维度的理想特性的（时间，应该可以无约束地往前推进）。</p>
+<p>可能有读者疑问：为什么图像就不介意$\beta_1,\beta_2$中依赖于$w,h$呢？也就是说为什么图像生成不介意事先知道图像大小呢？这是因为图像有两个方向，就算我们用自回归的方式生成图像，也必须至少知道一个方向的大小，才能告诉模型及时“换行”，以生成一张完整的二维图像。而图像的两个空间维度是平权的，单知其一倒不如全部知道，所以我们能够接受事先确定图像大小。</p>
+<p>此外，我们还可以用<a href="/archives/9984">《“闭门造车”之多模态思路浅谈（一）：无损输入》</a>介绍的“AR+Diffusion”做“文本-图像”模型，此时图像生成部分是Diffusion，就必须提前知道目标图像大小了。</p>
+<h2 id="_6">相关工作</h2>
+<p>前段时间，阿里开源了名为“Qwen2-VL”的多模态模型，介绍中提到自己提出了一种多模态旋转位置编码（M-ROPE），引起了笔者的兴趣。经过阅读源码（<a href="https://github.com/huggingface/transformers/blob/1759bb9126e59405f58693a17ef9f58040c2008b/src/transformers/models/qwen2_vl/modeling_qwen2_vl.py#L1357">链接</a>），发现M-RoPE实际上就是沿用了RoPE-Tie的<strong>兼容性</strong> 思想，但没有保留<strong>对称性</strong> 和<strong>等价性</strong> 。</p>
+<p><a href="/usr/uploads/2024/09/1743575360.png" title="点击查看原图"><img alt="M-RoPE的源码注释" src="/usr/uploads/2024/09/1743575360.png" /></a></p>
+<p>M-RoPE的源码注释</p>
+<p>用本文的记号，M-RoPE实际上就是取了$\beta_1=\beta_2=\beta_3=L,\gamma_1=\gamma_2=\gamma_3$（对于“文本-视频”混合模态），然后视频右段的文本的第一个Token的位置，直接取视频最大的位置坐标加1。这样如果还是用自回归的方式生成视频，确实也不用提前确定帧数，但牺牲了<strong>对称性</strong> 和<strong>等价性</strong> 。</p>
+<p><strong>对称性</strong> 和<strong>等价性</strong> 有多重要呢？笔者不清楚答案，这需要充分实验来验证。但如果仅仅是头脑风暴的话，笔者猜测可能会影响极端情形的表现，比如对于M-RoPE来说，如果是画面很小但时间很长的视频，它的空间维度的位置坐标相对于左段文本来说是连续的，但相对于右段文本来说则是突变了，直觉上会使得文本和视觉的交互更不友好。</p>
+<p>再比如一个$w=h=t=n$的视频，直觉上它等效于$n^3$个Token，但如果按照M-RoPE的规则，如果两段文本夹着这样一个视频，只是等价于夹着一个$n$个Token的文本，换言之在大小为$n$的相对距离内放下了$n^3$个Token，会不会导致信息密度过大而增加模型理解难度了？</p>
+<p>当然，对于NoPE都可能Work的Decoder-only LLM来说，这些问题也可能是笔者多虑了。</p>
+<h2 id="_7">文章小结</h2>
+<p>本文分享了笔者关于多模态位置编码的后续思考，提出了构建多模态位置编码的三个原则：兼容性、等价性和对称性，改进了之前提出过的RoPE-Tie，最后讨论了“文本-视频”混合模态的位置编码设计和困难，以及Qwen2-VL的M-RoPE与RoPE-Tie的联系等。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10352">https://spaces.ac.cn/archives/10352</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Sep. 06, 2024). 《“闭门造车”之多模态思路浅谈（三）：位置编码 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10352">https://spaces.ac.cn/archives/10352</a></p>
+<p>@online{kexuefm-10352,<br />
+title={“闭门造车”之多模态思路浅谈（三）：位置编码},<br />
+author={苏剑林},<br />
+year={2024},<br />
+month={Sep},<br />
+url={\url{https://spaces.ac.cn/archives/10352}},<br />
+} </p>
+<hr />
+<h2 id="_8">公式推导与注释</h2>
+<h3 id="rope-rotary-position-embedding">一、RoPE (Rotary Position Embedding) 的完整数学推导</h3>
+<h4 id="11">1.1 旋转矩阵的基本性质</h4>
+<p>二维旋转矩阵的标准形式：</p>
+<p>\begin{equation}
+\boldsymbol{R}(\theta) = \begin{pmatrix}
+\cos\theta &amp; -\sin\theta \
+\sin\theta &amp; \cos\theta
+\end{pmatrix}
+\tag{1}
+\end{equation}</p>
+<p><strong>关键性质</strong>:</p>
+<p>\begin{equation}
+\boldsymbol{R}(\theta_1) \boldsymbol{R}(\theta_2) = \boldsymbol{R}(\theta_1 + \theta_2)
+\tag{2}
+\end{equation}</p>
+<p>\begin{equation}
+\boldsymbol{R}(\theta)^\top = \boldsymbol{R}(-\theta) = \boldsymbol{R}(\theta)^{-1}
+\tag{3}
+\end{equation}</p>
+<p><strong>数学直觉</strong>: 旋转矩阵的乘法对应角度相加，这是RoPE实现相对位置编码的核心。</p>
+<h4 id="12-rope-1d">1.2 RoPE-1D的构造</h4>
+<p>对于 $d$ 维向量 $\boldsymbol{q} \in \mathbb{R}^d$，RoPE将其分为 $d/2$ 对，每对应用不同频率的旋转。</p>
+<p>位置 $n$ 的RoPE矩阵：</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em d_2-1="d/2-1">n = \begin{pmatrix}
+\boldsymbol{R}(n\theta_0) &amp; &amp; &amp; \
+&amp; \boldsymbol{R}(n\theta_1) &amp; &amp; \
+&amp; &amp; \ddots &amp; \
+&amp; &amp; &amp; \boldsymbol{R}(n\theta</em>)
+\end{pmatrix} \in \mathbb{R}^{d \times d}
+\tag{4}
+\end{equation}</p>
+<p>其中频率 $\theta_i$ 定义为：</p>
+<p>\begin{equation}
+\theta_i = b^{-2i/d}, \quad i = 0, 1, \ldots, d/2-1
+\tag{5}
+\end{equation}</p>
+<p>基数 $b$ 通常取 10000（类似Transformer的正弦位置编码）。</p>
+<h4 id="13-rope">1.3 RoPE实现相对位置的数学证明</h4>
+<p>Query在位置 $m$，Key在位置 $n$，经过RoPE后的内积：</p>
+<p>\begin{equation}
+(\boldsymbol{\mathcal{R}}_m \boldsymbol{q})^\top (\boldsymbol{\mathcal{R}}_n \boldsymbol{k}) = \boldsymbol{q}^\top \boldsymbol{\mathcal{R}}_m^\top \boldsymbol{\mathcal{R}}_n \boldsymbol{k}
+\tag{6}
+\end{equation}</p>
+<p>利用旋转矩阵性质 (2):</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em n-m="n-m">m^\top \boldsymbol{\mathcal{R}}_n = \boldsymbol{\mathcal{R}}</em>
+\tag{7}
+\end{equation}</p>
+<p><strong>展开证明</strong>: 对于第 $i$ 个二维块：</p>
+<p>\begin{equation}
+\boldsymbol{R}(m\theta_i)^\top \boldsymbol{R}(n\theta_i) = \boldsymbol{R}(-m\theta_i) \boldsymbol{R}(n\theta_i) = \boldsymbol{R}((n-m)\theta_i)
+\tag{8}
+\end{equation}</p>
+<p>因此：</p>
+<p>\begin{equation}
+(\boldsymbol{\mathcal{R}}<em n-m="n-m">m \boldsymbol{q})^\top (\boldsymbol{\mathcal{R}}_n \boldsymbol{k}) = \boldsymbol{q}^\top \boldsymbol{\mathcal{R}}</em>
+\tag{9}
+\end{equation}} \boldsymbol{k</p>
+<p><strong>结论</strong>: 内积只依赖于相对位置差 $n-m$，实现了相对位置编码！</p>
+<h4 id="14-rope">1.4 RoPE的频率设计原理</h4>
+<p>不同频率 $\theta_i$ 编码不同的距离尺度：
+- 低频 (小 $i$): $\theta_i$ 大，旋转快，适合编码短距离
+- 高频 (大 $i$): $\theta_i$ 小，旋转慢，适合编码长距离</p>
+<p><strong>周期分析</strong>: 第 $i$ 个维度的周期为：</p>
+<p>\begin{equation}
+T_i = \frac{2\pi}{\theta_i} = 2\pi b^{2i/d}
+\tag{10}
+\end{equation}</p>
+<p>对于 $b=10000, d=128$:
+- $i=0$: $T_0 = 2\pi \approx 6.28$
+- $i=63$: $T_{63} = 2\pi \times 10000 \approx 62832$</p>
+<p><strong>数值示例</strong>: 这保证了从局部到全局的多尺度位置表示。</p>
+<h3 id="rope-2d">二、RoPE-2D的数学推导</h3>
+<h4 id="21">2.1 二维位置的表示</h4>
+<p>对于图像patch，位置用二元组 $(x, y)$ 表示，其中 $x$ 是行坐标，$y$ 是列坐标。</p>
+<h4 id="22-rope-2d">2.2 RoPE-2D的构造方案</h4>
+<p><strong>方案1: 交错分配</strong> - 将 $d$ 维向量分为两半，分别编码 $x$ 和 $y$：</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em d_4-1="d/4-1">{x,y}^{\text{split}} = \begin{pmatrix}
+\boldsymbol{R}(x\theta_0) &amp; &amp; &amp; &amp; &amp; \
+&amp; \ddots &amp; &amp; &amp; &amp; \
+&amp; &amp; \boldsymbol{R}(x\theta</em>) &amp; &amp; &amp; \
+&amp; &amp; &amp; \boldsymbol{R}(y\theta_{d/4}) &amp; &amp; \
+&amp; &amp; &amp; &amp; \ddots &amp; \
+&amp; &amp; &amp; &amp; &amp; \boldsymbol{R}(y\theta_{d/2-1})
+\end{pmatrix}
+\tag{11}
+\end{equation}</p>
+<p><strong>方案2: 交替分配</strong> - 奇数维度编码 $x$，偶数维度编码 $y$：</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em d_2-1="d/2-1">{x,y}^{\text{alternate}} = \begin{pmatrix}
+\boldsymbol{R}(x\theta_0) &amp; &amp; &amp; \
+&amp; \boldsymbol{R}(y\theta_1) &amp; &amp; \
+&amp; &amp; \ddots &amp; \
+&amp; &amp; &amp; \boldsymbol{R}(y\theta</em>)
+\end{pmatrix}
+\tag{12}
+\end{equation}</p>
+<p>其中：</p>
+<p>\begin{equation}
+\theta_{2i} = b^{-4i/d} \quad (\text{编码} x)
+\tag{13}
+\end{equation}</p>
+<p>\begin{equation}
+\theta_{2i+1} = b^{-4i/d} \quad (\text{编码} y)
+\tag{14}
+\end{equation}</p>
+<p><strong>对称性</strong>: 设置 $\theta_{2i} = \theta_{2i+1}$ 保证了 $x$ 和 $y$ 的对称性。</p>
+<h4 id="23-rope-2d">2.3 RoPE-2D的相对位置性质</h4>
+<p>对于位置 $(m_x, m_y)$ 和 $(n_x, n_y)$：</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em n_x_="n_x," n_y="n_y">{m_x, m_y}^\top \boldsymbol{\mathcal{R}}</em>
+\tag{15}
+\end{equation}} = \boldsymbol{\mathcal{R}}_{n_x - m_x, n_y - m_y</p>
+<p><strong>证明</strong>: 对于编码 $x$ 的维度：</p>
+<p>\begin{equation}
+\boldsymbol{R}(m_x\theta_i)^\top \boldsymbol{R}(n_x\theta_i) = \boldsymbol{R}((n_x - m_x)\theta_i)
+\tag{16}
+\end{equation}</p>
+<p>对于编码 $y$ 的维度同理。因此内积只依赖于 $(n_x - m_x, n_y - m_y)$。□</p>
+<h4 id="24-rope-2d">2.4 RoPE-2D的距离度量</h4>
+<p>二维相对位置 $(\Delta x, \Delta y)$ 的编码强度：</p>
+<p>\begin{equation}
+s(\Delta x, \Delta y) = \sum_{i=0}^{d/4-1} \cos(\Delta x \cdot \theta_{2i}) + \sum_{i=0}^{d/4-1} \cos(\Delta y \cdot \theta_{2i+1})
+\tag{17}
+\end{equation}</p>
+<p><strong>各向同性</strong>: 当 $\theta_{2i} = \theta_{2i+1}$ 时，欧氏距离相同的位置获得相似的编码。</p>
+<p>\begin{equation}
+s(\Delta x, \Delta y) \approx f(\sqrt{\Delta x^2 + \Delta y^2})
+\tag{18}
+\end{equation}</p>
+<h3 id="_9">三、多模态位置编码的挑战</h3>
+<h4 id="31">3.1 维度不匹配问题</h4>
+<p>考虑文本-图像混合输入：
+- 文本token位置: $n \in \mathbb{N}$ (一维)
+- 图像patch位置: $(x, y) \in \mathbb{N}^2$ (二维)</p>
+<p><strong>直接问题</strong>: 无法直接计算不同维度位置之间的相对位置差。</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em x_y="x,y">n^\top \boldsymbol{\mathcal{R}}</em>
+\tag{19}
+\end{equation}} = \text{?</p>
+<h4 id="32">3.2 升维策略的数学基础</h4>
+<p><strong>核心思想</strong>: 将低维位置嵌入到高维空间，统一使用高维RoPE。</p>
+<p>对于文本位置 $n$，升维到二维：</p>
+<p>\begin{equation}
+n \to (n, n)
+\tag{20}
+\end{equation}</p>
+<p><strong>向后兼容性证明</strong>: 需要证明 $\boldsymbol{\mathcal{R}}<em n_n="n,n">n^{\text{1D}} = \boldsymbol{\mathcal{R}}</em>$。}^{\text{2D}</p>
+<p>对于RoPE-1D:</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em d_2-1="d/2-1">n^{\text{1D}} = \text{diag}(\boldsymbol{R}(n\theta_0), \boldsymbol{R}(n\theta_1), \ldots, \boldsymbol{R}(n\theta</em>))
+\tag{21}
+\end{equation}</p>
+<p>对于RoPE-2D (交替方案):</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em d_2-1="d/2-1">{n,n}^{\text{2D}} = \text{diag}(\boldsymbol{R}(n\theta_0), \boldsymbol{R}(n\theta_1), \ldots, \boldsymbol{R}(n\theta</em>))
+\tag{22}
+\end{equation}</p>
+<p>当 $\theta_{2i} = \theta_{2i+1}$ 时，两者完全相同！□</p>
+<h3 id="rope-tv-rope-for-text-and-vision">四、RoPE-TV (RoPE for Text and Vision) 的数学设计</h3>
+<h4 id="41">4.1 设计原则</h4>
+<ol>
+<li><strong>兼容性</strong>: 纯文本时退化为RoPE-1D</li>
+<li><strong>等价性</strong>: Patch与Token地位等价</li>
+<li><strong>对称性</strong>: 模态间距离对称</li>
+</ol>
+<h4 id="42">4.2 图像位置编码的一般化</h4>
+<p>对于 $w \times h$ 的图像，基础二维位置：</p>
+<p>\begin{equation}
+\boldsymbol{P}_{\text{base}} = {(i, j) : 1 \leq i \leq h, 1 \leq j \leq w}
+\tag{23}
+\end{equation}</p>
+<p>引入缩放 $(\gamma_1, \gamma_2)$ 和偏置 $(\beta_1, \beta_2)$：</p>
+<p>\begin{equation}
+\boldsymbol{P}<em _text_base="\text{base">{\text{general}} = {(\beta_1 + i\gamma_1, \beta_2 + j\gamma_2) : (i,j) \in \boldsymbol{P}</em>}
+\tag{24}
+\end{equation}}</p>
+<p><strong>数学性质</strong>: RoPE的相对位置不变性保证了偏置 $\beta$ 不影响注意力计算（只影响绝对位置）。</p>
+<h4 id="43">4.3 等价性约束的推导</h4>
+<p>假设左段文本最后一个token位置为 $(L, L)$，图像有 $wh$ 个patch。</p>
+<p><strong>等价性</strong>: 图像等价于 $wh$ 个连续token，因此右段文本第一个token位置应为：</p>
+<p>\begin{equation}
+(L + wh + 1, L + wh + 1)
+\tag{25}
+\end{equation}</p>
+<h4 id="44">4.4 对称性约束的推导</h4>
+<p>图像第一个patch位置: $(\beta_1 + \gamma_1, \beta_2 + \gamma_2)$</p>
+<p>图像最后一个patch位置: $(\beta_1 + h\gamma_1, \beta_2 + w\gamma_2)$</p>
+<p><strong>对称性要求</strong>: 文本到图像的距离 = 图像到文本的距离</p>
+<p>\begin{equation}
+\begin{pmatrix}
+\beta_1 + \gamma_1 - L \
+\beta_2 + \gamma_2 - L
+\end{pmatrix} = \begin{pmatrix}
+L + wh + 1 - (\beta_1 + h\gamma_1) \
+L + wh + 1 - (\beta_2 + w\gamma_2)
+\end{pmatrix}
+\tag{26}
+\end{equation}</p>
+<p>展开：</p>
+<p>\begin{equation}
+2\beta_1 + (h+1)\gamma_1 = 2L + wh + 1
+\tag{27}
+\end{equation}</p>
+<p>\begin{equation}
+2\beta_2 + (w+1)\gamma_2 = 2L + wh + 1
+\tag{28}
+\end{equation}</p>
+<h4 id="45-rope-tv">4.5 RoPE-TV的解</h4>
+<p>选择 $\gamma_1 = \gamma_2 = 1$ (保持patch间距为1)：</p>
+<p>\begin{equation}
+\beta_1 = L + \frac{wh - h}{2} = L + \frac{h(w-1)}{2}
+\tag{29}
+\end{equation}</p>
+<p>\begin{equation}
+\beta_2 = L + \frac{wh - w}{2} = L + \frac{w(h-1)}{2}
+\tag{30}
+\end{equation}</p>
+<p><strong>数值示例</strong>: $L=100, w=h=16$:</p>
+<p>\begin{equation}
+\beta_1 = \beta_2 = 100 + \frac{16 \times 15}{2} = 100 + 120 = 220
+\tag{31}
+\end{equation}</p>
+<p>图像第一个patch: $(221, 221)$</p>
+<p>图像最后一个patch: $(236, 236)$</p>
+<p>右段文本第一个: $(357, 357) = (100 + 256 + 1, 100 + 256 + 1)$</p>
+<p>验证对称性：
+- 文本到图像: $(221-100, 221-100) = (121, 121)$
+- 图像到文本: $(357-236, 357-236) = (121, 121)$ ✓</p>
+<h3 id="alibi">五、ALiBi位置编码的数学原理</h3>
+<h4 id="51-alibi">5.1 ALiBi的定义</h4>
+<p>ALiBi (Attention with Linear Biases) 不修改Q和K，而是在注意力logits上添加偏置：</p>
+<p>\begin{equation}
+\text{Attention}(\boldsymbol{Q}, \boldsymbol{K}, \boldsymbol{V}) = \text{softmax}\left(\frac{\boldsymbol{Q}\boldsymbol{K}^\top}{\sqrt{d_k}} + \boldsymbol{B}\right) \boldsymbol{V}
+\tag{32}
+\end{equation}</p>
+<p>其中偏置矩阵：</p>
+<p>\begin{equation}
+B_{i,j} = -m \cdot |i - j|
+\tag{33}
+\end{equation}</p>
+<p>$m &gt; 0$ 是head-specific的斜率。</p>
+<h4 id="52-alibi">5.2 ALiBi的长度外推性</h4>
+<p><strong>关键性质</strong>: ALiBi的偏置是距离的线性函数，不依赖绝对位置。</p>
+<p>训练长度 $L_{\text{train}}$，推理长度 $L_{\text{infer}} &gt; L_{\text{train}}$：</p>
+<p>\begin{equation}
+B_{i,j}^{\text{infer}} = -m \cdot |i - j|
+\tag{34}
+\end{equation}</p>
+<p>与训练时的形式完全一致，只是 $|i-j|$ 的范围扩大。</p>
+<p><strong>数学直觉</strong>: 模型学习的是"距离越远，注意力越小"，这个规则在更长序列上仍然适用。</p>
+<h4 id="53-alibi-vs-rope">5.3 ALiBi vs RoPE的对比</h4>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>RoPE</th>
+<th>ALiBi</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>实现方式</td>
+<td>修改Q和K (旋转)</td>
+<td>添加注意力偏置</td>
+</tr>
+<tr>
+<td>长度外推</td>
+<td>需要插值</td>
+<td>自然外推</td>
+</tr>
+<tr>
+<td>计算开销</td>
+<td>较高 (矩阵乘法)</td>
+<td>较低 (加法)</td>
+</tr>
+<tr>
+<td>位置信息</td>
+<td>绝对+相对</td>
+<td>纯相对</td>
+</tr>
+</tbody>
+</table>
+<p><strong>外推性对比</strong>: 对于训练长度2048，推理长度8192：
+- ALiBi: 直接使用，性能下降 &lt; 5%
+- RoPE: 需要位置插值，性能下降 10-20%</p>
+<h3 id="position-interpolation">六、位置插值 (Position Interpolation) 的数学推导</h3>
+<h4 id="61-rope">6.1 RoPE的长度外推问题</h4>
+<p>RoPE在训练长度 $L_{\text{train}}$ 时，最大位置为 $L_{\text{train}} - 1$。</p>
+<p>推理时使用位置 $n &gt; L_{\text{train}}$：</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em d_2-1="d/2-1">n = \text{diag}(\boldsymbol{R}(n\theta_0), \ldots, \boldsymbol{R}(n\theta</em>))
+\tag{35}
+\end{equation}</p>
+<p><strong>问题</strong>: 训练时从未见过 $n &gt; L_{\text{train}}$ 的旋转角度，模型可能无法正确处理。</p>
+<h4 id="62-pi">6.2 位置插值 (PI) 的方案</h4>
+<p><strong>核心思想</strong>: 将推理位置 $n$ 缩放到训练范围内。</p>
+<p>缩放因子：</p>
+<p>\begin{equation}
+s = \frac{L_{\text{train}}}{L_{\text{infer}}}
+\tag{36}
+\end{equation}</p>
+<p>插值后的位置：</p>
+<p>\begin{equation}
+n' = n \cdot s = n \cdot \frac{L_{\text{train}}}{L_{\text{infer}}}
+\tag{37}
+\end{equation}</p>
+<p>使用 $\boldsymbol{\mathcal{R}}_{n'}$ 替代 $\boldsymbol{\mathcal{R}}_n$。</p>
+<p><strong>数值示例</strong>: $L_{\text{train}} = 2048, L_{\text{infer}} = 8192$:</p>
+<p>\begin{equation}
+s = \frac{2048}{8192} = 0.25
+\tag{38}
+\end{equation}</p>
+<p>位置 $n=4000$ 被插值为 $n' = 1000$，在训练范围内。</p>
+<h4 id="63">6.3 位置插值的理论分析</h4>
+<p><strong>相对位置保持</strong>: 对于位置 $m$ 和 $n$：</p>
+<p>\begin{equation}
+\frac{n' - m'}{L_{\text{infer}}} = \frac{ns - ms}{L_{\text{infer}}} = \frac{(n-m)s}{L_{\text{infer}}} = \frac{n-m}{L_{\text{train}}}
+\tag{39}
+\end{equation}</p>
+<p>相对位置的比例保持不变！</p>
+<p><strong>高频损失</strong>: 插值会压缩高频信息（小 $\theta_i$）：</p>
+<p>\begin{equation}
+\theta_i \cdot n' = \theta_i \cdot ns = (\theta_i s) \cdot n
+\tag{40}
+\end{equation}</p>
+<p>等效于频率从 $\theta_i$ 降低到 $\theta_i s$。</p>
+<h3 id="ntk-aware">七、NTK-Aware插值的改进</h3>
+<h4 id="71-ntk-neural-tangent-kernel">7.1 NTK (Neural Tangent Kernel) 理论</h4>
+<p>NTK理论指出，不同频率对长度外推的敏感度不同：
+- 低频 (大 $\theta_i$): 对长距离敏感，需要调整
+- 高频 (小 $\theta_i$): 对短距离敏感，应保持</p>
+<h4 id="72-ntk-aware">7.2 NTK-Aware的频率调整</h4>
+<p>不是统一缩放位置，而是调整频率：</p>
+<p>\begin{equation}
+\theta_i' = \theta_i \cdot s^{f(i)}
+\tag{41}
+\end{equation}</p>
+<p>其中 $f(i)$ 是插值函数：</p>
+<p>\begin{equation}
+f(i) = \begin{cases}
+1, &amp; i &lt; i_{\text{threshold}} \
+\frac{i - i_{\text{threshold}}}{d/2 - i_{\text{threshold}}}, &amp; i \geq i_{\text{threshold}}
+\end{cases}
+\tag{42}
+\end{equation}</p>
+<p><strong>效果</strong>: 低频完全调整，高频保持不变。</p>
+<p>\begin{equation}
+\theta_0' = \theta_0 \cdot s, \quad \theta_{d/2-1}' = \theta_{d/2-1}
+\tag{43}
+\end{equation}</p>
+<h4 id="73-ntk">7.3 动态NTK插值</h4>
+<p>更激进的方案：根据序列长度动态调整基数 $b$：</p>
+<p>\begin{equation}
+b' = b \cdot \left(\frac{L_{\text{infer}}}{L_{\text{train}}}\right)^{d/(d-2)}
+\tag{44}
+\end{equation}</p>
+<p>新的频率：</p>
+<p>\begin{equation}
+\theta_i' = (b')^{-2i/d} = b^{-2i/d} \cdot \left(\frac{L_{\text{infer}}}{L_{\text{train}}}\right)^{-2i/(d-2)}
+\tag{45}
+\end{equation}</p>
+<p><strong>数值示例</strong>: $d=128, b=10000, L_{\text{train}}=2048, L_{\text{infer}}=8192$:</p>
+<p>\begin{equation}
+b' = 10000 \times 4^{128/126} \approx 10000 \times 4.03 = 40300
+\tag{46}
+\end{equation}</p>
+<h3 id="-">八、图像-文本位置对齐的理论</h3>
+<h4 id="81-vit">8.1 ViT的位置编码</h4>
+<p>Vision Transformer使用可学习的位置嵌入：</p>
+<p>\begin{equation}
+\boldsymbol{x}_i' = \boldsymbol{x}_i + \boldsymbol{p}_i
+\tag{47}
+\end{equation}</p>
+<p>其中 $\boldsymbol{p}_i \in \mathbb{R}^d$ 是位置嵌入，通过训练学习。</p>
+<p><strong>缺点</strong>: 位置嵌入数量固定，难以处理变分辨率输入。</p>
+<h4 id="82-clip">8.2 CLIP的位置编码策略</h4>
+<p>CLIP在图像编码器使用ViT式的可学习位置嵌入，在文本编码器使用学习的位置嵌入。</p>
+<p><strong>跨模态对齐</strong>: 通过对比学习，使得图像和文本的特征在同一语义空间。</p>
+<p>\begin{equation}
+\mathcal{L}<em t_="t'">{\text{CLIP}} = -\log \frac{\exp(\text{sim}(\boldsymbol{i}, \boldsymbol{t}) / \tau)}{\sum</em>
+\tag{48}
+\end{equation}} \exp(\text{sim}(\boldsymbol{i}, \boldsymbol{t}') / \tau)</p>
+<p><strong>位置编码的隐式对齐</strong>: 对比学习隐式地使得相似位置的patch和token学习到相似的位置表示。</p>
+<h4 id="83">8.3 插值策略处理变分辨率</h4>
+<p>对于训练分辨率 $H_{\text{train}} \times W_{\text{train}}$，推理分辨率 $H_{\text{infer}} \times W_{\text{infer}}$：</p>
+<p><strong>二维插值</strong>:</p>
+<p>\begin{equation}
+\boldsymbol{p}<em i_j_="i',j'">{i,j}^{\text{infer}} = \text{Interpolate}({\boldsymbol{p}</em>}<em _text_train="\text{train">{i',j'}, (i \cdot \frac{H</em>))
+\tag{49}
+\end{equation}}}}{H_{\text{infer}}}, j \cdot \frac{W_{\text{train}}}{W_{\text{infer}}</p>
+<p>使用双线性或双三次插值。</p>
+<h3 id="_10">九、多尺度位置编码的数学设计</h3>
+<h4 id="91">9.1 金字塔位置编码</h4>
+<p>对于不同分辨率的特征，使用不同尺度的位置编码：</p>
+<p>\begin{equation}
+\boldsymbol{\mathcal{R}}<em x_2_s_="x/2^s," y_2_s="y/2^s">{x,y}^{(s)} = \boldsymbol{\mathcal{R}}</em>
+\tag{50}
+\end{equation}</p>
+<p>其中 $s$ 是金字塔层级。</p>
+<p><strong>数学直觉</strong>: 浅层关注细节（高分辨率），深层关注全局（低分辨率）。</p>
+<h4 id="92-conditional-pe">9.2 条件位置编码 (Conditional PE)</h4>
+<p>根据输入自适应生成位置编码：</p>
+<p>\begin{equation}
+\boldsymbol{p}<em _text_PE="\text{PE">i = f</em>_i, i)
+\tag{51}
+\end{equation}}}(\boldsymbol{x</p>
+<p>$f_{\text{PE}}$ 是一个小型网络（如MLP）。</p>
+<p><strong>优势</strong>:
+1. 参数共享，不受序列长度限制
+2. 可以编码相对位置关系</p>
+<h3 id="_11">十、实践建议与数值验证</h3>
+<h4 id="101">10.1 不同模态的位置编码选择</h4>
+<table>
+<thead>
+<tr>
+<th>模态</th>
+<th>推荐方案</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>纯文本</td>
+<td>RoPE-1D</td>
+<td>外推性好，效果优</td>
+</tr>
+<tr>
+<td>纯图像</td>
+<td>RoPE-2D或可学习</td>
+<td>保持空间结构</td>
+</tr>
+<tr>
+<td>文本-图像</td>
+<td>RoPE-TV</td>
+<td>统一框架，兼容性好</td>
+</tr>
+<tr>
+<td>文本-视频</td>
+<td>RoPE-3D或分离</td>
+<td>时间维度特殊处理</td>
+</tr>
+</tbody>
+</table>
+<h4 id="102">10.2 长度外推的配置建议</h4>
+<p><strong>训练长度 $L_{\text{train}} = 2048$</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>目标长度</th>
+<th>方法</th>
+<th>配置</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4096</td>
+<td>PI</td>
+<td>$s = 0.5$</td>
+</tr>
+<tr>
+<td>8192</td>
+<td>NTK</td>
+<td>$b' \approx 40000$</td>
+</tr>
+<tr>
+<td>16384</td>
+<td>Dynamic NTK + 微调</td>
+<td>$b' \approx 160000$ + 1000步</td>
+</tr>
+<tr>
+<td>32768+</td>
+<td>ALiBi替换</td>
+<td>$m = {0.5, 1, 2, 4}$</td>
+</tr>
+</tbody>
+</table>
+<h4 id="103-rope-tv">10.3 RoPE-TV的参数计算</h4>
+<p>Python实现示例:</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">compute_rope_tv_offset</span><span class="p">(</span><span class="n">L_text</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">h</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    计算RoPE-TV的偏置参数</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        L_text: 左段文本长度</span>
+<span class="sd">        w, h: 图像的宽和高（patch数）</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        beta_1, beta_2: 偏置参数</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">wh</span> <span class="o">=</span> <span class="n">w</span> <span class="o">*</span> <span class="n">h</span>
+    <span class="n">beta_1</span> <span class="o">=</span> <span class="n">L_text</span> <span class="o">+</span> <span class="p">(</span><span class="n">wh</span> <span class="o">-</span> <span class="n">h</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+    <span class="n">beta_2</span> <span class="o">=</span> <span class="n">L_text</span> <span class="o">+</span> <span class="p">(</span><span class="n">wh</span> <span class="o">-</span> <span class="n">w</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+    <span class="k">return</span> <span class="n">beta_1</span><span class="p">,</span> <span class="n">beta_2</span>
+</code></pre></div>
+
+<p><strong>数值验证</strong>:</p>
+<p>\begin{equation}
+\text{assert: } (\beta_1 + \gamma_1, \beta_2 + \gamma_2) - (L, L) = (L + wh + 1, L + wh + 1) - (\beta_1 + h, \beta_2 + w)
+\tag{52}
+\end{equation}</p>
+<h4 id="104-qwen2-vlm-rope">10.4 Qwen2-VL的M-RoPE分析</h4>
+<p>Qwen2-VL的M-RoPE选择 $\beta_1 = \beta_2 = \beta_3 = L, \gamma_1 = \gamma_2 = \gamma_3 = 1$。</p>
+<p><strong>优点</strong>: 实现简单，计算高效</p>
+<p><strong>缺点</strong>:
+1. 不满足对称性: 左文本到图像距离 $\neq$ 图像到右文本距离
+2. 不满足等价性: $wh$ 个patch不等价于 $wh$ 个token</p>
+<p><strong>数值对比</strong>: $L=100, w=h=16$:</p>
+<table>
+<thead>
+<tr>
+<th>方案</th>
+<th>图像首patch</th>
+<th>图像末patch</th>
+<th>右文本首token</th>
+<th>对称性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RoPE-TV</td>
+<td>$(220, 220)$</td>
+<td>$(235, 235)$</td>
+<td>$(356, 356)$</td>
+<td>✓</td>
+</tr>
+<tr>
+<td>M-RoPE</td>
+<td>$(101, 101)$</td>
+<td>$(116, 116)$</td>
+<td>$(117, 117)$</td>
+<td>✗</td>
+</tr>
+</tbody>
+</table>
+<p>M-RoPE中，256个patch只相当于16个token的距离！</p>
+<h3 id="_12">十一、总结</h3>
+<p>本节详细推导了多模态位置编码的数学原理：</p>
+<p><strong>核心公式</strong>:</p>
+<ol>
+<li>
+<p><strong>RoPE-1D的相对位置性质</strong>:
+\begin{equation}
+\boldsymbol{\mathcal{R}}<em n-m="n-m">m^\top \boldsymbol{\mathcal{R}}_n = \boldsymbol{\mathcal{R}}</em>
+\tag{53}
+\end{equation}</p>
+</li>
+<li>
+<p><strong>RoPE-TV的对称性约束</strong>:
+\begin{equation}
+\beta_1 = L + \frac{h(w-1)}{2}, \quad \beta_2 = L + \frac{w(h-1)}{2}
+\tag{54}
+\end{equation}</p>
+</li>
+<li>
+<p><strong>位置插值的缩放</strong>:
+\begin{equation}
+n' = n \cdot \frac{L_{\text{train}}}{L_{\text{infer}}}
+\tag{55}
+\end{equation}</p>
+</li>
+<li>
+<p><strong>NTK-Aware的频率调整</strong>:
+\begin{equation}
+b' = b \cdot \left(\frac{L_{\text{infer}}}{L_{\text{train}}}\right)^{d/(d-2)}
+\tag{56}
+\end{equation}</p>
+</li>
+</ol>
+<p><strong>设计原则</strong>:
+1. <strong>兼容性</strong>: 单模态时退化为标准方案
+2. <strong>等价性</strong>: 不同模态的基本单元地位平等
+3. <strong>对称性</strong>: 跨模态距离对称一致</p>
+<p>通过严格的数学推导，RoPE-TV实现了统一、优雅的多模态位置编码方案。</p>
+        </div>
+    </div>
+</body>
+</html>

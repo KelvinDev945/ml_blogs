@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>最小熵原理（六）：词向量的维度应该怎么选择？</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>最小熵原理（六）：词向量的维度应该怎么选择？</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 12.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7695">https://spaces.ac.cn/archives/7695</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>随着NLP的发展，像Word2Vec、Glove这样的词向量模型，正逐渐地被基于Transformer的BERT等模型代替，不过经典始终是经典，词向量模型依然在不少场景发光发热，并且仍有不少值得我们去研究的地方。本文我们来关心一个词向量模型可能有的疑惑：词向量的维度大概多少才够？</p>
+<p>先说结论，笔者给出的估算结果是<br />
+\begin{equation}n &gt; 8.33\log N\label{eq:final}\end{equation}<br />
+更简约的话可以直接记$n &gt; 8\log N$，其中$N$是词表大小，$n$就是词向量维度，$\log$是自然对数。当$n$超过这个阈值时，就说明模型有足够的容量容纳这$N$个词语（当然$n$越大过拟合风险也越大）。这样一来，当$N=100000$时，得到的$n$大约是96，所以对于10万个词的词向量模型来说，维度选择96就足够了；如果要容纳500万个词，那么$n$大概就是128。</p>
+<h2 id="_1">背景</h2>
+<p>之所以想起这个问题，是因为昨天在Arxiv上刷到了论文<a href="https://papers.cool/arxiv/2008.07720">《Word2vec Skip-gram Dimensionality Selection via Sequential Normalized Maximum Likelihood》</a>，遗憾的是，从这篇论文中笔者并没有找到想要的答案。顺带搜索了一下，发现也有类似文献研究同样的问题，比如<a href="https://papers.cool/arxiv/1812.04224">《On the Dimensionality of Word Embedding》</a>，但答案依旧不是笔者想要的。</p>
+<p>为什么这样说呢？很显然，这个问题的最标准答案应该是靠反复实验来确定最优维度，所以不能指望理论分析给出相当精确的答案。我们平时用到的词向量维度，一般有64、100、128、256、300等，不同的维度之间效果差别其实也没多少，所以笔者只希望能从最简洁直观的方式推导一下一般词向量模型所需要的维度量级，比如几十或者几百，不应该出现太过复杂的分析。</p>
+<p>由于没有找到比较满意的现有结果，因此笔者从<a href="/tag/%E6%9C%80%E5%B0%8F%E7%86%B5/">最小熵原理</a>角度分析了一下，得到了一个接近自己心中所想的答案。</p>
+<h2 id="_2">分析</h2>
+<p>本文要分析是基于Skip Gram思想的词向量模型，多数词向量模型其实都是它的变种，至于CBOW类的模型，在以往的实验里，它的表现其实跟Skip Gram差不多（尤其是数据量较大时），因此可以认为Skip Gram的分析结果应该是通用的。</p>
+<h3 id="_3">最小化熵</h3>
+<p>我们的出发点是信息熵，我们知道，熵是不确定性的度量（参考<a href="/archives/3534">《“熵”不起：从熵、最大熵原理到最大熵模型（一）》</a>），语言本身具有一定的不确定性，而我们在用向量编码词语时，编码结果应该要等于甚至小于这种不确定性，才能保证这种编码是有效的、能充分保留原来语言的信息。所以，我们要消除不确定性，也就是要最小熵。</p>
+<p>要注意的是，词向量是基于Skip Gram模型的，所以我们要计算的不是词平均熵，而是整个Skip Gram模型的平均熵，假设词对$(w_i, w_j)$的频率是$\tilde{p}(w_i, w_j)$，那么可以估算它的熵为<br />
+\begin{equation}\tilde{H}=-\sum_{i, j} \tilde{p}(w_i, w_j)\log \tilde{p}(w_i, w_j)\end{equation}<br />
+不同的词向量训练目标也有所差异，有些是在拟合联合概率$p(w_i, w_j)$，有些是在拟合条件概率$p(w_j|w_i)$，但这差别不大，前面说了，本文只是想得到一个概数。所以这里统一假设词向量模型为<br />
+\begin{equation}p(w_i, w_j) = \frac{e^{\langle\boldsymbol{u}<em i_j="i,j">i, \boldsymbol{v}_j\rangle}}{Z},\quad Z = \sum</em>}e^{\langle\boldsymbol{u<em i_="i," j="j">i, \boldsymbol{v}_j\rangle}\end{equation}<br />
+其中$\boldsymbol{u},\boldsymbol{v}$代表两套不同的词向量（中心词向量、上下文词向量），$\boldsymbol{u}_i$代表词$w_i$而$\boldsymbol{v}_j$代表词$w_j$。这时候它的信息熵是<br />
+\begin{equation}H=-\sum</em>} p(w_i, w_j)\log p(w_i, w_j)=\log Z-\frac{1}{Z}\sum_{i, j} e^{\langle \boldsymbol{u}_i, \boldsymbol{v}_j\rangle} \langle \boldsymbol{u}_i, \boldsymbol{v}_j\rangle\end{equation</p>
+<h3 id="_4">采样近似</h3>
+<p>为了近似计算上式，我们将求和用采样近似，比如<br />
+\begin{equation}Z = \sum_{i, j} e^{\langle \boldsymbol{u}<em i_="i," j="j">i, \boldsymbol{v}_j\rangle} = N^2\times \frac{1}{N^2}\sum</em>} e^{\langle \boldsymbol{u<em _boldsymbol_u="\boldsymbol{u">i, \boldsymbol{v}_j\rangle}\approx N^2\mathbb{E}</em><em i_="i," j="j">i,\boldsymbol{v}_j}\left[e^{\langle \boldsymbol{u}_i, \boldsymbol{v}_j\rangle}\right]\end{equation}<br />
+这里的$N$是词表大小。同理<br />
+\begin{equation}\sum</em>} e^{\langle \boldsymbol{u<em _boldsymbol_u="\boldsymbol{u">i, \boldsymbol{v}_j\rangle} \langle \boldsymbol{u}_i, \boldsymbol{v}_j\rangle\approx N^2\mathbb{E}</em><em _boldsymbol_u="\boldsymbol{u">i,\boldsymbol{v}_j}\left[e^{\langle \boldsymbol{u}_i, \boldsymbol{v}_j\rangle} \langle \boldsymbol{u}_i, \boldsymbol{v}_j\rangle\right]\end{equation}<br />
+所以我们有近似<br />
+\begin{equation}H\approx\log N^2 + \log \mathbb{E}</em><em _boldsymbol_u="\boldsymbol{u">i,\boldsymbol{v}_j}\left[e^{\langle \boldsymbol{u}_i, \boldsymbol{v}_j\rangle}\right]-\frac{\mathbb{E}</em><em _boldsymbol_u="\boldsymbol{u">i,\boldsymbol{v}_j}\left[e^{\langle \boldsymbol{u}_i, \boldsymbol{v}_j\rangle} \langle \boldsymbol{u}_i, \boldsymbol{v}_j\rangle\right]}{\mathbb{E}</em>}_i,\boldsymbol{v}_j}\left[e^{\langle \boldsymbol{u}_i, \boldsymbol{v}_j\rangle}\right]}\end{equation</p>
+<h3 id="_5">分布假设</h3>
+<p>观察已有的词向量模型，我们可以发现每个维度的数值有正有负，绝对值大小一般也比较均匀。在此，我们不妨假设每个元素的绝对值大概为1，那么每个词向量的模长大致就为$\sqrt{n}$（$n$是词向量的维度，也就是我们要估算的目标，如果觉得这个近似不够准确，也可以自行调整），并且进一步假设所有的词向量均匀分布在半径为$\sqrt{n}$的$n$维超球面上，那么$\langle \boldsymbol{u}<em _theta="\theta">i, \boldsymbol{v}_j\rangle=n\cos\theta$，$\theta$是它们的夹角，所以<br />
+\begin{equation}H\approx\log N^2 + \log \mathbb{E}</em>}\left[e^{n\cos\theta}\right]-\frac{\mathbb{E<em _theta="\theta">{\theta}\left[e^{n\cos\theta} n\cos\theta\right]}{\mathbb{E}</em>}\left[e^{n\cos\theta}\right]}\label{eq:H-theta}\end{equation<br />
+现在$\theta$相当于$n$维空间中任意两个向量的夹角，我们在<a href="/archives/7076">《n维空间下两个随机向量的夹角分布》</a>中就求出了它的分布为<br />
+\begin{equation}p_n(\theta) = \frac{\Gamma\left(\frac{n}{2}\right)}{\Gamma\left(\frac{n-1}{2}\right)\sqrt{\pi}}\sin^{n-2} \label{eq:jqfb}\theta\end{equation}<br />
+既然概率密度函数都确定了，那么对于给定的$N$和$n$，近似式$\eqref{eq:H-theta}$是完全可以数值计算出来的，而由$\tilde{H} &gt; H$便可以解出对应的$n$。</p>
+<h3 id="_6">结果对比</h3>
+<p>首先我们数值计算出$h_n=\log \mathbb{E}<em _theta="\theta">{\theta}\left[e^{n\cos\theta}\right]-\frac{\mathbb{E}</em>$的一些结果：}\left[e^{n\cos\theta} n\cos\theta\right]}{\mathbb{E}_{\theta}\left[e^{n\cos\theta}\right]<br />
+\begin{array}{c|cccccc}<br />
+\hline<br />
+n &amp; 32 &amp; 64 &amp; 96 &amp; 128 &amp; 256 &amp; 512\\\<br />
+\hline<br />
+h_n &amp; -7.77471 &amp; -15.4734 &amp; -23.1726 &amp; -30.8718 &amp; -61.6692 &amp; -123.264\\\<br />
+\hline<br />
+\end{array}<br />
+那么比如$n=64,N=100000$，就有$H\approx \log 100000^2 - 15.4734 = 7.55245$。读者可能会觉得奇怪，当$n=128,N=100000$时，$H$不就是负数了？离散熵怎么可能是负数？事实上，这是因为我们在前面的推导过程中，使用了采样近似和精确积分相结合的方式，当空间维数$n$足够大时，就算你采样几十万个样本也不一定能准确估计一些统计量，所以采样近似这一步带来了误差。</p>
+<p>不过这倒是给我们另外一个确定$n$的思路：当出现$H &lt; 0$时，说明$N$个样本已经无法对统计量做很好地估计了，那么反过来说就是此时的$n$维空间要容纳$N$个样本是“绰绰有余”的。因此，我们可以用$H &lt; 0$简单确定一个边界，而不需要去估算$\tilde{H}$。（或者从另外一个角度想：$\tilde{H}$一定是大于0的，因此$H &lt; 0$是$H &lt; \tilde{H}$的充分条件。）</p>
+<p>最后，我们看到$h_n$关于$n$大概是线性的，$h_n/n\approx -0.24$，因此$H\approx\log N^2 -0.24n$，让它小于0我们可以解出公式$\eqref{eq:final}$了。</p>
+<h3 id="_7">近似估计</h3>
+<p>对于$h_n/n\approx -0.24$这个结果，我们也可以从理论上得到它。根据$h_n$定义，我们有<br />
+\begin{equation}h_n = \log\frac{\int_0^{\pi} \sin^{n-2}\theta\, e^{n\cos\theta}d\theta}{\int_0^{\pi} \sin^{n-2}\theta d\theta} - n\frac{\int_0^{\pi} \sin^{n-2}\theta\, e^{n\cos\theta}\cos\theta d\theta}{\int_0^{\pi} \sin^{n-2}\theta\,e^{n\cos\theta} d\theta}\end{equation}<br />
+所以，这是几个定积分的渐近估计问题，我们主要利用拉普拉斯近似的思想，假设$n$比较大，以至于我们可以忽略$n$与$n-2$的区别，那么<br />
+\begin{equation}\log\left[\sin^{n-2}\theta\, e^{n\cos\theta}\right]=(n-2)\log \sin\theta + n\cos\theta \approx n (\log \sin\theta + \cos\theta)\end{equation}<br />
+可以算出$\log\sin\theta + \cos\theta$在$[0,\pi]$的极大值点为$\arctan\sqrt{\frac{\sqrt{5}+1}{2}}\approx 0.904557$，那么在该处展开到二阶，就得到<br />
+\begin{equation}\log \sin\theta + \cos\theta\approx 0.377428 -1.11803 (\theta - 0.904557)^2\end{equation}<br />
+从而<br />
+\begin{equation}\begin{aligned}<br />
+\int_0^{\pi} \sin^{n-2}\theta\, e^{n\cos\theta}d\theta\approx&amp;\, \int_{-\infty}^{\infty} e^{n[0.377428 -1.11803 (\theta - 0.904557)^2]}d\theta\\\<br />
+\approx&amp;\, \frac{1.67629}{\sqrt{n}}e^{0.377428n}<br />
+\end{aligned}\end{equation}<br />
+以及注意当$n$足够大的时候，被积函数只有在$\theta=0.904557$附近才会明显不等于0（或者将正态分布的极限视为<a href="/archives/1870">狄拉克函数</a>的近似），从而有<br />
+\begin{equation}\begin{aligned}<br />
+\frac{\int_0^{\pi} \sin^{n-2}\theta\, e^{n\cos\theta}\cos\theta d\theta}{\int_0^{\pi} \sin^{n-2}\theta\, e^{n\cos\theta} d\theta}\approx&amp;\, \frac{\int_{-\infty}^{\infty} e^{n[0.377428 -1.11803 (\theta - 0.904557)^2]}\cos\theta d\theta}{\int_{-\infty}^{\infty} e^{n[0.377428 -1.11803 (\theta - 0.904557)^2]}d\theta} \\\<br />
+\approx&amp;\, \int_{-\infty}^{\infty} \delta(\theta - 0.904557) \cos\theta d\theta\\\<br />
+=&amp;\,\cos 0.904557 \approx 0.618034<br />
+\end{aligned}\end{equation}<br />
+同样利用拉普拉斯近似，我们可以得到$\int_0^{\pi} \sin^{n-2}\theta d\theta\approx\frac{2.50663}{\sqrt{n}}$。综合所有结果，我们可以得到<br />
+\begin{equation}h_n \approx \log \frac{\frac{1.67629}{\sqrt{n}}e^{0.377428n}}{\frac{2.50663}{\sqrt{n}}}-0.618034n\approx -0.240606 n\end{equation}<br />
+这就得到了$h_n/n\approx -0.24$这个结果。上述推导过程用的都是数值值，如果全部保留解析值，那么可以得到这个系数的解析解为$\frac{1}{2}\log\frac{\sqrt{5}+1}{2}$。</p>
+<h2 id="_8">小结</h2>
+<p>本文从最小熵原理的思想出发分析了词向量的维度选择问题，最终给出了一个近似的估算公式，计算结果表明该估算公式与我们以往的炼丹经验是相符的。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7695">https://spaces.ac.cn/archives/7695</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Aug. 20, 2020). 《 最小熵原理（六）：词向量的维度应该怎么选择？ 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7695">https://spaces.ac.cn/archives/7695</a></p>
+<p>@online{kexuefm-7695,<br />
+title={ 最小熵原理（六）：词向量的维度应该怎么选择？},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={Aug},<br />
+url={\url{https://spaces.ac.cn/archives/7695}},<br />
+} </p>
+<hr />
+<h2 id="_9">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

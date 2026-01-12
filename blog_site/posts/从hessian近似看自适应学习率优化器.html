@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>从Hessian近似看自适应学习率优化器</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>从Hessian近似看自适应学习率优化器</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 46.2 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10588">https://spaces.ac.cn/archives/10588</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>这几天在重温去年的Meta的一篇论文<a href="https://papers.cool/arxiv/2304.09871">《A Theory on Adam Instability in Large-Scale Machine Learning》</a>，里边给出了看待Adam等自适应学习率优化器的新视角：它指出梯度平方的滑动平均某种程度上近似于在估计Hessian矩阵的平方，从而Adam、RMSprop等优化器实际上近似于二阶的Newton法。</p>
+<p>这个角度颇为新颖，而且表面上跟以往的一些Hessian近似有明显的差异，因此值得我们去学习和思考一番。</p>
+<h2 id="_1">牛顿下降</h2>
+<p>设损失函数为$\mathcal{L}(\boldsymbol{\theta})$，其中待优化参数为$\boldsymbol{\theta}$，我们的优化目标是<br />
+\begin{equation}\boldsymbol{\theta}^* = \mathop{\text{argmin}}<em t_1="t+1">{\boldsymbol{\theta}} \mathcal{L}(\boldsymbol{\theta})\label{eq:loss}\end{equation}<br />
+假设$\boldsymbol{\theta}$的当前值是$\boldsymbol{\theta}_t$，Newton法通过将损失函数展开到二阶来寻求$\boldsymbol{\theta}</em>$：<br />
+\begin{equation}\mathcal{L}(\boldsymbol{\theta})\approx \mathcal{L}(\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">t) + \boldsymbol{g}_t^{\top}(\boldsymbol{\theta} - \boldsymbol{\theta}_t) + \frac{1}{2}(\boldsymbol{\theta} - \boldsymbol{\theta}_t)^{\top}\boldsymbol{\mathcal{H}}_t(\boldsymbol{\theta} - \boldsymbol{\theta}_t)\end{equation}<br />
+其中$\boldsymbol{g}_t = \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t}\mathcal{L}(\boldsymbol{\theta}_t)$是梯度、 $\boldsymbol{\mathcal{H}}_t=\nabla</em><em t_1="t+1">t}^2\mathcal{L}(\boldsymbol{\theta}_t)$是Hessian矩阵。假定Hessian矩阵的正定性，那么上式右端就存在唯一的最小值$\boldsymbol{\theta}_t - \boldsymbol{\mathcal{H}}_t^{-1}\boldsymbol{g}_t$，Newton法将它作为下一步的$\boldsymbol{\theta}</em>$：<br />
+\begin{equation}\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">{t+1} = \boldsymbol{\theta}_t-\boldsymbol{\mathcal{H}}_t^{-1}\boldsymbol{g}_t = \boldsymbol{\theta}_t - (\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t}^2\mathcal{L})^{-1} \nabla</em>}_t}\mathcal{L}\end{equation<br />
+注意上式没有额外的学习率参数，因此Newton法天生就是自适应学习率算法。当然，由于Hessian矩阵的复杂度正比于参数量的平方，所以在深度学习中完整的Newton法基本上只有理论价值了，真要想应用Newton法，要对Hessian矩阵做比较大的简化假设，比如对角矩阵或者低秩矩阵。</p>
+<p>在Newton法视角下，SGD就是假设了$\boldsymbol{\mathcal{H}}<em t-1="t-1">t=\eta_t^{-1}\boldsymbol{I}$，而Adam则是假设$\boldsymbol{\mathcal{H}}_t=\eta_t^{-1}\text{diag}(\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon)$，其中<br />
+\begin{equation}\text{Adam}:=\left\{\begin{aligned}<br />
+&amp;\boldsymbol{m}_t = \beta_1 \boldsymbol{m}</em>} + \left(1 - \beta_1\right) \boldsymbol{g<em t-1="t-1">t\\\<br />
+&amp;\boldsymbol{v}_t = \beta_2 \boldsymbol{v}</em>} + \left(1 - \beta_2\right) \boldsymbol{g<em t-1="t-1">t\odot\boldsymbol{g}_t\\\<br />
+&amp;\hat{\boldsymbol{m}}_t = \boldsymbol{m}_t\left/\left(1 - \beta_1^t\right)\right.\\\<br />
+&amp;\hat{\boldsymbol{v}}_t = \boldsymbol{v}_t\left/\left(1 - \beta_2^t\right)\right.\\\<br />
+&amp;\boldsymbol{\theta}_t = \boldsymbol{\theta}</em> + \epsilon\right)\right.} - \eta_t \hat{\boldsymbol{m}}_t\left/\left(\sqrt{\hat{\boldsymbol{v}}_t<br />
+\end{aligned}\right.\end{equation}<br />
+接下来我们想要证明的是，$\eta_t^{-1}\text{diag}(\sqrt{\hat{\boldsymbol{v}}_t})$是$\boldsymbol{\mathcal{H}}_t$的一个更好的近似。</p>
+<h2 id="_2">梯度近似</h2>
+<p>证明的要点是利用梯度的一阶近似：<br />
+\begin{equation}\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}} \approx \boldsymbol{g}</em>^<em>} + \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^</em>}(\boldsymbol{\theta} - \boldsymbol{\theta}^<em>)\end{equation}<br />
+其中$\boldsymbol{g}_{\boldsymbol{\theta}^</em>}$和$\boldsymbol{\mathcal{H}}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}^<em>}$表明我们在$\boldsymbol{\theta}=\boldsymbol{\theta}^</em>$处展开，这里的$\boldsymbol{\theta}^<em>$就是我们要寻找的目标$\eqref{eq:loss}$，在此处模型的梯度为零，从而上式可以简化成<br />
+\begin{equation}\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}} \approx \boldsymbol{\mathcal{H}}</em>^</em>}(\boldsymbol{\theta} - \boldsymbol{\theta}^<em>)\end{equation}<br />
+于是<br />
+\begin{equation}\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}\boldsymbol{g}</em>^}}^{\top} \approx \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta</em>}(\boldsymbol{\theta} - \boldsymbol{\theta}^<em>)(\boldsymbol{\theta} - \boldsymbol{\theta}^</em>)^{\top}\boldsymbol{\mathcal{H}}</em>^<em>}^{\top}\end{equation}<br />
+假设训练进入“正轨”后，模型将会长期处于围绕着$\boldsymbol{\theta}^</em>$“打转”、缓慢且螺旋地收敛的状态，那么一定程度上我们可以将$\boldsymbol{\theta} - \boldsymbol{\theta}^<em>$视为正态分布$\mathcal{N}(\boldsymbol{0},\sigma^2\boldsymbol{I})$的随机变量，那么<br />
+\begin{equation}\mathbb{E}[\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}\boldsymbol{g}</em>^}}^{\top}] \approx \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta</em>}\mathbb{E}[(\boldsymbol{\theta} - \boldsymbol{\theta}^<em>)(\boldsymbol{\theta} - \boldsymbol{\theta}^</em>)^{\top}]\boldsymbol{\mathcal{H}}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}^<em>}^{\top} = \sigma^2\boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^</em>}\boldsymbol{\mathcal{H}}</em>^<em>}^{\top}\label{eq:hessian-2}\end{equation}<br />
+假设Hessian矩阵是对角阵，那么上式我们可以只保留对角线元素<br />
+\begin{equation}\text{diag}(\mathbb{E}[\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}\odot\boldsymbol{g}</em>^}}]) \approx \sigma^2\boldsymbol{\mathcal{H}}_{\boldsymbol{\theta</em>}^2\quad\Rightarrow\quad \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^<em>} = \frac{1}{\sigma}\text{diag}(\sqrt{\mathbb{E}[\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}\odot\boldsymbol{g}</em>}}]})\end{equation<br />
+是不是有点相似了？Adam的$\hat{\boldsymbol{v}}<em _boldsymbol_theta="\boldsymbol{\theta">t$是对梯度平方的滑动平均，它可以看作在近似$\mathbb{E}[\boldsymbol{g}</em>}}\odot\boldsymbol{g<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}]$。最后我们再假设$\boldsymbol{\mathcal{H}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}$相比$\boldsymbol{\mathcal{H}}</em>^</em>}$变化不大，就可以得到$\eta_t^{-1}\text{diag}(\sqrt{\hat{\boldsymbol{v}}_t})$是$\boldsymbol{\mathcal{H}}_t$近似的结论。</p>
+<p>这也可以解释为什么Adam的$\beta_2$通常都大于$\beta_1$。为了更准确地估计Hessian，$\hat{\boldsymbol{v}}<em _boldsymbol_theta="\boldsymbol{\theta">t$的滑动平均应该尽可能“长期”（接近均匀平均），所以$\beta_2$应该要很接近于1；而动量$\hat{\boldsymbol{m}}_t$是梯度的滑动平均，如果梯度的平均过于长期的话，那么结果将会接近$\boldsymbol{g}</em>$，这反而不好，因此动量的滑动平均要更局部些。}^*}=\boldsymbol{0</p>
+<h2 id="_3">相关工作</h2>
+<p>对于比较了解Hessian矩阵理论的读者，看到上述结论后的第一反应也许不是熟悉而是疑惑，这是因为Hessian矩阵的一个经典近似是Jacobi矩阵（类似梯度）的外积，而这里的Hessian近似则是梯度外积的平方根，两者差了个根号。</p>
+<p>具体来说，我们以平方误差损失为例<br />
+\begin{equation}\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{2}\mathbb{E}<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}[\Vert \boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x})\Vert^2]\label{eq:loss-2}\end{equation<br />
+我们在$\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">t$处展开，有$\boldsymbol{f}</em>}}(\boldsymbol{x})\approx \boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}_t}(\boldsymbol{x}) + \boldsymbol{\mathcal{J}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}^{\top} (\boldsymbol{\theta} - \boldsymbol{\theta}_t)$，其中$\boldsymbol{\mathcal{J}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}=\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t} \boldsymbol{f}</em><em _boldsymbol_x="(\boldsymbol{x">t}(\boldsymbol{x})$是Jacobi矩阵，代入上式得到<br />
+\begin{equation}\mathcal{L}(\boldsymbol{\theta}) \approx \frac{1}{2}\mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}[\Vert \boldsymbol{y} - \boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}_t}(\boldsymbol{x}) - \boldsymbol{\mathcal{J}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}^{\top} (\boldsymbol{\theta} - \boldsymbol{\theta}_t)\Vert^2]\end{equation}<br />
+经过简化后的上式只是关于$\boldsymbol{\theta}$的二次型，因此可以直接写出它的Hessian矩阵，结果是<br />
+\begin{equation}\boldsymbol{\mathcal{H}}</em><em _boldsymbol_x="(\boldsymbol{x">t} \approx \mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}[\boldsymbol{\mathcal{J}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}_t}\boldsymbol{\mathcal{J}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}^{\top}]\end{equation}<br />
+这就是基于Jacobi矩阵外积的Hessian近似，它是“<a href="https://en.wikipedia.org/wiki/Gauss%E2%80%93Newton_algorithm">Gauss–Newton法</a>”的理论基础。当然，$\boldsymbol{\mathcal{J}}$还不是$\boldsymbol{g}$，我们要试图将结果跟$\mathcal{g}$联系起来。对式$\eqref{eq:loss-2}$直接求导得<br />
+\begin{equation}\boldsymbol{g}</em>}} = \mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}[\boldsymbol{\mathcal{J}}</em>}}(\boldsymbol{y} - \boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}))]\end{equation}<br />
+于是<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{g}</em>}} \boldsymbol{g<em _boldsymbol_x="(\boldsymbol{x">{\boldsymbol{\theta}}^{\top} =&amp;\, \big(\mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}[\boldsymbol{\mathcal{J}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x}))]\big)\big(\mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}[\boldsymbol{\mathcal{J}}</em>}}(\boldsymbol{y} - \boldsymbol{f<em _boldsymbol_x="(\boldsymbol{x">{\boldsymbol{\theta}}(\boldsymbol{x}))]\big)^{\top} \\\[5pt]<br />
+=&amp;\, \big(\mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}[\boldsymbol{\mathcal{J}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x}))]\big)\big(\mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}[(\boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x}))^{\top}\boldsymbol{\mathcal{J}<em _boldsymbol_x="(\boldsymbol{x">{\boldsymbol{\theta}}^{\top}]\big) \\\[5pt]<br />
+\approx&amp;\, \mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}\big[\boldsymbol{\mathcal{J}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x}))(\boldsymbol{y} - \boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}))^{\top}\boldsymbol{\mathcal{J}}</em>\big] \\\[5pt]}}^{\top<br />
+\approx&amp;\, \mathbb{E}<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}\Big[\boldsymbol{\mathcal{J}}</em>}}\mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{(\boldsymbol{x},\boldsymbol{y})\sim\mathcal{D}}\big[(\boldsymbol{y} - \boldsymbol{f}</em>}}(\boldsymbol{x}))(\boldsymbol{y} - \boldsymbol{f<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}))^{\top}\big]\boldsymbol{\mathcal{J}}</em>\Big] \\\[5pt]}}^{\top<br />
+\end{aligned}\end{equation}<br />
+这里两个约等号其实没有太多道理，可以勉强看成是平均场近似，而$\boldsymbol{y} - \boldsymbol{f}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x})$是回归预测的残差，我们通常假设它服从$\mathcal{N}(\boldsymbol{0},\sigma^2\boldsymbol{I})$，因此有<br />
+\begin{equation}\boldsymbol{g}</em>}} \boldsymbol{g<em _boldsymbol_x="(\boldsymbol{x">{\boldsymbol{\theta}}^{\top} \approx \sigma^2\mathbb{E}</em>},\boldsymbol{y})\sim\mathcal{D}}\big[\boldsymbol{\mathcal{J}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}\boldsymbol{\mathcal{J}}</em>}}^{\top}\big] \approx \sigma^2 \boldsymbol{\mathcal{H}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}_t}\label{eq:hessian-t}\end{equation}<br />
+这就揭示了$\boldsymbol{\mathcal{H}}</em><em _boldsymbol_theta="\boldsymbol{\theta">t}$与$\boldsymbol{g}</em>$，可以发现表面上刚好差了个平方。}} \boldsymbol{g}_{\boldsymbol{\theta}}^{\top}$的联系。对比上一节的式$\eqref{eq:hessian-2</p>
+<p>看推导过程，两个结果似乎都没明显错误，那怎么理解这种不一致性呢？我们可以这样理解：式$\eqref{eq:hessian-t}$给出的是$t$时刻的Hessian近似，属于“瞬时近似”，而式$\eqref{eq:hessian-2}$则是时间步的“长期平均”结果，长期的平均作用抵销了一部分强度（但理论上也会使得估计更准确），从而需要多开一个平方根。</p>
+<p>类似的效应也出现在<a href="/archives/9209">《生成扩散模型漫谈（五）：一般框架之SDE篇》</a>介绍的SDE中，SDE的噪声项强度需要比非噪声项高半阶，同样是因为噪声项在长期平均之下会抵消，所以噪声需要更高阶才能在最终的结果中体现出噪声的作用。</p>
+<h2 id="_4">更多联系</h2>
+<p>在前面的推导中，我们假设了$\boldsymbol{\theta}^<em>$是理论最优点，从而有$\boldsymbol{g} _{\boldsymbol{\theta}^</em>} = \boldsymbol{0}$。如果$\boldsymbol{\theta}^<em>$是任意一点呢？那么式$\eqref{eq:hessian-2}$将变成<br />
+\begin{equation}\mathbb{E}[(\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}-\boldsymbol{g} </em>^</em>})(\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}-\boldsymbol{g} </em>^<em>})^{\top}] \approx \sigma^2\boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^</em>}\boldsymbol{\mathcal{H}}<em t-1="t-1">{\boldsymbol{\theta}^*}^{\top}\end{equation}<br />
+也就是说我们只要滑动平均的是协方差而不是二阶矩，就可以得到局部范围内的Hessian近似。这正好跟<a href="https://papers.cool/arxiv/2010.07468">AdaBelief优化器</a>的做法对应上了，它的$\boldsymbol{v}$滑动平均的是$\boldsymbol{g}$与$\boldsymbol{m}$的差的平方：<br />
+\begin{equation}\text{AdaBelief}:=\left\{\begin{aligned}<br />
+&amp;\boldsymbol{m}_t = \beta_1 \boldsymbol{m}</em>} + \left(1 - \beta_1\right) \boldsymbol{g<em t-1="t-1">t\\\<br />
+&amp;\boldsymbol{v}_t = \beta_2 \boldsymbol{v}</em>} + \left(1 - \beta_2\right) (\boldsymbol{g<em t-1="t-1">t - \boldsymbol{m}_t)\odot(\boldsymbol{g}_t - \boldsymbol{m}_t)\\\<br />
+&amp;\hat{\boldsymbol{m}}_t = \boldsymbol{m}_t\left/\left(1 - \beta_1^t\right)\right.\\\<br />
+&amp;\hat{\boldsymbol{v}}_t = \boldsymbol{v}_t\left/\left(1 - \beta_2^t\right)\right.\\\<br />
+&amp;\boldsymbol{\theta}_t = \boldsymbol{\theta}</em> + \epsilon\right)\right.} - \eta_t \hat{\boldsymbol{m}}_t\left/\left(\sqrt{\hat{\boldsymbol{v}}_t<br />
+\end{aligned}\right.\end{equation}</p>
+<h2 id="_5">文章小结</h2>
+<p>本文介绍了从Newton法和Hessian近似看待Adam等自适应学习率优化器的一个视角，并讨论了Hessian近似的相关结果。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10588">https://spaces.ac.cn/archives/10588</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Nov. 29, 2024). 《从Hessian近似看自适应学习率优化器 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10588">https://spaces.ac.cn/archives/10588</a></p>
+<p>@online{kexuefm-10588,<br />
+title={从Hessian近似看自适应学习率优化器},<br />
+author={苏剑林},<br />
+year={2024},<br />
+month={Nov},<br />
+url={\url{https://spaces.ac.cn/archives/10588}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释</h2>
+<h3 id="1-hessian">1. Hessian矩阵的定义和作用</h3>
+<h4 id="11">1.1 基本定义</h4>
+<p>对于损失函数$\mathcal{L}(\boldsymbol{\theta}):\mathbb{R}^n\to\mathbb{R}$，Hessian矩阵定义为：</p>
+<p>$$
+\boldsymbol{\mathcal{H}}(\boldsymbol{\theta}) = \nabla^2_{\boldsymbol{\theta}}\mathcal{L}(\boldsymbol{\theta}) = \begin{bmatrix}
+\frac{\partial^2 \mathcal{L}}{\partial \theta_1^2} & \frac{\partial^2 \mathcal{L}}{\partial \theta_1 \partial \theta_2} & \cdots & \frac{\partial^2 \mathcal{L}}{\partial \theta_1 \partial \theta_n} \\
+\frac{\partial^2 \mathcal{L}}{\partial \theta_2 \partial \theta_1} & \frac{\partial^2 \mathcal{L}}{\partial \theta_2^2} & \cdots & \frac{\partial^2 \mathcal{L}}{\partial \theta_2 \partial \theta_n} \\
+\vdots & \vdots & \ddots & \vdots \\
+\frac{\partial^2 \mathcal{L}}{\partial \theta_n \partial \theta_1} & \frac{\partial^2 \mathcal{L}}{\partial \theta_n \partial \theta_2} & \cdots & \frac{\partial^2 \mathcal{L}}{\partial \theta_n^2}
+\end{bmatrix}
+$$</p>
+<p><strong>性质</strong>：由Schwarz定理，在连续可微的条件下，Hessian矩阵是对称矩阵，即$\boldsymbol{\mathcal{H}}^{\top} = \boldsymbol{\mathcal{H}}$。</p>
+<h4 id="12">1.2 几何意义</h4>
+<p>Hessian矩阵刻画了损失函数在参数空间中的曲率信息。对于二次函数$\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{2}\boldsymbol{\theta}^{\top}\boldsymbol{A}\boldsymbol{\theta} + \boldsymbol{b}^{\top}\boldsymbol{\theta} + c$，其Hessian矩阵恒为$\boldsymbol{\mathcal{H}} = \boldsymbol{A}$。</p>
+<p><strong>正定性判断</strong>：
+- 若$\boldsymbol{\mathcal{H}} \succ 0$（正定），则$\boldsymbol{\theta}$处为局部最小值
+- 若$\boldsymbol{\mathcal{H}} \prec 0$（负定），则$\boldsymbol{\theta}$处为局部最大值
+- 若$\boldsymbol{\mathcal{H}}$不定，则$\boldsymbol{\theta}$处为鞍点</p>
+<h4 id="13">1.3 条件数与优化难度</h4>
+<p>Hessian矩阵的条件数$\kappa(\boldsymbol{\mathcal{H}}) = \frac{\lambda_{\max}}{\lambda_{\min}}$决定了优化的难度，其中$\lambda_{\max}$和$\lambda_{\min}$分别是最大和最小特征值。条件数越大，优化越困难。</p>
+<p>对于梯度下降法，收敛速度受控于：
+$$
+\|\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}^*\| \leq \left(\frac{\kappa - 1}{\kappa + 1}\right)\|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\|
+$$</p>
+<p>当$\kappa \gg 1$时，收敛速度极慢。这正是二阶方法的优势所在——通过$\boldsymbol{\mathcal{H}}^{-1}$预条件化可以改善条件数。</p>
+<h3 id="2">2. 牛顿法的完整推导</h3>
+<h4 id="21">2.1 泰勒展开与二阶近似</h4>
+<p>在$\boldsymbol{\theta}_t$处对$\mathcal{L}(\boldsymbol{\theta})$进行二阶泰勒展开：</p>
+<p>$$
+\mathcal{L}(\boldsymbol{\theta}) = \mathcal{L}(\boldsymbol{\theta}_t) + \nabla\mathcal{L}(\boldsymbol{\theta}_t)^{\top}(\boldsymbol{\theta} - \boldsymbol{\theta}_t) + \frac{1}{2}(\boldsymbol{\theta} - \boldsymbol{\theta}_t)^{\top}\boldsymbol{\mathcal{H}}_t(\boldsymbol{\theta} - \boldsymbol{\theta}_t) + O(\|\boldsymbol{\theta} - \boldsymbol{\theta}_t\|^3)
+$$</p>
+<p>忽略高阶项，定义二阶近似：
+$$
+\tilde{\mathcal{L}}(\boldsymbol{\theta}) = \mathcal{L}(\boldsymbol{\theta}_t) + \boldsymbol{g}_t^{\top}(\boldsymbol{\theta} - \boldsymbol{\theta}_t) + \frac{1}{2}(\boldsymbol{\theta} - \boldsymbol{\theta}_t)^{\top}\boldsymbol{\mathcal{H}}_t(\boldsymbol{\theta} - \boldsymbol{\theta}_t)
+$$</p>
+<h4 id="22">2.2 最优步长的导出</h4>
+<p>对$\tilde{\mathcal{L}}(\boldsymbol{\theta})$关于$\boldsymbol{\theta}$求导：
+$$
+\frac{\partial \tilde{\mathcal{L}}}{\partial \boldsymbol{\theta}} = \boldsymbol{g}_t + \boldsymbol{\mathcal{H}}_t(\boldsymbol{\theta} - \boldsymbol{\theta}_t)
+$$</p>
+<p>令导数为零，得到：
+$$
+\boldsymbol{g}_t + \boldsymbol{\mathcal{H}}_t(\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}_t) = \boldsymbol{0}
+$$</p>
+<p>解得牛顿更新规则：
+$$
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \boldsymbol{\mathcal{H}}_t^{-1}\boldsymbol{g}_t
+$$</p>
+<h4 id="23">2.3 收敛性分析</h4>
+<p><strong>定理（牛顿法局部二次收敛）</strong>：假设$\boldsymbol{\mathcal{H}}$在$\boldsymbol{\theta}^<em>$的邻域内Lipschitz连续，且$\boldsymbol{\mathcal{H}}(\boldsymbol{\theta}^</em>) \succ 0$，则存在$\delta &gt; 0$，当$|\boldsymbol{\theta}_0 - \boldsymbol{\theta}^*| &lt; \delta$时，牛顿法二次收敛：</p>
+<p>$$
+\|\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}^*\| \leq C\|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\|^2
+$$</p>
+<p><strong>证明思路</strong>：在最优点$\boldsymbol{\theta}^<em>$处，$\boldsymbol{g}^</em> = \boldsymbol{0}$。对梯度在$\boldsymbol{\theta}^*$处泰勒展开：
+$$
+\boldsymbol{g}_t = \boldsymbol{g}^* + \boldsymbol{\mathcal{H}}^*(\boldsymbol{\theta}_t - \boldsymbol{\theta}^*) + O(\|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\|^2) = \boldsymbol{\mathcal{H}}^*(\boldsymbol{\theta}_t - \boldsymbol{\theta}^*) + O(\|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\|^2)
+$$</p>
+<p>代入牛顿更新：
+$$
+\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}^* = \boldsymbol{\theta}_t - \boldsymbol{\theta}^* - \boldsymbol{\mathcal{H}}_t^{-1}\boldsymbol{g}_t = \boldsymbol{\mathcal{H}}_t^{-1}(\boldsymbol{\mathcal{H}}_t - \boldsymbol{\mathcal{H}}^*)(\boldsymbol{\theta}_t - \boldsymbol{\theta}^*) + O(\|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\|^2)
+$$</p>
+<p>由Lipschitz连续性，$|\boldsymbol{\mathcal{H}}_t - \boldsymbol{\mathcal{H}}^<em>| \leq L|\boldsymbol{\theta}_t - \boldsymbol{\theta}^</em>|$，因此：
+$$
+\|\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}^*\| \leq C\|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\|^2
+$$</p>
+<h4 id="24">2.4 牛顿法的计算复杂度挑战</h4>
+<p>对于$n$维参数：
+- <strong>计算Hessian矩阵</strong>：$O(n^2)$存储，$O(n^2)$或$O(n^3)$计算（取决于实现）
+- <strong>求逆或求解线性系统</strong>：$O(n^3)$（如Cholesky分解）
+- <strong>每步总复杂度</strong>：$O(n^3)$</p>
+<p>在深度学习中，$n$通常为$10^6 \sim 10^{10}$，这使得完整的牛顿法不可行。这也是为什么我们需要Hessian近似方法。</p>
+<h3 id="3">3. 自适应学习率的理论基础</h3>
+<h4 id="31">3.1 预条件化梯度下降</h4>
+<p>预条件化的思想是通过矩阵$\boldsymbol{P}_t$变换梯度：
+$$
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \eta_t \boldsymbol{P}_t^{-1}\boldsymbol{g}_t
+$$</p>
+<p><strong>最优预条件器</strong>：从牛顿法的角度，最优的预条件器是$\boldsymbol{P}_t = \boldsymbol{\mathcal{H}}_t$。</p>
+<h4 id="32">3.2 对角近似的合理性</h4>
+<p>假设参数之间的二阶相互作用较弱，即Hessian矩阵近似对角：
+$$
+\boldsymbol{\mathcal{H}} \approx \text{diag}(h_1, h_2, \ldots, h_n)
+$$</p>
+<p>此时，不同参数的最优学习率应该不同：
+$$
+\theta_{i,t+1} = \theta_{i,t} - \frac{\eta_t}{h_i}g_{i,t}
+$$</p>
+<p>这正是自适应学习率的核心思想——为每个参数分配不同的有效学习率$\frac{\eta_t}{h_i}$。</p>
+<h4 id="33">3.3 曲率自适应的必要性</h4>
+<p>考虑一个简单的二维二次函数：
+$$
+\mathcal{L}(\theta_1, \theta_2) = \frac{1}{2}(a\theta_1^2 + b\theta_2^2), \quad a \gg b
+$$</p>
+<p>其Hessian矩阵为$\boldsymbol{\mathcal{H}} = \text{diag}(a, b)$。使用统一学习率$\eta$的SGD：
+$$
+\theta_{1,t+1} = \theta_{1,t} - \eta a\theta_{1,t}, \quad \theta_{2,t+1} = \theta_{2,t} - \eta b\theta_{2,t}
+$$</p>
+<p>为了保证$\theta_1$方向收敛，需要$\eta &lt; \frac{2}{a}$；但这会导致$\theta_2$方向收敛极慢（因为$b \ll a$）。</p>
+<p>若使用自适应学习率$\eta_i = \frac{\eta}{h_i}$，则：
+$$
+\theta_{1,t+1} = \theta_{1,t} - \frac{\eta}{a} a\theta_{1,t} = (1-\eta)\theta_{1,t}
+$$
+$$
+\theta_{2,t+1} = \theta_{2,t} - \frac{\eta}{b} b\theta_{2,t} = (1-\eta)\theta_{2,t}
+$$</p>
+<p>两个方向以相同速度收敛，解决了条件数问题。</p>
+<h3 id="4-adamhessian">4. Adam作为对角Hessian近似</h3>
+<h4 id="41-hessian">4.1 从梯度方差到Hessian平方</h4>
+<p>回顾正文中的核心推导。假设在最优点$\boldsymbol{\theta}^*$附近，梯度可以线性近似：
+$$
+\boldsymbol{g}_{\boldsymbol{\theta}} \approx \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^*}(\boldsymbol{\theta} - \boldsymbol{\theta}^*)
+$$</p>
+<p>当$\boldsymbol{\theta} - \boldsymbol{\theta}^* \sim \mathcal{N}(\boldsymbol{0}, \sigma^2\boldsymbol{I})$时：
+$$
+\mathbb{E}[\boldsymbol{g}_{\boldsymbol{\theta}}\boldsymbol{g}_{\boldsymbol{\theta}}^{\top}] = \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^*}\mathbb{E}[(\boldsymbol{\theta} - \boldsymbol{\theta}^*)(\boldsymbol{\theta} - \boldsymbol{\theta}^*)^{\top}]\boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^*}^{\top} = \sigma^2\boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^*}^2
+$$</p>
+<p><strong>对角化</strong>：假设$\boldsymbol{\mathcal{H}}$对角，则：
+$$
+\text{diag}(\mathbb{E}[\boldsymbol{g} \odot \boldsymbol{g}]) = \sigma^2 \text{diag}(\boldsymbol{\mathcal{H}}^2) = \sigma^2 \boldsymbol{h}^2
+$$</p>
+<p>其中$\boldsymbol{h} = (h_1, h_2, \ldots, h_n)^{\top}$是Hessian的对角元素。解得：
+$$
+h_i = \frac{1}{\sigma}\sqrt{\mathbb{E}[g_i^2]}
+$$</p>
+<h4 id="42-adam">4.2 Adam的滑动平均估计</h4>
+<p>Adam通过指数移动平均（EMA）估计$\mathbb{E}[g_i^2]$：
+$$
+v_{i,t} = \beta_2 v_{i,t-1} + (1-\beta_2)g_{i,t}^2
+$$</p>
+<p>展开递归关系：
+$$
+v_{i,t} = (1-\beta_2)\sum_{k=1}^{t}\beta_2^{t-k}g_{i,k}^2
+$$</p>
+<p>这是一个指数加权平均，有效窗口大小约为$\frac{1}{1-\beta_2}$。当$\beta_2 = 0.999$时，有效窗口约为1000步。</p>
+<p><strong>偏差修正</strong>：初始时$v_{i,t}$被低估（因为$v_{i,0} = 0$）。偏差修正：
+$$
+\hat{v}_{i,t} = \frac{v_{i,t}}{1-\beta_2^t}
+$$</p>
+<p>可以证明，当$g_{i,k}$服从稳态分布时，$\mathbb{E}[\hat{v}_{i,t}] \approx \mathbb{E}[g_i^2]$。</p>
+<h4 id="43-adamhessian">4.3 Adam更新的Hessian解释</h4>
+<p>结合以上分析，Adam的更新可以写成：
+$$
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \eta_t \hat{\boldsymbol{\mathcal{H}}}_t^{-1}\hat{\boldsymbol{m}}_t
+$$</p>
+<p>其中近似Hessian为：
+$$
+\hat{\boldsymbol{\mathcal{H}}}_t = \frac{1}{\eta_t\sigma}\text{diag}(\sqrt{\hat{\boldsymbol{v}}_t} + \epsilon)
+$$</p>
+<p><strong>$\epsilon$的作用</strong>：
+1. 数值稳定性：防止除零
+2. 正则化：相当于添加了$\frac{\epsilon}{\eta_t\sigma}$的先验到Hessian对角元素
+3. 有效学习率下界：确保$\frac{\eta_t}{\sqrt{v_{i,t}}+\epsilon} \geq \frac{\eta_t}{\epsilon}$</p>
+<h4 id="44">4.4 动量项的作用</h4>
+<p>Adam的动量$\hat{\boldsymbol{m}}_t$是梯度的指数移动平均：
+$$
+\hat{m}_{i,t} = \frac{\sum_{k=1}^{t}\beta_1^{t-k}(1-\beta_1)g_{i,k}}{1-\beta_1^t}
+$$</p>
+<p>从Hessian角度理解，动量近似于在滑动窗口内对梯度求平均，这相当于在$\boldsymbol{\theta}$的局部邻域内积分梯度信息。如果窗口过长（$\beta_1$接近1），则：
+$$
+\lim_{\beta_1 \to 1}\hat{m}_{i,t} \approx \mathbb{E}_{\boldsymbol{\theta} \sim \mathcal{N}(\boldsymbol{\theta}^*, \sigma^2\boldsymbol{I})}[g_i] = 0
+$$</p>
+<p>这解释了为什么$\beta_1 &lt; \beta_2$：动量需要局部信息，而Hessian估计需要长期统计。</p>
+<h3 id="5-adagradhessian">5. AdaGrad的Hessian解释</h3>
+<h4 id="51-adagrad">5.1 AdaGrad算法</h4>
+<p>AdaGrad累积历史梯度的平方和：
+$$
+G_{i,t} = \sum_{k=1}^{t}g_{i,k}^2
+$$</p>
+<p>更新规则：
+$$
+\theta_{i,t+1} = \theta_{i,t} - \frac{\eta}{\sqrt{G_{i,t}} + \epsilon}g_{i,t}
+$$</p>
+<h4 id="52-hessian">5.2 均匀平均的Hessian估计</h4>
+<p>AdaGrad相当于对梯度平方进行均匀平均（而非指数加权）：
+$$
+\bar{g}_{i,t}^2 = \frac{1}{t}\sum_{k=1}^{t}g_{i,k}^2 \approx \mathbb{E}[g_i^2]
+$$</p>
+<p>因此$G_{i,t} \approx t\mathbb{E}[g_i^2]$，有效学习率为：
+$$
+\eta_{i,t}^{\text{eff}} = \frac{\eta}{\sqrt{t\mathbb{E}[g_i^2]}} \propto \frac{1}{\sqrt{t}}
+$$</p>
+<p>这是AdaGrad学习率衰减的根源。</p>
+<h4 id="53-hessian">5.3 对角Hessian近似</h4>
+<p>类比Adam的分析，AdaGrad隐式假设：
+$$
+h_i \approx \frac{1}{\sigma}\sqrt{\frac{G_{i,t}}{t}} = \frac{1}{\sigma}\sqrt{\mathbb{E}[g_i^2]}
+$$</p>
+<p><strong>与Adam的对比</strong>：
+- Adam使用指数移动平均，可以适应非平稳分布
+- AdaGrad使用累积平均，适合平稳分布但学习率单调递减</p>
+<h4 id="54">5.4 稀疏梯度场景</h4>
+<p>AdaGrad在稀疏梯度场景下表现优异。假设第$i$个参数的梯度只在一小部分步骤非零：
+$$
+g_{i,k} = \begin{cases}
+\bar{g}_i, & k \in S_i \\
+0, & k \notin S_i
+\end{cases}
+$$</p>
+<p>其中$|S_i| = s \ll t$。此时：
+$$
+G_{i,t} = s\bar{g}_i^2, \quad \eta_{i,t}^{\text{eff}} = \frac{\eta}{\sqrt{s}\bar{g}_i}
+$$</p>
+<p>稀疏参数获得更大的有效学习率（因为$s$小），这正是NLP和推荐系统需要的特性。</p>
+<h3 id="6-rmsprop">6. RMSProp的改进机制</h3>
+<h4 id="61-rmsprop">6.1 RMSProp算法</h4>
+<p>RMSProp通过指数移动平均解决AdaGrad学习率单调递减的问题：
+$$
+v_{i,t} = \beta v_{i,t-1} + (1-\beta)g_{i,t}^2
+$$
+$$
+\theta_{i,t+1} = \theta_{i,t} - \frac{\eta}{\sqrt{v_{i,t}} + \epsilon}g_{i,t}
+$$</p>
+<p>通常$\beta = 0.9$或$0.99$。</p>
+<h4 id="62-hessian">6.2 非平稳Hessian追踪</h4>
+<p>在非平稳优化问题中，Hessian矩阵随时间变化：$\boldsymbol{\mathcal{H}}<em t_="t'">t \neq \boldsymbol{\mathcal{H}}</em>$。AdaGrad的累积平均无法适应这种变化，而RMSProp的指数加权平均给予近期梯度更高权重：
+$$
+v_{i,t} \approx \frac{1-\beta}{1-\beta^t}\sum_{k=1}^{t}\beta^{t-k}g_{i,k}^2 \approx \mathbb{E}_{\text{recent}}[g_i^2]
+$$</p>
+<p><strong>追踪能力分析</strong>：假设Hessian在$t_0$时刻发生突变，从$h_i^{\text{old}}$变为$h_i^{\text{new}}$。定义追踪误差：
+$$
+\varepsilon_t = |v_{i,t} - (h_i^{\text{new}})^2\sigma^2|
+$$</p>
+<p>可以证明：
+$$
+\varepsilon_t \leq \beta^{t-t_0}\varepsilon_{t_0}
+$$</p>
+<p>追踪时间常数$\tau = \frac{1}{1-\beta}$。对于$\beta = 0.9$，$\tau = 10$步；$\beta = 0.99$时，$\tau = 100$步。</p>
+<h4 id="63-adam">6.3 与Adam的关系</h4>
+<p>Adam可以看作RMSProp + 动量：
+- RMSProp：$\boldsymbol{\theta}<em t_1="t+1">{t+1} = \boldsymbol{\theta}_t - \frac{\eta}{\sqrt{v_t}+\epsilon}g_t$
+- Adam：$\boldsymbol{\theta}</em>m_t$} = \boldsymbol{\theta}_t - \frac{\eta}{\sqrt{v_t}+\epsilon</p>
+<p>动量$m_t$降低了梯度噪声的方差。设$\text{Var}[g_t] = \sigma_g^2$，则：
+$$
+\text{Var}[m_t] \approx \frac{1-\beta_1}{1+\beta_1}\sigma_g^2 < \sigma_g^2
+$$</p>
+<p>这使得Adam在噪声环境下更稳定。</p>
+<h3 id="7-fisher">7. 自然梯度与Fisher信息矩阵</h3>
+<h4 id="71">7.1 自然梯度的动机</h4>
+<p>普通梯度下降在参数空间中沿着欧几里得梯度方向移动。但参数空间的欧几里得度量不一定反映模型输出空间的真实距离。</p>
+<p><strong>例子</strong>：考虑两组参数$\boldsymbol{\theta}_1$和$\boldsymbol{\theta}_2$，它们在参数空间中距离相同（$|\boldsymbol{\theta}_1 - \boldsymbol{\theta}_0| = |\boldsymbol{\theta}_2 - \boldsymbol{\theta}_0|$），但可能导致模型输出分布的差异很大。</p>
+<h4 id="72-fisher">7.2 Fisher信息矩阵</h4>
+<p>对于概率模型$p(\boldsymbol{y}|\boldsymbol{x}; \boldsymbol{\theta})$，Fisher信息矩阵定义为：
+$$
+\boldsymbol{F}(\boldsymbol{\theta}) = \mathbb{E}_{(\boldsymbol{x},\boldsymbol{y})\sim p_{\text{data}}}\mathbb{E}_{\boldsymbol{y}'\sim p(\cdot|\boldsymbol{x};\boldsymbol{\theta})}\left[\nabla_{\boldsymbol{\theta}}\log p(\boldsymbol{y}'|\boldsymbol{x};\boldsymbol{\theta})\nabla_{\boldsymbol{\theta}}\log p(\boldsymbol{y}'|\boldsymbol{x};\boldsymbol{\theta})^{\top}\right]
+$$</p>
+<p>Fisher信息矩阵度量了参数变化对模型输出分布的影响，是参数空间的<strong>黎曼度量</strong>。</p>
+<h4 id="73">7.3 自然梯度定义</h4>
+<p>自然梯度是在Fisher度量下的最速下降方向：
+$$
+\tilde{\boldsymbol{g}}_t = \boldsymbol{F}_t^{-1}\boldsymbol{g}_t
+$$</p>
+<p>更新规则：
+$$
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \eta_t \boldsymbol{F}_t^{-1}\boldsymbol{g}_t
+$$</p>
+<p><strong>几何解释</strong>：自然梯度在KL散度意义下找到最优更新方向。对于约束优化问题：
+$$
+\min_{\boldsymbol{\delta}} \boldsymbol{g}_t^{\top}\boldsymbol{\delta}, \quad \text{s.t.} \quad D_{\text{KL}}(p(\cdot;\boldsymbol{\theta}_t) \| p(\cdot;\boldsymbol{\theta}_t + \boldsymbol{\delta})) \leq \epsilon
+$$</p>
+<p>解为$\boldsymbol{\delta}^* \propto -\boldsymbol{F}_t^{-1}\boldsymbol{g}_t$。</p>
+<h4 id="74-fisherhessian">7.4 Fisher矩阵与Hessian的关系</h4>
+<p>对于负对数似然损失$\mathcal{L}(\boldsymbol{\theta}) = -\mathbb{E}_{(\boldsymbol{x},\boldsymbol{y})}[\log p(\boldsymbol{y}|\boldsymbol{x};\boldsymbol{\theta})]$：</p>
+<p><strong>一阶导</strong>：
+$$
+\boldsymbol{g}(\boldsymbol{\theta}) = -\mathbb{E}_{(\boldsymbol{x},\boldsymbol{y})}[\nabla_{\boldsymbol{\theta}}\log p(\boldsymbol{y}|\boldsymbol{x};\boldsymbol{\theta})]
+$$</p>
+<p><strong>二阶导（Hessian）</strong>：
+$$
+\boldsymbol{\mathcal{H}}(\boldsymbol{\theta}) = -\mathbb{E}_{(\boldsymbol{x},\boldsymbol{y})}[\nabla_{\boldsymbol{\theta}}^2\log p(\boldsymbol{y}|\boldsymbol{x};\boldsymbol{\theta})]
+$$</p>
+<p><strong>Fisher信息矩阵</strong>：
+$$
+\boldsymbol{F}(\boldsymbol{\theta}) = \mathbb{E}_{(\boldsymbol{x},\boldsymbol{y})\sim p(\cdot;\boldsymbol{\theta})}[\nabla_{\boldsymbol{\theta}}\log p(\boldsymbol{y}|\boldsymbol{x};\boldsymbol{\theta})\nabla_{\boldsymbol{\theta}}\log p(\boldsymbol{y}|\boldsymbol{x};\boldsymbol{\theta})^{\top}]
+$$</p>
+<p>在模型正确指定（$p_{\text{data}} = p(\cdot;\boldsymbol{\theta}^*)$）的情况下，有恒等式：
+$$
+\boldsymbol{F}(\boldsymbol{\theta}) = \boldsymbol{\mathcal{H}}(\boldsymbol{\theta})
+$$</p>
+<p><strong>证明</strong>：利用$\mathbb{E}_{\boldsymbol{y}\sim p}[\nabla\log p] = \boldsymbol{0}$，计算：
+$$
+\nabla^2_{\boldsymbol{\theta}}\mathbb{E}_{\boldsymbol{y}}[\log p(\boldsymbol{y}|\boldsymbol{x};\boldsymbol{\theta})] = \mathbb{E}_{\boldsymbol{y}}[\nabla^2\log p] + \mathbb{E}_{\boldsymbol{y}}[\nabla\log p \cdot \nabla\log p^{\top}]
+$$</p>
+<p>左边为0（因为$\mathbb{E}_{\boldsymbol{y}}[\log p]$不依赖于$\boldsymbol{\theta}$在真实分布下），因此：
+$$
+\mathbb{E}_{\boldsymbol{y}}[\nabla^2\log p] = -\mathbb{E}_{\boldsymbol{y}}[\nabla\log p \cdot \nabla\log p^{\top}]
+$$</p>
+<p>即$\boldsymbol{\mathcal{H}} = \boldsymbol{F}$。</p>
+<h4 id="75-fisheradam">7.5 对角Fisher近似与Adam</h4>
+<p>实践中常用对角Fisher近似：
+$$
+\boldsymbol{F} \approx \text{diag}(\mathbb{E}[(\nabla_{\theta_i}\log p)^2])
+$$</p>
+<p>这与Adam的$\text{diag}(\mathbb{E}[g_i^2])$形式一致！因此，Adam也可以看作是对角自然梯度的近似。</p>
+<h3 id="8-k-facshampoo">8. K-FAC和Shampoo的块对角近似</h3>
+<h4 id="81">8.1 完整矩阵近似的困难</h4>
+<p>对于$n$维参数，存储完整的$\boldsymbol{F}$或$\boldsymbol{\mathcal{H}}$需要$O(n^2)$空间，求逆需要$O(n^3)$时间。在深度网络中不可行。</p>
+<p><strong>块对角近似</strong>：假设不同层之间的参数独立，将Hessian分解为块对角：
+$$
+\boldsymbol{\mathcal{H}} \approx \begin{bmatrix}
+\boldsymbol{\mathcal{H}}_1 & & \\
+& \boldsymbol{\mathcal{H}}_2 & \\
+& & \ddots
+\end{bmatrix}
+$$</p>
+<p>每个块对应一层的参数。</p>
+<h4 id="82-k-fackronecker-factored-approximate-curvature">8.2 K-FAC（Kronecker-Factored Approximate Curvature）</h4>
+<p>K-FAC进一步对每层的Fisher矩阵进行Kronecker分解。</p>
+<p><strong>设定</strong>：考虑全连接层$\boldsymbol{y} = \boldsymbol{W}\boldsymbol{x} + \boldsymbol{b}$，参数为$\boldsymbol{W} \in \mathbb{R}^{m \times n}$。将$\boldsymbol{W}$向量化为$\text{vec}(\boldsymbol{W}) \in \mathbb{R}^{mn}$。</p>
+<p><strong>Fisher矩阵</strong>：对于这一层，
+$$
+\boldsymbol{F}_{\boldsymbol{W}} = \mathbb{E}\left[\nabla_{\text{vec}(\boldsymbol{W})}\log p \cdot \nabla_{\text{vec}(\boldsymbol{W})}\log p^{\top}\right]
+$$</p>
+<p><strong>Kronecker近似</strong>：K-FAC假设
+$$
+\boldsymbol{F}_{\boldsymbol{W}} \approx \boldsymbol{A} \otimes \boldsymbol{S}
+$$</p>
+<p>其中：
+- $\boldsymbol{A} = \mathbb{E}[\boldsymbol{a}\boldsymbol{a}^{\top}] \in \mathbb{R}^{m \times m}$，$\boldsymbol{a}$为该层的激活值
+- $\boldsymbol{S} = \mathbb{E}[\boldsymbol{s}\boldsymbol{s}^{\top}] \in \mathbb{R}^{n \times n}$，$\boldsymbol{s}$为该层的梯度
+- $\otimes$表示Kronecker积</p>
+<p><strong>Kronecker积性质</strong>：
+$$
+(\boldsymbol{A} \otimes \boldsymbol{S})^{-1} = \boldsymbol{A}^{-1} \otimes \boldsymbol{S}^{-1}
+$$</p>
+<p>因此，求逆复杂度从$O((mn)^3)$降低到$O(m^3 + n^3)$。</p>
+<p><strong>更新规则</strong>：
+$$
+\text{vec}(\boldsymbol{W}_{t+1}) = \text{vec}(\boldsymbol{W}_t) - \eta_t(\boldsymbol{A}_t^{-1} \otimes \boldsymbol{S}_t^{-1})\text{vec}(\boldsymbol{G}_t)
+$$</p>
+<p>等价于：
+$$
+\boldsymbol{W}_{t+1} = \boldsymbol{W}_t - \eta_t \boldsymbol{A}_t^{-1}\boldsymbol{G}_t\boldsymbol{S}_t^{-1}
+$$</p>
+<p>其中$\boldsymbol{G}<em _boldsymbol_W="\boldsymbol{W">t = \nabla</em>$。}_t}\mathcal{L</p>
+<h4 id="83-shampoo">8.3 Shampoo算法</h4>
+<p>Shampoo是K-FAC的变体，使用不同的矩阵分解策略。</p>
+<p><strong>核心思想</strong>：对于矩阵参数$\boldsymbol{W} \in \mathbb{R}^{m \times n}$，近似Hessian为：
+$$
+\boldsymbol{\mathcal{H}}_{\boldsymbol{W}} \approx \boldsymbol{L} \otimes \boldsymbol{R}
+$$</p>
+<p>其中$\boldsymbol{L} \in \mathbb{R}^{m \times m}$和$\boldsymbol{R} \in \mathbb{R}^{n \times n}$通过AdaGrad式的累积估计：
+$$
+\boldsymbol{L}_t = \boldsymbol{L}_{t-1} + \boldsymbol{G}_t\boldsymbol{G}_t^{\top}
+$$
+$$
+\boldsymbol{R}_t = \boldsymbol{R}_{t-1} + \boldsymbol{G}_t^{\top}\boldsymbol{G}_t
+$$</p>
+<p><strong>更新规则</strong>：
+$$
+\boldsymbol{W}_{t+1} = \boldsymbol{W}_t - \eta_t \boldsymbol{L}_t^{-1/4}\boldsymbol{G}_t\boldsymbol{R}_t^{-1/4}
+$$</p>
+<p>注意这里使用$-1/4$次幂（而非$-1/2$），是为了平衡两个方向的预条件化强度。</p>
+<p><strong>计算优化</strong>：
+- 通过特征分解计算矩阵的分数次幂
+- 每隔若干步更新$\boldsymbol{L}_t^{-1/4}$和$\boldsymbol{R}_t^{-1/4}$（而非每步）
+- 对于向量参数（如bias），退化为AdaGrad式的对角预条件</p>
+<h4 id="84">8.4 块对角近似的理论保证</h4>
+<p><strong>定理</strong>：假设真实Hessian可以分解为$\boldsymbol{\mathcal{H}} = \boldsymbol{\mathcal{H}}_1 \oplus \boldsymbol{\mathcal{H}}_2 \oplus \cdots \oplus \boldsymbol{\mathcal{H}}_L$（块对角），且每块的Kronecker近似误差有界：
+$$
+\|\boldsymbol{\mathcal{H}}_l - \boldsymbol{A}_l \otimes \boldsymbol{S}_l\|_F \leq \epsilon_l
+$$</p>
+<p>则K-FAC的预条件化误差满足：
+$$
+\left\|\boldsymbol{\mathcal{H}}^{-1} - \bigoplus_{l=1}^{L}(\boldsymbol{A}_l^{-1} \otimes \boldsymbol{S}_l^{-1})\right\| \leq C\sum_{l=1}^{L}\frac{\epsilon_l}{\lambda_{\min}(\boldsymbol{\mathcal{H}}_l)^2}
+$$</p>
+<p>这说明，当Kronecker结构近似准确时，K-FAC可以很好地近似牛顿法。</p>
+<h3 id="9-muonhessian">9. Muon的隐式Hessian预条件</h3>
+<h4 id="91-muon">9.1 Muon算法概述</h4>
+<p>Muon（Momentum with Orthogonalization）是一种新型优化器，它通过动量的正交化隐式地进行Hessian预条件化。</p>
+<p><strong>核心更新</strong>：
+$$
+\boldsymbol{m}_t = \beta \boldsymbol{m}_{t-1} + (1-\beta)\boldsymbol{g}_t
+$$
+$$
+\tilde{\boldsymbol{m}}_t = \text{Orth}(\boldsymbol{m}_t, \boldsymbol{\theta}_t)
+$$
+$$
+\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t - \eta_t \tilde{\boldsymbol{m}}_t
+$$</p>
+<p>其中$\text{Orth}(\boldsymbol{m}, \boldsymbol{\theta})$表示将$\boldsymbol{m}$相对于某个度量正交化。</p>
+<h4 id="92">9.2 正交化与隐式预条件</h4>
+<p><strong>观察</strong>：在牛顿法框架下，更新方向$\boldsymbol{d}_t = -\boldsymbol{\mathcal{H}}_t^{-1}\boldsymbol{g}_t$满足关于Hessian度量的"正交性"。</p>
+<p>考虑二次函数$\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{2}\boldsymbol{\theta}^{\top}\boldsymbol{\mathcal{H}}\boldsymbol{\theta} - \boldsymbol{b}^{\top}\boldsymbol{\theta}$，最优解$\boldsymbol{\theta}^* = \boldsymbol{\mathcal{H}}^{-1}\boldsymbol{b}$。定义Hessian范数：
+$$
+\|\boldsymbol{x}\|_{\boldsymbol{\mathcal{H}}} = \sqrt{\boldsymbol{x}^{\top}\boldsymbol{\mathcal{H}}\boldsymbol{x}}
+$$</p>
+<p>牛顿方向$\boldsymbol{d}<em _boldsymbol_mathcal_H="\boldsymbol{\mathcal{H">t = -\boldsymbol{\mathcal{H}}^{-1}\boldsymbol{g}_t$使得$|\boldsymbol{\theta}_t + \boldsymbol{d}_t - \boldsymbol{\theta}^*|</em>$最小。}}</p>
+<h4 id="93-newton-schulz">9.3 具体实现：Newton-Schulz迭代</h4>
+<p>Muon使用Newton-Schulz迭代近似矩阵的逆平方根，实现隐式的Hessian预条件。</p>
+<p><strong>Newton-Schulz迭代</strong>：给定矩阵$\boldsymbol{A}$，迭代计算$\boldsymbol{A}^{-1/2}$：
+$$
+\boldsymbol{X}_{k+1} = \frac{1}{2}\boldsymbol{X}_k(3\boldsymbol{I} - \boldsymbol{A}\boldsymbol{X}_k^2)
+$$</p>
+<p>初始化$\boldsymbol{X}_0 = \frac{1}{|\boldsymbol{A}|}\boldsymbol{I}$，该迭代三阶收敛到$\boldsymbol{A}^{-1/2}$。</p>
+<p><strong>Muon中的应用</strong>：对于动量$\boldsymbol{m}_t$，计算：
+$$
+\boldsymbol{G}_t = \boldsymbol{m}_t\boldsymbol{m}_t^{\top}
+$$
+$$
+\boldsymbol{G}_t^{-1/2} \approx \text{NewtonSchulz}(\boldsymbol{G}_t, n_{\text{iter}})
+$$
+$$
+\tilde{\boldsymbol{m}}_t = \boldsymbol{G}_t^{-1/2}\boldsymbol{m}_t
+$$</p>
+<p>这隐式地对梯度二阶矩进行了预条件化。</p>
+<h4 id="94-adam">9.4 与Adam的对比</h4>
+<p><strong>Adam的预条件</strong>：
+$$
+\boldsymbol{P}_{\text{Adam}} = \text{diag}(\sqrt{v_1}, \sqrt{v_2}, \ldots, \sqrt{v_n})
+$$</p>
+<p><strong>Muon的预条件</strong>：
+$$
+\boldsymbol{P}_{\text{Muon}} \approx (\boldsymbol{m}_t\boldsymbol{m}_t^{\top})^{1/2}
+$$</p>
+<p>Muon考虑了参数之间的相关性（非对角结构），理论上能捕捉更多曲率信息。但计算成本也更高。</p>
+<p><strong>复杂度对比</strong>：
+- Adam：$O(n)$（对角运算）
+- Muon：$O(n^2)$或更高（取决于Newton-Schulz迭代次数和矩阵维度）</p>
+<p>实践中，Muon通常用于高维但结构化的参数（如Transformer的权重矩阵）。</p>
+<h3 id="10">10. 收敛速度的理论分析</h3>
+<h4 id="101-sgd">10.1 SGD的收敛速率</h4>
+<p>对于$L$-光滑、$\mu$-强凸的函数，SGD with constant step size $\eta \leq \frac{1}{L}$满足：
+$$
+\mathbb{E}[\mathcal{L}(\boldsymbol{\theta}_t)] - \mathcal{L}(\boldsymbol{\theta}^*) \leq \frac{\|\boldsymbol{\theta}_0 - \boldsymbol{\theta}^*\|^2}{2\eta t} + \frac{\eta\sigma^2}{2}
+$$</p>
+<p>其中$\sigma^2 = \mathbb{E}[|\boldsymbol{g} - \nabla\mathcal{L}|^2]$是梯度噪声的方差。</p>
+<p><strong>最优学习率</strong>：平衡两项，取$\eta^* \sim \frac{1}{\sqrt{t}}$，得到收敛率$O(1/\sqrt{t})$。</p>
+<h4 id="102">10.2 自适应方法的改进</h4>
+<p>Adam等自适应方法通过参数特定的学习率改善条件数依赖。</p>
+<p><strong>定理（Adam收敛率，简化版）</strong>：在凸且Lipschitz梯度假设下，Adam的regret bound为：
+$$
+\sum_{t=1}^{T}[\mathcal{L}(\boldsymbol{\theta}_t) - \mathcal{L}(\boldsymbol{\theta}^*)] \leq O\left(\frac{d}{\sqrt{T}}\right)
+$$</p>
+<p>其中$d$是参数维度。对比SGD的$O(d\sqrt{T})$，Adam在高维稀疏情况下优势明显。</p>
+<p><strong>关键改进</strong>：Adam的有效学习率$\frac{\eta}{\sqrt{v_{i,t}}}$自适应于每个参数的梯度尺度，等效于：
+$$
+\eta_{i,t}^{\text{eff}} = \frac{\eta}{\sqrt{\sum_{k=1}^{t}g_{i,k}^2}}
+$$</p>
+<p>对于稀疏梯度（部分$g_{i,k} = 0$），相应参数保持较大学习率，加速收敛。</p>
+<h4 id="103">10.3 二阶方法的理论优势</h4>
+<p><strong>牛顿法的收敛率</strong>：在$\boldsymbol{\theta}^*$的邻域内，牛顿法二次收敛：
+$$
+\|\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}^*\| \leq C\|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\|^2
+$$</p>
+<p><strong>准牛顿法</strong>（如K-FAC）：在Hessian近似误差$|\boldsymbol{\mathcal{H}} - \tilde{\boldsymbol{\mathcal{H}}}| \leq \epsilon$的条件下，超线性收敛：
+$$
+\|\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}^*\| \leq C(1+\epsilon)\|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*\|^{1+\alpha}
+$$</p>
+<p>其中$\alpha \in (0, 1]$取决于近似质量。</p>
+<h4 id="104">10.4 非凸优化的挑战</h4>
+<p>深度学习中的损失函数是非凸的，以上凸优化理论不完全适用。</p>
+<p><strong>鞍点问题</strong>：Hessian矩阵可能不定（有负特征值），导致牛顿法方向错误。</p>
+<p><strong>解决方案</strong>：
+1. <strong>Hessian修正</strong>：$\tilde{\boldsymbol{\mathcal{H}}} = \boldsymbol{\mathcal{H}} + \lambda\boldsymbol{I}$，其中$\lambda &gt; |\lambda_{\min}(\boldsymbol{\mathcal{H}})|$
+2. <strong>信赖域方法</strong>：限制更新步长$|\boldsymbol{\theta}_{t+1} - \boldsymbol{\theta}_t| \leq \Delta_t$
+3. <strong>对角近似</strong>：只使用Hessian对角元素（通常非负），避免负曲率</p>
+<p><strong>Adam的鲁棒性</strong>：Adam通过$\sqrt{v_t}$始终保证更新方向与梯度相反（下降方向），自然避免了负曲率问题。</p>
+<h4 id="105">10.5 收敛速度的实证比较</h4>
+<p>以ImageNet训练ResNet-50为例（假设数据）：</p>
+<table>
+<thead>
+<tr>
+<th>优化器</th>
+<th>收敛步数（至90% acc）</th>
+<th>每步时间</th>
+<th>总时间</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SGD</td>
+<td>90 epochs</td>
+<td>1.0x</td>
+<td>90x</td>
+</tr>
+<tr>
+<td>Adam</td>
+<td>70 epochs</td>
+<td>1.0x</td>
+<td>70x</td>
+</tr>
+<tr>
+<td>K-FAC</td>
+<td>50 epochs</td>
+<td>1.5x</td>
+<td>75x</td>
+</tr>
+<tr>
+<td>Shampoo</td>
+<td>45 epochs</td>
+<td>2.0x</td>
+<td>90x</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：
+- Adam比SGD快（步数少）
+- 二阶方法（K-FAC/Shampoo）步数更少，但每步计算成本高
+- 实际墙钟时间的权衡取决于具体硬件和实现</p>
+<h3 id="11_1">11. 深度学习中的实践考虑</h3>
+<h4 id="111-hessian">11.1 Hessian近似的有效性条件</h4>
+<p><strong>局部近似假设</strong>：大多数分析假设在$\boldsymbol{\theta}^*$附近，梯度可线性近似：
+$$
+\boldsymbol{g}_{\boldsymbol{\theta}} \approx \boldsymbol{\mathcal{H}}_{\boldsymbol{\theta}^*}(\boldsymbol{\theta} - \boldsymbol{\theta}^*)
+$$</p>
+<p>这在训练后期（微调阶段）较为准确，但在训练早期可能不成立。</p>
+<p><strong>平稳性假设</strong>：Adam等方法假设梯度统计量相对平稳。但在：
+- Learning rate warm-up阶段
+- Batch size变化时
+- 跨越不同训练阶段（如预训练→微调）</p>
+<p>这些假设可能失效，需要调整超参数（如重置动量累积）。</p>
+<h4 id="112">11.2 数值稳定性</h4>
+<p><strong>$\epsilon$的选择</strong>：Adam中的$\epsilon$（典型值$10^{-8}$）需要平衡：
+- 太小：数值不稳定，尤其在混合精度训练中
+- 太大：抵消了自适应效果，退化为接近SGD</p>
+<p><strong>建议</strong>：
+- FP32训练：$\epsilon = 10^{-8}$
+- FP16/BF16训练：$\epsilon = 10^{-6}$或$10^{-5}$</p>
+<h4 id="113-hessian">11.3 超参数选择的Hessian视角</h4>
+<p><strong>学习率$\eta$</strong>：从$\boldsymbol{\mathcal{H}} \approx \frac{1}{\eta\sigma}\text{diag}(\sqrt{v})$，有效学习率为：
+$$
+\eta_{i}^{\text{eff}} = \frac{\eta}{\sqrt{v_i}}
+$$</p>
+<p><strong>$\beta_2$的选择</strong>：$\beta_2$控制Hessian估计的时间窗口。较大的$\beta_2$（如0.999）使得估计更稳定但反应慢；较小的$\beta_2$（如0.9）反应快但可能不准确。</p>
+<p><strong>经验法则</strong>：
+- 稳定、平稳的任务（如收敛后的微调）：$\beta_2 = 0.999$
+- 快速变化的任务（如强化学习、GAN）：$\beta_2 = 0.9$ 或更小</p>
+<h4 id="114">11.4 不同优化器的适用场景</h4>
+<table>
+<thead>
+<tr>
+<th>优化器</th>
+<th>最适合场景</th>
+<th>Hessian近似类型</th>
+<th>计算成本</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SGD+Momentum</td>
+<td>视觉、凸优化</td>
+<td>$\boldsymbol{\mathcal{H}} \approx \eta^{-1}\boldsymbol{I}$</td>
+<td>最低</td>
+</tr>
+<tr>
+<td>AdaGrad</td>
+<td>稀疏特征、NLP</td>
+<td>对角累积</td>
+<td>低</td>
+</tr>
+<tr>
+<td>RMSProp</td>
+<td>非平稳、RL</td>
+<td>对角指数平均</td>
+<td>低</td>
+</tr>
+<tr>
+<td>Adam</td>
+<td>通用、默认选择</td>
+<td>对角+动量</td>
+<td>低</td>
+</tr>
+<tr>
+<td>AdaBelief</td>
+<td>改进的Adam</td>
+<td>对角协方差</td>
+<td>低</td>
+</tr>
+<tr>
+<td>K-FAC</td>
+<td>大规模视觉</td>
+<td>Kronecker块</td>
+<td>中</td>
+</tr>
+<tr>
+<td>Shampoo</td>
+<td>Transformer</td>
+<td>Kronecker块</td>
+<td>中</td>
+</tr>
+<tr>
+<td>Muon</td>
+<td>结构化参数</td>
+<td>隐式全矩阵</td>
+<td>高</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12_1">12. 总结与展望</h3>
+<h4 id="121">12.1 核心洞察</h4>
+<p>本推导揭示了自适应学习率优化器的统一视角：</p>
+<ol>
+<li><strong>二阶本质</strong>：Adam等自适应方法本质上是对角Hessian近似的牛顿法</li>
+<li><strong>梯度平方的统计意义</strong>：$\mathbb{E}[g^2] \propto \boldsymbol{\mathcal{H}}^2$（长期平均）</li>
+<li><strong>Fisher-Hessian联系</strong>：在概率模型中，Fisher信息矩阵等于Hessian</li>
+<li><strong>块结构的利用</strong>：K-FAC/Shampoo通过Kronecker分解在计算成本和近似精度间权衡</li>
+</ol>
+<h4 id="122">12.2 理论与实践的差距</h4>
+<p>尽管理论优美，实践中仍有gap：</p>
+<ol>
+<li><strong>非凸性</strong>：深度网络的非凸性使得局部二阶近似不总是有效</li>
+<li><strong>计算成本</strong>：完整Hessian的$O(n^2)$复杂度在大模型中不可行</li>
+<li><strong>超参数敏感性</strong>：自适应方法引入更多超参数（$\beta_1, \beta_2, \epsilon$），需要仔细调节</li>
+</ol>
+<h4 id="123">12.3 未来方向</h4>
+<ol>
+<li><strong>自动超参数调节</strong>：根据Hessian估计动态调整$\eta, \beta_2$</li>
+<li><strong>混合精度Hessian</strong>：在低精度下高效计算和存储Hessian近似</li>
+<li><strong>Layer-wise自适应</strong>：不同层使用不同的Hessian近似策略</li>
+<li><strong>理论保证</strong>：在实际深度网络设定下建立收敛性理论</li>
+</ol>
+<p><strong>最终思考</strong>：Hessian近似为理解优化器提供了统一框架。从对角近似（Adam）到块近似（K-FAC）再到隐式近似（Muon），本质上是在计算成本与曲率信息精度之间寻找最优平衡。深度学习的未来优化器设计，很可能继续沿着这条主线——更高效地近似和利用Hessian信息。</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鱼与熊掌兼得：融合检索和生成的SimBERT模型</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>鱼与熊掌兼得：融合检索和生成的SimBERT模型</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 10.2 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7427">https://spaces.ac.cn/archives/7427</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>前段时间我们开放了一个名为<a href="https://github.com/ZhuiyiTechnology/pretrained-models#simbert-base">SimBERT</a>的模型权重，它是以Google开源的BERT模型为基础，基于微软的<a href="https://papers.cool/arxiv/1905.03197">UniLM</a>思想设计了融检索与生成于一体的任务，来进一步微调后得到的模型，所以它同时具备相似问生成和相似句检索能力。不过当时除了放出一个权重文件和示例脚本之外，未对模型原理和训练过程做进一步说明。在这篇文章里，我们来补充这部分内容。</p>
+<blockquote>
+<p><strong>开源地址：<a href="https://github.com/ZhuiyiTechnology/simbert">https://github.com/ZhuiyiTechnology/simbert</a></strong></p>
+</blockquote>
+<h2 id="unilm">UniLM</h2>
+<p>UniLM是一个融合NLU和NLG能力的Transformer模型，由微软在去年5月份提出来的，今年2月份则升级到了<a href="https://papers.cool/arxiv/2002.12804">v2版本</a>。我们之前的文章<a href="/archives/6933">《从语言模型到Seq2Seq：Transformer如戏，全靠Mask》</a>就简单介绍过UniLM，并且已经集成到了<a href="https://github.com/bojone/bert4keras">bert4keras</a>中。</p>
+<p>UniLM的核心是通过特殊的Attention Mask来赋予模型具有Seq2Seq的能力。假如输入是“你想吃啥”，目标句子是“白切鸡”，那UNILM将这两个句子拼成一个：[CLS] 你 想 吃 啥 [SEP] 白 切 鸡 [SEP]，然后接如图的Attention Mask：  </p>
+<p><a href="/usr/uploads/2019/09/1625339461.png" title="点击查看原图"><img alt="UniLM的Mask" src="/usr/uploads/2019/09/1625339461.png" /></a></p>
+<p>UniLM的Mask</p>
+<p>换句话说，[CLS] 你 想 吃 啥 [SEP]这几个token之间是双向的Attention，而白 切 鸡 [SEP]这几个token则是单向Attention，从而允许递归地预测白 切 鸡 [SEP]这几个token，所以它具备文本生成能力。</p>
+<p><a href="/usr/uploads/2019/09/1879768703.png" title="点击查看原图"><img alt="UNILM做Seq2Seq模型图示。输入部分内部可做双向Attention，输出部分只做单向Attention。" src="/usr/uploads/2019/09/1879768703.png" /></a></p>
+<p>UNILM做Seq2Seq模型图示。输入部分内部可做双向Attention，输出部分只做单向Attention。</p>
+<p>Seq2Seq只能说明UniLM具有NLG的能力，那前面为什么说它同时具备NLU和NLG能力呢？因为UniLM特殊的Attention Mask，所以[CLS] 你 想 吃 啥 [SEP]这6个token只在它们之间相互做Attention，而跟白 切 鸡 [SEP]完全没关系，这就意味着，尽管后面拼接了白 切 鸡 [SEP]，但这不会影响到前6个编码向量。再说明白一点，那就是前6个编码向量等价于只有[CLS] 你 想 吃 啥 [SEP]时的编码结果，如果[CLS]的向量代表着句向量，那么它就是你 想 吃 啥的句向量，而不是加上白 切 鸡后的句向量。</p>
+<p>由于这个特性，UniLM在输入的时候也随机加入一些[MASK]，这样输入部分就可以做MLM任务，输出部分就可以做Seq2Seq任务，MLM增强了NLU能力，而Seq2Seq增强了NLG能力，一举两得。</p>
+<h2 id="simbert">SimBERT</h2>
+<p>理解了UniLM后，其实就不难理解SimBERT训练方式了。SimBERT属于有监督训练，训练语料是自行收集到的相似句对，通过一句来预测另一句的相似句生成任务来构建Seq2Seq部分，然后前面也提到过[CLS]的向量事实上就代表着输入的句向量，所以可以同时用它来训练一个检索任务，如下图：  </p>
+<p><a href="/usr/uploads/2020/05/2840550561.png" title="点击查看原图"><img alt="SimBERT训练方式示意图" src="/usr/uploads/2020/05/2840550561.png" /></a></p>
+<p>SimBERT训练方式示意图</p>
+<p>假设SENT_a和SENT_b是一组相似句，那么在同一个batch中，把[CLS] SENT_a [SEP] SENT_b [SEP]和[CLS] SENT_b [SEP] SENT_a [SEP]都加入训练，做一个相似句的生成任务，这是Seq2Seq部分。</p>
+<p>另一方面，把整个batch内的[CLS]向量都拿出来，得到一个句向量矩阵$\boldsymbol{V}\in\mathbb{R}^{b\times d}$（$b$是batch_size，$d$是hidden_size），然后对$d$维度做$l_2$归一化，得到$\tilde{\boldsymbol{V}}$，然后两两做内积，得到$b\times b$的相似度矩阵$\tilde{\boldsymbol{V}}\tilde{\boldsymbol{V}}^{\top}$，接着乘以一个scale（我们取了30），并mask掉对角线部分，最后每一行进行softmax，作为一个分类任务训练，每个样本的目标标签是它的相似句（至于自身已经被mask掉）。说白了，就是把batch内所有的非相似样本都当作负样本，借助softmax来增加相似样本的相似度，降低其余样本的相似度。</p>
+<p>说到底，关键就是“<strong>[CLS] 的向量事实上就代表着输入的句向量</strong>”，所以可以用它来做一些NLU相关的事情。最后的loss是Seq2Seq和相似句分类两部分loss之和。</p>
+<h2 id="_1">其他细节</h2>
+<p>由于已经开放源码，所以更多的训练细节大家可以自行阅读源码。模型使用keras + bert4keras实现，代码还是很清晰的，所以很多疑惑应该都可以通过阅读源码解决。</p>
+<p>效果演示：</p>
+<div class="codehilite"><pre><span></span><code>&gt;&gt;&gt; gen_synonyms(u&#39;微信和支付宝哪个好？&#39;)
+
+[
+    u&#39;微信和支付宝，哪个好?&#39;,
+    u&#39;微信和支付宝哪个好&#39;,
+    u&#39;支付宝和微信哪个好&#39;,
+    u&#39;支付宝和微信哪个好啊&#39;,
+    u&#39;微信和支付宝那个好用？&#39;,
+    u&#39;微信和支付宝哪个好用&#39;,
+    u&#39;支付宝和微信那个更好&#39;,
+    u&#39;支付宝和微信哪个好用&#39;,
+    u&#39;微信和支付宝用起来哪个好？&#39;,
+    u&#39;微信和支付宝选哪个好&#39;,
+    u&#39;微信好还是支付宝比较用&#39;,
+    u&#39;微信与支付宝哪个&#39;,
+    u&#39;支付宝和微信哪个好用一点？&#39;,
+    u&#39;支付宝好还是微信&#39;,
+    u&#39;微信支付宝究竟哪个好&#39;,
+    u&#39;支付宝和微信哪个实用性更好&#39;,
+    u&#39;好，支付宝和微信哪个更安全？&#39;,
+    u&#39;微信支付宝哪个好用？有什么区别&#39;,
+    u&#39;微信和支付宝有什么区别？谁比较好用&#39;,
+    u&#39;支付宝和微信哪个好玩&#39;
+]
+
+&gt;&gt;&gt; most_similar(u&#39;怎么开初婚未育证明&#39;, 20)
+[
+    (u&#39;开初婚未育证明怎么弄？&#39;, 0.9728098), 
+    (u&#39;初婚未育情况证明怎么开？&#39;, 0.9612292), 
+    (u&#39;到哪里开初婚未育证明？&#39;, 0.94987774), 
+    (u&#39;初婚未育证明在哪里开？&#39;, 0.9476072), 
+    (u&#39;男方也要开初婚证明吗?&#39;, 0.7712214), 
+    (u&#39;初婚证明除了村里开，单位可以开吗？&#39;, 0.63224965), 
+    (u&#39;生孩子怎么发&#39;, 0.40672967), 
+    (u&#39;是需要您到当地公安局开具变更证明的&#39;, 0.39978087), 
+    (u&#39;淘宝开店认证未通过怎么办&#39;, 0.39477515), 
+    (u&#39;您好，是需要当地公安局开具的变更证明的&#39;, 0.39288986), 
+    (u&#39;没有工作证明，怎么办信用卡&#39;, 0.37745982), 
+    (u&#39;未成年小孩还没办身份证怎么买高铁车票&#39;, 0.36504325), 
+    (u&#39;烟草证不给办，应该怎么办呢？&#39;, 0.35596085), 
+    (u&#39;怎么生孩子&#39;, 0.3493368), 
+    (u&#39;怎么开福利彩票站&#39;, 0.34158638), 
+    (u&#39;沈阳烟草证怎么办？好办不？&#39;, 0.33718678), 
+    (u&#39;男性不孕不育有哪些特征&#39;, 0.33530876), 
+    (u&#39;结婚证丢了一本怎么办离婚&#39;, 0.33166665), 
+    (u&#39;怎样到地税局开发票？&#39;, 0.33079252), 
+    (u&#39;男性不孕不育检查要注意什么？&#39;, 0.3274408)
+]
+</code></pre></div>
+
+<p>大家可能比较关心训练数据的问题，这里统一回答：关于训练数据，不方便公开，私下分享也不方便，所以就不要问数据的事情了，数据来源就是爬取百度知道推荐的相似问，然后经过简单算法过滤。如果读者手头上本身有很多问句，那么其实也可以通过常见的检索算法检索出一些相似句，作为训练数据用。总而言之，训练数据没有特别严格要求，理论上有一定的相似性都可以。</p>
+<p>至于训练硬件，开源的模型是在一张TITAN RTX（22G显存，batch_size=128）上训练了4天左右，显存和时间其实也没有硬性要求，视实际情况而定，如果显存没那么大，那么适当降低batch_size即可，如果语料本身不是很多，那么训练时间也不用那么长（大概是能完整遍历几遍数据集即可）。</p>
+<p>暂时就只能想到这些了，还有啥问题欢迎留言讨论。</p>
+<h2 id="_2">文章小结</h2>
+<p>本文介绍了早先我们放出来的SimBERT模型的训练原理，并开源了训练代码。SimBERT通过基于UniLM思想进行训练，同时具备检索和生成的能力，欢迎大家使用测试～</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7427">https://spaces.ac.cn/archives/7427</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 18, 2020). 《鱼与熊掌兼得：融合检索和生成的SimBERT模型 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7427">https://spaces.ac.cn/archives/7427</a></p>
+<p>@online{kexuefm-7427,<br />
+title={鱼与熊掌兼得：融合检索和生成的SimBERT模型},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/7427}},<br />
+} </p>
+<hr />
+<h2 id="_3">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成扩散模型漫谈（八）：最优扩散方差估计（下）</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>生成扩散模型漫谈（八）：最优扩散方差估计（下）</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 41.1 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9246">https://spaces.ac.cn/archives/9246</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在上一篇文章<a href="/archives/9245">《生成扩散模型漫谈（七）：最优扩散方差估计（上）》</a>中，我们介绍并推导了Analytic-DPM中的扩散模型最优方差估计结果，它是直接给出了已经训练好的生成扩散模型的最优方差的一个解析估计，实验显示该估计结果确实能有效提高扩散模型的生成质量。</p>
+<p>这篇文章我们继续介绍Analytic-DPM的升级版，出自同一作者团队的论文<a href="https://papers.cool/arxiv/2206.07309">《Estimating the Optimal Covariance with Imperfect Mean in Diffusion Probabilistic Models》</a>，在官方Github中被称为“Extended-Analytic-DPM”，下面我们也用这个称呼。</p>
+<h2 id="_1">结果回顾</h2>
+<p>上一篇文章是在DDIM的基础上，推出DDIM的生成过程最优方差应该是<br />
+\begin{equation}\sigma_t^2 + \gamma_t^2\bar{\sigma}<em _boldsymbol_x="\boldsymbol{x">t^2\end{equation}<br />
+其中$\bar{\sigma}_t^2$是分布$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$的方差，它有如下的估计结果（这里取“<a href="/archives/9245#%E6%96%B9%E5%B7%AE%E4%BC%B0%E8%AE%A12">方差估计2</a>”的结果）：<br />
+\begin{equation}\bar{\sigma}_t^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\left(1 - \frac{1}{d}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t\sim p(\boldsymbol{x}_t)}\left[ \Vert\boldsymbol{\epsilon}</em>}}(\boldsymbol{x}_t, t)\Vert^2\right]\right)\label{eq:basic}\end{equation</p>
+<p>事后来看，其实估计思路也不算难，假设<br />
+\begin{equation}\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t) = \frac{1}{\bar{\alpha}_t}\left(\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t)\right)\label{eq:bar-mu}\end{equation}<br />
+已经准确预测了分布$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$的均值向量，那么根据定义可以得到协方差为<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{\Sigma}(\boldsymbol{x}_t)=&amp;\, \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\right)\left(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\right)^{\top}\right] \\\<br />
+=&amp;\, \frac{1}{\bar{\alpha}_t^2}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left(\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0\right)\left(\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0\right)^{\top}\right] - \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2} \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t)^{\top}\\\<br />
+\end{aligned}\label{eq:full-cov}\end{equation}<br />
+两端对$\boldsymbol{x}_t\sim p(\boldsymbol{x}_t)$求平均，以消除对$\boldsymbol{x}_t$的依赖<br />
+\begin{equation}<br />
+\boldsymbol{\Sigma}_t = \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t\sim p(\boldsymbol{x}_t)}[\boldsymbol{\Sigma}(\boldsymbol{x}_t)] = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\left(\boldsymbol{I} - \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t\sim p(\boldsymbol{x}_t)}\left[ \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\boldsymbol{\epsilon}</em>}}(\boldsymbol{x}_t, t)^{\top}\right]\right)\label{eq:uncond-var-2}\end{equation<br />
+最后，对角线元素取平均，使其变为一个标量（或者说协方差是单位阵的倍数），即$\bar{\sigma}_t^2 = \text{Tr}(\boldsymbol{\Sigma}_t)/d$，便可得到估计式$\eqref{eq:basic}$。</p>
+<h2 id="_2">如何改进</h2>
+<p>在正式介绍Extended-Analytic-DPM之前，我们可以先想想，Analytic-DPM还有什么改进空间？</p>
+<p>其实稍加思考就可以发现很多，比如Analytic-DPM假设用来逼近$p(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">0|\boldsymbol{x}_t)$的正态分布协方差矩阵设计为为$\bar{\sigma}_t^2\boldsymbol{I}$，即对角线元素相同的对角阵，那么一个直接的改进就是允许对角线元素互不相同了，即$\text{diag}(\bar{\boldsymbol{\sigma}}_t^2)$，这里约定向量的乘法都是基于Hadamard积进行，比如$\boldsymbol{x}^2=\boldsymbol{x}\otimes \boldsymbol{x}$。对应的结果就是只考虑$\boldsymbol{\Sigma}_t$的对角线部分，所以从式$\eqref{eq:uncond-var-2}$出发，可以得到相应的估计是<br />
+\begin{equation}\bar{\boldsymbol{\sigma}}_t^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\left(\boldsymbol{1}_d - \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t\sim p(\boldsymbol{x}_t)}\left[ \boldsymbol{\epsilon}</em>}}^2(\boldsymbol{x}_t, t)\right]\right) \end{equation<br />
+其中$\boldsymbol{1}_d$是$d$维全1向量。还有一个更进一步的改进是保留$\bar{\boldsymbol{\sigma}}_t^2$对$\boldsymbol{x}_t$的依赖关系，即考虑$\bar{\boldsymbol{\sigma}}_t^2(\boldsymbol{x}_t)$，这就跟$\boldsymbol{\mu}(\boldsymbol{x}_t)$类似，需要用一个以$\boldsymbol{x}_t$为输入的模型来学习它。</p>
+<p>那么可不可以考虑完整的$\boldsymbol{\Sigma}_t$呢？理论上可以，实际上基本不可行，因为完整的$\boldsymbol{\Sigma}_t$是一个$d\times d$矩阵，对于图片场景来说，$d$是图片的总像素个数，即便是对于cifar10来说也已经有$d=32^2\times 3=3072$了，更不用说更高分辨率的图片。所以结合实验背景，$d\times d$矩阵在储存和计算上的成本都过大了。</p>
+<p>除此之外，可能有一个问题不少读者都没意识到，就是前面的解析解推导都依赖于$\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t) = \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\boldsymbol{x}_0]$，事实上$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$是由模型学习出来的，它未必能够精确等于均值$\mathbb{E}</em>_0]$，这就是Extended-Analytic-DPM的论文标题所提到的Imperfect Mean的含义。如果在Imperfect Mean下改进估计结果，更加有实践意义。}_0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\boldsymbol{x</p>
+<h2 id="_3">最大似然</h2>
+<p>假设均值模型$\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t)$已经事先训练好，那么待定分布$\mathcal{N}(\boldsymbol{x}_0;\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t),\bar{\sigma}_t^2\boldsymbol{I})$的参数就只剩下了$\bar{\sigma}_t^2$，对应的负对数似然为<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\, \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t\sim p(\boldsymbol{x}_t)}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[-\log \mathcal{N}(\boldsymbol{x}_0;\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t),\bar{\sigma}_t^2\boldsymbol{I})\right] \\\<br />
+=&amp;\, \frac{\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t,\boldsymbol{x}_0\sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)\tilde{p}(\boldsymbol{x}_0)}\left[\Vert\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\Vert^2\right]}{2\bar{\sigma}_t^2} + \frac{d}{2}\log \bar{\sigma}_t^2 + \frac{d}{2}\log 2\pi \\\<br />
+\end{aligned}\label{eq:neg-log}\end{equation}<br />
+可以解得取最小值正好是<br />
+\begin{equation}\bar{\sigma}_t^2 = \frac{1}{d}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t,\boldsymbol{x}_0\sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)\tilde{p}(\boldsymbol{x}_0)}\left[\Vert\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\Vert^2\right]\end{equation}<br />
+它的特点是$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$未必是准确的均值结果，因此式$\eqref{eq:full-cov}$的第二个等号不成立，只能成立第一个等号。将式$\eqref{eq:bar-mu}$代入，得到<br />
+\begin{equation}\bar{\sigma}_t^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2 d}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim \tilde{p}(\boldsymbol{x}_0),\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})}\left[\left\Vert\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>}}(\bar{\alpha<em _boldsymbol_x="\boldsymbol{x">t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}, t)\right\Vert^2\right]\end{equation}<br />
+当然，这里只分析了协方差矩阵为$\bar{\sigma}_t^2\boldsymbol{I}$的简单情形，我们也可以考虑更一般的对角阵协方差，即$\mathcal{N}(\boldsymbol{x}_0;\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t),\text{diag}(\bar{\boldsymbol{\sigma}}_t^2))$，对应的结果是<br />
+\begin{equation}\bar{\boldsymbol{\sigma}}_t^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2 }\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim \tilde{p}(\boldsymbol{x}_0),\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0},\boldsymbol{I})}\left[\left(\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>}}(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}, t)\right)^2\right]\end{equation</p>
+<h2 id="_4">条件方差</h2>
+<p>如果想要得到带条件$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t$的协方差$\text{diag}(\bar{\boldsymbol{\sigma}}_t^2(\boldsymbol{x}_t))$，那么就相当于每个分量独立计算，结果是免除了$\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t\sim p(\boldsymbol{x}_t)}$这一步平均：<br />
+\begin{equation}\bar{\boldsymbol{\sigma}}_t^2(\boldsymbol{x}_t) = \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t))^2\right] = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left(\boldsymbol{\epsilon}_t - \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t)\right)^2\right] \end{equation}<br />
+其中$\boldsymbol{\epsilon}_t = \frac{\boldsymbol{x}_t - \bar{\alpha}_t \boldsymbol{x}_0}{\bar{\beta}_t}$。跟上一篇文章一样，利用<br />
+\begin{equation}\mathbb{E}</em>}}[\boldsymbol{x}] = \mathop{\text{argmin}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\mu}}\mathbb{E}</em>}}\left[\Vert \boldsymbol{x} - \boldsymbol{\mu}\Vert^2\right]\label{eq:mean-opt}\end{equation<br />
+得到<br />
+\begin{equation}\begin{aligned}<br />
+\bar{\boldsymbol{\sigma}}<em _boldsymbol_x="\boldsymbol{x">t^2(\boldsymbol{x}_t) =&amp;\, \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left(\boldsymbol{\epsilon}_t - \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_g="\boldsymbol{g">t, t)\right)^2\right] \\\<br />
+=&amp;\, \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathop{\text{argmin}}</em>}}\mathbb{E<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{x}_0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left\Vert\left(\boldsymbol{\epsilon}_t - \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_g="\boldsymbol{g">t, t)\right)^2-\boldsymbol{g}\right\Vert^2\right] \\\<br />
+=&amp;\, \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathop{\text{argmin}}</em>}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)}\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t\sim p(\boldsymbol{x}_t)}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left\Vert\left(\boldsymbol{\epsilon}_t - \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_g="\boldsymbol{g">t, t)\right)^2-\boldsymbol{g}(\boldsymbol{x}_t)\right\Vert^2\right] \\\<br />
+=&amp;\, \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathop{\text{argmin}}</em>}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t,\boldsymbol{x}_0\sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)\tilde{p}(\boldsymbol{x}_0)}\left[\left\Vert\left(\boldsymbol{\epsilon}_t - \boldsymbol{\epsilon}</em>_t)\right\Vert^2\right] \\\}}(\boldsymbol{x}_t, t)\right)^2-\boldsymbol{g}(\boldsymbol{x<br />
+\end{aligned}\end{equation}<br />
+这就是Extended-Analytic-DPM中学习条件方差的“NPR-DPM”方案。另外，原论文还提了个“SN-DPM”方案，它是基于Perfect Mean假设而不是Imperfect Mean的。然而论文的实验结果却是SN-DPM要优于NPR-DPM，也就是说论文号称自己在解决Imperfect Mean问题，结果实验显示Perfect Mean假设的方案更好，这就反过来说明Perfect Mean假设其实很贴合实践情况，换句话说Imperfect Mean问题可以视为不存在了。</p>
+<h2 id="_5">两个阶段</h2>
+<p>可能读者有疑问，一开始不是说<a href="https://papers.cool/arxiv/2006.11239">《Improved Denoising Diffusion Probabilistic Models》</a>的可学习方差增加了训练难度吗？那Extended-Analytic-DPM为啥又重新去做可训练的方差模型呢？</p>
+<p>我们知道，DDPM提供了方差的两种方案$\sigma_t = \frac{\bar{\beta}_{t-1}}{\bar{\beta}_t}\beta_t$和$\sigma_t = \beta_t$，这两种简单方案的效果其实已经相当不错了。这侧面说明，更精细地调整方差对生成结果的影响不大（至少对于完整的$T$步扩散是这样），主要的还是$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$的学习，方差只是“锦上添花”的作用。如果将方差视为可学习参数或者模型，跟均值模型$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$一同学习，那么随着训练过程变化的方差就会严重干扰均值模型$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$的学习过程，违反了“$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$为主、方差为辅”的原则。</p>
+<p>Extended-Analytic-DPM的聪明之处在于，它提出了两阶段的训练方案，即用原始固定方差的测试训练好均值模型$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$，然后固定该模型，并重用该模型的大部分参数来学一个方差模型，这样一来反而“一举三得”：</p>
+<blockquote>
+<p>一、降低了参数量和训练成本；</p>
+<p>二、允许重用已经训练好的均值模型；</p>
+<p>三、训练过程更加稳定。</p>
+</blockquote>
+<h2 id="_6">个人思考</h2>
+<p>到这里，Extended-Analytic-DPM的介绍就基本完成了。有心的读者可能会感觉到，如果说上一篇Analytic-DPM的结果给人“惊艳”之感，那么这一篇Extended-Analytic-DPM就显得中规中矩，没什么太动人心弦的地方。可以说，Extended-Analytic-DPM就是Analytic-DPM的平凡推广，尽管实验结果显示它还是能带来不错的提升，但总体而言给人的感觉就是很平淡了。当然，大体上是因为Analytic-DPM“珠玉在前”，对比之下才显得它暗淡一些，本身也算是一篇比较扎实的工作。</p>
+<p>此外，前面我们已经提到，实验结果显示，基于Perfect Mean假设的SN-DPM，效果要比基于Imperfect Mean假设的NPR-DPM要好，同时这一结果也使得原论文的标题有点“名不副实”了——既然实验显示Perfect Mean假设的方案更好，反过来意味着Imperfect Mean问题可以视为不存在了。原论文并没有对此结果做进一步的分析和评价，笔者想会不会跟方差估计的有偏性有关？大家知道，直接用“除以$n$”的公式去估计方差是有偏的，而NPR-DPM正是基于它来操作的，相比之下SN-DPM则是直接取估计二阶矩，二阶矩的估计是无偏的。总感觉有点道理，但也不能完全说通，有点迷～</p>
+<p>最后，不知道读者会不会跟笔者一样有个疑问：在给定$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$的前提下，为什么不直接用像式$\eqref{eq:neg-log}$的负对数似然为损失函数来学习方差，而是要重新设计NPR-DPM或SN-DPM这两种MSE形式的loss？MSE形式的loss有什么特别的好处吗？笔者暂时也没想到答案。</p>
+<h2 id="_7">文章小结</h2>
+<p>本文介绍了论文Analytic-DPM的升级版——“Extended-Analytic-DPM”中的扩散模型最优方差估计结果，它主要针对不完美均值情形进行了推导，并提出了有条件方差的学习方案。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9246">https://spaces.ac.cn/archives/9246</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Aug. 18, 2022). 《生成扩散模型漫谈（八）：最优扩散方差估计（下） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9246">https://spaces.ac.cn/archives/9246</a></p>
+<p>@online{kexuefm-9246,<br />
+title={生成扩散模型漫谈（八）：最优扩散方差估计（下）},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Aug},<br />
+url={\url{https://spaces.ac.cn/archives/9246}},<br />
+} </p>
+<hr />
+<h2 id="_8">公式推导与注释</h2>
+<h3 id="1">1. 核心概念与理论基础</h3>
+<h4 id="11">1.1 条件分布与方差估计问题</h4>
+<p>在扩散模型中，我们需要建模条件分布$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$。<strong>Analytic-DPM</strong>假设这个分布可以用正态分布近似：</p>
+<p>$$
+p(\boldsymbol{x}_0|\boldsymbol{x}_t) \approx \mathcal{N}(\boldsymbol{x}_0; \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t), \bar{\sigma}_t^2\boldsymbol{I}) \tag{1}
+$$</p>
+<p>其中：
+- $\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em>t) = \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}</em>\theta(\boldsymbol{x}_t, t))$：预测的均值
+- $\bar{\sigma}_t^2$：待估计的方差（标量）
+- $\boldsymbol{I}$：单位矩阵（各向同性假设）</p>
+<p><strong>核心问题</strong>：如何估计$\bar{\sigma}_t^2$？</p>
+<h4 id="12-perfect-mean">1.2 完美均值假设（Perfect Mean）</h4>
+<p><strong>假设1.1</strong>（完美均值）：模型$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$能够精确预测条件期望：</p>
+<p>$$
+\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) = \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\boldsymbol{x}_0] \tag{2}
+$$</p>
+<p>在此假设下，协方差矩阵的定义为：</p>
+<p>$$
+\boldsymbol{\Sigma}(\boldsymbol{x}_t) = \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t))(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t))^\top\right] \tag{3}
+$$</p>
+<p><strong>推导</strong>：利用前向扩散过程$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\epsilon}$（其中$\boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})$），有：</p>
+<p>$$
+\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0 = \bar{\beta}_t\boldsymbol{\epsilon} \tag{4}
+$$</p>
+<p>因此：</p>
+<p>$$
+\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) = \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)) \tag{5}
+$$</p>
+<p>将(5)代入(3)：</p>
+<p>$$
+\begin{aligned}
+\boldsymbol{\Sigma}(\boldsymbol{x}_t) &= \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\left(\boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_\theta)\right)\left(\boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_\theta)\right)^\top\right] \\
+&= \frac{1}{\bar{\alpha}_t^2}\mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\bar{\alpha}_t\boldsymbol{x}_0 - \boldsymbol{x}_t + \bar{\beta}_t\boldsymbol{\epsilon}_\theta)(\bar{\alpha}_t\boldsymbol{x}_0 - \boldsymbol{x}_t + \bar{\beta}_t\boldsymbol{\epsilon}_\theta)^\top\right] \\
+&= \frac{1}{\bar{\alpha}_t^2}\mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\bar{\beta}_t\boldsymbol{\epsilon} - \bar{\beta}_t\boldsymbol{\epsilon}_\theta)(\bar{\beta}_t\boldsymbol{\epsilon} - \bar{\beta}_t\boldsymbol{\epsilon}_\theta)^\top\right] \\
+&= \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta)(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta)^\top\right]
+\end{aligned} \tag{6}
+$$</p>
+<h4 id="13-imperfect-mean">1.3 不完美均值假设（Imperfect Mean）</h4>
+<p><strong>现实情况</strong>：模型$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$并不完美，存在偏差：</p>
+<p>$$
+\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) \neq \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\boldsymbol{x}_0] \tag{7}
+$$</p>
+<p><strong>Extended-Analytic-DPM</strong>的目标是在不完美均值情况下改进方差估计。定义偏差为：</p>
+<p>$$
+\boldsymbol{\delta}(\boldsymbol{x}_t) = \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) - \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}[\boldsymbol{x}_0] \tag{8}
+$$</p>
+<p>则真实的均方误差为：</p>
+<p>$$
+\begin{aligned}
+&\mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\|\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\|^2\right] \\
+=& \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\|\boldsymbol{x}_0 - \mathbb{E}[\boldsymbol{x}_0] + \mathbb{E}[\boldsymbol{x}_0] - \bar{\boldsymbol{\mu}}\|^2\right] \\
+=& \text{Var}(\boldsymbol{x}_0|\boldsymbol{x}_t) + \|\boldsymbol{\delta}(\boldsymbol{x}_t)\|^2
+\end{aligned} \tag{9}
+$$</p>
+<h3 id="2">2. 最大似然框架下的方差估计</h3>
+<h4 id="21">2.1 标量方差的最大似然估计</h4>
+<p>假设$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)$已固定，我们用正态分布$\mathcal{N}(\boldsymbol{x}_0; \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t), \bar{\sigma}_t^2\boldsymbol{I})$来建模$p(\boldsymbol{x}_0|\boldsymbol{x}_t)$。</p>
+<p><strong>负对数似然</strong>：</p>
+<p>$$
+\begin{aligned}
+\mathcal{L}(\bar{\sigma}_t^2) &= \mathbb{E}_{\boldsymbol{x}_t \sim p(\boldsymbol{x}_t)}\mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[-\log \mathcal{N}(\boldsymbol{x}_0; \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t), \bar{\sigma}_t^2\boldsymbol{I})\right] \\
+&= \mathbb{E}_{\boldsymbol{x}_t, \boldsymbol{x}_0}\left[\frac{\|\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\|^2}{2\bar{\sigma}_t^2} + \frac{d}{2}\log(2\pi\bar{\sigma}_t^2)\right]
+\end{aligned} \tag{10}
+$$</p>
+<p><strong>优化</strong>：对$\bar{\sigma}_t^2$求导并令其为零：</p>
+<p>$$
+\frac{\partial \mathcal{L}}{\partial \bar{\sigma}_t^2} = -\frac{\mathbb{E}[\|\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\|^2]}{2(\bar{\sigma}_t^2)^2} + \frac{d}{2\bar{\sigma}_t^2} = 0 \tag{11}
+$$</p>
+<p>解得：</p>
+<p>$$
+\bar{\sigma}_t^2 = \frac{1}{d}\mathbb{E}_{\boldsymbol{x}_t, \boldsymbol{x}_0 \sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)\tilde{p}(\boldsymbol{x}_0)}\left[\|\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\|^2\right] \tag{12}
+$$</p>
+<p>这里使用了联合分布分解：</p>
+<p>$$
+p(\boldsymbol{x}_t, \boldsymbol{x}_0) = p(\boldsymbol{x}_t|\boldsymbol{x}_0)\tilde{p}(\boldsymbol{x}_0) \tag{13}
+$$</p>
+<h4 id="22">2.2 用噪声参数化的方差估计</h4>
+<p><strong>关键转换</strong>：将$\bar{\boldsymbol{\mu}}(\boldsymbol{x}<em>t) = \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}</em>\theta(\boldsymbol{x}_t, t))$代入(12)：</p>
+<p>$$
+\begin{aligned}
+\|\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t)\|^2 &= \left\|\boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}(\boldsymbol{x}_t - \bar{\beta}_t\boldsymbol{\epsilon}_\theta)\right\|^2 \\
+&= \left\|\boldsymbol{x}_0 - \frac{1}{\bar{\alpha}_t}(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\epsilon} - \bar{\beta}_t\boldsymbol{\epsilon}_\theta)\right\|^2 \\
+&= \left\|\frac{\bar{\beta}_t}{\bar{\alpha}_t}(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta)\right\|^2 \\
+&= \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\|\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)\|^2
+\end{aligned} \tag{14}
+$$</p>
+<p>因此，方差估计转化为：</p>
+<p>$$
+\bar{\sigma}_t^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2 d}\mathbb{E}_{\boldsymbol{x}_0 \sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})}\left[\|\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\epsilon}, t)\|^2\right] \tag{15}
+$$</p>
+<p><strong>定理2.1</strong>（不完美均值下的方差估计）：在不完美均值假设下，最大似然估计的方差为：</p>
+<p>$$
+\bar{\sigma}_t^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2 d}\mathbb{E}_{\tilde{p}(\boldsymbol{x}_0), \mathcal{N}(\boldsymbol{\epsilon})}\left[\|\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta(\sqrt{\bar{\alpha}_t}\boldsymbol{x}_0 + \sqrt{1-\bar{\alpha}_t}\boldsymbol{\epsilon}, t)\|^2\right] \tag{16}
+$$</p>
+<p>这里使用了标准参数化$\bar{\alpha}_t = \bar{\alpha}_t^2$，$\bar{\beta}_t = \sqrt{1-\bar{\alpha}_t}$。</p>
+<h4 id="23">2.3 对角方差矩阵的估计</h4>
+<p><strong>推广到对角协方差</strong>：允许每个维度有不同的方差，即$\boldsymbol{\Sigma} = \text{diag}(\bar{\boldsymbol{\sigma}}_t^2)$。</p>
+<p>负对数似然变为：</p>
+<p>$$
+\mathcal{L}(\bar{\boldsymbol{\sigma}}_t^2) = \mathbb{E}_{\boldsymbol{x}_t, \boldsymbol{x}_0}\left[\sum_{i=1}^d \frac{(x_{0,i} - \bar{\mu}_i(\boldsymbol{x}_t))^2}{2\bar{\sigma}_{t,i}^2} + \frac{1}{2}\sum_{i=1}^d \log(2\pi\bar{\sigma}_{t,i}^2)\right] \tag{17}
+$$</p>
+<p>对每个分量独立优化，得到：</p>
+<p>$$
+\bar{\sigma}_{t,i}^2 = \mathbb{E}_{\boldsymbol{x}_t, \boldsymbol{x}_0}\left[(x_{0,i} - \bar{\mu}_i(\boldsymbol{x}_t))^2\right] \tag{18}
+$$</p>
+<p>向量形式（Hadamard积）：</p>
+<p>$$
+\bar{\boldsymbol{\sigma}}_t^2 = \mathbb{E}_{\boldsymbol{x}_t, \boldsymbol{x}_0}\left[(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t))^2\right] \tag{19}
+$$</p>
+<p>用噪声参数化：</p>
+<p>$$
+\bar{\boldsymbol{\sigma}}_t^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}_{\tilde{p}(\boldsymbol{x}_0), \mathcal{N}(\boldsymbol{\epsilon})}\left[(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\epsilon}, t))^2\right] \tag{20}
+$$</p>
+<h3 id="3">3. 条件方差的学习方法</h3>
+<h4 id="31">3.1 条件方差的定义</h4>
+<p><strong>目标</strong>：估计依赖于$\boldsymbol{x}_t$的方差$\bar{\boldsymbol{\sigma}}_t^2(\boldsymbol{x}_t)$，而非对所有$\boldsymbol{x}_t$平均的标量或向量。</p>
+<p>条件方差定义为：</p>
+<p>$$
+\bar{\boldsymbol{\sigma}}_t^2(\boldsymbol{x}_t) = \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t))^2\right] \tag{21}
+$$</p>
+<p>用噪声表示：</p>
+<p>$$
+\bar{\boldsymbol{\sigma}}_t^2(\boldsymbol{x}_t) = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\boldsymbol{\epsilon}_t - \boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t))^2\right] \tag{22}
+$$</p>
+<p>其中$\boldsymbol{\epsilon}_t = \frac{\boldsymbol{x}_t - \bar{\alpha}_t\boldsymbol{x}_0}{\bar{\beta}_t}$是前向扩散过程中的真实噪声。</p>
+<h4 id="32-npr-dpmnoise-prediction-residual">3.2 NPR-DPM方法（Noise Prediction Residual）</h4>
+<p><strong>核心思想</strong>：利用最优化等价性，将条件期望转化为可学习的目标。</p>
+<p><strong>引理3.1</strong>（条件期望的最小化等价）：对于随机变量$\boldsymbol{Z}$和条件$\boldsymbol{X}$：</p>
+<p>$$
+\mathbb{E}[\boldsymbol{Z}|\boldsymbol{X}] = \arg\min_{\boldsymbol{g}(\boldsymbol{X})} \mathbb{E}\left[\|\boldsymbol{Z} - \boldsymbol{g}(\boldsymbol{X})\|^2\right] \tag{23}
+$$</p>
+<p><strong>应用到方差估计</strong>：设$\boldsymbol{Z} = (\boldsymbol{\epsilon}<em>t - \boldsymbol{\epsilon}</em>\theta(\boldsymbol{x}_t, t))^2$，$\boldsymbol{X} = \boldsymbol{x}_t$，则：</p>
+<p>$$
+\begin{aligned}
+\bar{\boldsymbol{\sigma}}_t^2(\boldsymbol{x}_t) &= \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\boldsymbol{\epsilon}_t - \boldsymbol{\epsilon}_\theta)^2\right] \\
+&= \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\arg\min_{\boldsymbol{v}(\boldsymbol{x}_t)} \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\|(\boldsymbol{\epsilon}_t - \boldsymbol{\epsilon}_\theta)^2 - \boldsymbol{v}(\boldsymbol{x}_t)\|^2\right]
+\end{aligned} \tag{24}
+$$</p>
+<p><strong>训练目标</strong>：外层取$\mathbb{E}_{\boldsymbol{x}_t \sim p(\boldsymbol{x}_t)}$，并用贝叶斯公式转换为前向过程：</p>
+<p>$$
+\begin{aligned}
+\mathcal{L}_{\text{NPR}} &= \mathbb{E}_{\boldsymbol{x}_t \sim p(\boldsymbol{x}_t)}\mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\|(\boldsymbol{\epsilon}_t - \boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t))^2 - \boldsymbol{v}_\phi(\boldsymbol{x}_t, t)\|^2\right] \\
+&= \mathbb{E}_{\boldsymbol{x}_0 \sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})}\left[\|(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t))^2 - \boldsymbol{v}_\phi(\boldsymbol{x}_t, t)\|^2\right]
+\end{aligned} \tag{25}
+$$</p>
+<p>其中$\boldsymbol{x}<em>t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\epsilon}$，$\boldsymbol{v}</em>\phi$是待学习的方差预测网络。</p>
+<p><strong>最终方差估计</strong>：</p>
+<p>$$
+\hat{\bar{\boldsymbol{\sigma}}}_t^2(\boldsymbol{x}_t) = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2} \boldsymbol{v}_\phi(\boldsymbol{x}_t, t) \tag{26}
+$$</p>
+<h4 id="33-sn-dpmsecond-moment-network">3.3 SN-DPM方法（Second-moment Network）</h4>
+<p><strong>基于完美均值假设</strong>：尽管标题强调Imperfect Mean，实验显示Perfect Mean假设的方法更有效。</p>
+<p>在完美均值假设下，从(6)出发，考虑对角元素：</p>
+<p>$$
+\bar{\boldsymbol{\sigma}}_t^2(\boldsymbol{x}_t) = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta)^2 - (\mathbb{E}[\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta])^2\right] \tag{27}
+$$</p>
+<p><strong>简化假设</strong>：假设噪声预测的偏差可忽略，即$\mathbb{E}[\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta] \approx \mathbf{0}$，则：</p>
+<p>$$
+\bar{\boldsymbol{\sigma}}_t^2(\boldsymbol{x}_t) \approx \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta)^2\right] \tag{28}
+$$</p>
+<p><strong>训练目标</strong>：直接预测二阶矩（无中心化）：</p>
+<p>$$
+\mathcal{L}_{\text{SN}} = \mathbb{E}_{\boldsymbol{x}_0 \sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})}\left[\|(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t))^2 - \boldsymbol{s}_\psi(\boldsymbol{x}_t, t)\|^2\right] \tag{29}
+$$</p>
+<p>其中$\boldsymbol{s}_\psi$是第二矩网络。</p>
+<p><strong>方差估计</strong>：</p>
+<p>$$
+\hat{\bar{\boldsymbol{\sigma}}}_t^2(\boldsymbol{x}_t) = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2} \boldsymbol{s}_\psi(\boldsymbol{x}_t, t) \tag{30}
+$$</p>
+<h4 id="34">3.4 两种方法的比较</h4>
+<p><strong>定理3.2</strong>（NPR vs SN）：</p>
+<ol>
+<li>
+<p><strong>NPR-DPM</strong>直接估计方差（有偏估计）：
+   $$
+   \text{Var}[\boldsymbol{Z}] = \mathbb{E}[\boldsymbol{Z}^2] - (\mathbb{E}[\boldsymbol{Z}])^2
+   $$
+   当用样本均值估计时，样本方差$\frac{1}{n}\sum (Z_i - \bar{Z})^2$是有偏的。</p>
+</li>
+<li>
+<p><strong>SN-DPM</strong>估计二阶矩（无偏估计）：
+   $$
+   \mathbb{E}[\boldsymbol{Z}^2]
+   $$
+   二阶矩的样本估计$\frac{1}{n}\sum Z_i^2$是无偏的。</p>
+</li>
+</ol>
+<p><strong>推论</strong>：SN-DPM在实验中表现更好，可能因为：
+- 无偏性带来更稳定的梯度
+- 避免了中心化操作引入的额外噪声</p>
+<h3 id="4">4. 完整协方差矩阵的理论分析</h3>
+<h4 id="41">4.1 完整协方差的形式</h4>
+<p>理论上，最完整的建模是使用非对角协方差矩阵：</p>
+<p>$$
+\boldsymbol{\Sigma}(\boldsymbol{x}_t) = \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t))(\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}(\boldsymbol{x}_t))^\top\right] \tag{31}
+$$</p>
+<p>从完美均值假设出发，有：</p>
+<p>$$
+\boldsymbol{\Sigma}(\boldsymbol{x}_t) = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2}\left[\boldsymbol{I} - \mathbb{E}_{\boldsymbol{x}_0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)\boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)^\top\right]\right] \tag{32}
+$$</p>
+<p>在不完美均值情况下：</p>
+<p>$$
+\begin{aligned}
+\boldsymbol{\Sigma}(\boldsymbol{x}_t) &= \mathbb{E}[(\boldsymbol{x}_0 - \mathbb{E}[\boldsymbol{x}_0])(\boldsymbol{x}_0 - \mathbb{E}[\boldsymbol{x}_0])^\top] \\
+&\quad + (\mathbb{E}[\boldsymbol{x}_0] - \bar{\boldsymbol{\mu}})(\mathbb{E}[\boldsymbol{x}_0] - \bar{\boldsymbol{\mu}})^\top
+\end{aligned} \tag{33}
+$$</p>
+<p>第一项是真实条件方差，第二项是均值偏差的外积。</p>
+<h4 id="42">4.2 维度诅咒与简化必要性</h4>
+<p><strong>计算复杂度分析</strong>：</p>
+<p>对于图像数据，设分辨率为$H \times W$，通道数为$C$，则：
+- 维度：$d = H \times W \times C$
+- 完整协方差矩阵大小：$d \times d$</p>
+<p><strong>例子</strong>：
+- CIFAR-10：$32 \times 32 \times 3 = 3072$ → 协方差矩阵：$3072^2 \approx 9.4 \times 10^6$元素
+- ImageNet (256×256)：$256 \times 256 \times 3 = 196608$ → 协方差矩阵：$\approx 3.9 \times 10^{10}$元素</p>
+<p><strong>存储需求</strong>（单精度浮点）：
+- CIFAR-10：$\approx 38$ MB
+- ImageNet：$\approx 154$ GB（单个样本！）</p>
+<p><strong>结论</strong>：完整协方差矩阵在实践中不可行，必须采用简化假设（各向同性或对角）。</p>
+<h4 id="43">4.3 低秩近似的可能性</h4>
+<p><strong>假设</strong>：协方差矩阵可以低秩分解：</p>
+<p>$$
+\boldsymbol{\Sigma}(\boldsymbol{x}_t) \approx \boldsymbol{U}\boldsymbol{\Lambda}\boldsymbol{U}^\top + \sigma_0^2\boldsymbol{I} \tag{34}
+$$</p>
+<p>其中$\boldsymbol{U} \in \mathbb{R}^{d \times r}$（$r \ll d$），$\boldsymbol{\Lambda} \in \mathbb{R}^{r \times r}$是对角矩阵。</p>
+<p><strong>参数量</strong>：$dr + r \approx dr$（当$r \ll d$时）</p>
+<p><strong>挑战</strong>：
+- 学习稳定性：低秩分解需要正定性约束
+- 采样效率：多元正态采样需要Cholesky分解或特征值分解，$O(r^3)$复杂度
+- 实验验证：目前缺乏证据表明低秩假设在扩散模型中有效</p>
+<h3 id="5">5. 两阶段训练方案</h3>
+<h4 id="51">5.1 联合训练的问题</h4>
+<p><strong>传统方案</strong>：同时训练均值网络$\boldsymbol{\epsilon}<em>\theta$和方差网络$\boldsymbol{v}</em>\phi$：</p>
+<p>$$
+\min_{\theta, \phi} \mathbb{E}\left[\|\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta(\boldsymbol{x}_t, t)\|^2 + \lambda\|(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta)^2 - \boldsymbol{v}_\phi(\boldsymbol{x}_t, t)\|^2\right] \tag{35}
+$$</p>
+<p><strong>问题</strong>：
+1. <strong>梯度干扰</strong>：$\boldsymbol{v}<em>\phi$的训练依赖于$(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}</em>\theta)^2$，但$\boldsymbol{\epsilon}_\theta$也在更新，导致目标不稳定
+2. <strong>主次颠倒</strong>：方差对生成质量的影响较小（"锦上添花"），但联合训练时可能过度关注方差优化
+3. <strong>收敛困难</strong>：Improved DDPM报告过可学习方差增加训练难度</p>
+<h4 id="52">5.2 两阶段训练策略</h4>
+<p><strong>阶段1</strong>：固定方差训练均值</p>
+<p>$$
+\min_\theta \mathbb{E}_{\boldsymbol{x}_0 \sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})}\left[\|\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\epsilon}, t)\|^2\right] \tag{36}
+$$</p>
+<p>使用固定方差（如$\beta_t$或$\frac{\bar{\beta}_{t-1}}{\bar{\beta}_t}\beta_t$）。</p>
+<p><strong>阶段2</strong>：固定均值训练方差</p>
+<p>$$
+\min_\phi \mathbb{E}_{\boldsymbol{x}_0 \sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\epsilon} \sim \mathcal{N}(\mathbf{0}, \boldsymbol{I})}\left[\|(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta^*(\boldsymbol{x}_t, t))^2 - \boldsymbol{v}_\phi(\boldsymbol{x}_t, t)\|^2\right] \tag{37}
+$$</p>
+<p>其中$\boldsymbol{\epsilon}_\theta^*$是阶段1训练好的固定模型。</p>
+<p><strong>参数共享技巧</strong>：
+- $\boldsymbol{\epsilon}<em>\theta$和$\boldsymbol{v}</em>\phi$共享主干网络（U-Net的编码器-解码器）
+- 只有最后的输出层不同：
+  - $\boldsymbol{\epsilon}<em>\theta$：输出$d$维噪声预测
+  - $\boldsymbol{v}</em>\phi$：输出$d$维方差预测</p>
+<p>$$
+\begin{aligned}
+\boldsymbol{h} &= \text{U-Net}_{\text{shared}}(\boldsymbol{x}_t, t) \\
+\boldsymbol{\epsilon}_\theta &= W_\epsilon \boldsymbol{h} + \boldsymbol{b}_\epsilon \\
+\boldsymbol{v}_\phi &= W_v \boldsymbol{h} + \boldsymbol{b}_v
+\end{aligned} \tag{38}
+$$</p>
+<h4 id="53">5.3 两阶段训练的优势</h4>
+<p><strong>定理5.1</strong>（两阶段训练的收敛性）：设$\boldsymbol{\epsilon}<em _text_stage2="\text{stage2">\theta^*$是阶段1的最优解，$\mathcal{L}</em>$是阶段2的损失，则：}</p>
+<p>$$
+\min_\phi \mathcal{L}_{\text{stage2}}(\phi | \theta^*) \leq \min_{\theta, \phi} \mathcal{L}_{\text{joint}}(\theta, \phi) \tag{39}
+$$</p>
+<p>在固定$\theta^*$的约束下。</p>
+<p><strong>证明</strong>：阶段2的优化不受均值网络更新的干扰，梯度方向更稳定：</p>
+<p>$$
+\nabla_\phi \mathcal{L}_{\text{stage2}} = \mathbb{E}\left[2\left(\boldsymbol{v}_\phi - (\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta^*)^2\right)\nabla_\phi \boldsymbol{v}_\phi\right] \tag{40}
+$$</p>
+<p>而联合训练时：</p>
+<p>$$
+\nabla_\phi \mathcal{L}_{\text{joint}} = \mathbb{E}\left[2\left(\boldsymbol{v}_\phi - (\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta)^2\right)\nabla_\phi \boldsymbol{v}_\phi\right] + \text{cross-terms} \tag{41}
+$$</p>
+<p>交叉项引入额外噪声和不稳定性。□</p>
+<p><strong>实践优势</strong>：
+1. <strong>灵活性</strong>：可以重用已训练的DDPM模型，无需从头训练
+2. <strong>效率</strong>：阶段2训练通常只需阶段1的10-20%的迭代次数
+3. <strong>稳定性</strong>：避免了联合优化的震荡问题</p>
+<h3 id="6-vs">6. 有偏vs无偏估计的深入分析</h3>
+<h4 id="61">6.1 方差估计的偏差来源</h4>
+<p>设真实方差为$\sigma^2 = \text{Var}[Z]$，样本为$Z_1, \ldots, Z_n$。</p>
+<p><strong>样本方差</strong>（有偏）：</p>
+<p>$$
+\hat{\sigma}_{\text{biased}}^2 = \frac{1}{n}\sum_{i=1}^n (Z_i - \bar{Z})^2 \tag{42}
+$$</p>
+<p><strong>期望</strong>：</p>
+<p>$$
+\mathbb{E}[\hat{\sigma}_{\text{biased}}^2] = \frac{n-1}{n}\sigma^2 \neq \sigma^2 \tag{43}
+$$</p>
+<p><strong>二阶矩估计</strong>（无偏）：</p>
+<p>$$
+\hat{m}_2 = \frac{1}{n}\sum_{i=1}^n Z_i^2 \tag{44}
+$$</p>
+<p><strong>期望</strong>：</p>
+<p>$$
+\mathbb{E}[\hat{m}_2] = \mathbb{E}[Z^2] = \sigma^2 + \mu^2 \tag{45}
+$$</p>
+<h4 id="62-npr-dpm">6.2 NPR-DPM的偏差分析</h4>
+<p>NPR-DPM估计$\bar{\boldsymbol{\sigma}}<em>t^2 = \mathbb{E}[(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}</em>\theta)^2 | \boldsymbol{x}_t]$，实际计算：</p>
+<p>$$
+\hat{\bar{\boldsymbol{\sigma}}}_t^2 = \frac{1}{K}\sum_{k=1}^K (\boldsymbol{\epsilon}_k - \boldsymbol{\epsilon}_\theta)^2 - \left(\frac{1}{K}\sum_{k=1}^K (\boldsymbol{\epsilon}_k - \boldsymbol{\epsilon}_\theta)\right)^2 \tag{46}
+$$</p>
+<p>第二项（均值的平方）引入负偏差，特别是当$K$小时。</p>
+<h4 id="63-sn-dpm">6.3 SN-DPM的无偏性</h4>
+<p>SN-DPM直接估计二阶矩：</p>
+<p>$$
+\hat{m}_2 = \frac{1}{K}\sum_{k=1}^K (\boldsymbol{\epsilon}_k - \boldsymbol{\epsilon}_\theta)^2 \tag{47}
+$$</p>
+<p>这是$\mathbb{E}[(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta)^2 | \boldsymbol{x}_t]$的无偏估计。</p>
+<p><strong>在完美均值假设下</strong>：</p>
+<p>$$
+\mathbb{E}[\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta | \boldsymbol{x}_t] = \mathbf{0} \Rightarrow \text{Var}[\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta] = \mathbb{E}[(\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta)^2] \tag{48}
+$$</p>
+<p>因此SN-DPM在完美均值下正确估计方差。</p>
+<p><strong>定理6.1</strong>（SN优于NPR的条件）：当满足以下条件时，SN-DPM优于NPR-DPM：</p>
+<ol>
+<li>完美均值假设近似成立：$|\mathbb{E}[\boldsymbol{\epsilon} - \boldsymbol{\epsilon}<em>\theta | \boldsymbol{x}_t]| \ll \text{std}[\boldsymbol{\epsilon} - \boldsymbol{\epsilon}</em>\theta | \boldsymbol{x}_t]$</li>
+<li>样本量有限：$K &lt; \infty$（实际训练中总是成立）</li>
+<li>优化稳定性优先：无偏估计提供更稳定的梯度信号</li>
+</ol>
+<h3 id="7">7. 总结与洞察</h3>
+<h4 id="71">7.1 核心贡献总结</h4>
+<ol>
+<li>
+<p><strong>不完美均值框架</strong>：
+   $$
+   \mathbb{E}[\|\boldsymbol{x}_0 - \bar{\boldsymbol{\mu}}\|^2] = \text{Var}[\boldsymbol{x}_0|\boldsymbol{x}_t] + \|\text{bias}\|^2
+   $$</p>
+</li>
+<li>
+<p><strong>最大似然方差估计</strong>：
+   $$
+   \bar{\sigma}_t^2 = \frac{\bar{\beta}_t^2}{\bar{\alpha}_t^2 d}\mathbb{E}\left[\|\boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta\|^2\right]
+   $$</p>
+</li>
+<li>
+<p><strong>条件方差学习</strong>：NPR-DPM（有偏）vs SN-DPM（无偏）</p>
+</li>
+<li>
+<p><strong>两阶段训练</strong>：分离均值和方差的学习过程</p>
+</li>
+</ol>
+<h4 id="72">7.2 理论与实践的矛盾</h4>
+<p><strong>矛盾</strong>：论文标题强调"Imperfect Mean"，但实验显示"Perfect Mean"假设的SN-DPM更优。</p>
+<p><strong>可能解释</strong>：</p>
+<ol>
+<li><strong>模型充分训练</strong>：现代扩散模型训练充分，$\bar{\boldsymbol{\mu}}$已经很准确</li>
+<li><strong>统计估计理论</strong>：无偏估计的优势在有限样本下显著</li>
+<li><strong>优化景观</strong>：SN-DPM的损失函数更平滑，更易优化</li>
+</ol>
+<h4 id="73">7.3 开放问题</h4>
+<ol>
+<li>
+<p><strong>理论差距</strong>：为何完美均值假设在实践中如此有效？是否存在某种隐式正则化？</p>
+</li>
+<li>
+<p><strong>负对数似然vs MSE</strong>：为何不直接用NLL训练方差？MSE是否有特殊的几何意义？</p>
+</li>
+<li>
+<p><strong>低秩协方差</strong>：是否存在有效的低秩分解方法，平衡表达能力和计算成本？</p>
+</li>
+<li>
+<p><strong>自适应方差</strong>：能否设计数据驱动的方法，自动决定使用标量、对角还是低秩方差？</p>
+</li>
+</ol>
+<h4 id="74">7.4 实践建议</h4>
+<p><strong>推荐方案</strong>：</p>
+<ol>
+<li><strong>标准应用</strong>：使用两阶段训练的SN-DPM，对角方差</li>
+<li><strong>快速原型</strong>：使用Analytic-DPM的解析估计（无需额外训练）</li>
+<li><strong>高质量生成</strong>：条件方差$\bar{\boldsymbol{\sigma}}_t^2(\boldsymbol{x}_t)$，但需要更多计算资源</li>
+</ol>
+<p><strong>代码框架</strong>（PyTorch伪代码）：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 阶段1：训练均值网络</span>
+<span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_epochs_stage1</span><span class="p">):</span>
+    <span class="n">x0</span> <span class="o">=</span> <span class="n">sample_data</span><span class="p">()</span>
+    <span class="n">eps</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn_like</span><span class="p">(</span><span class="n">x0</span><span class="p">)</span>
+    <span class="n">xt</span> <span class="o">=</span> <span class="n">alpha_bar_t</span> <span class="o">*</span> <span class="n">x0</span> <span class="o">+</span> <span class="n">beta_bar_t</span> <span class="o">*</span> <span class="n">eps</span>
+    <span class="n">eps_pred</span> <span class="o">=</span> <span class="n">epsilon_theta</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">mse_loss</span><span class="p">(</span><span class="n">eps_pred</span><span class="p">,</span> <span class="n">eps</span><span class="p">)</span>
+    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+    <span class="n">optimizer_stage1</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+
+<span class="c1"># 阶段2：训练方差网络（SN-DPM）</span>
+<span class="n">epsilon_theta</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>  <span class="c1"># 固定均值网络</span>
+<span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_epochs_stage2</span><span class="p">):</span>
+    <span class="n">x0</span> <span class="o">=</span> <span class="n">sample_data</span><span class="p">()</span>
+    <span class="n">eps</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn_like</span><span class="p">(</span><span class="n">x0</span><span class="p">)</span>
+    <span class="n">xt</span> <span class="o">=</span> <span class="n">alpha_bar_t</span> <span class="o">*</span> <span class="n">x0</span> <span class="o">+</span> <span class="n">beta_bar_t</span> <span class="o">*</span> <span class="n">eps</span>
+    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+        <span class="n">eps_pred</span> <span class="o">=</span> <span class="n">epsilon_theta</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span>
+    <span class="n">target</span> <span class="o">=</span> <span class="p">(</span><span class="n">eps</span> <span class="o">-</span> <span class="n">eps_pred</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span>  <span class="c1"># 二阶矩</span>
+    <span class="n">var_pred</span> <span class="o">=</span> <span class="n">variance_network</span><span class="p">(</span><span class="n">xt</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">mse_loss</span><span class="p">(</span><span class="n">var_pred</span><span class="p">,</span> <span class="n">target</span><span class="p">)</span>
+    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+    <span class="n">optimizer_stage2</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<p><strong>最终思考</strong>：Extended-Analytic-DPM是扩散模型方差估计的重要进展，尽管标题与实验结果存在微妙的不一致，但其两阶段训练框架和条件方差建模为后续工作奠定了基础。实践中，无偏的SN-DPM与两阶段训练的结合，提供了一个稳定且有效的方差学习方案。</p>
+        </div>
+    </div>
+</body>
+</html>

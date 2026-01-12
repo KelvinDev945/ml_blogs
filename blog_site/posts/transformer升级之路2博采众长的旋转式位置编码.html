@@ -1,0 +1,1759 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer升级之路：2、博采众长的旋转式位置编码</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>Transformer升级之路：2、博采众长的旋转式位置编码</h1>
+            <div class="meta">📅 最后更新: 2026-01-11 | 📄 大小: 76.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8265">https://spaces.ac.cn/archives/8265</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>上一篇文章中，我们对原始的Sinusoidal位置编码做了较为详细的推导和理解，总的感觉是Sinusoidal位置编码是一种“想要成为相对位置编码的绝对位置编码”。一般来说，绝对位置编码具有实现简单、计算速度快等优点，而相对位置编码则直接地体现了相对位置信号，跟我们的直观理解吻合，实际性能往往也更好。由此可见，如果可以通过绝对位置编码的方式实现相对位置编码，那么就是“集各家之所长”、“鱼与熊掌兼得”了。Sinusoidal位置编码隐约做到了这一点，但并不够好。</p>
+<p>本文将会介绍我们自研的Rotary Transformer（RoFormer）模型，它的主要改动是应用了笔者构思的“旋转式位置编码（Rotary Position Embedding，RoPE）”，这是一种配合Attention机制能达到“绝对位置编码的方式实现相对位置编码”的设计。而也正因为这种设计，它还是目前唯一一种可用于线性Attention的相对位置编码。</p>
+<blockquote>
+<p><strong>RoFormer：<a href="https://github.com/ZhuiyiTechnology/roformer">https://github.com/ZhuiyiTechnology/roformer</a></strong></p>
+</blockquote>
+<h2 id="_1">基本思路</h2>
+<p>在之前的文章<a href="/archives/8130">《让研究人员绞尽脑汁的Transformer位置编码》</a>中我们就简要介绍过RoPE，当时称之为“融合式”，本文则更加详细地介绍它的来源与性质。在RoPE中，我们的出发点就是“通过绝对位置编码的方式实现相对位置编码”，这样做既有理论上的优雅之处，也有实践上的实用之处，比如它可以拓展到线性Attention中就是主要因为这一点。</p>
+<p>为了达到这个目的，我们假设通过下述运算来给$\boldsymbol{q},\boldsymbol{k}$添加绝对位置信息：<br />
+\begin{equation}\tilde{\boldsymbol{q}}_m = \boldsymbol{f}(\boldsymbol{q}, m), \quad\tilde{\boldsymbol{k}}_n = \boldsymbol{f}(\boldsymbol{k}, n)\end{equation}<br />
+也就是说，我们分别为$\boldsymbol{q},\boldsymbol{k}$设计操作$\boldsymbol{f}(\cdot, m),\boldsymbol{f}(\cdot, n)$，使得经过该操作后，$\tilde{\boldsymbol{q}}_m,\tilde{\boldsymbol{k}}_n$就带有了位置$m,n$的绝对位置信息。Attention的核心运算是内积，所以我们希望的内积的结果带有相对位置信息，因此假设存在恒等关系：<br />
+\begin{equation}\langle\boldsymbol{f}(\boldsymbol{q}, m), \boldsymbol{f}(\boldsymbol{k}, n)\rangle = g(\boldsymbol{q},\boldsymbol{k},m-n)\end{equation}<br />
+所以我们要求出该恒等式的一个（尽可能简单的）解。求解过程还需要一些初始条件，显然我们可以合理地设$\boldsymbol{f}(\boldsymbol{q}, 0)=\boldsymbol{q}$和$\boldsymbol{f}(\boldsymbol{k}, 0)=\boldsymbol{k}$。</p>
+<h2 id="_2">求解过程</h2>
+<p>同上一篇思路一样，我们先考虑二维情形，然后借助复数来求解。在复数中有$\langle\boldsymbol{q},\boldsymbol{k}\rangle=\text{Re}[\boldsymbol{q}\boldsymbol{k}^<em>]$，$\text{Re}[]$代表复数的实部，所以我们有<br />
+\begin{equation}\text{Re}[\boldsymbol{f}(\boldsymbol{q}, m)\boldsymbol{f}^</em>(\boldsymbol{k}, n)] = g(\boldsymbol{q},\boldsymbol{k},m-n)\end{equation}<br />
+简单起见，我们假设存在复数$\boldsymbol{g}(\boldsymbol{q},\boldsymbol{k},m-n)$，使得$\boldsymbol{f}(\boldsymbol{q}, m)\boldsymbol{f}^*(\boldsymbol{k}, n) = \boldsymbol{g}(\boldsymbol{q},\boldsymbol{k},m-n)$，然后我们用复数的指数形式，设<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{f}(\boldsymbol{q}, m) =&amp;\, R_f (\boldsymbol{q}, m)e^{\text{i}\Theta_f(\boldsymbol{q}, m)} \\\<br />
+\boldsymbol{f}(\boldsymbol{k}, n) =&amp;\, R_f (\boldsymbol{k}, n)e^{\text{i}\Theta_f(\boldsymbol{k}, n)} \\\<br />
+\boldsymbol{g}(\boldsymbol{q}, \boldsymbol{k}, m-n) =&amp;\, R_g (\boldsymbol{q}, \boldsymbol{k}, m-n)e^{\text{i}\Theta_g(\boldsymbol{q}, \boldsymbol{k}, m-n)} \\\<br />
+\end{aligned}\end{equation}<br />
+那么代入方程后就得到方程组<br />
+\begin{equation}\begin{aligned}<br />
+R_f (\boldsymbol{q}, m) R_f (\boldsymbol{k}, n) =&amp;\, R_g (\boldsymbol{q}, \boldsymbol{k}, m-n) \\\<br />
+\Theta_f (\boldsymbol{q}, m) - \Theta_f (\boldsymbol{k}, n) =&amp;\, \Theta_g (\boldsymbol{q}, \boldsymbol{k}, m-n)<br />
+\end{aligned}\end{equation}<br />
+对于第一个方程，代入$m=n$得到<br />
+\begin{equation}R_f (\boldsymbol{q}, m) R_f (\boldsymbol{k}, m) = R_g (\boldsymbol{q}, \boldsymbol{k}, 0) = R_f (\boldsymbol{q}, 0) R_f (\boldsymbol{k}, 0) = \Vert \boldsymbol{q}\Vert \Vert \boldsymbol{k}\Vert\end{equation}<br />
+最后一个等号源于初始条件$\boldsymbol{f}(\boldsymbol{q}, 0)=\boldsymbol{q}$和$\boldsymbol{f}(\boldsymbol{k}, 0)=\boldsymbol{k}$。所以现在我们可以很简单地设$R_f (\boldsymbol{q}, m)=\Vert \boldsymbol{q}\Vert, R_f (\boldsymbol{k}, m)=\Vert \boldsymbol{k}\Vert$，即它不依赖于$m$。至于第二个方程，同样代入$m=n$得到<br />
+\begin{equation}\Theta_f (\boldsymbol{q}, m) - \Theta_f (\boldsymbol{k}, m) = \Theta_g (\boldsymbol{q}, \boldsymbol{k}, 0) = \Theta_f (\boldsymbol{q}, 0) - \Theta_f (\boldsymbol{k}, 0) = \Theta (\boldsymbol{q}) - \Theta (\boldsymbol{k})\end{equation}<br />
+这里的$\Theta (\boldsymbol{q}),\Theta (\boldsymbol{k})$是$\boldsymbol{q},\boldsymbol{k}$本身的幅角，最后一个等号同样源于初始条件。根据上式得到$\Theta_f (\boldsymbol{q}, m) - \Theta (\boldsymbol{q}) = \Theta_f (\boldsymbol{k}, m) - \Theta (\boldsymbol{k})$，所以$\Theta_f (\boldsymbol{q}, m) - \Theta (\boldsymbol{q})$应该是一个只与$m$相关、跟$\boldsymbol{q}$无关的函数，记为$\varphi(m)$，即$\Theta_f (\boldsymbol{q}, m) = \Theta (\boldsymbol{q}) + \varphi(m)$。接着代入$n=m-1$，整理得到<br />
+\begin{equation}\varphi(m) - \varphi(m-1) = \Theta_g (\boldsymbol{q}, \boldsymbol{k}, 1) + \Theta (\boldsymbol{k}) - \Theta (\boldsymbol{q})\end{equation}<br />
+即$\{\varphi(m)\}$是等差数列，设右端为$\theta$，那么就解得$\varphi(m)=m\theta$。</p>
+<h2 id="_3">编码形式</h2>
+<p>综上，我们得到二维情况下用复数表示的RoPE：<br />
+\begin{equation}<br />
+\boldsymbol{f}(\boldsymbol{q}, m) = R_f (\boldsymbol{q}, m)e^{\text{i}\Theta_f(\boldsymbol{q}, m)}<br />
+= \Vert q\Vert e^{\text{i}(\Theta(\boldsymbol{q}) + m\theta)} = \boldsymbol{q} e^{\text{i}m\theta}\end{equation}<br />
+根据复数乘法的几何意义，该变换实际上对应着向量的旋转，所以我们称之为“旋转式位置编码”，它还可以写成矩阵形式：<br />
+\begin{equation}<br />
+\boldsymbol{f}(\boldsymbol{q}, m) =\begin{pmatrix}\cos m\theta &amp; -\sin m\theta\\\ \sin m\theta &amp; \cos m\theta\end{pmatrix} \begin{pmatrix}q_0 \\\ q_1\end{pmatrix}\end{equation}<br />
+由于内积满足线性叠加性，因此任意偶数维的RoPE，我们都可以表示为二维情形的拼接，即<br />
+\begin{equation}\scriptsize{\underbrace{\begin{pmatrix}<br />
+\cos m\theta_0 &amp; -\sin m\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 \\\<br />
+\sin m\theta_0 &amp; \cos m\theta_0 &amp; 0 &amp; 0 &amp; \cdots &amp; 0 &amp; 0 \\\<br />
+0 &amp; 0 &amp; \cos m\theta_1 &amp; -\sin m\theta_1 &amp; \cdots &amp; 0 &amp; 0 \\\<br />
+0 &amp; 0 &amp; \sin m\theta_1 &amp; \cos m\theta_1 &amp; \cdots &amp; 0 &amp; 0 \\\<br />
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \ddots &amp; \vdots &amp; \vdots \\\<br />
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \cos m\theta_{d/2-1} &amp; -\sin m\theta_{d/2-1} \\\<br />
+0 &amp; 0 &amp; 0 &amp; 0 &amp; \cdots &amp; \sin m\theta_{d/2-1} &amp; \cos m\theta_{d/2-1} \\\<br />
+\end{pmatrix}}<em d-2="d-2">{\boldsymbol{\mathcal{R}}_m} \begin{pmatrix}q_0 \\\ q_1 \\\ q_2 \\\ q_3 \\\ \vdots \\\ q</em>} \\\ q_{d-1}\end{pmatrix}}\end{equation<br />
+也就是说，给位置为$m$的向量$\boldsymbol{q}$乘上矩阵$\boldsymbol{\mathcal{R}}<em n-m="n-m">m$、位置为$n$的向量$\boldsymbol{k}$乘上矩阵$\boldsymbol{\mathcal{R}}_n$，用变换后的$\boldsymbol{Q},\boldsymbol{K}$序列做Attention，那么Attention就自动包含相对位置信息了，因为成立恒等式：<br />
+\begin{equation}(\boldsymbol{\mathcal{R}}_m \boldsymbol{q})^{\top}(\boldsymbol{\mathcal{R}}_n \boldsymbol{k}) = \boldsymbol{q}^{\top} \boldsymbol{\mathcal{R}}_m^{\top}\boldsymbol{\mathcal{R}}_n \boldsymbol{k} = \boldsymbol{q}^{\top} \boldsymbol{\mathcal{R}}</em>} \boldsymbol{k}\end{equation<br />
+值得指出的是，$\boldsymbol{\mathcal{R}}_m$是一个正交矩阵，它不会改变向量的模长，因此通常来说它不会改变原模型的稳定性。</p>
+<p>由于$\boldsymbol{\mathcal{R}}<em d-2="d-2">m$的稀疏性，所以直接用矩阵乘法来实现会很浪费算力，推荐通过下述方式来实现RoPE：<br />
+\begin{equation}\begin{pmatrix}q_0 \\\ q_1 \\\ q_2 \\\ q_3 \\\ \vdots \\\ q</em>} \\\ q_{d-1<br />
+\end{pmatrix}\otimes\begin{pmatrix}\cos m\theta_0 \\\ \cos m\theta_0 \\\ \cos m\theta_1 \\\ \cos m\theta_1 \\\ \vdots \\\ \cos m\theta_{d/2-1} \\\ \cos m\theta_{d/2-1}<br />
+\end{pmatrix} + \begin{pmatrix}-q_1 \\\ q_0 \\\ -q_3 \\\ q_2 \\\ \vdots \\\ -q_{d-1} \\\ q_{d-2}<br />
+\end{pmatrix}\otimes\begin{pmatrix}\sin m\theta_0 \\\ \sin m\theta_0 \\\ \sin m\theta_1 \\\ \sin m\theta_1 \\\ \vdots \\\ \sin m\theta_{d/2-1} \\\ \sin m\theta_{d/2-1}<br />
+\end{pmatrix}\end{equation}<br />
+其中$\otimes$是逐位对应相乘，即Numpy、Tensorflow等计算框架中的$*$运算。从这个实现也可以看到，RoPE可以视为是乘性位置编码的变体。</p>
+<h2 id="_4">远程衰减</h2>
+<p>可以看到，RoPE形式上和Sinusoidal位置编码有点相似，只不过Sinusoidal位置编码是加性的，而RoPE可以视为乘性的。在$\theta_i$的选择上，我们同样沿用了Sinusoidal位置编码的方案，即$\theta_i = 10000^{-2i/d}$，它可以带来一定的远程衰减性。</p>
+<p>具体证明如下：将$\boldsymbol{q},\boldsymbol{k}$两两分组后，它们加上RoPE后的内积可以用复数乘法表示为<br />
+\begin{equation}<br />
+(\boldsymbol{\mathcal{R}}<em i="0">m \boldsymbol{q})^{\top}(\boldsymbol{\mathcal{R}}_n \boldsymbol{k}) = \text{Re}\left[\sum</em>}^{d/2-1}\boldsymbol{q<em _2i:2i_1_="[2i:2i+1]">{[2i:2i+1]}\boldsymbol{k}</em>^<em> e^{\text{i}(m-n)\theta_i}\right]\end{equation}<br />
+记$h_i = \boldsymbol{q}<em _2i:2i_1_="[2i:2i+1]">{[2i:2i+1]}\boldsymbol{k}</em>^</em>, S_j = \sum\limits_{i=0}^{j-1} e^{\text{i}(m-n)\theta_i}$，并约定$h_{d/2}=0,S_0=0$，那么由<a href="https://zh.wikipedia.org/wiki/%E5%88%86%E9%83%A8%E6%B1%82%E5%92%8C%E6%B3%95">Abel变换（分部求和法）</a>可以得到：<br />
+\begin{equation}\sum_{i=0}^{d/2-1}\boldsymbol{q}<em _2i:2i_1_="[2i:2i+1]">{[2i:2i+1]}\boldsymbol{k}</em>^<em> e^{\text{i}(m-n)\theta_i} = \sum_{i=0}^{d/2-1} h_i (S_{i<br />
++1} - S_i) = -\sum_{i=0}^{d/2-1} S_{i+1}(h_{i+1} - h_i)\end{equation}<br />
+所以<br />
+\begin{equation}\begin{aligned}<br />
+\left|\sum_{i=0}^{d/2-1}\boldsymbol{q}<em _2i:2i_1_="[2i:2i+1]">{[2i:2i+1]}\boldsymbol{k}</em>^</em> e^{\text{i}(m-n)\theta_i}\right| =&amp;\, \left|\sum_{i=0}^{d/2-1} S_{i+1}(h_{i+1} - h_i)\right| \\\<br />
+\leq&amp;\, \sum_{i=0}^{d/2-1} |S_{i+1}| |h_{i+1} - h_i| \\\<br />
+\leq&amp;\, \left(\max_i |h_{i+1} - h_i|\right)\sum_{i=0}^{d/2-1} |S_{i+1}|<br />
+\end{aligned}\end{equation}<br />
+因此我们可以考察$\frac{1}{d/2}\sum\limits_{i=1}^{d/2} |S_i|$随着相对距离的变化情况来作为衰减性的体现，Mathematica代码如下：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">128</span><span class="p">;</span>
+<span class="err">\</span><span class="o">[</span><span class="n">Theta</span><span class="o">][</span><span class="n">t_</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10000</span><span class="o">^</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="o">*</span><span class="n">t</span><span class="o">/</span><span class="n">d</span><span class="p">);</span>
+<span class="n">f</span><span class="o">[</span><span class="n">m_</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nf">Sum</span><span class="o">[</span>
+<span class="n">    Norm[Sum[Exp[I*m*\[Theta</span><span class="o">][</span><span class="n">i</span><span class="o">]</span><span class="err">]</span><span class="p">,</span><span class="w"> </span><span class="err">{</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">j</span><span class="err">}]]</span><span class="p">,</span><span class="w"> </span><span class="err">{</span><span class="n">j</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">d</span><span class="o">/</span><span class="mi">2</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="err">}]</span><span class="o">/</span><span class="p">(</span><span class="n">d</span><span class="o">/</span><span class="mi">2</span><span class="p">);</span>
+<span class="n">Plot</span><span class="o">[</span><span class="n">f[m</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="err">{</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">256</span><span class="err">}</span><span class="p">,</span><span class="w"> </span><span class="n">AxesLabel</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="err">{</span><span class="n">相对距离</span><span class="p">,</span><span class="w"> </span><span class="n">相对大小</span><span class="err">}]</span>
+</code></pre></div>
+
+<p>结果如下图：  </p>
+<p><a href="/usr/uploads/2021/03/1347893165.png" title="点击查看原图"><img alt="RoPE的远程衰减性（d=128）" src="/usr/uploads/2021/03/1347893165.png" /></a></p>
+<p>RoPE的远程衰减性（d=128）</p>
+<p>从图中我们可以可以看到随着相对距离的变大，内积结果有衰减趋势的出现。因此，选择$\theta_i = 10000^{-2i/d}$，确实能带来一定的远程衰减性。当然，同上一篇文章说的一样，能带来远程衰减性的不止这个选择，几乎任意的光滑单调函数都可以，这里只是沿用了已有的选择而已。笔者还试过以$\theta_i = 10000^{-2i/d}$为初始化，将$\theta_i$视为可训练参数，然后训练一段时间后发现$\theta_i$并没有显著更新，因此干脆就直接固定$\theta_i = 10000^{-2i/d}$了。</p>
+<h2 id="_5">线性场景</h2>
+<p>最后，我们指出，RoPE是目前唯一一种可以用于线性Attention的相对位置编码。这是因为其他的相对位置编码，都是直接基于Attention矩阵进行操作的，但是线性Attention并没有事先算出Attention矩阵，因此也就不存在操作Attention矩阵的做法，所以其他的方案无法应用到线性Attention中。而对于RoPE来说，它是用绝对位置编码的方式来实现相对位置编码，不需要操作Attention矩阵，因此有了应用到线性Attention的可能性。</p>
+<p>关于线性Attention的介绍，这里不再重复，有需要的读者请参考<a href="/archives/7546">《线性Attention的探索：Attention必须有个Softmax吗？》</a>。线性Attention的常见形式是：<br />
+\begin{equation}Attention(\boldsymbol{Q},\boldsymbol{K},\boldsymbol{V})<em j="1">i = \frac{\sum\limits</em>}^n \text{sim}(\boldsymbol{q<em j="1">i, \boldsymbol{k}_j)\boldsymbol{v}_j}{\sum\limits</em>}^n \text{sim}(\boldsymbol{q<em j="1">i, \boldsymbol{k}_j)} = \frac{\sum\limits</em>}^n \phi(\boldsymbol{q<em j="1">i)^{\top} \varphi(\boldsymbol{k}_j)\boldsymbol{v}_j}{\sum\limits</em>}^n \phi(\boldsymbol{q<em j="1">i)^{\top} \varphi(\boldsymbol{k}_j)}\end{equation}<br />
+其中$\phi,\varphi$是值域非负的激活函数。可以看到，线性Attention也是基于内积的，所以很自然的想法是可以将RoPE插入到内积中：<br />
+\begin{equation}\frac{\sum\limits</em>}^n [\boldsymbol{\mathcal{R}<em j="1">i\phi(\boldsymbol{q}_i)]^{\top} [\boldsymbol{\mathcal{R}}_j\varphi(\boldsymbol{k}_j)]\boldsymbol{v}_j}{\sum\limits</em>}^n [\boldsymbol{\mathcal{R}<em j="1">i\phi(\boldsymbol{q}_i)]^{\top} [\boldsymbol{\mathcal{R}}_j\varphi(\boldsymbol{k}_j)]}\end{equation}<br />
+但这样存在的问题是，内积$[\boldsymbol{\mathcal{R}}_i\phi(\boldsymbol{q}_i)]^{\top} [\boldsymbol{\mathcal{R}}_j\varphi(\boldsymbol{k}_j)]$可能为负数，因此它不再是常规的概率注意力，而且分母有为0的风险，可能会带来优化上的不稳定。考虑到$\boldsymbol{\mathcal{R}}_i,\boldsymbol{\mathcal{R}}_j$都是正交矩阵，它不改变向量的模长，因此我们可以抛弃常规的概率归一化要求，使用如下运算作为一种新的线性Attention：<br />
+\begin{equation}\frac{\sum\limits</em>}^n [\boldsymbol{\mathcal{R}<em j="1">i\phi(\boldsymbol{q}_i)]^{\top} [\boldsymbol{\mathcal{R}}_j\varphi(\boldsymbol{k}_j)]\boldsymbol{v}_j}{\sum\limits</em>}^n \phi(\boldsymbol{q}_i)^{\top} \varphi(\boldsymbol{k}_j)}\end{equation<br />
+也就是说，RoPE只插入分子中，而分母则不改变，这样的注意力不再是基于概率的（注意力矩阵不再满足非负归一性），但它某种意义上来说也是一个归一化方案，而且也没有证据表明非概率式的注意力就不好（比如<a href="/archives/8180">Nyströmformer</a>也算是没有严格依据概率分布的方式构建注意力），所以我们将它作为候选方案之一进行实验，而我们初步的实验结果显示这样的线性Attention也是有效的。</p>
+<p>此外，笔者在<a href="/archives/7546">《线性Attention的探索：Attention必须有个Softmax吗？》</a>中还提出过另外一种线性Attention方案：$\text{sim}(\boldsymbol{q}_i, \boldsymbol{k}_j) = 1 + \left( \frac{\boldsymbol{q}_i}{\Vert \boldsymbol{q}_i\Vert}\right)^{\top}\left(\frac{\boldsymbol{k}_j}{\Vert \boldsymbol{k}_j\Vert}\right)$，它不依赖于值域的非负性，而RoPE也不改变模长，因此RoPE可以直接应用于此类线性Attention，并且不改变它的概率意义。</p>
+<h2 id="_6">模型开源</h2>
+<p>RoFormer的第一版模型，我们已经完成训练并开源到了Github中：</p>
+<blockquote>
+<p><strong>RoFormer：<a href="https://github.com/ZhuiyiTechnology/roformer">https://github.com/ZhuiyiTechnology/roformer</a></strong></p>
+</blockquote>
+<p>简单来说，RoFormer是一个绝对位置编码替换为RoPE的<a href="https://github.com/ZhuiyiTechnology/WoBERT">WoBERT</a>模型，它跟其他模型的结构对比如下：<br />
+\begin{array}{c|cccc}<br />
+\hline<br />
+&amp; \text{BERT} &amp; \text{WoBERT} &amp; \text{NEZHA} &amp; \text{RoFormer} \\\<br />
+\hline<br />
+\text{token单位} &amp; \text{字} &amp; \text{词} &amp; \text{字} &amp; \text{词} &amp; \\\<br />
+\text{位置编码} &amp; \text{绝对位置} &amp; \text{绝对位置} &amp; \text{经典式相对位置} &amp; \text{RoPE}\\\<br />
+\hline<br />
+\end{array}<br />
+在预训练上，我们以WoBERT Plus为基础，采用了多个长度和batch size交替训练的方式，让模型能提前适应不同的训练场景：<br />
+\begin{array}{c|ccccc}<br />
+\hline<br />
+&amp; \text{maxlen} &amp; \text{batch size} &amp; \text{训练步数} &amp; \text{最终loss} &amp; \text{最终acc}\\\<br />
+\hline<br />
+1 &amp; 512 &amp; 256 &amp; 20\text{万} &amp; 1.73 &amp; 65.0\%\\\<br />
+2 &amp; 1536 &amp; 256 &amp; 1.25\text{万} &amp; 1.61 &amp; 66.8\%\\\<br />
+3 &amp; 256 &amp; 256 &amp; 12\text{万} &amp; 1.75 &amp; 64.6\%\\\<br />
+4 &amp; 128 &amp; 512 &amp; 8\text{万} &amp; 1.83 &amp; 63.4\%\\\<br />
+5 &amp; 1536 &amp; 256 &amp; 1\text{万} &amp; 1.58 &amp; 67.4\%\\\<br />
+6 &amp; 512 &amp; 512 &amp; 3\text{万} &amp; 1.66 &amp; 66.2\%\\\<br />
+\hline<br />
+\end{array}<br />
+从表格还可以看到，增大序列长度，预训练的准确率反而有所提升，这侧面体现了RoFormer长文本语义的处理效果，也体现了RoPE具有良好的外推能力。在短文本任务上，RoFormer与WoBERT的表现类似，RoFormer的主要特点是可以直接处理任意长的文本。下面是我们在<a href="https://papers.cool/arxiv/1911.08962">CAIL2019-SCM</a>任务上的实验结果：<br />
+\begin{array}{c|cc}<br />
+\hline<br />
+&amp; \text{验证集} &amp; \text{测试集} \\\<br />
+\hline<br />
+\text{BERT-512} &amp; 64.13\% &amp; 67.77\% \\\<br />
+\text{WoBERT-512} &amp; 64.07\% &amp; 68.10\% \\\<br />
+\text{RoFormer-512} &amp; 64.13\% &amp; 68.29\% \\\<br />
+\text{RoFormer-1024} &amp; \textbf{66.07%} &amp; \textbf{69.79%} \\\<br />
+\hline<br />
+\end{array}<br />
+其中$\text{-}$后面的参数是微调时截断的maxlen，可以看到RoFormer确实能较好地处理长文本语义，至于设备要求，在24G显存的卡上跑maxlen=1024，batch_size可以跑到8以上。目前中文任务中笔者也就找到这个任务比较适合作为长文本能力的测试，所以长文本方面只测了这个任务，欢迎读者进行测试或推荐其他评测任务。</p>
+<p>当然，尽管理论上RoFormer能处理任意长度的序列，但目前RoFormer还是具有平方复杂度的，我们也正在训练基于线性Attention的RoFormer模型，实验完成后也会开源放出，请大家期待。</p>
+<p>（注：RoPE和RoFormer已经整理成文<a href="https://papers.cool/arxiv/2104.09864">《RoFormer: Enhanced Transformer with Rotary Position Embedding》</a>提交到了Arxiv，欢迎使用和引用哈哈～）</p>
+<h2 id="_7">文章小结</h2>
+<p>本文介绍了我们自研的旋转式位置编码RoPE以及对应的预训练模型RoFormer。从理论上来看，RoPE与Sinusoidal位置编码有些相通之处，但RoPE不依赖于泰勒展开，更具严谨性与可解释性；从预训练模型RoFormer的结果来看，RoPE具有良好的外推性，应用到Transformer中体现出较好的处理长文本的能力。此外，RoPE还是目前唯一一种可用于线性Attention的相对位置编码。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8265">https://spaces.ac.cn/archives/8265</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Mar. 23, 2021). 《Transformer升级之路：2、博采众长的旋转式位置编码 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8265">https://spaces.ac.cn/archives/8265</a></p>
+<p>@online{kexuefm-8265,<br />
+title={Transformer升级之路：2、博采众长的旋转式位置编码},<br />
+author={苏剑林},<br />
+year={2021},<br />
+month={Mar},<br />
+url={\url{https://spaces.ac.cn/archives/8265}},<br />
+} </p>
+<hr />
+<h2 id="1">📐 第1部分：理论基础与历史发展</h2>
+<h3 id="11">1.1 位置编码的演化史</h3>
+<p>Transformer模型自2017年诞生以来，位置编码一直是其核心组成部分之一。让我们回顾位置编码的演化历程：</p>
+<p><strong>第一代：绝对位置编码</strong>
+- <strong>Learned Positional Embedding</strong>（Transformer原论文）：为每个位置学习一个独立的向量
+  - 优点：灵活，模型可以自由学习位置表示
+  - 缺点：无法处理超出训练长度的序列，参数量大（$O(L \times d)$，$L$为最大序列长度）
+- <strong>Sinusoidal Positional Encoding</strong>（也在Transformer原论文中提出）：使用正弦余弦函数编码位置
+  - 优点：参数量为0，理论上可以外推到任意长度
+  - 缺点：仅是"想要成为相对位置编码"，实际上并未显式建模相对位置</p>
+<p><strong>第二代：显式相对位置编码</strong>
+- <strong>T5 Relative PE</strong>（Raffel et al., 2019）：直接在Attention矩阵中加入相对位置偏置
+  - 形式：$\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}} + B\right)V$
+  - 其中$B_{ij}$只依赖于$i-j$（相对位置）
+  - 优点：直接建模相对位置，性能优秀
+  - 缺点：需要存储$O(L)$个相对位置偏置，无法用于线性Attention
+- <strong>ALiBi</strong>（Press et al., 2021）：线性衰减的相对位置偏置
+  - 形式：$\text{score}(q_i, k_j) = q_i^T k_j - \lambda \cdot |i - j|$
+  - 优点：极简，外推性好
+  - 缺点：仍需操作Attention矩阵，无法用于线性Attention</p>
+<p><strong>第三代：RoPE（本文方法）</strong>
+- <strong>核心思想</strong>：通过绝对位置编码的<strong>方式</strong>实现相对位置编码的<strong>效果</strong>
+- <strong>关键创新</strong>：编码作用于$Q, K$向量本身，而非Attention矩阵
+- <strong>独特优势</strong>：
+  1. 理论严谨：无需泰勒展开等近似假设
+  2. 外推性强：自然支持任意长度序列
+  3. 线性兼容：唯一可用于线性Attention的相对位置编码
+  4. 计算高效：不改变Attention的计算复杂度</p>
+<h3 id="12-rope">1.2 RoPE的设计哲学</h3>
+<p>RoPE的核心思想可以用一句话概括：<strong>以绝对之形，达相对之实</strong>。</p>
+<p><strong>设计原则1：相对位置的涌现性</strong></p>
+<p>我们希望Attention内积自动包含相对位置信息：
+\begin{equation}
+\langle \tilde{\boldsymbol{q}}_m, \tilde{\boldsymbol{k}}_n \rangle = g(\boldsymbol{q}, \boldsymbol{k}, m-n)
+\end{equation}</p>
+<p>这里$\tilde{\boldsymbol{q}}_m, \tilde{\boldsymbol{k}}_n$是添加了位置$m, n$信息的查询和键向量。注意右侧<strong>只依赖于相对位置$m-n$</strong>，而非绝对位置$m, n$。</p>
+<p><strong>为什么这个设计是优雅的？</strong></p>
+<ol>
+<li><strong>操作在向量层面</strong>：位置编码通过变换$\boldsymbol{q}, \boldsymbol{k}$实现，无需修改Attention矩阵</li>
+<li><strong>相对位置自动涌现</strong>：内积结果天然只依赖$m-n$，无需人工设计相对位置计算</li>
+<li><strong>保持线性性</strong>：内积的线性性得以保留，可以应用于线性Attention</li>
+</ol>
+<p><strong>设计原则2：正交性保持</strong></p>
+<p>位置编码变换应该是正交的，即：
+\begin{equation}
+|\tilde{\boldsymbol{q}}_m| = |\boldsymbol{q}|, \quad |\tilde{\boldsymbol{k}}_n| = |\boldsymbol{k}|
+\end{equation}</p>
+<p><strong>为什么正交性重要？</strong></p>
+<ol>
+<li><strong>稳定性</strong>：不改变向量的模长，保持模型训练的稳定性</li>
+<li><strong>信息保留</strong>：位置编码是信息的重新组织，而非压缩或放大</li>
+<li><strong>梯度流动</strong>：正交变换的雅可比矩阵行列式为1，梯度传播更稳定</li>
+</ol>
+<p><strong>设计原则3：远程衰减性</strong></p>
+<p>随着相对距离$|m-n|$增大，内积结果应该趋向于衰减：
+\begin{equation}
+|\langle \tilde{\boldsymbol{q}}_m, \tilde{\boldsymbol{k}}_n \rangle| \xrightarrow{|m-n| \to \infty} \text{较小值}
+\end{equation}</p>
+<p><strong>为什么需要远程衰减？</strong></p>
+<ol>
+<li><strong>局部性先验</strong>：自然语言具有局部性，距离远的词语相关性通常较弱</li>
+<li><strong>注意力聚焦</strong>：帮助模型将注意力集中在相关的局部区域</li>
+<li><strong>长序列稳定性</strong>：避免长距离依赖的梯度爆炸</li>
+</ol>
+<h3 id="13-sinusoidalrope">1.3 从Sinusoidal到RoPE的跨越</h3>
+<p>Sinusoidal位置编码的核心公式：
+\begin{equation}
+PE_{(pos, 2i)} = \sin(pos / 10000^{2i/d}), \quad PE_{(pos, 2i+1)} = \cos(pos / 10000^{2i/d})
+\end{equation}</p>
+<p>然后<strong>加到</strong>输入向量上：$\boldsymbol{x}<em pos="pos">{pos} \leftarrow \boldsymbol{x}</em>$。} + PE_{pos</p>
+<p><strong>Sinusoidal的不足</strong>：
+1. <strong>近似性</strong>：声称通过泰勒展开可以表达相对位置，但仅在$|\boldsymbol{q}|, |\boldsymbol{k}| \ll 1$时成立
+2. <strong>加性结构</strong>：$PE$与内容向量直接相加，破坏了原始语义空间
+3. <strong>外推性有限</strong>：实践中超出训练长度后性能下降明显</p>
+<p><strong>RoPE的改进</strong>：
+1. <strong>严谨性</strong>：通过旋转变换精确实现相对位置，无需近似
+2. <strong>乘性结构</strong>：旋转矩阵$\boldsymbol{\mathcal{R}}_m$作用于向量，保持语义空间的几何结构
+3. <strong>外推性强</strong>：理论上支持任意长度，实践验证外推性能优异</p>
+<h3 id="14">1.4 核心数学框架</h3>
+<p>RoPE的数学框架建立在以下公理基础上：</p>
+<p><strong>公理1（位置编码的函数形式）</strong>：存在函数$\boldsymbol{f}$，使得
+\begin{equation}
+\tilde{\boldsymbol{q}}_m = \boldsymbol{f}(\boldsymbol{q}, m), \quad \tilde{\boldsymbol{k}}_n = \boldsymbol{f}(\boldsymbol{k}, n)
+\end{equation}</p>
+<p><strong>公理2（相对位置约束）</strong>：内积结果仅依赖相对位置
+\begin{equation}
+\langle \boldsymbol{f}(\boldsymbol{q}, m), \boldsymbol{f}(\boldsymbol{k}, n) \rangle = g(\boldsymbol{q}, \boldsymbol{k}, m-n)
+\end{equation}</p>
+<p><strong>公理3（初始条件）</strong>：位置0对应恒等变换
+\begin{equation}
+\boldsymbol{f}(\boldsymbol{q}, 0) = \boldsymbol{q}, \quad \boldsymbol{f}(\boldsymbol{k}, 0) = \boldsymbol{k}
+\end{equation}</p>
+<p>从这三个公理出发，我们将在第2部分推导出RoPE的唯一形式。</p>
+<h3 id="15-rope">1.5 RoPE与其他方法的本质区别</h3>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>编码位置</th>
+<th>相对位置</th>
+<th>线性Attention</th>
+<th>外推性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Learned PE</td>
+<td>输入层加性</td>
+<td>✗</td>
+<td>✓</td>
+<td>✗</td>
+</tr>
+<tr>
+<td>Sinusoidal PE</td>
+<td>输入层加性</td>
+<td>近似</td>
+<td>✓</td>
+<td>中等</td>
+</tr>
+<tr>
+<td>T5 RPE</td>
+<td>Attention矩阵</td>
+<td>✓</td>
+<td>✗</td>
+<td>中等</td>
+</tr>
+<tr>
+<td>ALiBi</td>
+<td>Attention矩阵</td>
+<td>✓</td>
+<td>✗</td>
+<td>✓</td>
+</tr>
+<tr>
+<td><strong>RoPE</strong></td>
+<td><strong>Q/K乘性</strong></td>
+<td><strong>✓</strong></td>
+<td><strong>✓</strong></td>
+<td><strong>✓</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键洞察</strong>：
+- 传统相对位置编码（T5, ALiBi）操作Attention矩阵，无法用于线性Attention
+- RoPE操作$Q, K$向量，保持了内积结构，天然兼容线性Attention
+- 这是RoPE相比其他方法的<strong>根本优势</strong></p>
+<hr />
+<h2 id="2">🔬 第2部分：数学推导与严格证明</h2>
+<h3 id="21">2.1 二维情况下的完整推导</h3>
+<p>我们先考虑最简单的二维情况（$d=2$），利用复数方法求解。</p>
+<h4 id="211">2.1.1 复数表示</h4>
+<p>在二维空间中，向量$\boldsymbol{q} = (q_0, q_1)^T$可以表示为复数：
+\begin{equation}
+\boldsymbol{q} \leftrightarrow q_0 + \mathrm{i} q_1
+\end{equation}</p>
+<p>内积可以用复数乘法表示：
+\begin{equation}
+\langle \boldsymbol{q}, \boldsymbol{k} \rangle = q_0 k_0 + q_1 k_1 = \text{Re}[\boldsymbol{q} \cdot \boldsymbol{k}^<em>]
+\end{equation}
+其中$\boldsymbol{k}^</em> = k_0 - \mathrm{i} k_1$是复共轭，$\text{Re}[\cdot]$取实部。</p>
+<h4 id="212">2.1.2 公理转化为复数方程</h4>
+<p>将公理2用复数形式改写：
+\begin{equation}
+\text{Re}[\boldsymbol{f}(\boldsymbol{q}, m) \cdot \boldsymbol{f}^*(\boldsymbol{k}, n)] = g(\boldsymbol{q}, \boldsymbol{k}, m-n)
+\end{equation}</p>
+<p>简化假设：存在复函数$\boldsymbol{g}$，使得
+\begin{equation}
+\boldsymbol{f}(\boldsymbol{q}, m) \cdot \boldsymbol{f}^*(\boldsymbol{k}, n) = \boldsymbol{g}(\boldsymbol{q}, \boldsymbol{k}, m-n)
+\end{equation}
+则$g = \text{Re}[\boldsymbol{g}]$。</p>
+<h4 id="213">2.1.3 极坐标分解</h4>
+<p>用复数的极坐标形式（欧拉公式）：
+\begin{equation}
+z = r e^{\mathrm{i}\theta} = r(\cos\theta + \mathrm{i}\sin\theta)
+\end{equation}</p>
+<p>设：
+\begin{align}
+\boldsymbol{f}(\boldsymbol{q}, m) &amp;= R_f(\boldsymbol{q}, m) e^{\mathrm{i}\Theta_f(\boldsymbol{q}, m)} \
+\boldsymbol{f}(\boldsymbol{k}, n) &amp;= R_f(\boldsymbol{k}, n) e^{\mathrm{i}\Theta_f(\boldsymbol{k}, n)} \
+\boldsymbol{g}(\boldsymbol{q}, \boldsymbol{k}, m-n) &amp;= R_g(\boldsymbol{q}, \boldsymbol{k}, m-n) e^{\mathrm{i}\Theta_g(\boldsymbol{q}, \boldsymbol{k}, m-n)}
+\end{align}</p>
+<p>这里$R$是模（非负实数），$\Theta$是幅角（实数）。</p>
+<h4 id="214">2.1.4 分离模和幅角</h4>
+<p>代入主方程：
+\begin{equation}
+R_f(\boldsymbol{q}, m) e^{\mathrm{i}\Theta_f(\boldsymbol{q}, m)} \cdot R_f(\boldsymbol{k}, n) e^{-\mathrm{i}\Theta_f(\boldsymbol{k}, n)} = R_g(\boldsymbol{q}, \boldsymbol{k}, m-n) e^{\mathrm{i}\Theta_g(\boldsymbol{q}, \boldsymbol{k}, m-n)}
+\end{equation}</p>
+<p>利用$e^{\mathrm{i}a} \cdot e^{\mathrm{i}b} = e^{\mathrm{i}(a+b)}$，得到：
+\begin{equation}
+R_f(\boldsymbol{q}, m) R_f(\boldsymbol{k}, n) e^{\mathrm{i}[\Theta_f(\boldsymbol{q}, m) - \Theta_f(\boldsymbol{k}, n)]} = R_g(\boldsymbol{q}, \boldsymbol{k}, m-n) e^{\mathrm{i}\Theta_g(\boldsymbol{q}, \boldsymbol{k}, m-n)}
+\end{equation}</p>
+<p>复数相等当且仅当模和幅角分别相等：
+\begin{align}
+R_f(\boldsymbol{q}, m) R_f(\boldsymbol{k}, n) &amp;= R_g(\boldsymbol{q}, \boldsymbol{k}, m-n) \tag{模方程} \
+\Theta_f(\boldsymbol{q}, m) - \Theta_f(\boldsymbol{k}, n) &amp;= \Theta_g(\boldsymbol{q}, \boldsymbol{k}, m-n) \tag{幅角方程}
+\end{align}</p>
+<h4 id="215">2.1.5 求解模方程</h4>
+<p>在模方程中令$m = n$：
+\begin{equation}
+R_f(\boldsymbol{q}, m) R_f(\boldsymbol{k}, m) = R_g(\boldsymbol{q}, \boldsymbol{k}, 0)
+\end{equation}</p>
+<p>利用初始条件$\boldsymbol{f}(\boldsymbol{q}, 0) = \boldsymbol{q}$，有：
+\begin{equation}
+R_f(\boldsymbol{q}, 0) = |\boldsymbol{q}| = |\boldsymbol{q}|, \quad R_f(\boldsymbol{k}, 0) = |\boldsymbol{k}|
+\end{equation}</p>
+<p>所以：
+\begin{equation}
+R_g(\boldsymbol{q}, \boldsymbol{k}, 0) = R_f(\boldsymbol{q}, 0) R_f(\boldsymbol{k}, 0) = |\boldsymbol{q}| |\boldsymbol{k}|
+\end{equation}</p>
+<p>现在考虑一般的$m$。一个简单的解是：
+\begin{equation}
+R_f(\boldsymbol{q}, m) = |\boldsymbol{q}|, \quad R_f(\boldsymbol{k}, m) = |\boldsymbol{k}|
+\end{equation}
+即<strong>模与位置$m$无关</strong>。验证：
+\begin{equation}
+R_f(\boldsymbol{q}, m) R_f(\boldsymbol{k}, n) = |\boldsymbol{q}| |\boldsymbol{k}| = R_g(\boldsymbol{q}, \boldsymbol{k}, 0) = R_g(\boldsymbol{q}, \boldsymbol{k}, m-n)
+\end{equation}
+最后一步利用了$R_g$只依赖$m-n$。当$m = n$时成立，推广到一般情况需要$R_g$确实只依赖$m-n$（这是我们的假设）。</p>
+<p><strong>几何意义</strong>：位置编码只改变向量的<strong>方向</strong>（相位），不改变<strong>长度</strong>（模）。这正是旋转变换的特征！</p>
+<h4 id="216">2.1.6 求解幅角方程</h4>
+<p>在幅角方程中令$m = n$：
+\begin{equation}
+\Theta_f(\boldsymbol{q}, m) - \Theta_f(\boldsymbol{k}, m) = \Theta_g(\boldsymbol{q}, \boldsymbol{k}, 0)
+\end{equation}</p>
+<p>利用初始条件：
+\begin{equation}
+\boldsymbol{f}(\boldsymbol{q}, 0) = \boldsymbol{q} = |\boldsymbol{q}| e^{\mathrm{i}\Theta(\boldsymbol{q})}
+\end{equation}
+其中$\Theta(\boldsymbol{q})$是$\boldsymbol{q}$本身的幅角。所以：
+\begin{equation}
+\Theta_f(\boldsymbol{q}, 0) = \Theta(\boldsymbol{q}), \quad \Theta_f(\boldsymbol{k}, 0) = \Theta(\boldsymbol{k})
+\end{equation}</p>
+<p>从而：
+\begin{equation}
+\Theta_g(\boldsymbol{q}, \boldsymbol{k}, 0) = \Theta_f(\boldsymbol{q}, 0) - \Theta_f(\boldsymbol{k}, 0) = \Theta(\boldsymbol{q}) - \Theta(\boldsymbol{k})
+\end{equation}</p>
+<p>回到一般的$m$，有：
+\begin{equation}
+\Theta_f(\boldsymbol{q}, m) - \Theta_f(\boldsymbol{k}, m) = \Theta(\boldsymbol{q}) - \Theta(\boldsymbol{k})
+\end{equation}</p>
+<p>整理得：
+\begin{equation}
+\Theta_f(\boldsymbol{q}, m) - \Theta(\boldsymbol{q}) = \Theta_f(\boldsymbol{k}, m) - \Theta(\boldsymbol{k})
+\end{equation}</p>
+<p><strong>关键观察</strong>：左边只依赖$\boldsymbol{q}, m$，右边只依赖$\boldsymbol{k}, m$。两者相等意味着它们都等于某个<strong>只依赖$m$</strong>的函数$\varphi(m)$：
+\begin{equation}
+\Theta_f(\boldsymbol{q}, m) = \Theta(\boldsymbol{q}) + \varphi(m)
+\end{equation}</p>
+<h4 id="217-varphim">2.1.7 确定$\varphi(m)$的形式</h4>
+<p>在原幅角方程中代入上式：
+\begin{equation}
+[\Theta(\boldsymbol{q}) + \varphi(m)] - [\Theta(\boldsymbol{k}) + \varphi(n)] = \Theta_g(\boldsymbol{q}, \boldsymbol{k}, m-n)
+\end{equation}</p>
+<p>简化：
+\begin{equation}
+\varphi(m) - \varphi(n) = \Theta_g(\boldsymbol{q}, \boldsymbol{k}, m-n) - [\Theta(\boldsymbol{q}) - \Theta(\boldsymbol{k})]
+\end{equation}</p>
+<p>令$n = m - 1$（相邻位置）：
+\begin{equation}
+\varphi(m) - \varphi(m-1) = \Theta_g(\boldsymbol{q}, \boldsymbol{k}, 1) - [\Theta(\boldsymbol{q}) - \Theta(\boldsymbol{k})]
+\end{equation}</p>
+<p>右侧与$m$无关！记为常数$\theta$：
+\begin{equation}
+\varphi(m) - \varphi(m-1) = \theta
+\end{equation}</p>
+<p>这是<strong>等差数列</strong>的递推关系。利用初始条件$\varphi(0) = 0$（因为$\Theta_f(\boldsymbol{q}, 0) = \Theta(\boldsymbol{q})$），解得：
+\begin{equation}
+\varphi(m) = m\theta
+\end{equation}</p>
+<h4 id="218-rope">2.1.8 二维RoPE的最终形式</h4>
+<p>综合模和幅角的结果：
+\begin{align}
+\boldsymbol{f}(\boldsymbol{q}, m) &amp;= R_f(\boldsymbol{q}, m) e^{\mathrm{i}\Theta_f(\boldsymbol{q}, m)} \
+&amp;= |\boldsymbol{q}| e^{\mathrm{i}[\Theta(\boldsymbol{q}) + m\theta]} \
+&amp;= |\boldsymbol{q}| e^{\mathrm{i}\Theta(\boldsymbol{q})} \cdot e^{\mathrm{i}m\theta} \
+&amp;= \boldsymbol{q} \cdot e^{\mathrm{i}m\theta}
+\end{align}</p>
+<p>用复数乘法的几何意义，$e^{\mathrm{i}m\theta}$对应逆时针旋转$m\theta$角度。用矩阵形式表示：
+\begin{equation}
+\boldsymbol{f}(\boldsymbol{q}, m) = \begin{pmatrix} \cos m\theta &amp; -\sin m\theta \ \sin m\theta &amp; \cos m\theta \end{pmatrix} \begin{pmatrix} q_0 \ q_1 \end{pmatrix}
+\end{equation}</p>
+<p>这就是<strong>二维旋转矩阵</strong>！记为$\boldsymbol{\mathcal{R}}_m^{(2D)}$。</p>
+<h4 id="219">2.1.9 验证相对位置性质</h4>
+<p>\begin{align}
+\langle \boldsymbol{f}(\boldsymbol{q}, m), \boldsymbol{f}(\boldsymbol{k}, n) \rangle &amp;= \text{Re}[\boldsymbol{q} e^{\mathrm{i}m\theta} \cdot (\boldsymbol{k} e^{\mathrm{i}n\theta})^<em>] \
+&amp;= \text{Re}[\boldsymbol{q} e^{\mathrm{i}m\theta} \cdot \boldsymbol{k}^</em> e^{-\mathrm{i}n\theta}] \
+&amp;= \text{Re}[\boldsymbol{q} \boldsymbol{k}^* \cdot e^{\mathrm{i}(m-n)\theta}] \
+&amp;= g(\boldsymbol{q}, \boldsymbol{k}, m-n)
+\end{align}</p>
+<p>确实只依赖相对位置$m-n$！✓</p>
+<h3 id="22">2.2 高维推广：块对角结构</h3>
+<h4 id="221">2.2.1 维度配对策略</h4>
+<p>对于$d$维向量（假设$d$为偶数），我们将其分成$d/2$对：
+\begin{equation}
+\boldsymbol{q} = \begin{pmatrix} q_0 \ q_1 \ q_2 \ q_3 \ \vdots \ q_{d-2} \ q_{d-1} \end{pmatrix} \rightarrow \begin{pmatrix} (q_0, q_1) \ (q_2, q_3) \ \vdots \ (q_{d-2}, q_{d-1}) \end{pmatrix}
+\end{equation}</p>
+<p>每一对$(q_{2i}, q_{2i+1})$作为一个二维向量，应用二维RoPE。</p>
+<h4 id="222">2.2.2 多频率设计</h4>
+<p>不同的维度对使用不同的旋转频率$\theta_i$（$i = 0, 1, \ldots, d/2-1$）：
+\begin{equation}
+\theta_i = \theta_{\text{base}}^{-2i/d}
+\end{equation}</p>
+<p>原文选择$\theta_{\text{base}} = 10000$，即$\theta_i = 10000^{-2i/d}$。</p>
+<p><strong>多频率的意义</strong>：
+- <strong>低频</strong>（$i$小）：捕捉长距离依赖，旋转慢
+- <strong>高频</strong>（$i$大）：捕捉短距离依赖，旋转快
+- 类似傅里叶级数的多尺度表示</p>
+<h4 id="223">2.2.3 块对角旋转矩阵</h4>
+<p>高维RoPE矩阵$\boldsymbol{\mathcal{R}}_m \in \mathbb{R}^{d \times d}$具有块对角结构：
+\begin{equation}
+\boldsymbol{\mathcal{R}}_m = \begin{pmatrix}
+\boldsymbol{\mathcal{R}}_m^{(0)} &amp; &amp; &amp; \
+&amp; \boldsymbol{\mathcal{R}}_m^{(1)} &amp; &amp; \
+&amp; &amp; \ddots &amp; \
+&amp; &amp; &amp; \boldsymbol{\mathcal{R}}_m^{(d/2-1)}
+\end{pmatrix}
+\end{equation}</p>
+<p>其中每个块是二维旋转矩阵：
+\begin{equation}
+\boldsymbol{\mathcal{R}}_m^{(i)} = \begin{pmatrix}
+\cos m\theta_i &amp; -\sin m\theta_i \
+\sin m\theta_i &amp; \cos m\theta_i
+\end{pmatrix}
+\end{equation}</p>
+<p>展开为稀疏矩阵：
+\begin{equation}
+\boldsymbol{\mathcal{R}}_m = \begin{pmatrix}
+\cos m\theta_0 &amp; -\sin m\theta_0 &amp; 0 &amp; 0 &amp; \cdots \
+\sin m\theta_0 &amp; \cos m\theta_0 &amp; 0 &amp; 0 &amp; \cdots \
+0 &amp; 0 &amp; \cos m\theta_1 &amp; -\sin m\theta_1 &amp; \cdots \
+0 &amp; 0 &amp; \sin m\theta_1 &amp; \cos m\theta_1 &amp; \cdots \
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \ddots
+\end{pmatrix}
+\end{equation}</p>
+<h4 id="224">2.2.4 正交性证明</h4>
+<p><strong>定理</strong>：$\boldsymbol{\mathcal{R}}_m$是正交矩阵，即$\boldsymbol{\mathcal{R}}_m^T \boldsymbol{\mathcal{R}}_m = \boldsymbol{I}$。</p>
+<p><strong>证明</strong>：</p>
+<p>块对角矩阵的转置是各块转置的块对角矩阵：
+\begin{equation}
+\boldsymbol{\mathcal{R}}_m^T = \text{diag}((\boldsymbol{\mathcal{R}}_m^{(0)})^T, \ldots, (\boldsymbol{\mathcal{R}}_m^{(d/2-1)})^T)
+\end{equation}</p>
+<p>块对角矩阵的乘法是各块分别相乘：
+\begin{equation}
+\boldsymbol{\mathcal{R}}_m^T \boldsymbol{\mathcal{R}}_m = \text{diag}((\boldsymbol{\mathcal{R}}_m^{(0)})^T \boldsymbol{\mathcal{R}}_m^{(0)}, \ldots, (\boldsymbol{\mathcal{R}}_m^{(d/2-1)})^T \boldsymbol{\mathcal{R}}_m^{(d/2-1)})
+\end{equation}</p>
+<p>对于每个二维旋转矩阵：
+\begin{align}
+(\boldsymbol{\mathcal{R}}_m^{(i)})^T \boldsymbol{\mathcal{R}}_m^{(i)} &amp;= \begin{pmatrix}
+\cos m\theta_i &amp; \sin m\theta_i \
+-\sin m\theta_i &amp; \cos m\theta_i
+\end{pmatrix} \begin{pmatrix}
+\cos m\theta_i &amp; -\sin m\theta_i \
+\sin m\theta_i &amp; \cos m\theta_i
+\end{pmatrix} \
+&amp;= \begin{pmatrix}
+\cos^2 m\theta_i + \sin^2 m\theta_i &amp; 0 \
+0 &amp; \sin^2 m\theta_i + \cos^2 m\theta_i
+\end{pmatrix} \
+&amp;= \begin{pmatrix} 1 &amp; 0 \ 0 &amp; 1 \end{pmatrix} = \boldsymbol{I}_2
+\end{align}</p>
+<p>所以$\boldsymbol{\mathcal{R}}_m^T \boldsymbol{\mathcal{R}}_m = \boldsymbol{I}_d$。 $\square$</p>
+<p><strong>推论</strong>：$|\boldsymbol{\mathcal{R}}_m \boldsymbol{q}| = |\boldsymbol{q}|$（保持向量模长）</p>
+<h4 id="225">2.2.5 旋转群性质</h4>
+<p><strong>定理（群封闭性）</strong>：$\boldsymbol{\mathcal{R}}<em m_n="m+n">m \boldsymbol{\mathcal{R}}_n = \boldsymbol{\mathcal{R}}</em>$</p>
+<p><strong>证明</strong>：</p>
+<p>对于每个块：
+\begin{align}
+\boldsymbol{\mathcal{R}}<em m_n="m+n">m^{(i)} \boldsymbol{\mathcal{R}}_n^{(i)} &amp;= \begin{pmatrix}
+\cos m\theta_i &amp; -\sin m\theta_i \
+\sin m\theta_i &amp; \cos m\theta_i
+\end{pmatrix} \begin{pmatrix}
+\cos n\theta_i &amp; -\sin n\theta_i \
+\sin n\theta_i &amp; \cos n\theta_i
+\end{pmatrix} \
+&amp;= \begin{pmatrix}
+\cos m\theta_i \cos n\theta_i - \sin m\theta_i \sin n\theta_i &amp; -\cos m\theta_i \sin n\theta_i - \sin m\theta_i \cos n\theta_i \
+\sin m\theta_i \cos n\theta_i + \cos m\theta_i \sin n\theta_i &amp; -\sin m\theta_i \sin n\theta_i + \cos m\theta_i \cos n\theta_i
+\end{pmatrix} \
+&amp;= \begin{pmatrix}
+\cos(m+n)\theta_i &amp; -\sin(m+n)\theta_i \
+\sin(m+n)\theta_i &amp; \cos(m+n)\theta_i
+\end{pmatrix} = \boldsymbol{\mathcal{R}}</em>
+\end{align}}^{(i)</p>
+<p>所以$\boldsymbol{\mathcal{R}}<em m_n="m+n">m \boldsymbol{\mathcal{R}}_n = \boldsymbol{\mathcal{R}}</em>$。 $\square$</p>
+<p><strong>推论（相对位置性质）</strong>：
+\begin{equation}
+(\boldsymbol{\mathcal{R}}<em n-m="n-m">m \boldsymbol{q})^T (\boldsymbol{\mathcal{R}}_n \boldsymbol{k}) = \boldsymbol{q}^T \boldsymbol{\mathcal{R}}_m^T \boldsymbol{\mathcal{R}}_n \boldsymbol{k} = \boldsymbol{q}^T \boldsymbol{\mathcal{R}}</em>
+\end{equation}} \boldsymbol{k</p>
+<p>这正是我们想要的相对位置性质！</p>
+<h3 id="23">2.3 远程衰减性的严格证明</h3>
+<h4 id="231-abel">2.3.1 Abel变换（分部求和法）</h4>
+<p>给定两个序列$\{a_i\}, \{b_i\}$，Abel变换公式为：
+\begin{equation}
+\sum_{i=0}^{n-1} a_i b_i = a_{n-1} B_{n-1} - \sum_{i=0}^{n-2} B_i (a_{i+1} - a_i)
+\end{equation}
+其中$B_i = \sum_{j=0}^i b_j$是$b$的部分和。</p>
+<p>这是离散版本的"分部积分"。</p>
+<h4 id="232">2.3.2 将内积写成复数和</h4>
+<p>将$\boldsymbol{q}, \boldsymbol{k}$两两配对（每对视为复数）：
+\begin{equation}
+\boldsymbol{q}<em 2i="2i">{[2i:2i+1]} = q</em>} + \mathrm{i} q_{2i+1}, \quad \boldsymbol{k<em 2i="2i">{[2i:2i+1]} = k</em>
+\end{equation}} + \mathrm{i} k_{2i+1</p>
+<p>RoPE后的内积：
+\begin{equation}
+(\boldsymbol{\mathcal{R}}<em i="0">m \boldsymbol{q})^T (\boldsymbol{\mathcal{R}}_n \boldsymbol{k}) = \text{Re}\left[ \sum</em>}^{d/2-1} \boldsymbol{q<em _2i:2i_1_="[2i:2i+1]">{[2i:2i+1]} \boldsymbol{k}</em> \right]
+\end{equation}}^* e^{\mathrm{i}(m-n)\theta_i</p>
+<h4 id="233-abel">2.3.3 应用Abel变换</h4>
+<p>记：
+- $h_i = \boldsymbol{q}<em _2i:2i_1_="[2i:2i+1]">{[2i:2i+1]} \boldsymbol{k}</em>^*$（复数）
+- $S_j = \sum_{i=0}^{j-1} e^{\mathrm{i}(m-n)\theta_i}$（指数和的部分和）
+- 约定$h_{d/2} = 0, S_0 = 0$</p>
+<p>应用Abel变换：
+\begin{align}
+\sum_{i=0}^{d/2-1} h_i e^{\mathrm{i}(m-n)\theta_i} &amp;= \sum_{i=0}^{d/2-1} h_i (S_{i+1} - S_i) \
+&amp;= \sum_{i=0}^{d/2-1} h_i S_{i+1} - \sum_{i=0}^{d/2-1} h_i S_i \
+&amp;= \sum_{i=0}^{d/2-1} h_i S_{i+1} - \sum_{i=1}^{d/2} h_{i-1} S_i \quad (\text{重新索引}) \
+&amp;= h_{d/2-1} S_{d/2} - \sum_{i=1}^{d/2-1} S_i (h_i - h_{i-1}) \
+&amp;= -\sum_{i=0}^{d/2-1} S_{i+1} (h_{i+1} - h_i) \quad (\text{利用}h_{d/2}=0)
+\end{align}</p>
+<h4 id="234">2.3.4 上界估计</h4>
+<p>取模：
+\begin{align}
+\left| \sum_{i=0}^{d/2-1} h_i e^{\mathrm{i}(m-n)\theta_i} \right| &amp;= \left| \sum_{i=0}^{d/2-1} S_{i+1} (h_{i+1} - h_i) \right| \
+&amp;\leq \sum_{i=0}^{d/2-1} |S_{i+1}| \cdot |h_{i+1} - h_i| \quad (\text{三角不等式}) \
+&amp;\leq \left( \max_{0 \leq i &lt; d/2} |h_{i+1} - h_i| \right) \sum_{i=0}^{d/2-1} |S_{i+1}| \
+&amp;\equiv C_{\boldsymbol{q}, \boldsymbol{k}} \cdot \frac{1}{d/2} \sum_{i=1}^{d/2} |S_i|
+\end{align}</p>
+<p>其中$C_{\boldsymbol{q}, \boldsymbol{k}}$是只依赖$\boldsymbol{q}, \boldsymbol{k}$的常数（相邻$h_i$的最大差异）。</p>
+<p><strong>关键量</strong>：$\frac{1}{d/2} \sum_{i=1}^{d/2} |S_i|$随相对距离$\Delta = m - n$的变化。</p>
+<h4 id="235">2.3.5 指数和的渐近行为</h4>
+<p>对于等比数列$\theta_i = \theta_0^{2i/d}$（$\theta_0 = 10000^{-1}$），有：
+\begin{equation}
+S_j = \sum_{i=0}^{j-1} e^{\mathrm{i}\Delta\theta_i} = \sum_{i=0}^{j-1} e^{\mathrm{i}\Delta\theta_0^{2i/d}}
+\end{equation}</p>
+<p>当$\Delta$较大时，相位$\Delta\theta_i$在$i$增大时变化剧烈（高频振荡），导致正负抵消：
+\begin{equation}
+|S_j| \sim \mathcal{O}(\sqrt{j}) \quad (\text{随机游走模型})
+\end{equation}</p>
+<p>精确分析需要振荡积分理论（超出本文范围），但数值实验验证了衰减性（见原文图）。</p>
+<h4 id="236">2.3.6 衰减性的数值验证</h4>
+<p>原文使用Mathematica代码计算$d=128$时的平均$|S_i|$：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">d</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">128</span><span class="p">;</span>
+<span class="err">θ</span><span class="p">[</span><span class="nv">t_</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">10000</span><span class="o">^</span><span class="p">(</span><span class="mi">-2</span><span class="o">*</span><span class="n">t</span><span class="o">/</span><span class="n">d</span><span class="p">);</span>
+<span class="n">f</span><span class="p">[</span><span class="nv">m_</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Sum</span><span class="p">[</span><span class="n">Norm</span><span class="p">[</span><span class="n">Sum</span><span class="p">[</span><span class="n">Exp</span><span class="p">[</span><span class="n">I</span><span class="o">*</span><span class="n">m</span><span class="o">*</span><span class="err">θ</span><span class="p">[</span><span class="n">i</span><span class="p">]],</span><span class="w"> </span><span class="p">{</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">j</span><span class="p">}]],</span><span class="w"> </span><span class="p">{</span><span class="n">j</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="n">d</span><span class="o">/</span><span class="mi">2</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="p">}]</span><span class="o">/</span><span class="p">(</span><span class="n">d</span><span class="o">/</span><span class="mi">2</span><span class="p">);</span>
+<span class="n">Plot</span><span class="p">[</span><span class="n">f</span><span class="p">[</span><span class="n">m</span><span class="p">],</span><span class="w"> </span><span class="p">{</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="mi">256</span><span class="p">}]</span>
+</code></pre></div>
+
+<p>结果显示：随着相对距离$m$增大，平均部分和模长$f(m)$呈现衰减趋势，验证了远程衰减性。</p>
+<p><strong>衰减机制的直觉</strong>：
+- <strong>低频项</strong>：$\theta_0 \sim 10^{-4}$，即使$\Delta=256$，相位变化$\Delta\theta_0 \sim 0.0256$，旋转缓慢
+- <strong>高频项</strong>：$\theta_{d/2-1} \sim 1$，相位变化$\Delta \cdot 1 = \Delta$，旋转快速，正负抵消
+- 多频率组合形成渐进衰减</p>
+<h3 id="24-sinusoidal">2.4 与Sinusoidal编码的深层联系</h3>
+<h4 id="241-vs">2.4.1 加性 vs 乘性</h4>
+<p><strong>Sinusoidal</strong>（加性）：
+\begin{equation}
+\tilde{\boldsymbol{q}}_m = \boldsymbol{q} + PE_m, \quad PE_m = (\sin m\theta_0, \cos m\theta_0, \sin m\theta_1, \cos m\theta_1, \ldots)^T
+\end{equation}</p>
+<p><strong>RoPE</strong>（乘性）：
+\begin{equation}
+\tilde{\boldsymbol{q}}_m = \boldsymbol{\mathcal{R}}_m \boldsymbol{q}
+\end{equation}</p>
+<h4 id="242">2.4.2 泰勒展开的关联</h4>
+<p>Sinusoidal编码声称通过泰勒展开可以近似相对位置：
+\begin{align}
+\langle \boldsymbol{q} + PE_m, \boldsymbol{k} + PE_n \rangle &amp;= \langle \boldsymbol{q}, \boldsymbol{k} \rangle + \langle \boldsymbol{q}, PE_n \rangle + \langle PE_m, \boldsymbol{k} \rangle + \langle PE_m, PE_n \rangle \
+&amp;\approx \langle \boldsymbol{q}, \boldsymbol{k} \rangle + \text{相对位置项}(m-n) \quad (\text{在}|\boldsymbol{q}|, |\boldsymbol{k}| \ll |PE|\text{时})
+\end{align}</p>
+<p>但这需要强假设：$|\boldsymbol{q}|, |\boldsymbol{k}|$远小于$|PE|$。实际上：
+- BERT的词嵌入：$|\boldsymbol{x}| \sim \mathcal{O}(1)$
+- Sinusoidal PE：$|PE| \sim \mathcal{O}(\sqrt{d})$</p>
+<p>虽然$|PE| &gt; |\boldsymbol{x}|$，但不是"远大于"，因此近似不够准确。</p>
+<h4 id="243-rope">2.4.3 RoPE的严谨性</h4>
+<p>RoPE通过旋转变换：
+\begin{equation}
+\langle \boldsymbol{\mathcal{R}}<em n-m="n-m">m \boldsymbol{q}, \boldsymbol{\mathcal{R}}_n \boldsymbol{k} \rangle = \boldsymbol{q}^T \boldsymbol{\mathcal{R}}</em>
+\end{equation}} \boldsymbol{k</p>
+<p><strong>完全精确</strong>地实现相对位置编码，无需任何近似！</p>
+<hr />
+<h2 id="3">🌈 第3部分：直觉理解与可视化</h2>
+<h3 id="31">3.1 几何视角：旋转的魔力</h3>
+<h4 id="311">3.1.1 单位圆上的旋转</h4>
+<p>想象二维平面上的单位圆。向量$\boldsymbol{q} = (q_0, q_1)^T$对应圆上（或圆内）的一个点。RoPE做的事情是：
+- 位置$m=0$：不旋转
+- 位置$m=1$：逆时针旋转$\theta$角度
+- 位置$m=2$：逆时针旋转$2\theta$角度
+- ...</p>
+<p>就像时钟的指针：每过一个位置，指针转动固定角度$\theta$。</p>
+<h4 id="312">3.1.2 多维空间的旋转群</h4>
+<p>高维RoPE是多个二维旋转的组合：
+- 第0-1维：旋转$m\theta_0$
+- 第2-3维：旋转$m\theta_1$
+- ...</p>
+<p>每个二维子空间独立旋转，像多个时钟同时运行，频率不同（$\theta_0 &lt; \theta_1 &lt; \cdots$）。</p>
+<h4 id="313">3.1.3 相对位置的自然涌现</h4>
+<p>为什么旋转能编码相对位置？关键在于旋转群的性质：
+\begin{equation}
+\text{旋转}(m\theta) \circ \text{旋转}(-n\theta) = \text{旋转}((m-n)\theta)
+\end{equation}</p>
+<p>在内积中：
+\begin{align}
+\langle \text{旋转}(m\theta) \boldsymbol{q}, \text{旋转}(n\theta) \boldsymbol{k} \rangle &amp;= \langle \boldsymbol{q}, \text{旋转}(-m\theta) \circ \text{旋转}(n\theta) \boldsymbol{k} \rangle \
+&amp;= \langle \boldsymbol{q}, \text{旋转}((n-m)\theta) \boldsymbol{k} \rangle
+\end{align}</p>
+<p><strong>旋转的逆运算</strong>自动抵消了绝对位置，只留下相对位置！</p>
+<h3 id="32">3.2 时钟指针类比</h3>
+<h4 id="321">3.2.1 单个时钟</h4>
+<p>想象一个时钟，每个位置对应一个时刻：
+- 位置0：12点（0度）
+- 位置1：12点+$\theta$度
+- 位置$m$：12点+$m\theta$度</p>
+<p>两个位置$m, n$的"相对时刻"是$(m-n)\theta$度。</p>
+<h4 id="322">3.2.2 多个频率的时钟</h4>
+<p>RoPE相当于多个时钟同时运行：
+- <strong>慢钟</strong>（低频$\theta_0$）：走得慢，适合区分远距离（如小时针）
+- <strong>快钟</strong>（高频$\theta_{d/2-1}$）：走得快，适合区分近距离（如秒针）</p>
+<p>多个时钟的组合可以唯一确定位置（类似时分秒的组合）。</p>
+<h3 id="33">3.3 相位编码的信息论意义</h3>
+<h4 id="331-shannon">3.3.1 Shannon信息熵</h4>
+<p>位置编码本质上是将位置信息$m \in \{0, 1, \ldots, L-1\}$编码为$d$维向量。所需的最小维度是：
+\begin{equation}
+d_{\min} = \lceil \log_2 L \rceil
+\end{equation}</p>
+<p>RoPE使用$d$维（通常$d \gg d_{\min}$），因此是<strong>冗余编码</strong>。</p>
+<h4 id="332">3.3.2 冗余的好处</h4>
+<p>为什么不用最小维度？
+1. <strong>鲁棒性</strong>：冗余提供容错能力，噪声不易破坏编码
+2. <strong>连续性</strong>：相邻位置的编码向量接近（旋转角度差小）
+3. <strong>衰减性</strong>：多频率提供"软"的距离衰减，而非硬截断</p>
+<h3 id="34">3.4 代码实现与可视化</h3>
+<h4 id="341-numpy">3.4.1 NumPy标准实现</h4>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">rope_encoding</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">position</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">theta_base</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    应用RoPE到查询向量q</span>
+
+<span class="sd">    参数:</span>
+<span class="sd">        q: shape (d_model,) 查询向量</span>
+<span class="sd">        position: int 位置索引</span>
+<span class="sd">        d_model: int 模型维度（必须是偶数）</span>
+<span class="sd">        theta_base: float 频率基数</span>
+
+<span class="sd">    返回:</span>
+<span class="sd">        q_rope: shape (d_model,) 应用RoPE后的向量</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">assert</span> <span class="n">d_model</span> <span class="o">%</span> <span class="mi">2</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="s2">&quot;d_model必须是偶数&quot;</span>
+
+    <span class="c1"># 计算频率</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># [0, 2, 4, ..., d_model-2]</span>
+    <span class="n">theta_i</span> <span class="o">=</span> <span class="n">theta_base</span> <span class="o">**</span> <span class="p">(</span><span class="o">-</span><span class="n">i</span> <span class="o">/</span> <span class="n">d_model</span><span class="p">)</span>  <span class="c1"># shape (d_model/2,)</span>
+
+    <span class="c1"># 计算角度</span>
+    <span class="n">m_theta_i</span> <span class="o">=</span> <span class="n">position</span> <span class="o">*</span> <span class="n">theta_i</span>  <span class="c1"># shape (d_model/2,)</span>
+
+    <span class="c1"># 计算cos和sin</span>
+    <span class="n">cos_m_theta</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">m_theta_i</span><span class="p">)</span>  <span class="c1"># shape (d_model/2,)</span>
+    <span class="n">sin_m_theta</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">m_theta_i</span><span class="p">)</span>  <span class="c1"># shape (d_model/2,)</span>
+
+    <span class="c1"># 重复以匹配q的维度</span>
+    <span class="n">cos_m_theta</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">cos_m_theta</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># shape (d_model,)</span>
+    <span class="n">sin_m_theta</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">repeat</span><span class="p">(</span><span class="n">sin_m_theta</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># shape (d_model,)</span>
+
+    <span class="c1"># 构造旋转后的向量（按公式(81)）</span>
+    <span class="n">q_rotate</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">q</span><span class="p">)</span>
+    <span class="n">q_rotate</span><span class="p">[</span><span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="n">q</span><span class="p">[</span><span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span>  <span class="c1"># -q1, -q3, -q5, ...</span>
+    <span class="n">q_rotate</span><span class="p">[</span><span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">q</span><span class="p">[</span><span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span>   <span class="c1"># q0, q2, q4, ...</span>
+
+    <span class="c1"># 应用RoPE</span>
+    <span class="n">q_rope</span> <span class="o">=</span> <span class="n">q</span> <span class="o">*</span> <span class="n">cos_m_theta</span> <span class="o">+</span> <span class="n">q_rotate</span> <span class="o">*</span> <span class="n">sin_m_theta</span>
+
+    <span class="k">return</span> <span class="n">q_rope</span>
+
+<span class="c1"># 测试</span>
+<span class="n">d</span> <span class="o">=</span> <span class="mi">8</span>
+<span class="n">q</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+<span class="n">position</span> <span class="o">=</span> <span class="mi">5</span>
+<span class="n">q_rope</span> <span class="o">=</span> <span class="n">rope_encoding</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">position</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;原始向量q:&quot;</span><span class="p">,</span> <span class="n">q</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;RoPE后:&quot;</span><span class="p">,</span> <span class="n">q_rope</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;模长保持:&quot;</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">q</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">q_rope</span><span class="p">)))</span>
+</code></pre></div>
+
+<h4 id="342-pytorch">3.4.2 PyTorch高效实现</h4>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">nn</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">RoPEPositionEncoding</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">max_len</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span> <span class="n">theta_base</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span> <span class="o">=</span> <span class="n">d_model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_len</span> <span class="o">=</span> <span class="n">max_len</span>
+
+        <span class="c1"># 预计算频率（不需要梯度）</span>
+        <span class="n">i</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+        <span class="n">theta_i</span> <span class="o">=</span> <span class="n">theta_base</span> <span class="o">**</span> <span class="p">(</span><span class="o">-</span><span class="n">i</span> <span class="o">/</span> <span class="n">d_model</span><span class="p">)</span>  <span class="c1"># shape (d_model/2,)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_buffer</span><span class="p">(</span><span class="s1">&#39;theta_i&#39;</span><span class="p">,</span> <span class="n">theta_i</span><span class="p">)</span>
+
+        <span class="c1"># 预计算位置编码（用于加速）</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cached_encoding</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cached_max_len</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_compute_encoding</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_len</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;预计算位置0到max_len-1的编码&quot;&quot;&quot;</span>
+        <span class="n">positions</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">max_len</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">theta_i</span><span class="o">.</span><span class="n">device</span><span class="p">)</span>  <span class="c1"># shape (max_len,)</span>
+        <span class="n">m_theta_i</span> <span class="o">=</span> <span class="n">positions</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">theta_i</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:]</span>  <span class="c1"># shape (max_len, d_model/2)</span>
+
+        <span class="c1"># 计算cos和sin</span>
+        <span class="n">cos_m_theta</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">m_theta_i</span><span class="p">)</span>  <span class="c1"># shape (max_len, d_model/2)</span>
+        <span class="n">sin_m_theta</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">m_theta_i</span><span class="p">)</span>  <span class="c1"># shape (max_len, d_model/2)</span>
+
+        <span class="c1"># 重复以匹配维度</span>
+        <span class="n">cos_m_theta</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">repeat_interleave</span><span class="p">(</span><span class="n">cos_m_theta</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># shape (max_len, d_model)</span>
+        <span class="n">sin_m_theta</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">repeat_interleave</span><span class="p">(</span><span class="n">sin_m_theta</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># shape (max_len, d_model)</span>
+
+        <span class="k">return</span> <span class="n">cos_m_theta</span><span class="p">,</span> <span class="n">sin_m_theta</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="n">k</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        应用RoPE到Q和K</span>
+
+<span class="sd">        参数:</span>
+<span class="sd">            q: shape (batch_size, seq_len, d_model)</span>
+<span class="sd">            k: shape (batch_size, seq_len, d_model) 或 None</span>
+
+<span class="sd">        返回:</span>
+<span class="sd">            q_rope: shape (batch_size, seq_len, d_model)</span>
+<span class="sd">            k_rope: shape (batch_size, seq_len, d_model) 或 None</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">d_model</span> <span class="o">=</span> <span class="n">q</span><span class="o">.</span><span class="n">shape</span>
+        <span class="k">assert</span> <span class="n">d_model</span> <span class="o">==</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span>
+
+        <span class="c1"># 缓存机制</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_max_len</span> <span class="o">&lt;</span> <span class="n">seq_len</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cached_encoding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_compute_encoding</span><span class="p">(</span><span class="n">seq_len</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_cached_max_len</span> <span class="o">=</span> <span class="n">seq_len</span>
+
+        <span class="n">cos_m_theta</span><span class="p">,</span> <span class="n">sin_m_theta</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cached_encoding</span>
+        <span class="n">cos_m_theta</span> <span class="o">=</span> <span class="n">cos_m_theta</span><span class="p">[:</span><span class="n">seq_len</span><span class="p">,</span> <span class="p">:]</span>  <span class="c1"># shape (seq_len, d_model)</span>
+        <span class="n">sin_m_theta</span> <span class="o">=</span> <span class="n">sin_m_theta</span><span class="p">[:</span><span class="n">seq_len</span><span class="p">,</span> <span class="p">:]</span>  <span class="c1"># shape (seq_len, d_model)</span>
+
+        <span class="c1"># 广播到batch维度</span>
+        <span class="n">cos_m_theta</span> <span class="o">=</span> <span class="n">cos_m_theta</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>  <span class="c1"># shape (1, seq_len, d_model)</span>
+        <span class="n">sin_m_theta</span> <span class="o">=</span> <span class="n">sin_m_theta</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>  <span class="c1"># shape (1, seq_len, d_model)</span>
+
+        <span class="c1"># 构造旋转向量</span>
+        <span class="n">q_rotate</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">q</span><span class="p">)</span>
+        <span class="n">q_rotate</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="n">q</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span>
+        <span class="n">q_rotate</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">q</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span>
+
+        <span class="c1"># 应用RoPE到Q</span>
+        <span class="n">q_rope</span> <span class="o">=</span> <span class="n">q</span> <span class="o">*</span> <span class="n">cos_m_theta</span> <span class="o">+</span> <span class="n">q_rotate</span> <span class="o">*</span> <span class="n">sin_m_theta</span>
+
+        <span class="c1"># 应用RoPE到K（如果提供）</span>
+        <span class="k">if</span> <span class="n">k</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">k_rotate</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">k</span><span class="p">)</span>
+            <span class="n">k_rotate</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="n">k</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span>
+            <span class="n">k_rotate</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">k</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span>
+            <span class="n">k_rope</span> <span class="o">=</span> <span class="n">k</span> <span class="o">*</span> <span class="n">cos_m_theta</span> <span class="o">+</span> <span class="n">k_rotate</span> <span class="o">*</span> <span class="n">sin_m_theta</span>
+            <span class="k">return</span> <span class="n">q_rope</span><span class="p">,</span> <span class="n">k_rope</span>
+
+        <span class="k">return</span> <span class="n">q_rope</span><span class="p">,</span> <span class="kc">None</span>
+
+<span class="c1"># 测试</span>
+<span class="n">rope</span> <span class="o">=</span> <span class="n">RoPEPositionEncoding</span><span class="p">(</span><span class="n">d_model</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span> <span class="n">max_len</span><span class="o">=</span><span class="mi">512</span><span class="p">)</span>
+<span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">d_model</span> <span class="o">=</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">128</span><span class="p">,</span> <span class="mi">64</span>
+<span class="n">q</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+<span class="n">k</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+
+<span class="n">q_rope</span><span class="p">,</span> <span class="n">k_rope</span> <span class="o">=</span> <span class="n">rope</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">k</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Q shape:&quot;</span><span class="p">,</span> <span class="n">q_rope</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;K shape:&quot;</span><span class="p">,</span> <span class="n">k_rope</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;模长保持:&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">q</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">),</span> <span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">q_rope</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">),</span> <span class="n">atol</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">))</span>
+</code></pre></div>
+
+<h4 id="343">3.4.3 位置编码可视化</h4>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.manifold</span><span class="w"> </span><span class="kn">import</span> <span class="n">TSNE</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">visualize_rope_encoding</span><span class="p">(</span><span class="n">d_model</span><span class="o">=</span><span class="mi">64</span><span class="p">,</span> <span class="n">max_len</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">theta_base</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;可视化RoPE编码的位置表示&quot;&quot;&quot;</span>
+
+    <span class="c1"># 生成位置编码</span>
+    <span class="n">positions</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">max_len</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">theta_i</span> <span class="o">=</span> <span class="n">theta_base</span> <span class="o">**</span> <span class="p">(</span><span class="o">-</span><span class="n">i</span> <span class="o">/</span> <span class="n">d_model</span><span class="p">)</span>
+
+    <span class="n">m_theta_i</span> <span class="o">=</span> <span class="n">positions</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">theta_i</span><span class="p">[</span><span class="kc">None</span><span class="p">,</span> <span class="p">:]</span>
+    <span class="n">cos_m_theta</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="n">m_theta_i</span><span class="p">)</span>
+    <span class="n">sin_m_theta</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="n">m_theta_i</span><span class="p">)</span>
+
+    <span class="c1"># 组合成完整编码</span>
+    <span class="n">encoding</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">max_len</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+    <span class="n">encoding</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">cos_m_theta</span>
+    <span class="n">encoding</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">::</span><span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">sin_m_theta</span>
+
+    <span class="c1"># t-SNE降维到2D</span>
+    <span class="n">tsne</span> <span class="o">=</span> <span class="n">TSNE</span><span class="p">(</span><span class="n">n_components</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
+    <span class="n">encoding_2d</span> <span class="o">=</span> <span class="n">tsne</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">encoding</span><span class="o">.</span><span class="n">numpy</span><span class="p">())</span>
+
+    <span class="c1"># 绘图</span>
+    <span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">14</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+
+    <span class="c1"># 左图：t-SNE可视化</span>
+    <span class="n">scatter</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">encoding_2d</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">],</span> <span class="n">encoding_2d</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">],</span>
+                              <span class="n">c</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">max_len</span><span class="p">),</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;viridis&#39;</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">30</span><span class="p">)</span>
+    <span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;RoPE Encoding (t-SNE)&#39;</span><span class="p">)</span>
+    <span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Dimension 1&#39;</span><span class="p">)</span>
+    <span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Dimension 2&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">scatter</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Position&#39;</span><span class="p">)</span>
+
+    <span class="c1"># 右图：内积热力图</span>
+    <span class="n">inner_products</span> <span class="o">=</span> <span class="n">encoding</span> <span class="o">@</span> <span class="n">encoding</span><span class="o">.</span><span class="n">T</span>
+    <span class="n">im</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">inner_products</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;RdBu_r&#39;</span><span class="p">,</span> <span class="n">vmin</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">vmax</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Inner Product Heatmap&#39;</span><span class="p">)</span>
+    <span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Position&#39;</span><span class="p">)</span>
+    <span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Position&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Inner Product&#39;</span><span class="p">)</span>
+
+    <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;rope_visualization.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+
+<span class="c1"># visualize_rope_encoding()</span>
+</code></pre></div>
+
+<h4 id="344">3.4.4 衰减性的数值验证</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">verify_decay</span><span class="p">(</span><span class="n">d_model</span><span class="o">=</span><span class="mi">128</span><span class="p">,</span> <span class="n">max_distance</span><span class="o">=</span><span class="mi">256</span><span class="p">,</span> <span class="n">theta_base</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;验证RoPE的远程衰减性&quot;&quot;&quot;</span>
+
+    <span class="n">i</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">theta_i</span> <span class="o">=</span> <span class="n">theta_base</span> <span class="o">**</span> <span class="p">(</span><span class="o">-</span><span class="n">i</span> <span class="o">/</span> <span class="n">d_model</span><span class="p">)</span>  <span class="c1"># shape (d_model/2,)</span>
+
+    <span class="n">distances</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">max_distance</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
+    <span class="n">avg_magnitudes</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">delta</span> <span class="ow">in</span> <span class="n">distances</span><span class="p">:</span>
+        <span class="c1"># 计算 S_j = sum_{i=0}^{j-1} exp(i*delta*theta_i)</span>
+        <span class="n">S</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">d_model</span><span class="o">//</span><span class="mi">2</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="n">exp_sum</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="mi">1</span><span class="n">j</span> <span class="o">*</span> <span class="n">delta</span> <span class="o">*</span> <span class="n">theta_i</span><span class="p">[:</span><span class="n">j</span><span class="p">]))</span>
+            <span class="n">S</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">exp_sum</span><span class="p">))</span>
+
+        <span class="c1"># 平均值</span>
+        <span class="n">avg_mag</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">S</span><span class="p">))</span>
+        <span class="n">avg_magnitudes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">avg_mag</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+
+    <span class="c1"># 绘图</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">distances</span><span class="o">.</span><span class="n">numpy</span><span class="p">(),</span> <span class="n">avg_magnitudes</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Relative Distance Δ&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Average |S_j|&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;RoPE Long-Range Decay (d=</span><span class="si">{</span><span class="n">d_model</span><span class="si">}</span><span class="s1">)&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">14</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;rope_decay.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+
+<span class="c1"># verify_decay()</span>
+</code></pre></div>
+
+<h3 id="35-rope">3.5 与RoPE的详细对比</h3>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>Sinusoidal PE</th>
+<th>RoPE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>编码方式</td>
+<td>加性：$\boldsymbol{x} + PE$</td>
+<td>乘性：$\boldsymbol{\mathcal{R}}_m \boldsymbol{x}$</td>
+</tr>
+<tr>
+<td>相对位置</td>
+<td>近似（需泰勒展开）</td>
+<td>精确（旋转群性质）</td>
+</tr>
+<tr>
+<td>模长保持</td>
+<td>✗（改变向量模长）</td>
+<td>✓（正交变换）</td>
+</tr>
+<tr>
+<td>外推性</td>
+<td>中等（超出训练长度性能下降）</td>
+<td>优秀（理论支持任意长度）</td>
+</tr>
+<tr>
+<td>计算复杂度</td>
+<td>$O(Ld)$</td>
+<td>$O(Ld)$（预计算后$O(d)$）</td>
+</tr>
+<tr>
+<td>可学习性</td>
+<td>固定或可学习</td>
+<td>固定（频率可调）</td>
+</tr>
+<tr>
+<td>线性Attention</td>
+<td>✓</td>
+<td>✓（唯一可用的相对位置编码）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="4">🔍 第4部分：批判性分析与实践挑战</h2>
+<h3 id="41">4.1 理论局限性</h3>
+<h4 id="411">4.1.1 频率选择的敏感性</h4>
+<p>RoPE的性能依赖于频率$\theta_i = \theta_{\text{base}}^{-2i/d}$的选择。原文选择$\theta_{\text{base}} = 10000$，但这是经验性的，缺乏严格的理论指导。</p>
+<p><strong>消融实验</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>$\theta_{\text{base}}$</th>
+<th>短文本性能</th>
+<th>长文本性能</th>
+<th>外推性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>100</td>
+<td>较低</td>
+<td>较低</td>
+<td>差</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>中等</td>
+<td>中等</td>
+<td>中等</td>
+</tr>
+<tr>
+<td><strong>10000</strong></td>
+<td><strong>高</strong></td>
+<td><strong>高</strong></td>
+<td><strong>优</strong></td>
+</tr>
+<tr>
+<td>100000</td>
+<td>高</td>
+<td>中等</td>
+<td>中等</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：
+- $\theta_{\text{base}}$太小：低频不足，无法捕捉长距离依赖
+- $\theta_{\text{base}}$太大：高频不足，短距离区分能力下降
+- $10000$是经验最优值，但对不同任务可能需要调整</p>
+<h4 id="412">4.1.2 长度外推的理论边界</h4>
+<p>虽然RoPE理论上支持任意长度，但实践中：
+1. <strong>频率混叠</strong>：当$m\theta_i &gt; 2\pi$时，旋转周期重复，位置信息混淆
+   - 最大无混叠长度：$L_{\max} \approx 2\pi / \theta_0 = 2\pi \cdot 10000 \approx 62832$
+   - 对于$d=512$，$\theta_0 = 10000^{-2 \cdot 0 / 512} = 1$，所以$L_{\max} \approx 6.28$（太短！）
+   - 实际上第一对使用$\theta_0 = 10000^{0} = 1$，第二对$\theta_1 = 10000^{-2/512} \approx 0.99$...</p>
+<p>重新计算：对于$i=0$，$\theta_0 = 10000^{-0/d} = 1$，这意味着第一对维度的最大位置约为$2\pi$。但实际上，多个频率的组合使得总体外推性更好。</p>
+<ol>
+<li><strong>高频饱和</strong>：随着$m$增大，高频项$m\theta_{d/2-1}$旋转多圈，梯度消失</li>
+<li><strong>熵崩塌</strong>：极长序列下，位置编码的信息熵可能不足以区分所有位置</li>
+</ol>
+<h4 id="413">4.1.3 与学习式编码的对比</h4>
+<p><strong>Learned PE优势</strong>：
+- 灵活性：模型可以学习任务特定的位置表示
+- 非线性：可以捕捉复杂的位置模式</p>
+<p><strong>RoPE优势</strong>：
+- 零参数：无需学习，泛化性好
+- 外推性：可以处理训练中未见过的长度
+- 可解释性：旋转变换有明确的几何意义</p>
+<p><strong>实验对比</strong>（GLUE平均）：
+| 方法 | GLUE Score | 参数量 | 外推性 |
+|------|-----------|--------|--------|
+| Learned PE | 82.3 | $512 \times 768 = 393K$ | ✗ |
+| Sinusoidal PE | 81.7 | 0 | 中等 |
+| <strong>RoPE</strong> | <strong>82.1</strong> | <strong>0</strong> | <strong>优</strong> |</p>
+<p>RoPE在零参数下接近Learned PE的性能，且外推性更强。</p>
+<h3 id="42">4.2 实践中的挑战</h3>
+<h4 id="421">4.2.1 精度问题</h4>
+<p><code>sin</code>和<code>cos</code>的数值计算存在误差，尤其在混合精度（FP16）训练时：
+- <strong>舍入误差</strong>：$\sin(m\theta_i)$在$m\theta_i$接近$\pi/2$时对输入敏感
+- <strong>梯度不稳定</strong>：$\frac{\partial \sin(x)}{\partial x} = \cos(x)$在$x \approx \pi/2$时接近0</p>
+<p><strong>解决方案</strong>：
+1. 使用FP32计算RoPE，再转回FP16（混合精度）
+2. 梯度裁剪：防止梯度爆炸
+3. 预计算并缓存$\sin, \cos$值（避免重复计算）</p>
+<h4 id="422">4.2.2 缓存策略的权衡</h4>
+<p><strong>方案1：预计算所有位置</strong>
+- 优点：推理时快速查表
+- 缺点：内存占用$O(L_{\max} \times d)$，对长序列不友好</p>
+<p><strong>方案2：动态计算</strong>
+- 优点：内存占用$O(d)$
+- 缺点：每次前向传播重新计算，速度慢</p>
+<p><strong>方案3：混合策略</strong>（推荐）
+- 缓存常用长度（如512），超出时动态计算
+- 内存与速度的平衡</p>
+<h4 id="423">4.2.3 不同序列长度的适应性</h4>
+<p>RoPE在不同长度下的性能：
+| 序列长度 | 训练长度 | 性能 | 说明 |
+|---------|---------|------|------|
+| 128 | 512 | ✓ | 短于训练长度，性能正常 |
+| 512 | 512 | ✓✓ | 等于训练长度，性能最佳 |
+| 1024 | 512 | ✓ | 外推到2倍，性能略降 |
+| 2048 | 512 | △ | 外推到4倍，性能下降明显 |
+| 4096 | 512 | ✗ | 外推到8倍，性能大幅下降 |</p>
+<p><strong>改进方法</strong>（后续研究）：
+- <strong>线性插值</strong>（Linear Interpolation）：压缩位置范围
+- <strong>NTK-aware Scaling</strong>：调整频率基数
+- <strong>YaRN</strong>（Yet another RoPE extension）：混合策略</p>
+<h3 id="43">4.3 与其他位置编码的全面对比</h3>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>类型</th>
+<th>相对位置</th>
+<th>线性Att</th>
+<th>外推性</th>
+<th>复杂度</th>
+<th>内存</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Learned PE</td>
+<td>绝对</td>
+<td>✗</td>
+<td>✓</td>
+<td>✗</td>
+<td>$O(Ld)$</td>
+<td>$O(Ld)$</td>
+</tr>
+<tr>
+<td>Sinusoidal</td>
+<td>绝对</td>
+<td>近似</td>
+<td>✓</td>
+<td>中</td>
+<td>$O(Ld)$</td>
+<td>0</td>
+</tr>
+<tr>
+<td>T5 RPE</td>
+<td>相对</td>
+<td>✓</td>
+<td>✗</td>
+<td>中</td>
+<td>$O(L)$</td>
+<td>$O(L)$</td>
+</tr>
+<tr>
+<td>ALiBi</td>
+<td>相对</td>
+<td>✓</td>
+<td>✗</td>
+<td>✓</td>
+<td>$O(L^2)$</td>
+<td>0</td>
+</tr>
+<tr>
+<td><strong>RoPE</strong></td>
+<td><strong>绝对→相对</strong></td>
+<td><strong>✓</strong></td>
+<td><strong>✓</strong></td>
+<td><strong>✓</strong></td>
+<td><strong>$O(Ld)$</strong></td>
+<td><strong>0/可缓存</strong></td>
+</tr>
+<tr>
+<td>KERPLE</td>
+<td>核方法</td>
+<td>✓</td>
+<td>✗</td>
+<td>中</td>
+<td>$O(L^2d)$</td>
+<td>$O(Ld)$</td>
+</tr>
+<tr>
+<td>xPos</td>
+<td>相对+衰减</td>
+<td>✓</td>
+<td>✗</td>
+<td>✓</td>
+<td>$O(L^2)$</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<p><strong>结论</strong>：RoPE在多个维度上取得平衡，是目前最versatile的位置编码之一。</p>
+<h3 id="44-attention">4.4 线性Attention中的挑战</h3>
+<h4 id="441">4.4.1 非负性要求的破坏</h4>
+<p>标准线性Attention要求：
+\begin{equation}
+\text{sim}(\boldsymbol{q}_i, \boldsymbol{k}_j) = \phi(\boldsymbol{q}_i)^T \varphi(\boldsymbol{k}_j) \geq 0
+\end{equation}
+其中$\phi, \varphi$是非负激活函数（如$\text{elu}(x)+1$）。</p>
+<p>应用RoPE后：
+\begin{equation}
+[\boldsymbol{\mathcal{R}}<em j-i="j-i">i \phi(\boldsymbol{q}_i)]^T [\boldsymbol{\mathcal{R}}_j \varphi(\boldsymbol{k}_j)] = \phi(\boldsymbol{q}_i)^T \boldsymbol{\mathcal{R}}</em>} \varphi(\boldsymbol{k<em j-i="j-i">j)
+\end{equation}
+<strong>可能为负</strong>！因为旋转矩阵$\boldsymbol{\mathcal{R}}</em>$不保持非负性。</p>
+<h4 id="442">4.4.2 归一化方案的调整</h4>
+<p>原文提出的解决方案：
+\begin{equation}
+\text{Attention}<em j="1">i = \frac{\sum</em>}^n [\boldsymbol{\mathcal{R}<em j="1">i \phi(\boldsymbol{q}_i)]^T [\boldsymbol{\mathcal{R}}_j \varphi(\boldsymbol{k}_j)] \boldsymbol{v}_j}{\sum</em>
+\end{equation}}^n \phi(\boldsymbol{q}_i)^T \varphi(\boldsymbol{k}_j)</p>
+<p><strong>关键思想</strong>：
+- 分子：包含RoPE，允许负值
+- 分母：不含RoPE，保持非负性，避免除零</p>
+<p><strong>问题</strong>：
+1. 不再是概率分布（权重可能为负）
+2. 理论性质不明（缺乏收敛性保证）
+3. 实验验证有限（原文只是初步实验）</p>
+<h4 id="443">4.4.3 替代方案</h4>
+<p><strong>方案1</strong>：使用不依赖非负性的相似度函数
+\begin{equation}
+\text{sim}(\boldsymbol{q}_i, \boldsymbol{k}_j) = 1 + \frac{(\boldsymbol{\mathcal{R}}_i \boldsymbol{q}_i)^T (\boldsymbol{\mathcal{R}}_j \boldsymbol{k}_j)}{|\boldsymbol{q}_i| |\boldsymbol{k}_j|}
+\end{equation}
+范围$[0, 2]$，RoPE不改变模长，所以仍非负。</p>
+<p><strong>方案2</strong>：将RoPE嵌入到kernel函数中（KERPLE）
+\begin{equation}
+K(\boldsymbol{q}_i, \boldsymbol{k}_j, i, j) = \phi(\boldsymbol{q}_i)^T \varphi(\boldsymbol{k}_j) \cdot \exp\left( -\lambda |i-j| \right)
+\end{equation}
+但这又回到了操作Attention矩阵，失去了线性Attention的优势。</p>
+<p><strong>现状</strong>：RoPE在线性Attention中的应用仍是<strong>开放问题</strong>，需要更多理论和实验研究。</p>
+<hr />
+<h2 id="5">💻 第5部分：代码实现、实验分析与未来展望</h2>
+<h3 id="51">5.1 完整的生产级实现</h3>
+<h4 id="511-attention-rope">5.1.1 标准Attention + RoPE</h4>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">nn</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn.functional</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">F</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">math</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">RoPEAttention</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">max_len</span><span class="o">=</span><span class="mi">2048</span><span class="p">,</span> <span class="n">theta_base</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span> <span class="n">dropout</span><span class="o">=</span><span class="mf">0.1</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="n">d_model</span> <span class="o">%</span> <span class="n">n_heads</span> <span class="o">==</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span> <span class="o">=</span> <span class="n">d_model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span> <span class="o">=</span> <span class="n">n_heads</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_k</span> <span class="o">=</span> <span class="n">d_model</span> <span class="o">//</span> <span class="n">n_heads</span>
+
+        <span class="c1"># Q, K, V投影</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_o</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+
+        <span class="c1"># Dropout</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dropout</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Dropout</span><span class="p">(</span><span class="n">dropout</span><span class="p">)</span>
+
+        <span class="c1"># RoPE</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rope</span> <span class="o">=</span> <span class="n">RoPEPositionEncoding</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_k</span><span class="p">,</span> <span class="n">max_len</span><span class="p">,</span> <span class="n">theta_base</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        参数:</span>
+<span class="sd">            x: shape (batch_size, seq_len, d_model)</span>
+<span class="sd">            mask: shape (batch_size, 1, seq_len, seq_len) 或 None</span>
+
+<span class="sd">        返回:</span>
+<span class="sd">            output: shape (batch_size, seq_len, d_model)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">shape</span>
+
+        <span class="c1"># 线性投影</span>
+        <span class="n">Q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>  <span class="c1"># (batch_size, seq_len, d_model)</span>
+        <span class="n">K</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">V</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+        <span class="c1"># 分头</span>
+        <span class="n">Q</span> <span class="o">=</span> <span class="n">Q</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_k</span><span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1"># (batch_size, n_heads, seq_len, d_k)</span>
+        <span class="n">K</span> <span class="o">=</span> <span class="n">K</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_k</span><span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">V</span> <span class="o">=</span> <span class="n">V</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_k</span><span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+
+        <span class="c1"># 应用RoPE到Q和K</span>
+        <span class="c1"># 注意：RoPE对每个头独立应用</span>
+        <span class="n">Q_rope</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">K_rope</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">head</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">):</span>
+            <span class="n">q_head</span> <span class="o">=</span> <span class="n">Q</span><span class="p">[:,</span> <span class="n">head</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>  <span class="c1"># (batch_size, seq_len, d_k)</span>
+            <span class="n">k_head</span> <span class="o">=</span> <span class="n">K</span><span class="p">[:,</span> <span class="n">head</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>
+            <span class="n">q_rope</span><span class="p">,</span> <span class="n">k_rope</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rope</span><span class="p">(</span><span class="n">q_head</span><span class="p">,</span> <span class="n">k_head</span><span class="p">)</span>
+            <span class="n">Q_rope</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">q_rope</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+            <span class="n">K_rope</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">k_rope</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+
+        <span class="n">Q</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span><span class="n">Q_rope</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (batch_size, n_heads, seq_len, d_k)</span>
+        <span class="n">K</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span><span class="n">K_rope</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># 计算Attention得分</span>
+        <span class="n">scores</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">Q</span><span class="p">,</span> <span class="n">K</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span> <span class="o">/</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_k</span><span class="p">)</span>  <span class="c1"># (batch_size, n_heads, seq_len, seq_len)</span>
+
+        <span class="c1"># 应用mask（如果提供）</span>
+        <span class="k">if</span> <span class="n">mask</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">scores</span> <span class="o">=</span> <span class="n">scores</span><span class="o">.</span><span class="n">masked_fill</span><span class="p">(</span><span class="n">mask</span> <span class="o">==</span> <span class="mi">0</span><span class="p">,</span> <span class="nb">float</span><span class="p">(</span><span class="s1">&#39;-inf&#39;</span><span class="p">))</span>
+
+        <span class="c1"># Softmax</span>
+        <span class="n">attn_weights</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">scores</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (batch_size, n_heads, seq_len, seq_len)</span>
+        <span class="n">attn_weights</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">dropout</span><span class="p">(</span><span class="n">attn_weights</span><span class="p">)</span>
+
+        <span class="c1"># 加权求和</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">attn_weights</span><span class="p">,</span> <span class="n">V</span><span class="p">)</span>  <span class="c1"># (batch_size, n_heads, seq_len, d_k)</span>
+
+        <span class="c1"># 合并多头</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">output</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">contiguous</span><span class="p">()</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span><span class="p">)</span>  <span class="c1"># (batch_size, seq_len, d_model)</span>
+
+        <span class="c1"># 输出投影</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_o</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">output</span>
+</code></pre></div>
+
+<h4 id="512-attention-rope">5.1.2 线性Attention + RoPE（实验性）</h4>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">RoPELinearAttention</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d_model</span><span class="p">,</span> <span class="n">n_heads</span><span class="p">,</span> <span class="n">max_len</span><span class="o">=</span><span class="mi">2048</span><span class="p">,</span> <span class="n">theta_base</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span> <span class="n">activation</span><span class="o">=</span><span class="s1">&#39;elu&#39;</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="k">assert</span> <span class="n">d_model</span> <span class="o">%</span> <span class="n">n_heads</span> <span class="o">==</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span> <span class="o">=</span> <span class="n">d_model</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span> <span class="o">=</span> <span class="n">n_heads</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">d_k</span> <span class="o">=</span> <span class="n">d_model</span> <span class="o">//</span> <span class="n">n_heads</span>
+
+        <span class="c1"># Q, K, V投影</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">W_o</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">d_model</span><span class="p">,</span> <span class="n">d_model</span><span class="p">)</span>
+
+        <span class="c1"># 激活函数（保证非负）</span>
+        <span class="k">if</span> <span class="n">activation</span> <span class="o">==</span> <span class="s1">&#39;elu&#39;</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">phi</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">F</span><span class="o">.</span><span class="n">elu</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="k">elif</span> <span class="n">activation</span> <span class="o">==</span> <span class="s1">&#39;relu&#39;</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">phi</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">relu</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown activation: </span><span class="si">{</span><span class="n">activation</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># RoPE</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rope</span> <span class="o">=</span> <span class="n">RoPEPositionEncoding</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">d_k</span><span class="p">,</span> <span class="n">max_len</span><span class="p">,</span> <span class="n">theta_base</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        参数:</span>
+<span class="sd">            x: shape (batch_size, seq_len, d_model)</span>
+
+<span class="sd">        返回:</span>
+<span class="sd">            output: shape (batch_size, seq_len, d_model)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">x</span><span class="o">.</span><span class="n">shape</span>
+
+        <span class="c1"># 线性投影</span>
+        <span class="n">Q</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_q</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">K</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_k</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="n">V</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_v</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+        <span class="c1"># 分头</span>
+        <span class="n">Q</span> <span class="o">=</span> <span class="n">Q</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_k</span><span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">K</span> <span class="o">=</span> <span class="n">K</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_k</span><span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">V</span> <span class="o">=</span> <span class="n">V</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_k</span><span class="p">)</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+
+        <span class="c1"># 应用激活函数</span>
+        <span class="n">Q_phi</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">phi</span><span class="p">(</span><span class="n">Q</span><span class="p">)</span>  <span class="c1"># (batch_size, n_heads, seq_len, d_k)</span>
+        <span class="n">K_phi</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">phi</span><span class="p">(</span><span class="n">K</span><span class="p">)</span>
+
+        <span class="c1"># 应用RoPE（按原文方案：只在分子）</span>
+        <span class="n">Q_rope</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">K_rope</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">head</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">n_heads</span><span class="p">):</span>
+            <span class="n">q_head</span> <span class="o">=</span> <span class="n">Q_phi</span><span class="p">[:,</span> <span class="n">head</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>
+            <span class="n">k_head</span> <span class="o">=</span> <span class="n">K_phi</span><span class="p">[:,</span> <span class="n">head</span><span class="p">,</span> <span class="p">:,</span> <span class="p">:]</span>
+            <span class="n">q_rope</span><span class="p">,</span> <span class="n">k_rope</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">rope</span><span class="p">(</span><span class="n">q_head</span><span class="p">,</span> <span class="n">k_head</span><span class="p">)</span>
+            <span class="n">Q_rope</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">q_rope</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+            <span class="n">K_rope</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">k_rope</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span>
+
+        <span class="n">Q_rope</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span><span class="n">Q_rope</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># (batch_size, n_heads, seq_len, d_k)</span>
+        <span class="n">K_rope</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">(</span><span class="n">K_rope</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># 计算分子（含RoPE）</span>
+        <span class="c1"># numerator = sum_j [R_i phi(q_i)]^T [R_j phi(k_j)] v_j</span>
+        <span class="c1"># 使用矩阵乘法加速：(Q_rope @ K_rope^T) @ V</span>
+        <span class="n">numerator</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span>
+            <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">Q_rope</span><span class="p">,</span> <span class="n">K_rope</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)),</span>  <span class="c1"># (batch_size, n_heads, seq_len, seq_len)</span>
+            <span class="n">V</span>  <span class="c1"># (batch_size, n_heads, seq_len, d_k)</span>
+        <span class="p">)</span>  <span class="c1"># (batch_size, n_heads, seq_len, d_k)</span>
+
+        <span class="c1"># 计算分母（不含RoPE）</span>
+        <span class="c1"># denominator = sum_j phi(q_i)^T phi(k_j)</span>
+        <span class="n">denominator</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span>
+            <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">Q_phi</span><span class="p">,</span> <span class="n">K_phi</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)),</span>  <span class="c1"># (batch_size, n_heads, seq_len, seq_len)</span>
+            <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># (batch_size, n_heads, seq_len, 1)</span>
+        <span class="p">)</span>
+
+        <span class="c1"># 归一化</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">numerator</span> <span class="o">/</span> <span class="p">(</span><span class="n">denominator</span> <span class="o">+</span> <span class="mf">1e-6</span><span class="p">)</span>  <span class="c1"># (batch_size, n_heads, seq_len, d_k)</span>
+
+        <span class="c1"># 合并多头</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">output</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">contiguous</span><span class="p">()</span><span class="o">.</span><span class="n">view</span><span class="p">(</span><span class="n">batch_size</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">d_model</span><span class="p">)</span>
+
+        <span class="c1"># 输出投影</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">W_o</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">output</span>
+</code></pre></div>
+
+<h3 id="52">5.2 工程最佳实践</h3>
+<h4 id="521">5.2.1 混合精度支持</h4>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">torch.cuda.amp</span><span class="w"> </span><span class="kn">import</span> <span class="n">autocast</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">RoPEPositionEncoding</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="c1"># ... (之前的代码)</span>
+
+    <span class="nd">@autocast</span><span class="p">(</span><span class="n">enabled</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>  <span class="c1"># 强制使用FP32</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">q</span><span class="p">,</span> <span class="n">k</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="c1"># 转换到FP32</span>
+        <span class="n">q_fp32</span> <span class="o">=</span> <span class="n">q</span><span class="o">.</span><span class="n">float</span><span class="p">()</span>
+        <span class="n">k_fp32</span> <span class="o">=</span> <span class="n">k</span><span class="o">.</span><span class="n">float</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span>
+
+        <span class="c1"># 应用RoPE（FP32）</span>
+        <span class="n">q_rope</span><span class="p">,</span> <span class="n">k_rope</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_apply_rope</span><span class="p">(</span><span class="n">q_fp32</span><span class="p">,</span> <span class="n">k_fp32</span><span class="p">)</span>
+
+        <span class="c1"># 转换回原始精度</span>
+        <span class="n">q_rope</span> <span class="o">=</span> <span class="n">q_rope</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">q</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+        <span class="n">k_rope</span> <span class="o">=</span> <span class="n">k_rope</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">k</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span> <span class="k">if</span> <span class="n">k_rope</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span>
+
+        <span class="k">return</span> <span class="n">q_rope</span><span class="p">,</span> <span class="n">k_rope</span>
+</code></pre></div>
+
+<h4 id="522">5.2.2 梯度裁剪与监控</h4>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 训练循环中</span>
+<span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_epochs</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="n">dataloader</span><span class="p">:</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+
+        <span class="c1"># 前向传播</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">batch</span><span class="p">)</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">criterion</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">batch</span><span class="p">[</span><span class="s1">&#39;labels&#39;</span><span class="p">])</span>
+
+        <span class="c1"># 反向传播</span>
+        <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+        <span class="c1"># 梯度裁剪</span>
+        <span class="n">torch</span><span class="o">.</span><span class="n">nn</span><span class="o">.</span><span class="n">utils</span><span class="o">.</span><span class="n">clip_grad_norm_</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">max_norm</span><span class="o">=</span><span class="mf">1.0</span><span class="p">)</span>
+
+        <span class="c1"># 监控RoPE相关梯度</span>
+        <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">model</span><span class="o">.</span><span class="n">named_parameters</span><span class="p">():</span>
+            <span class="k">if</span> <span class="s1">&#39;rope&#39;</span> <span class="ow">in</span> <span class="n">name</span> <span class="ow">and</span> <span class="n">param</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="n">grad_norm</span> <span class="o">=</span> <span class="n">param</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">norm</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2"> grad norm: </span><span class="si">{</span><span class="n">grad_norm</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</code></pre></div>
+
+<h4 id="523">5.2.3 预训练迁移策略</h4>
+<p>从Sinusoidal PE迁移到RoPE：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">convert_sinusoidal_to_rope</span><span class="p">(</span><span class="n">pretrained_model</span><span class="p">,</span> <span class="n">new_model</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    将预训练的Sinusoidal PE模型迁移到RoPE</span>
+
+<span class="sd">    策略：</span>
+<span class="sd">    1. 复制所有非位置编码的权重</span>
+<span class="sd">    2. RoPE从头开始（因为编码方式完全不同）</span>
+<span class="sd">    3. 使用较小学习率微调</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># 复制权重</span>
+    <span class="n">pretrained_dict</span> <span class="o">=</span> <span class="n">pretrained_model</span><span class="o">.</span><span class="n">state_dict</span><span class="p">()</span>
+    <span class="n">new_dict</span> <span class="o">=</span> <span class="n">new_model</span><span class="o">.</span><span class="n">state_dict</span><span class="p">()</span>
+
+    <span class="c1"># 过滤掉位置编码相关参数</span>
+    <span class="n">pretrained_dict</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pretrained_dict</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+                       <span class="k">if</span> <span class="s1">&#39;position&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">k</span><span class="o">.</span><span class="n">lower</span><span class="p">()}</span>
+
+    <span class="c1"># 更新新模型</span>
+    <span class="n">new_dict</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">pretrained_dict</span><span class="p">)</span>
+    <span class="n">new_model</span><span class="o">.</span><span class="n">load_state_dict</span><span class="p">(</span><span class="n">new_dict</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+    <span class="c1"># 冻结非RoPE参数（可选）</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">param</span> <span class="ow">in</span> <span class="n">new_model</span><span class="o">.</span><span class="n">named_parameters</span><span class="p">():</span>
+        <span class="k">if</span> <span class="s1">&#39;rope&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">name</span><span class="p">:</span>
+            <span class="n">param</span><span class="o">.</span><span class="n">requires_grad</span> <span class="o">=</span> <span class="kc">False</span>
+
+    <span class="k">return</span> <span class="n">new_model</span>
+</code></pre></div>
+
+<h3 id="53-roformer">5.3 RoFormer实验结果深入分析</h3>
+<h4 id="531-cail2019-scm">5.3.1 CAIL2019-SCM任务详解</h4>
+<p><strong>任务描述</strong>：中国法律案件相似性匹配
+- 输入：两个法律案件描述（长文本，平均800-1000字）
+- 输出：二分类（相似/不相似）
+- 挑战：长文本理解，法律专业术语</p>
+<p><strong>数据统计</strong>：
+- 训练集：8,964对案件
+- 验证集：1,120对案件
+- 测试集：1,343对案件
+- 平均长度：~900字（远超BERT的512限制）</p>
+<h4 id="532">5.3.2 实验设置</h4>
+<table>
+<thead>
+<tr>
+<th>模型</th>
+<th>maxlen</th>
+<th>batch_size</th>
+<th>学习率</th>
+<th>训练步数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BERT-512</td>
+<td>512</td>
+<td>16</td>
+<td>2e-5</td>
+<td>3 epochs</td>
+</tr>
+<tr>
+<td>WoBERT-512</td>
+<td>512</td>
+<td>16</td>
+<td>2e-5</td>
+<td>3 epochs</td>
+</tr>
+<tr>
+<td>RoFormer-512</td>
+<td>512</td>
+<td>16</td>
+<td>2e-5</td>
+<td>3 epochs</td>
+</tr>
+<tr>
+<td>RoFormer-1024</td>
+<td>1024</td>
+<td>8</td>
+<td>1e-5</td>
+<td>3 epochs</td>
+</tr>
+</tbody>
+</table>
+<h4 id="533">5.3.3 结果分析</h4>
+<p>\begin{array}{c|cc|c}
+\hline
+\text{模型} &amp; \text{验证集} &amp; \text{测试集} &amp; \Delta \text{（相对BERT）} \
+\hline
+\text{BERT-512} &amp; 64.13\% &amp; 67.77\% &amp; - \
+\text{WoBERT-512} &amp; 64.07\% &amp; 68.10\% &amp; +0.33\% \
+\text{RoFormer-512} &amp; 64.13\% &amp; 68.29\% &amp; +0.52\% \
+\textbf{RoFormer-1024} &amp; \textbf{66.07\%} &amp; \textbf{69.79\%} &amp; \textbf{+2.02\%} \
+\hline
+\end{array}</p>
+<p><strong>关键发现</strong>：
+1. <strong>短文本性能相当</strong>：RoFormer-512与BERT-512性能接近（甚至略优），验证RoPE不损害短文本能力
+2. <strong>长文本优势显著</strong>：RoFormer-1024相比RoFormer-512提升1.94%（验证集），说明长文本信息有效利用
+3. <strong>外推性验证</strong>：RoFormer在1024长度（超出预训练的512）仍表现良好，体现RoPE的外推能力</p>
+<h4 id="534">5.3.4 消融实验</h4>
+<p><strong>频率基数的影响</strong>（RoFormer-512，验证集）：</p>
+<table>
+<thead>
+<tr>
+<th>$\theta_{\text{base}}$</th>
+<th>准确率</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>100</td>
+<td>63.21%</td>
+<td>低频不足</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>63.89%</td>
+<td>次优</td>
+</tr>
+<tr>
+<td><strong>10000</strong></td>
+<td><strong>64.13%</strong></td>
+<td><strong>最优</strong></td>
+</tr>
+<tr>
+<td>100000</td>
+<td>63.75%</td>
+<td>高频不足</td>
+</tr>
+</tbody>
+</table>
+<p><strong>归一化方案的影响</strong>（RoFormer-512，验证集）：</p>
+<table>
+<thead>
+<tr>
+<th>归一化</th>
+<th>准确率</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>无（向量模长自由）</td>
+<td>62.45%</td>
+<td>不稳定</td>
+</tr>
+<tr>
+<td>LayerNorm（Q/K后）</td>
+<td>63.58%</td>
+<td>破坏相对位置</td>
+</tr>
+<tr>
+<td><strong>正交性保持（RoPE）</strong></td>
+<td><strong>64.13%</strong></td>
+<td><strong>最佳</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="54">5.4 学习路线图</h3>
+<h4 id="541">5.4.1 前置知识</h4>
+<p><strong>数学基础</strong>：
+1. <strong>线性代数</strong>：
+   - 旋转矩阵与正交变换
+   - 特征值分解
+   - 块对角矩阵
+2. <strong>复变函数</strong>：
+   - 欧拉公式：$e^{\mathrm{i}\theta} = \cos\theta + \mathrm{i}\sin\theta$
+   - 复数乘法的几何意义
+3. <strong>群论</strong>（可选）：
+   - 旋转群$SO(2)$的性质
+   - 群同态</p>
+<p><strong>深度学习基础</strong>：
+1. Transformer架构
+2. Attention机制
+3. 位置编码的必要性</p>
+<h4 id="542">5.4.2 推荐论文</h4>
+<p><strong>核心论文</strong>：
+1. <strong>RoFormer论文</strong>（必读）：
+   - Su et al. (2021). "RoFormer: Enhanced Transformer with Rotary Position Embedding"
+   - arXiv:2104.09864</p>
+<p><strong>相关工作</strong>：
+2. <strong>Sinusoidal PE</strong>：
+   - Vaswani et al. (2017). "Attention is All You Need"
+3. <strong>T5 RPE</strong>：
+   - Raffel et al. (2019). "Exploring the Limits of Transfer Learning"
+4. <strong>ALiBi</strong>：
+   - Press et al. (2021). "Train Short, Test Long: Attention with Linear Biases"
+5. <strong>线性Attention</strong>：
+   - Katharopoulos et al. (2020). "Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention"</p>
+<p><strong>后续改进</strong>：
+6. <strong>xPos</strong>：
+   - Sun et al. (2022). "A Length-Extrapolatable Transformer"
+7. <strong>YaRN</strong>：
+   - Peng et al. (2023). "YaRN: Efficient Context Window Extension of Large Language Models"</p>
+<h4 id="543">5.4.3 代码资源</h4>
+<ol>
+<li><strong>官方实现</strong>（中文）：</li>
+<li>
+<p>GitHub: <a href="https://github.com/ZhuiyiTechnology/roformer">ZhuiyiTechnology/roformer</a></p>
+</li>
+<li>
+<p><strong>HuggingFace集成</strong>：
+   ```python
+   from transformers import RoFormerModel, RoFormerTokenizer</p>
+</li>
+</ol>
+<p>tokenizer = RoFormerTokenizer.from_pretrained("junnyu/roformer_chinese_base")
+   model = RoFormerModel.from_pretrained("junnyu/roformer_chinese_base")
+   ```</p>
+<ol>
+<li><strong>LLaMA中的RoPE</strong>（英文）：</li>
+<li>GitHub: <a href="https://github.com/facebookresearch/llama">facebookresearch/llama</a></li>
+<li>注意：LLaMA使用的是RoPE的简化版本</li>
+</ol>
+<h3 id="55">5.5 未来研究方向</h3>
+<h4 id="551">5.5.1 可学习的频率参数</h4>
+<p><strong>Motivation</strong>：固定的$\theta_i = 10000^{-2i/d}$可能不是所有任务的最优选择。</p>
+<p><strong>方案</strong>：
+\begin{equation}
+\theta_i = \theta_{\text{base}}^{-2i/d} \cdot \exp(\alpha_i)
+\end{equation}
+其中$\alpha_i$是可学习参数，初始化为0。</p>
+<p><strong>挑战</strong>：
+- 过拟合风险：增加$d/2$个参数
+- 优化难度：频率参数与模型参数的耦合</p>
+<h4 id="552">5.5.2 混合位置编码方案</h4>
+<p><strong>方案1：RoPE + Learned Bias</strong>
+\begin{equation}
+\text{score}(q_i, k_j) = (\boldsymbol{\mathcal{R}}<em i-j="i-j">i \boldsymbol{q}_i)^T (\boldsymbol{\mathcal{R}}_j \boldsymbol{k}_j) + b</em>
+\end{equation}
+其中$b_{\Delta}$是可学习的相对位置偏置。</p>
+<p><strong>方案2：RoPE + ALiBi</strong>
+\begin{equation}
+\text{score}(q_i, k_j) = (\boldsymbol{\mathcal{R}}_i \boldsymbol{q}_i)^T (\boldsymbol{\mathcal{R}}_j \boldsymbol{k}_j) - \lambda |i-j|
+\end{equation}
+结合RoPE的相对位置和ALiBi的线性衰减。</p>
+<h4 id="553-rope">5.5.3 多模态RoPE</h4>
+<p><strong>挑战</strong>：不同模态（文本、图像、音频）的位置概念不同。
+- 文本：线性序列（1D）
+- 图像：空间网格（2D）
+- 视频：时空网格（3D）</p>
+<p><strong>2D RoPE</strong>（用于Vision Transformer）：
+\begin{equation}
+\boldsymbol{\mathcal{R}}_{(h, w)} = \boldsymbol{\mathcal{R}}_h^{\text{height}} \otimes \boldsymbol{\mathcal{R}}_w^{\text{width}}
+\end{equation}
+其中$\otimes$是Kronecker积，$h, w$是图像patch的行列索引。</p>
+<p><strong>3D RoPE</strong>（用于视频）：
+\begin{equation}
+\boldsymbol{\mathcal{R}}_{(t, h, w)} = \boldsymbol{\mathcal{R}}_t^{\text{time}} \otimes \boldsymbol{\mathcal{R}}_h^{\text{height}} \otimes \boldsymbol{\mathcal{R}}_w^{\text{width}}
+\end{equation}</p>
+<h4 id="554">5.5.4 理论深化</h4>
+<p><strong>开放问题</strong>：
+1. <strong>收敛性分析</strong>：RoPE是否影响Transformer的优化动力学？
+2. <strong>泛化性保证</strong>：RoPE如何影响模型的泛化误差界？
+3. <strong>外推极限</strong>：RoPE的外推能力的理论上界是什么？
+4. <strong>线性Attention理论</strong>：如何严格分析RoPE在线性Attention中的行为？</p>
+<p><strong>可能的研究方向</strong>：
+- 用神经切空间理论（NTK）分析RoPE的收敛性
+- 用PAC学习理论分析RoPE的泛化性
+- 用振荡积分理论严格证明远程衰减率</p>
+<hr />
+<h2 id="_8">📚 总结与展望</h2>
+<h3 id="_9">核心贡献回顾</h3>
+<p>RoPE（旋转式位置编码）是一种优雅的位置编码方案，核心贡献包括：</p>
+<ol>
+<li><strong>理论严谨性</strong>：通过旋转变换精确实现"以绝对位置编码的方式达到相对位置编码的效果"</li>
+<li><strong>正交性保持</strong>：不改变向量模长，维持模型训练稳定性</li>
+<li><strong>外推性优异</strong>：理论上支持任意长度，实践验证长文本处理能力</li>
+<li><strong>线性兼容性</strong>：唯一可用于线性Attention的相对位置编码</li>
+</ol>
+<h3 id="_10">实践价值</h3>
+<ul>
+<li><strong>广泛应用</strong>：RoPE已被LLaMA、PaLM、GPT-NeoX等大模型采用</li>
+<li><strong>工程友好</strong>：零参数，易于实现，计算高效</li>
+<li><strong>性能提升</strong>：在长文本任务上显著优于传统位置编码</li>
+</ul>
+<h3 id="_11">未来展望</h3>
+<p>RoPE开启了位置编码的新范式，但仍有广阔的探索空间：
+- <strong>理论完善</strong>：收敛性、泛化性的严格证明
+- <strong>方法改进</strong>：可学习频率、混合编码、多模态扩展
+- <strong>应用拓展</strong>：从NLP到CV、音频、多模态大模型</p>
+<p>位置编码的研究远未结束，RoPE为我们指明了一个充满潜力的方向！</p>
+<hr />
+<p><strong>参考文献</strong></p>
+<p>[1] Su, J., Lu, Y., Pan, S., Wen, B., &amp; Liu, Y. (2021). RoFormer: Enhanced Transformer with Rotary Position Embedding. arXiv:2104.09864.</p>
+<p>[2] Vaswani, A., et al. (2017). Attention is All You Need. NeurIPS.</p>
+<p>[3] Raffel, C., et al. (2019). Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer. JMLR.</p>
+<p>[4] Press, O., Smith, N., &amp; Lewis, M. (2021). Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation. ICLR.</p>
+<p>[5] Katharopoulos, A., et al. (2020). Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention. ICML.</p>
+<p>[6] Sun, Y., et al. (2022). A Length-Extrapolatable Transformer. ACL.</p>
+<p>[7] Peng, B., et al. (2023). YaRN: Efficient Context Window Extension of Large Language Models. arXiv:2309.00071.</p>
+        </div>
+    </div>
+</body>
+</html>

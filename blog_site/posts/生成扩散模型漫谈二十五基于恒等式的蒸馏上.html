@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成扩散模型漫谈（二十五）：基于恒等式的蒸馏（上）</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>生成扩散模型漫谈（二十五）：基于恒等式的蒸馏（上）</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 57.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10085">https://spaces.ac.cn/archives/10085</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>今天我们分享一下论文<a href="https://papers.cool/arxiv/2404.04057">《Score identity Distillation: Exponentially Fast Distillation of Pretrained Diffusion Models for One-Step Generation》</a>，顾名思义，这是一篇探讨如何更快更好地蒸馏扩散模型的新论文。</p>
+<p>即便没有做过蒸馏，大家应该也能猜到蒸馏的常规步骤：随机采样大量输入，然后用扩散模型生成相应结果作为输出，用这些输入输出作为训练数据对，来监督训练一个新模型。然而，众所周知作为教师的原始扩散模型通常需要多步（比如1000步）迭代才能生成高质量输出，所以且不论中间训练细节如何，该方案的一个显著缺点是生成训练数据太费时费力。此外，蒸馏之后的学生模型通常或多或少都有效果损失。</p>
+<p>有没有方法能一次性解决这两个缺点呢？这就是上述论文试图要解决的问题。</p>
+<h2 id="_1">重现江湖</h2>
+<p>论文将所提方案称为“Score identity Distillation（SiD）”，该名字取自它基于几个恒等式（Identity）来设计和推导了整个框架，取这个略显随意的名字大体是想突出恒等式变换在SiD中的关键作用，这确实是SiD的核心贡献。</p>
+<p>至于SiD的训练思想，其实跟之前在<a href="/archives/7038">《从去噪自编码器到生成模型》</a>介绍过的论文<a href="https://papers.cool/arxiv/2001.02728">《Learning Generative Models using Denoising Density Estimators》</a>（简称“DDE”）几乎一模一样，甚至最终形式也有五六分相似。只不过当时扩散模型还未露头角，所以DDE是将其作为一种新的生成模型提出的，在当时反而显得非常小众。而在扩散模型流行的今天，它可以重新表述为一种扩散模型的蒸馏方法，因为它需要一个训练好的去噪自编码器——这正好是扩散模型的核心。</p>
+<p>接下来笔者用自己的思路去介绍SiD。假设我们有一个在目标数据集训练好的教师扩散模型$\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^<em>}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t,t)$，它需要多步采样才能生成高质量图片，我们的目标则是要训练一个单步采样的学生模型$\boldsymbol{x} = \boldsymbol{g}</em>^}}(\boldsymbol{z})$，也就是一个类似GAN的生成器，输入指定噪声$\boldsymbol{z}$就可以直接生成符合要求的图像。如果我们有很多的$(\boldsymbol{z},\boldsymbol{x})$对，那么直接监督训练就可以了（当然损失函数和其他细节还需要进一步确定，读者可以自行参考相关工作），但如果没有呢？肯定不是不能训，因为就算没有$\boldsymbol{\epsilon}_{\boldsymbol{\varphi</em>}(\boldsymbol{x}_t,t)$也能训，比如GAN，所以关键是怎么借助已经训练好的扩散模型提供更好的信号。</p>
+<p>SiD及前作DDE使用了一个看上去很绕但是也很聪明的思路：</p>
+<blockquote>
+<p>如果$\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{z})$产生的数据分布跟目标分布很相似，那么拿$\boldsymbol{g}</em>^}}(\boldsymbol{z})$生成的数据集去训练一个扩散模型$\boldsymbol{\epsilon}_{\boldsymbol{\psi<em>}(\boldsymbol{x}<em _boldsymbol_varphi="\boldsymbol{\varphi">t,t)$的话，它也应该跟$\boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}_t,t)$很相似？</p>
+</blockquote>
+<h2 id="_2">初级形式</h2>
+<p>这个思路的聪明之处在于，它绕开了对教师模型生成样本的需求，也不需要训练教师模型的真实样本，因为“拿$\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{z})$生成的数据集去训练一个扩散模型”只需要学生模型$\boldsymbol{g}</em>)$是一个单步模型，用它来生成数据时间上比较友好。}}(\boldsymbol{z})$生成的数据（简称“学生数据”），而$\boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z</p>
+<p>当然，这还只是思路，将其转换为实际可行的训练方案还有一段路要走。首先回顾一下扩散模型，我们采用<a href="/archives/9164">《生成扩散模型漫谈（三）：DDPM = 贝叶斯 + 去噪》</a>的形式，我们使用如下方式对输入$\boldsymbol{x}<em _boldsymbol_varphi="\boldsymbol{\varphi">0$进行加噪：<br />
+\begin{equation}\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon},\quad \boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})\end{equation}<br />
+换言之$p(\boldsymbol{x}_t|\boldsymbol{x}_0)=\mathcal{N}(\boldsymbol{x}_t;\bar{\alpha}_t\boldsymbol{x}_0,\bar{\beta}_t^2 \boldsymbol{I})$。训练$\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}_t,t)$的方式则是去噪：<br />
+\begin{equation}\boldsymbol{\varphi}^</em> = \mathop{\text{argmin}}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\varphi}} \mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">0\sim \tilde{p}(\boldsymbol{x}_0),\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon}</em>}}(\bar{\alpha<em _boldsymbol_theta="\boldsymbol{\theta">t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon},t) - \boldsymbol{\varepsilon}\Vert^2\right] \label{eq:d-real-data}\end{equation}<br />
+这里的$\tilde{p}(\boldsymbol{x}_0)$就是教师模型的训练数据。同样地，如果我们想用$\boldsymbol{g}</em>)$的学生数据一个扩散模型，那么训练目标是}}(\boldsymbol{z<br />
+\begin{equation}\begin{aligned}<br />
+\boldsymbol{\psi}^<em> =&amp;\, \mathop{\text{argmin}}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\psi}} \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0^{(g)}\sim p</em>}}(\boldsymbol{x<em _boldsymbol_psi="\boldsymbol{\psi">0^{(g)}),\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\varepsilon}\Vert^2\right] \\\<br />
+=&amp;\, \mathop{\text{argmin}}</em>}} \mathbb{E<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{z},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)},t) - \boldsymbol{\varepsilon}\Vert^2\right]<br />
+\end{aligned}\label{eq:dloss}\end{equation}<br />
+这里$\boldsymbol{x}_t^{(g)}=\bar{\alpha}_t\boldsymbol{x}_0^{(g)} + \bar{\beta}_t\boldsymbol{\varepsilon}=\bar{\alpha}_t\boldsymbol{g}</em>}}(\boldsymbol{z}) + \bar{\beta<em _boldsymbol_theta="\boldsymbol{\theta">t\boldsymbol{\varepsilon}$，是由学生数据加噪后的样本，学生数据的分布记为$p</em>$的期望。现在我们有两个扩散模型，它们之间的差异一定程度上衡量了教师模型和学生模型生成的数据分布差异，所以一个直观的想法是通过最小化它们之间的差异，来学习学生模型：}}(\boldsymbol{x}_0^{(g)})$；第二个等号用到了“$\boldsymbol{x}_0^{(g)}$直接由$\boldsymbol{z}$决定”的事实，所以对$\boldsymbol{x}_0^{(g)}$的期望等价于对$\boldsymbol{z<br />
+\begin{equation}<br />
+\boldsymbol{\theta}^</em> = \mathop{\text{argmin}}<em _boldsymbol_z="\boldsymbol{z">{\boldsymbol{\theta}} \underbrace{\mathbb{E}</em>},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon<em _mathcal_L="\mathcal{L">{\boldsymbol{\varphi}^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}_t^{(g)},t)\Vert^2\right]}</em>}_1}\label{eq:gloss-1}\end{equation<br />
+注意式$\eqref{eq:dloss}$的优化依赖于$\boldsymbol{\theta}$，所以当$\boldsymbol{\theta}$通过式$\eqref{eq:gloss-1}$发生改变时，$\boldsymbol{\psi}^*$的值也随之改变，因此式$\eqref{eq:dloss}$和式$\eqref{eq:gloss-1}$实际上需要交替优化，类似GAN一样。</p>
+<h2 id="_3">点睛之笔</h2>
+<p>谈到GAN，有读者可能会“闻之色变”，因为它是出了名的容易训崩。很遗憾，上述提出的式$\eqref{eq:dloss}$和式$\eqref{eq:gloss-1}$交替训练的方案同样有这个问题。首先它理论上是没有问题的，问题出现在理论与实践之间的gap，主要体现在两点：</p>
+<blockquote>
+<p>1、理论上要求先求出式$\eqref{eq:dloss}$的最优解，然后才去优化式$\eqref{eq:gloss-1}$，但实际上从训练成本考虑，我们并没有将它训练到最优就去优化式$\eqref{eq:gloss-1}$了；</p>
+<p>2、理论上$\boldsymbol{\psi}^<em>$随$\boldsymbol{\theta}$而变，即应该写成$\boldsymbol{\psi}^</em>(\boldsymbol{\theta})$，从而在优化式$\eqref{eq:gloss-1}$时应该多出一项$\boldsymbol{\psi}^<em>(\boldsymbol{\theta})$对$\boldsymbol{\theta}$的梯度，但实际上在优化式$\eqref{eq:gloss-1}$时我们都只当$\boldsymbol{\psi}^</em>$是常数。</p>
+</blockquote>
+<p>这两个问题非常本质，它们也是GAN训练不稳定的根本原因，此前论文<a href="https://papers.cool/arxiv/2205.10146">《Revisiting GANs by Best-Response Constraint: Perspective, Methodology, and Application》</a>也特意从第2点出发改进了GAN的训练。看上去，这两个问题哪一个都无法解决，尤其是第1个，我们几乎不可能总是将$\boldsymbol{\psi}$求到最优，这在成本上是绝对无法接受的，至于第2个，在交替训练场景下我们也没什么好办法获得$\boldsymbol{\psi}^*(\boldsymbol{\theta})$的任何有效信息，从而更加不可能获得它关于$\boldsymbol{\theta}$的梯度。</p>
+<p>幸运的是，对于上述扩散模型的蒸馏问题，SiD提出了一个有效缓解这两个问题的方案。SiD的想法可谓非常“朴素”：<strong>既然$\boldsymbol{\psi}^<em>$取近似值和$\boldsymbol{\psi}^</em>$当成常数都没法避免，那么唯一的办法就是通过恒等变换，尽量消除优化目标$\eqref{eq:gloss-1}$对$\boldsymbol{\psi}^*$的依赖了。</strong> 只要式$\eqref{eq:gloss-1}$对$\boldsymbol{\psi}^*$的依赖足够弱，那么上述两个问题带来的负面影响也能足够弱了。</p>
+<p>这就是SiD的核心贡献，也是让人拍案叫绝的“点睛之笔”。</p>
+<h2 id="_4">恒等变换</h2>
+<p>接下来我们具体来看做了什么恒等变换。我们先来看式$\eqref{eq:d-real-data}$，它的优化目标可以等价地改写成<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\, \mathbb{E}<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{x}_0\sim \tilde{p}(\boldsymbol{x}_0),\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon}</em>}}(\bar{\alpha<em _boldsymbol_x="\boldsymbol{x">t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon},t) - \boldsymbol{\varepsilon}\Vert^2\right] \\\<br />
+=&amp;\, \mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">0\sim \tilde{p}(\boldsymbol{x}_0),\boldsymbol{x}_t\sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)}\left[\left\Vert\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t,t) - \frac{\boldsymbol{x}_t - \bar{\alpha}_t \boldsymbol{x}_0}{\bar{\beta}_t}\right\Vert^2\right] \\\<br />
+=&amp;\, \mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">0\sim \tilde{p}(\boldsymbol{x}_0),\boldsymbol{x}_t\sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)}\left[\left\Vert\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t,t) + \bar{\beta}_t\nabla</em><em _boldsymbol_varphi="\boldsymbol{\varphi">t}\log p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right\Vert^2\right]<br />
+\end{aligned}\end{equation}<br />
+根据<a href="/archives/9209">《生成扩散模型漫谈（五）：一般框架之SDE篇》</a>的得分匹配相关结果，上述目标的最优解是$\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t,t)=-\bar{\beta}_t\nabla</em><em _boldsymbol_psi="\boldsymbol{\psi">t}\log p(\boldsymbol{x}_t)$，同理式$\eqref{eq:dloss}$的最优解是$\boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)},t)=-\bar{\beta}_t\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}}\log p</em>}}(\boldsymbol{x<em _boldsymbol_z="\boldsymbol{z">t^{(g)})$。此时式$\eqref{eq:gloss-1}$的目标函数可以等价地改写成<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\,\mathbb{E}</em>},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon<em _boldsymbol_z="\boldsymbol{z">{\boldsymbol{\varphi}^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}_t^{(g)},t)\Vert^2\right] \\\[5pt]<br />
+=&amp;\, \mathbb{E}</em>},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\left\langle\boldsymbol{\epsilon<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{\varphi}^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}_t^{(g)},t), \boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)},t) + \bar{\beta}_t\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}}\log p</em>}}(\boldsymbol{x<em _boldsymbol_z="\boldsymbol{z">t^{(g)})\right\rangle\right] \\\[5pt]<br />
+=&amp;\, \color{green}{\mathbb{E}</em>^},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\left\langle\boldsymbol{\epsilon}_{\boldsymbol{\varphi</em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)},t), \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)},t)\right\rangle\right]} \\\[5pt]<br />
+&amp;\,\qquad+ \color{red}{\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}\sim p</em>}}(\boldsymbol{x<em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)})}\left[\left\langle\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)},t), \bar{\beta}_t\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}}\log p</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t^{(g)})\right\rangle\right]}<br />
+\end{aligned}\end{equation}<br />
+接下来要用到在<a href="/archives/9509">《生成扩散模型漫谈（十八）：得分匹配 = 条件得分匹配》</a>证明过的一个恒等式，来化简上式的红色部分：<br />
+\begin{equation}\nabla</em><em _boldsymbol_x="\boldsymbol{x">t}\log p(\boldsymbol{x}_t) = \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0\sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)}\left[\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right] \label{eq:id}\end{equation}<br />
+这是由概率密度定义以及贝叶斯公式推出的恒等式，不依赖于$p(\boldsymbol{x}_t),p(\boldsymbol{x}_t|\boldsymbol{x}_0),p(\boldsymbol{x}_0|\boldsymbol{x}_t)$的形式。将该恒等式代入到红色部分，我们有<br />
+\begin{equation}\color{red}{\begin{aligned}<br />
+&amp;\,\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}\sim p</em>}}(\boldsymbol{x<em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)})}\left[\left\langle\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)},t), \bar{\beta}_t\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}}\log p</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t^{(g)})\right\rangle\right] \\\[5pt]<br />
+= &amp;\,\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}\sim p</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}),\boldsymbol{x}_0^{(g)}\sim p</em>}}(\boldsymbol{x<em _boldsymbol_varphi="\boldsymbol{\varphi">0^{(g)}|\boldsymbol{x}_t^{(g)})}\left[\left\langle\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)},t), \bar{\beta}_t\nabla</em><em _boldsymbol_x="\boldsymbol{x">t^{(g)}} \log p(\boldsymbol{x}_t^{(g)}|\boldsymbol{x}_0^{(g)})\right\rangle\right] \\\[5pt]<br />
+= &amp;\,-\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0^{(g)}\sim p</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">0^{(g)}),\boldsymbol{x}_t^{(g)}\sim p</em>}}(\boldsymbol{x<em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)}|\boldsymbol{x}_0^{(g)})}\left[\left\langle\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_z="\boldsymbol{z">t^{(g)},t), \frac{\boldsymbol{x}_t - \bar{\alpha}_t \boldsymbol{x}_0}{\bar{\beta}_t}\right\rangle\right] \\\[5pt]<br />
+= &amp;\,-\mathbb{E}</em>},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\left\langle\boldsymbol{\epsilon<em _boldsymbol_z="\boldsymbol{z">{\boldsymbol{\varphi}^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}_t^{(g)},t), \boldsymbol{\varepsilon}\right\rangle\right]<br />
+\end{aligned}}\end{equation}<br />
+跟绿色部分合并，就得到学生模型新的损失函数<br />
+\begin{equation}\mathcal{L}_2 = \mathbb{E}</em>},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\left\langle\boldsymbol{\epsilon<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{\varphi}^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}_t^{(g)},t), \boldsymbol{\epsilon}</em>}^*}(\boldsymbol{x}_t^{(g)},t) - \boldsymbol{\varepsilon}\right\rangle\right]\label{eq:gloss-2}\end{equation<br />
+这就是SiD的核心结果，原论文的实验结果显示它能够高效地实现蒸馏，而式$\eqref{eq:gloss-1}$则没有训练出有意义的结果。</p>
+<p>相比式$\eqref{eq:gloss-1}$，上式$\eqref{eq:gloss-2}$出现$\boldsymbol{\psi}^<em>$的次数显然更少，也就是对$\boldsymbol{\psi}^</em>$的依赖更弱。此外，上式是基于最优解$\boldsymbol{\epsilon}_{\boldsymbol{\psi}^<em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)},t)=-\bar{\beta}_t\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}}\log p</em>^}}(\boldsymbol{x}_t^{(g)})$恒等变换而来的，也就是说相当于（部分地）预先窥见了$\boldsymbol{\psi</em>$的精确值，这也是它更优越的原因之一</p>
+<h2 id="_5">其他细节</h2>
+<p>到目前为止，本文的推导基本上是原论文推导的重复，但出了个别记号上的不一致外，还有一些细节上的不同，下面简单澄清一下，以免读者混淆。</p>
+<p>首先，论文的推导默认了$\bar{\alpha}_t=1$，这是沿用了<a href="https://papers.cool/arxiv/2206.00364">《Elucidating the Design Space of Diffusion-Based Generative Models》</a>一文的设置。然而尽管$\bar{\alpha}_t=1$很有代表性，并且能简化形式，但并不能很好地覆盖所有扩散模型类型，所以本文的推导保留了$\bar{\alpha}_t$。其次，论文的结果是以$\bar{\boldsymbol{\mu}}(\boldsymbol{x}_t) = \frac{\boldsymbol{x}_t - \bar{\beta}_t \boldsymbol{\epsilon}(\boldsymbol{x}_t,t)}{\bar{\alpha}_t}$为标准给出的，这显然跟扩散模型常见的以$\boldsymbol{\epsilon}(\boldsymbol{x}_t,t)$为准不符，笔者暂时没有领悟到原论文的表述方式的优越所在。</p>
+<p>最后，原论文发现损失函数$\mathcal{L}_1$即$\eqref{eq:gloss-1}$实在太不稳定，往往对效果还起到负面作用，所以SiD最终取了式$\eqref{eq:gloss-1}$的相反数作为额外的损失函数，加权到改进的损失函数$\eqref{eq:gloss-2}$上，即最终损失为$\mathcal{L}_2 - \lambda\mathcal{L}_1$（注：原论文中的权重记号是$\alpha$，但本文$\alpha$已用来表示noise schedule，所以改用$\lambda$），这在个别情形还能取得更优的蒸馏效果。至于具体实验细节和数据，读者自行翻阅原论文就好。</p>
+<p>相比其他蒸馏方法，SiD的缺点是对显存的需求比较大，因为它同时要维护三个模型$\boldsymbol{\epsilon}<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{\varphi}}(\boldsymbol{x}_t,t)$、$\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t,t)$和$\boldsymbol{g}</em>)$，它们具有相同的体量，虽然并非同时进行反向传播，但叠加起来也使得总显存量翻了一倍左右。针对这个问题，SiD在正文末尾提出，未来可以尝试对预训练的模型加LoRA来作为额外引入的两个模型，以进一步节省显存需求。}}(\boldsymbol{z</p>
+<h2 id="_6">延伸思考</h2>
+<p>笔者相信，对于一开始的“初级形式”，即式$\eqref{eq:dloss}$和式$\eqref{eq:gloss-1}$的交替优化，那么不少理论基础比较扎实并且深入思考过的读者都有机会想到，尤其是已经有DDE“珠玉在前”，推出它似乎并不是那么难预估的事情。但SiD的精彩之处是并没有止步于此，而是提出了后面的恒等变换，使得训练更加稳定高效，这体现了作者对扩散模型和优化理论非常深刻的理解。</p>
+<p>同时，SiD也留下了不少值得进一步思考和探索的问题。比如，学生模型的损失$\eqref{eq:gloss-2}$的恒等化简到了尽头了吗？并没有，因为它的内积左边还有$\boldsymbol{\epsilon}<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{\psi}^<em>}(\boldsymbol{x}<em _boldsymbol_z="\boldsymbol{z">t^{(g)},t)$，还可以用同样的方式进行化简。具体来说，我们有<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\,\mathbb{E}</em>^},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi</em>}(\boldsymbol{x}_t^{(g)},t) - \boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_z="\boldsymbol{z">t^{(g)},t)\Vert^2\right] \\\[5pt]<br />
+=&amp;\,\mathbb{E}</em>^},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi</em>}(\boldsymbol{x}<em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)},t)\Vert^2 - 2\left\langle\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t),\boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t)\right\rangle + \Vert\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)},t)\Vert^2\right] \\\[5pt]<br />
+=&amp;\,\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}\sim p</em>}}(\boldsymbol{x<em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)})}\left[<br />
+\scriptsize{\Vert\boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)},t)\Vert^2 - 2\left\langle\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)},t),-\bar{\beta}_t\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}}\log p</em>}}(\boldsymbol{x<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)})\right\rangle + \left\langle\boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)},t),-\bar{\beta}_t\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}}\log p</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t^{(g)})\right\rangle}<br />
+\right] \\\[5pt]<br />
+\end{aligned}\end{equation}<br />
+这里的每一个$-\bar{\beta}_t\nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}}\log p</em>}}(\boldsymbol{x<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)})$都可以用相同的恒等变换$\eqref{eq:id}$最终转化为单个$\boldsymbol{\varepsilon}$（但要注意$\Vert\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t)\Vert^2=\langle\boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t),\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_z="\boldsymbol{z">t^{(g)},t)\rangle$只能转换一个，不能都转），而式$\eqref{eq:gloss-2}$相当于只转了一部分，如果全部转会更好吗？因为没有实验结果，所以暂时不得而知。但有一个特别有意思的形式，就是只转换上面的中间部分的话，该损失函数可以写成<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\,\mathbb{E}</em>^},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi</em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_z="\boldsymbol{z">t^{(g)},t)\Vert^2\right] \\\[5pt]<br />
+=&amp;\,\mathbb{E}</em>^},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi</em>}(\boldsymbol{x}<em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)},t)\Vert^2 - 2\left\langle\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t),\boldsymbol{\varepsilon}\right\rangle + \Vert\boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_z="\boldsymbol{z">t^{(g)},t)\Vert^2\right] \\\[5pt]<br />
+=&amp;\,\mathbb{E}</em>},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{\varphi}^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\varepsilon}\Vert^2 + \Vert\boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}_t^{(g)},t)\Vert^2\right] + \text{常数} \\\[5pt]<br />
+\end{aligned}\label{eq:gloss-3}\end{equation}<br />
+这是学生模型，也就是生成器的损失，然后我们再对比学生数据去噪模型的损失$\eqref{eq:dloss}$：<br />
+\begin{equation}\boldsymbol{\psi}^* = \mathop{\text{argmin}}</em>}} \mathbb{E<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{z},\boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\Vert\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)},t) - \boldsymbol{\varepsilon}\Vert^2\right]\label{eq:dloss-1}\end{equation}<br />
+这两个式子联合起来看，我们可以发现学生模型实则在向教师模型看齐，并且试图远离学生数据所训练的去噪模型，形式上很像<a href="https://papers.cool/arxiv/1611.04076">LSGAN</a>，$\boldsymbol{\epsilon}</em>,t)$类似GAN的判别器，不同的地方是，GAN的判别器一般是两项损失相加而生成器是单项损失，SiD则反过来了。这其实体现了两种不同的学习思路：}}(\boldsymbol{x}_t^{(g)</p>
+<blockquote>
+<p>1、GAN：一开始造假者（生成器）和鉴别者（判别器）都是小白，鉴别者不断对比真品和赝品来提供自己的鉴宝水平，造假者则通过鉴别者的反馈不断提高自己的造假水平；</p>
+<p>2、SiD：完全没有真品，但有一个绝对权威的鉴宝大师（教师模型），造假者（学生模型）不断制作赝品，同时培养自己的鉴别者（学生数据训练的去噪模型），然后通过自家鉴别者跟大师的交流来提高自己造假水平。</p>
+</blockquote>
+<p>可能有读者会问：为什么SiD中的造假者不直接向大师请教，而是要通过培养自己的鉴别者来间接获得反馈呢？这是因为直接跟大师交流的话，可能会出现的问题就是长期都只交流同一个作品的技术，最终只制造出了一种能够以假乱真的赝品（模式坍缩），而通过培养自己的鉴别者一定程度上就可以避免这个问题，因为造假者的学习策略是“多得到大师的好评，同时尽量减少自家人的好评”，如果造假者还是只制造一种赝品，那么大师和自家的好评都会越来越多，这不符合造假者的学习策略，从而迫使造假者不断开发新的产品而不是固步自封。</p>
+<p>此外，读者可以发现，SiD整个训练并没有利用到扩散模型的递归采样的任何信息，换句话说它纯粹是利用了去噪这一训练方式所训练出来的去噪模型，那么一个自然的问题是：如果单纯为了训练一个单步的生成模型，而不是作为已有扩散模型的蒸馏，那么我们训练一个只具有单一噪声强度的去噪模型会不会更好？比如像DDE一样，固定$\bar{\alpha}_t=1$、$\bar{\beta}_t=\beta=\text{某个常数}$取训练一个去噪模型，然后用它来重复SiD的训练过程，这样会不会能够简化训练难度、提高训练效率？这也是一个值得进一步确认的问题。</p>
+<h2 id="_7">文章小结</h2>
+<p>在这篇文章中，我们介绍了一种新的将扩散模型蒸馏为单步生成模型的方案，其思想可以追溯到前两年的利用去噪自编码器训练生成模型的工作，它不需要获得教师模型的真实训练集，也不需要迭代教师模型来生成样本对，而引入了类似GAN的交替训练，同时提出了关键的恒等变换来稳定训练过程，整个方法有颇多值得学习之处。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10085">https://spaces.ac.cn/archives/10085</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 01, 2024). 《生成扩散模型漫谈（二十五）：基于恒等式的蒸馏（上） 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10085">https://spaces.ac.cn/archives/10085</a></p>
+<p>@online{kexuefm-10085,<br />
+title={生成扩散模型漫谈（二十五）：基于恒等式的蒸馏（上）},<br />
+author={苏剑林},<br />
+year={2024},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/10085}},<br />
+} </p>
+<hr />
+<h2 id="_8">公式推导与注释</h2>
+<h3 id="1">1. 问题背景与动机</h3>
+<h4 id="11">1.1 扩散模型蒸馏的挑战</h4>
+<p><strong>教师模型</strong>：预训练的扩散模型 $\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^*}(\boldsymbol{x}_t, t)$
+- 需要多步采样（如1000步）
+- 生成质量高，但速度慢</p>
+<p><strong>目标</strong>：训练单步生成模型 $\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{z})$
+- 输入随机噪声 $\boldsymbol{z} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$
+- 输出高质量图像 $\boldsymbol{x} = \boldsymbol{g}</em>)$}}(\boldsymbol{z</p>
+<p><strong>传统蒸馏的问题</strong>：
+1. 需要大量教师模型生成的样本（成本高）
+2. 学生模型难以达到教师模型的质量
+3. 训练不稳定（类似GAN）</p>
+<h3 id="2">2. 核心思想：自我一致性</h3>
+<h4 id="21-dde">2.1 DDE的启发</h4>
+<p>Score identity Distillation (SiD)的思想源于Denoising Density Estimators (DDE)：</p>
+<p><strong>假设</strong>：如果学生模型 $\boldsymbol{g}_{\boldsymbol{\theta}}(\boldsymbol{z})$ 的分布接近真实数据分布，那么用学生数据训练的去噪模型应该接近教师模型。</p>
+<p><strong>形式化</strong>：
+\begin{equation}
+p_{\boldsymbol{\theta}}(\boldsymbol{x}) \approx \tilde{p}(\boldsymbol{x}) \quad \Rightarrow \quad \boldsymbol{\epsilon}_{\boldsymbol{\psi}^<em>}^{(\boldsymbol{\theta})} \approx \boldsymbol{\epsilon}_{\boldsymbol{\varphi}^</em>} \tag{1}
+\end{equation}</p>
+<p>其中 $\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\psi}^*}^{(\boldsymbol{\theta})}$ 是在学生数据 $\boldsymbol{x} \sim p</em>$ 上训练的去噪模型。}</p>
+<h4 id="22">2.2 优势与挑战</h4>
+<p><strong>优势</strong>：
+- 不需要真实数据 $\tilde{p}(\boldsymbol{x})$
+- 不需要教师模型生成样本
+- 学生模型 $\boldsymbol{g}_{\boldsymbol{\theta}}$ 单步生成，数据获取成本低</p>
+<p><strong>挑战</strong>：
+- 需要交替训练 $\boldsymbol{\theta}$ 和 $\boldsymbol{\psi}$（类似GAN）
+- 训练不稳定</p>
+<h3 id="3-ddpm">3. DDPM的数学基础</h3>
+<h4 id="31">3.1 加噪过程</h4>
+<p>标准DDPM的加噪过程：
+\begin{equation}
+\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{2}
+\end{equation}</p>
+<p><strong>概率密度</strong>：
+\begin{equation}
+p(\boldsymbol{x}_t | \boldsymbol{x}_0) = \mathcal{N}(\boldsymbol{x}_t; \bar{\alpha}_t \boldsymbol{x}_0, \bar{\beta}_t^2 \boldsymbol{I}) \tag{3}
+\end{equation}</p>
+<h4 id="32">3.2 去噪训练目标</h4>
+<p><strong>标准去噪损失</strong>（在真实数据上）：
+\begin{equation}
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">{\text{denoise}}(\boldsymbol{\varphi}) = \mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">0 \sim \tilde{p}(\boldsymbol{x}_0), \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})} \left[\Vert\boldsymbol{\epsilon}</em>
+\end{equation}}}(\boldsymbol{x}_t, t) - \boldsymbol{\varepsilon}\Vert^2\right] \tag{4</p>
+<p>其中 $\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$。</p>
+<p><strong>等价形式</strong>（通过变量替换）：
+\begin{equation}
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">{\text{denoise}}(\boldsymbol{\varphi}) = \mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">0 \sim \tilde{p}, \boldsymbol{x}_t \sim p(\boldsymbol{x}_t|\boldsymbol{x}_0)} \left[\left\Vert\boldsymbol{\epsilon}</em>
+\end{equation}}}(\boldsymbol{x}_t, t) - \frac{\boldsymbol{x}_t - \bar{\alpha}_t \boldsymbol{x}_0}{\bar{\beta}_t}\right\Vert^2\right] \tag{5</p>
+<p><strong>证明</strong>：
+从 $\boldsymbol{x}_t = \bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}$ 可得：
+\begin{equation}
+\boldsymbol{\varepsilon} = \frac{\boldsymbol{x}_t - \bar{\alpha}_t \boldsymbol{x}_0}{\bar{\beta}_t} \tag{6}
+\end{equation}</p>
+<p>由于雅可比行列式为1，积分测度不变，两种形式等价。</p>
+<h3 id="4">4. 初级蒸馏框架</h3>
+<h4 id="41">4.1 学生数据的去噪模型</h4>
+<p><strong>学生模型定义</strong>：
+\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">0^{(g)} = \boldsymbol{g}</em>
+\end{equation}}}(\boldsymbol{z}), \quad \boldsymbol{z} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{7</p>
+<p><strong>学生数据分布</strong>：$p_{\boldsymbol{\theta}}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">0^{(g)})$，由 $\boldsymbol{g}</em>$ 的推前测度决定。}</p>
+<p><strong>学生数据的加噪</strong>：
+\begin{equation}
+\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)} = \bar{\alpha}_t \boldsymbol{x}_0^{(g)} + \bar{\beta}_t \boldsymbol{\varepsilon} = \bar{\alpha}_t \boldsymbol{g}</em>
+\end{equation}}}(\boldsymbol{z}) + \bar{\beta}_t \boldsymbol{\varepsilon} \tag{8</p>
+<p><strong>在学生数据上训练去噪模型</strong>：
+\begin{equation}
+\begin{aligned}
+\boldsymbol{\psi}^* &amp;= \arg\min_{\boldsymbol{\psi}} \mathbb{E}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{x}_0^{(g)} \sim p</em>}}, \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})} \left[\Vert\boldsymbol{\epsilon<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{\psi}}(\boldsymbol{x}_t^{(g)}, t) - \boldsymbol{\varepsilon}\Vert^2\right] \
+&amp;= \arg\min</em>}} \mathbb{E<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{z}, \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})} \left[\Vert\boldsymbol{\epsilon}</em>\Vert^2\right]
+\end{aligned} \tag{9}
+\end{equation}}}(\boldsymbol{x}_t^{(g)}, t) - \boldsymbol{\varepsilon</p>
+<p>第二个等号利用了 $\boldsymbol{x}_0^{(g)}$ 直接由 $\boldsymbol{z}$ 决定的事实。</p>
+<h4 id="42">4.2 初级损失函数</h4>
+<p><strong>学生模型的训练目标</strong>（朴素版本）：最小化教师模型和学生数据去噪模型的差异
+\begin{equation}
+\mathcal{L}<em _boldsymbol_z="\boldsymbol{z">1(\boldsymbol{\theta}) = \mathbb{E}</em>^}, \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})} \left[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)}, t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}_t^{(g)}, t)\Vert^2\right] \tag{10}
+\end{equation}</p>
+<p><strong>训练流程</strong>（交替优化）：
+1. <strong>固定 $\boldsymbol{\theta}$，更新 $\boldsymbol{\psi}$</strong>：通过式(9)训练去噪模型
+2. <strong>固定 $\boldsymbol{\psi}$，更新 $\boldsymbol{\theta}$</strong>：通过式(10)训练生成器</p>
+<h3 id="5">5. 交替训练的理论问题</h3>
+<h4 id="51">5.1 两个本质问题</h4>
+<p><strong>问题1</strong>：$\boldsymbol{\psi}^*$ 未达到最优</p>
+<p>理论上要求：
+\begin{equation}
+\boldsymbol{\psi} = \arg\min_{\boldsymbol{\psi}} \mathcal{L}_{\text{denoise}}(\boldsymbol{\psi}) \tag{11}
+\end{equation}</p>
+<p>实践中：只训练有限步，$\boldsymbol{\psi} \approx \boldsymbol{\psi}^*$（近似最优）</p>
+<p><strong>问题2</strong>：忽略了 $\boldsymbol{\psi}^*$ 对 $\boldsymbol{\theta}$ 的依赖</p>
+<p>理论上：$\boldsymbol{\psi}^<em> = \boldsymbol{\psi}^</em>(\boldsymbol{\theta})$，在优化 $\boldsymbol{\theta}$ 时应考虑：
+\begin{equation}
+\frac{\partial \mathcal{L}<em _boldsymbol_psi="\boldsymbol{\psi">1}{\partial \boldsymbol{\theta}} = \underbrace{\frac{\partial \mathcal{L}_1}{\partial \boldsymbol{\theta}}\bigg|</em>}\text{ fixed}}<em _text_隐式梯度="\text{隐式梯度">{\text{显式梯度}} + \underbrace{\frac{\partial \mathcal{L}_1}{\partial \boldsymbol{\psi}}\frac{\partial \boldsymbol{\psi}^*}{\partial \boldsymbol{\theta}}}</em>
+\end{equation}}} \tag{12</p>
+<p>实践中：只计算显式梯度，忽略隐式梯度（因为 $\frac{\partial \boldsymbol{\psi}^*}{\partial \boldsymbol{\theta}}$ 难以计算）</p>
+<h4 id="52">5.2 为什么这些问题严重？</h4>
+<p>这两个问题导致：
+- 梯度估计有偏
+- 训练不稳定（类似GAN的模式坍缩）
+- 学生模型质量差</p>
+<p><strong>GAN的类比</strong>：
+- GAN判别器未达到最优 → 生成器梯度不准确
+- 忽略判别器对生成器的依赖 → 训练振荡</p>
+<h3 id="6">6. 得分匹配与恒等式</h3>
+<h4 id="61">6.1 得分匹配理论</h4>
+<p><strong>定理</strong>（得分匹配）：式(5)的最优解满足：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\varphi}^*}(\boldsymbol{x}_t, t) = -\bar{\beta}_t \nabla</em>
+\end{equation}}_t} \log p(\boldsymbol{x}_t) \tag{13</p>
+<p>其中 $p(\boldsymbol{x}_t) = \int p(\boldsymbol{x}_t | \boldsymbol{x}_0) \tilde{p}(\boldsymbol{x}_0) d\boldsymbol{x}_0$ 是边际分布。</p>
+<p><strong>证明思路</strong>（变分推导）：
+\begin{equation}
+\begin{aligned}
+&amp;\mathbb{E}<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{x}_0, \boldsymbol{x}_t} \left[\left\Vert\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) + \bar{\beta}_t \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t | \boldsymbol{x}_0)\right\Vert^2\right] \
+=&amp; \mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">t} \left[\Vert\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t)\Vert^2\right] + 2\mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">t}\left[\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) \cdot \bar{\beta}_t \nabla</em>
+\end{aligned} \tag{14}
+\end{equation}}_t} \log p(\boldsymbol{x}_t)\right] + \text{const</p>
+<p>第二项通过分部积分：
+\begin{equation}
+\begin{aligned}
+&amp;\mathbb{E}<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{x}_t}\left[\boldsymbol{\epsilon}</em>}} \cdot \nabla_{\boldsymbol{x<em _boldsymbol_varphi="\boldsymbol{\varphi">t} \log p(\boldsymbol{x}_t)\right] \
+=&amp; \int \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) \cdot \frac{\nabla</em><em _boldsymbol_varphi="\boldsymbol{\varphi">t} p(\boldsymbol{x}_t)}{p(\boldsymbol{x}_t)} p(\boldsymbol{x}_t) d\boldsymbol{x}_t \
+=&amp; \int \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) \cdot \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} p(\boldsymbol{x}_t) d\boldsymbol{x}_t \
+=&amp; -\int p(\boldsymbol{x}_t) \nabla</em><em _boldsymbol_varphi="\boldsymbol{\varphi">t} \cdot \boldsymbol{\epsilon}</em>_t
+\end{aligned} \tag{15}
+\end{equation}}}(\boldsymbol{x}_t, t) d\boldsymbol{x</p>
+<p>最小化式(14)等价于：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\varphi}^*}(\boldsymbol{x}_t, t) = -\bar{\beta}_t \nabla</em>
+\end{equation}}_t} \log p(\boldsymbol{x}_t) \tag{16</p>
+<p>同理，学生数据去噪模型的最优解为：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\psi}^*}(\boldsymbol{x}_t^{(g)}, t) = -\bar{\beta}_t \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}} \log p</em>
+\end{equation}}}(\boldsymbol{x}_t^{(g)}) \tag{17</p>
+<h4 id="62">6.2 条件得分恒等式</h4>
+<p><strong>关键恒等式</strong>（贝叶斯公式的梯度版本）：
+\begin{equation}
+\nabla_{\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t) = \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)} \left[\nabla</em>
+\end{equation}}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)\right] \tag{18</p>
+<p><strong>证明</strong>：
+从贝叶斯公式：
+\begin{equation}
+p(\boldsymbol{x}_0|\boldsymbol{x}_t) = \frac{p(\boldsymbol{x}_t|\boldsymbol{x}_0) p(\boldsymbol{x}_0)}{p(\boldsymbol{x}_t)} \tag{19}
+\end{equation}</p>
+<p>两边取对数：
+\begin{equation}
+\log p(\boldsymbol{x}_0|\boldsymbol{x}_t) = \log p(\boldsymbol{x}_t|\boldsymbol{x}_0) + \log p(\boldsymbol{x}_0) - \log p(\boldsymbol{x}_t) \tag{20}
+\end{equation}</p>
+<p>对 $\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t$ 求梯度（注意 $p(\boldsymbol{x}_0)$ 不依赖 $\boldsymbol{x}_t$）：
+\begin{equation}
+\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_0|\boldsymbol{x}_t) = \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0) - \nabla</em>
+\end{equation}}_t} \log p(\boldsymbol{x}_t) \tag{21</p>
+<p>两边关于 $\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">0 \sim p(\boldsymbol{x}_0|\boldsymbol{x}_t)$ 取期望：
+\begin{equation}
+\mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0|\boldsymbol{x}_t} [\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_0|\boldsymbol{x}_t)] = \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0|\boldsymbol{x}_t} [\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)] - \nabla</em>
+\end{equation}}_t} \log p(\boldsymbol{x}_t) \tag{22</p>
+<p>左边：
+\begin{equation}
+\begin{aligned}
+&amp;\mathbb{E}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{x}_0|\boldsymbol{x}_t} [\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_0|\boldsymbol{x}_t)] \
+=&amp; \int p(\boldsymbol{x}_0|\boldsymbol{x}_t) \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0 \
+=&amp; \int p(\boldsymbol{x}_0|\boldsymbol{x}_t) \frac{\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} p(\boldsymbol{x}_0|\boldsymbol{x}_t)}{p(\boldsymbol{x}_0|\boldsymbol{x}_t)} d\boldsymbol{x}_0 \
+=&amp; \int \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0 \
+=&amp; \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \int p(\boldsymbol{x}_0|\boldsymbol{x}_t) d\boldsymbol{x}_0 \
+=&amp; \nabla</em>
+\end{aligned} \tag{23}
+\end{equation}}_t} 1 = \boldsymbol{0</p>
+<p>代入式(22)得：
+\begin{equation}
+\nabla_{\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{x}_t) = \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0|\boldsymbol{x}_t} [\nabla</em>
+\end{equation}}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)] \tag{24</p>
+<p>这就是恒等式(18)！</p>
+<h3 id="7">7. 恒等式的应用</h3>
+<h4 id="71">7.1 展开初级损失</h4>
+<p>代入式(16)和(17)到式(10)：
+\begin{equation}
+\begin{aligned}
+\mathcal{L}<em _boldsymbol_z="\boldsymbol{z">1 &amp;= \mathbb{E}</em>}, \boldsymbol{\varepsilon}} \left[\Vert\boldsymbol{\epsilon<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\varphi}^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)}, t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}_t^{(g)}, t)\Vert^2\right] \
+&amp;= \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t^{(g)}} \left[\left\Vert -\bar{\beta}_t \nabla</em><em _boldsymbol_x="\boldsymbol{x">t^{(g)}} \log p(\boldsymbol{x}_t^{(g)}) + \bar{\beta}_t \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}} \log p</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t^{(g)})\right\Vert^2\right] \
+&amp;= \bar{\beta}_t^2 \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">t^{(g)}} \left[\left\Vert \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}} \log \frac{p</em>\right\Vert^2\right]
+\end{aligned} \tag{25}
+\end{equation}}}(\boldsymbol{x}_t^{(g)})}{p(\boldsymbol{x}_t^{(g)})</p>
+<p><strong>问题</strong>：这个形式仍然依赖 $p(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)})$ 和 $p</em>)$ 的梯度，难以计算。}}(\boldsymbol{x}_t^{(g)</p>
+<h4 id="72">7.2 应用恒等式化简</h4>
+<p>应用恒等式(18)：
+\begin{equation}
+\nabla_{\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}} \log p</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t^{(g)}) = \mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0^{(g)} \sim p</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">0^{(g)}|\boldsymbol{x}_t^{(g)})} \left[\nabla</em>
+\end{equation}}_t^{(g)}} \log p(\boldsymbol{x}_t^{(g)}|\boldsymbol{x}_0^{(g)})\right] \tag{26</p>
+<p>从式(6)：
+\begin{equation}
+\nabla_{\boldsymbol{x}_t^{(g)}} \log p(\boldsymbol{x}_t^{(g)}|\boldsymbol{x}_0^{(g)}) = -\frac{1}{\bar{\beta}_t^2}(\boldsymbol{x}_t^{(g)} - \bar{\alpha}_t \boldsymbol{x}_0^{(g)}) = -\frac{1}{\bar{\beta}_t} \boldsymbol{\varepsilon} \tag{27}
+\end{equation}</p>
+<p>因此：
+\begin{equation}
+\nabla_{\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}} \log p</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t^{(g)}) = -\frac{1}{\bar{\beta}_t} \mathbb{E}</em>
+\end{equation}}_0^{(g)}|\boldsymbol{x}_t^{(g)}} [\boldsymbol{\varepsilon}] \tag{28</p>
+<h3 id="8-sid">8. SiD的核心变换</h3>
+<h4 id="81">8.1 重写损失函数</h4>
+<p>将式(25)展开：
+\begin{equation}
+\begin{aligned}
+\mathcal{L}<em _boldsymbol_x="\boldsymbol{x">1 &amp;= \mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)}} \left[\left\Vert\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)}, t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)}, t)\right\Vert^2\right] \
+&amp;= \mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)}} \left[\Vert\boldsymbol{\epsilon}</em>^<em>}\Vert^2 - 2\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^</em>} \cdot \boldsymbol{\epsilon}_{\boldsymbol{\psi}^<em>} + \Vert\boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}\Vert^2\right]
+\end{aligned} \tag{29}
+\end{equation}</p>
+<p><strong>关键观察</strong>：中间的交叉项 $-2\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^<em>} \cdot \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}$ 可以用恒等式改写！</p>
+<h4 id="82">8.2 化简交叉项</h4>
+<p>使用式(17)：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\psi}^*}(\boldsymbol{x}_t^{(g)}, t) = -\bar{\beta}_t \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}} \log p</em>
+\end{equation}}}(\boldsymbol{x}_t^{(g)}) \tag{30</p>
+<p>交叉项：
+\begin{equation}
+\begin{aligned}
+&amp;\mathbb{E}<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{x}_t^{(g)}} \left[\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)}, t) \cdot \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)}, t)\right] \
+=&amp; \mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)}} \left[\boldsymbol{\epsilon}</em>}^*}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t^{(g)}, t) \cdot (-\bar{\beta}_t) \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}} \log p</em>)\right]
+\end{aligned} \tag{31}
+\end{equation}}}(\boldsymbol{x}_t^{(g)</p>
+<p>应用恒等式(26)：
+\begin{equation}
+\begin{aligned}
+&amp;= \mathbb{E}<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{x}_t^{(g)}} \left[\boldsymbol{\epsilon}</em>^<em>} \cdot (-\bar{\beta}<em _boldsymbol_x="\boldsymbol{x">t) \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0^{(g)}|\boldsymbol{x}_t^{(g)}} [\nabla</em><em _boldsymbol_x="\boldsymbol{x">t^{(g)}} \log p(\boldsymbol{x}_t^{(g)}|\boldsymbol{x}_0^{(g)})]\right] \
+&amp;= \mathbb{E}</em><em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)}, \boldsymbol{x}_0^{(g)}|\boldsymbol{x}_t^{(g)}} \left[\boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)}, t) \cdot \bar{\beta}_t \nabla</em>)\right]
+\end{aligned} \tag{32}
+\end{equation}}_t^{(g)}} \log p(\boldsymbol{x}_t^{(g)}|\boldsymbol{x}_0^{(g)</p>
+<p>使用式(27)：
+\begin{equation}
+\nabla_{\boldsymbol{x}_t^{(g)}} \log p(\boldsymbol{x}_t^{(g)}|\boldsymbol{x}_0^{(g)}) = -\frac{\boldsymbol{x}_t^{(g)} - \bar{\alpha}_t \boldsymbol{x}_0^{(g)}}{\bar{\beta}_t^2} \tag{33}
+\end{equation}</p>
+<p>代入：
+\begin{equation}
+\begin{aligned}
+&amp;= -\mathbb{E}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{x}_0^{(g)} \sim p</em>}}, \boldsymbol{x<em _boldsymbol_varphi="\boldsymbol{\varphi">t^{(g)} \sim p(\cdot|\boldsymbol{x}_0^{(g)})} \left[\boldsymbol{\epsilon}</em>^<em>}(\boldsymbol{x}<em _boldsymbol_z="\boldsymbol{z">t^{(g)}, t) \cdot \frac{\boldsymbol{x}_t^{(g)} - \bar{\alpha}_t \boldsymbol{x}_0^{(g)}}{\bar{\beta}_t}\right] \
+&amp;= -\mathbb{E}</em>^}, \boldsymbol{\varepsilon}} \left[\boldsymbol{\epsilon}_{\boldsymbol{\varphi</em>}(\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}, t) \cdot \frac{\bar{\alpha}_t \boldsymbol{g}</em>}}(\boldsymbol{z}) + \bar{\beta<em _boldsymbol_theta="\boldsymbol{\theta">t \boldsymbol{\varepsilon} - \bar{\alpha}_t \boldsymbol{g}</em>}}(\boldsymbol{z})}{\bar{\beta<em _boldsymbol_z="\boldsymbol{z">t}\right] \
+&amp;= -\mathbb{E}</em>\right]
+\end{aligned} \tag{34}
+\end{equation}}, \boldsymbol{\varepsilon}} \left[\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^*}(\boldsymbol{x}_t^{(g)}, t) \cdot \boldsymbol{\varepsilon</p>
+<h4 id="83-sid">8.3 最终的SiD损失</h4>
+<p>将式(34)代入式(29)：
+\begin{equation}
+\begin{aligned}
+\mathcal{L}<em _boldsymbol_z="\boldsymbol{z">1 &amp;= \mathbb{E}</em>}, \boldsymbol{\varepsilon}} \left[\Vert\boldsymbol{\epsilon<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{\varphi}^<em>}\Vert^2 + 2\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^</em>} \cdot \boldsymbol{\varepsilon} + \Vert\boldsymbol{\epsilon}</em>^<em>}\Vert^2\right] \
+&amp;= \mathbb{E}<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{z}, \boldsymbol{\varepsilon}} \left[\Vert\boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t^{(g)}, t) - \boldsymbol{\varepsilon}\Vert^2\right] + \mathbb{E}</em><em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)}} \left[\Vert\boldsymbol{\epsilon}</em>, t)\Vert^2\right]
+\end{aligned} \tag{35}
+\end{equation}}^*}(\boldsymbol{x}_t^{(g)</p>
+<p><strong>SiD的最终损失</strong>（忽略常数项 $\Vert\boldsymbol{\epsilon}_{\boldsymbol{\psi}^<em>}\Vert^2$）：
+\begin{equation}
+\mathcal{L}<em _boldsymbol_z="\boldsymbol{z">2(\boldsymbol{\theta}) = \mathbb{E}</em>^}, \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})} \left[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi</em>}(\boldsymbol{x}_t^{(g)}, t) - \boldsymbol{\varepsilon}\Vert^2\right] \tag{36}
+\end{equation}</p>
+<p>其中 $\boldsymbol{x}<em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)} = \bar{\alpha}_t \boldsymbol{g}</em>$。}}(\boldsymbol{z}) + \bar{\beta}_t \boldsymbol{\varepsilon</p>
+<p><strong>也可以写成内积形式</strong>：
+\begin{equation}
+\mathcal{L}<em _boldsymbol_z="\boldsymbol{z">2(\boldsymbol{\theta}) = \mathbb{E}</em>}, \boldsymbol{\varepsilon}} \left[\langle \boldsymbol{\epsilon<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{\varphi}^<em>}(\boldsymbol{x}<em _boldsymbol_psi="\boldsymbol{\psi">t^{(g)}, t) - \boldsymbol{\epsilon}</em>^</em>}(\boldsymbol{x}_t^{(g)}, t), \boldsymbol{\epsilon}</em>
+\end{equation}}^*}(\boldsymbol{x}_t^{(g)}, t) - \boldsymbol{\varepsilon}\rangle\right] \tag{37</p>
+<h3 id="9">9. 恒等变换的深层意义</h3>
+<h4 id="91-boldsymbolpsi">9.1 消除了对 $\boldsymbol{\psi}^*$ 的依赖</h4>
+<p><strong>Before</strong>（式10）：
+\begin{equation}
+\mathcal{L}<em _boldsymbol_varphi="\boldsymbol{\varphi">1 = \mathbb{E}[\Vert\boldsymbol{\epsilon}</em>^<em>} - \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}\Vert^2] \tag{38}
+\end{equation}
+- 显式依赖 $\boldsymbol{\epsilon}_{\boldsymbol{\psi}^*}$
+- 需要交替训练
+- 梯度有偏</p>
+<p><strong>After</strong>（式36）：
+\begin{equation}
+\mathcal{L}<em _boldsymbol_varphi="\boldsymbol{\varphi">2 = \mathbb{E}[\Vert\boldsymbol{\epsilon}</em>^<em>} - \boldsymbol{\varepsilon}\Vert^2] \tag{39}
+\end{equation}
+- $\boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}$ 被 $\boldsymbol{\varepsilon}$ 替换
+- 不再需要训练 $\boldsymbol{\psi}$
+- 直接优化 $\boldsymbol{\theta}$</p>
+<h4 id="92">9.2 为什么有效？</h4>
+<p><strong>关键洞察</strong>：恒等式(18)提前"窥见"了 $\boldsymbol{\psi}^*$ 的形式！</p>
+<p>从式(17)和式(26)：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\psi}^*}(\boldsymbol{x}_t^{(g)}, t) = -\bar{\beta}_t \mathbb{E}</em><em _boldsymbol_x="\boldsymbol{x">0^{(g)}|\boldsymbol{x}_t^{(g)}} [\nabla</em><em _boldsymbol_x="\boldsymbol{x">t^{(g)}} \log p(\boldsymbol{x}_t^{(g)}|\boldsymbol{x}_0^{(g)})] = \mathbb{E}</em>
+\end{equation}}_0^{(g)}|\boldsymbol{x}_t^{(g)}} [\boldsymbol{\varepsilon}] \tag{40</p>
+<p>虽然不知道具体的 $\boldsymbol{\epsilon}_{\boldsymbol{\psi}^<em>}$，但知道它的</em><em>期望形式</em>*！</p>
+<h3 id="10">10. 进一步变换</h3>
+<h4 id="101-35">10.1 式(35)的完整展开</h4>
+<p>回到式(35)的第二种形式：
+\begin{equation}
+\mathcal{L}<em _boldsymbol_varphi="\boldsymbol{\varphi">1 = \mathbb{E}[\Vert\boldsymbol{\epsilon}</em>^<em>} - \boldsymbol{\varepsilon}\Vert^2] + \mathbb{E}[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}\Vert^2] \tag{41}
+\end{equation}</p>
+<p>进一步展开第二项：
+\begin{equation}
+\begin{aligned}
+\mathbb{E}[\Vert\boldsymbol{\epsilon}<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{\psi}^<em>}\Vert^2] &amp;= \mathbb{E}[\langle \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}, \boldsymbol{\epsilon}</em>^<em>} \rangle] \
+&amp;= \mathbb{E}[\langle \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}, -\bar{\beta}<em _boldsymbol_x="\boldsymbol{x">t \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}} \log p</em>) \rangle]
+\end{aligned} \tag{42}
+\end{equation}}}(\boldsymbol{x}_t^{(g)</p>
+<p>同样应用恒等式(26)，最终可以得到：
+\begin{equation}
+\mathbb{E}[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\psi}^<em>}\Vert^2] = \mathbb{E}[\langle \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}, \boldsymbol{\varepsilon} \rangle] \tag{43}
+\end{equation}</p>
+<h4 id="102-boldsymbolpsi">10.2 完全消除 $\boldsymbol{\psi}^*$ 的形式</h4>
+<p>如果连式(41)的第二项也变换：
+\begin{equation}
+\mathcal{L}<em _boldsymbol_varphi="\boldsymbol{\varphi">1 = \mathbb{E}[\Vert\boldsymbol{\epsilon}</em>^<em>} - \boldsymbol{\varepsilon}\Vert^2] + \mathbb{E}[\langle \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}, \boldsymbol{\varepsilon} \rangle] \tag{44}
+\end{equation}</p>
+<p>但第二项仍然有 $\boldsymbol{\epsilon}_{\boldsymbol{\psi}^*}$！</p>
+<p><strong>原论文的选择</strong>：保留式(37)的形式，因为：
+1. 第一项 $\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^<em>} - \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}\Vert$ 已经被部分消除
+2. 实验发现式(37)训练最稳定</p>
+<h3 id="11-10">11. 与式(10)的对比</h3>
+<h4 id="111">11.1 损失函数的演化</h4>
+<p><strong>式(10)</strong>（初级形式）：
+\begin{equation}
+\begin{aligned}
+\mathcal{L}<em _boldsymbol_varphi="\boldsymbol{\varphi">1 &amp;= \mathbb{E}[\Vert\boldsymbol{\epsilon}</em>^<em>} - \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}\Vert^2] \
+&amp;= \mathbb{E}[\Vert\boldsymbol{\epsilon}<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{\varphi}^<em>}\Vert^2] - 2\mathbb{E}[\langle \boldsymbol{\epsilon}_{\boldsymbol{\varphi}^</em>}, \boldsymbol{\epsilon}</em>^<em>} \rangle] + \mathbb{E}[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}\Vert^2]
+\end{aligned} \tag{45}
+\end{equation}</p>
+<p><strong>式(37)</strong>（SiD形式）：
+\begin{equation}
+\begin{aligned}
+\mathcal{L}<em _boldsymbol_varphi="\boldsymbol{\varphi">2 &amp;= \mathbb{E}[\langle \boldsymbol{\epsilon}</em>^<em>} - \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}, \boldsymbol{\epsilon}<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{\varphi}^<em>} - \boldsymbol{\varepsilon} \rangle] \
+&amp;= \mathbb{E}[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^</em>}\Vert^2] - \mathbb{E}[\langle \boldsymbol{\epsilon}</em>^<em>}, \boldsymbol{\varepsilon} \rangle] - \mathbb{E}[\langle \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}, \boldsymbol{\epsilon}_{\boldsymbol{\varphi}^<em>} \rangle] + \mathbb{E}[\langle \boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}, \boldsymbol{\varepsilon} \rangle]
+\end{aligned} \tag{46}
+\end{equation}</p>
+<p><strong>关系</strong>：通过恒等式(34)和(43)，两者等价，但式(37)更稳定。</p>
+<h4 id="112">11.2 实践中的细节</h4>
+<p><strong>原论文的最终损失</strong>：
+\begin{equation}
+\mathcal{L}_{\text{SiD}} = \mathcal{L}_2 - \lambda \mathcal{L}_1 \tag{47}
+\end{equation}</p>
+<p>其中 $\lambda &gt; 0$ 是超参数（通常 $\lambda \approx 1$）。</p>
+<p><strong>解释</strong>：
+- $\mathcal{L}<em _boldsymbol_varphi="\boldsymbol{\varphi">2$：主损失，利用恒等式化简
+- $-\lambda \mathcal{L}_1$：正则项，反向的初级损失（鼓励 $\boldsymbol{\epsilon}</em>^<em>}$ 和 $\boldsymbol{\epsilon}_{\boldsymbol{\psi}^</em>}$ 的差异）</p>
+<p>这有点反直觉，但实验显示效果更好！</p>
+<h3 id="12">12. 训练算法</h3>
+<h4 id="121-sid">12.1 SiD的完整训练流程</h4>
+<div class="codehilite"><pre><span></span><code>算法：Score identity Distillation (SiD)
+输入：
+  <span class="k">-</span> 教师模型 ε_φ*
+  <span class="k">-</span> 噪声 schedule {ᾱ_t, β̄_t}
+  <span class="k">-</span> 学生模型初始化 g_θ
+
+输出：训练好的学生模型 g_θ
+
+1. while not converged do
+2.     # 采样batch
+3.     采样 z ~ N(0, I)
+4.     采样 ε ~ N(0, I)
+5.     采样 t ~ Uniform(1, T)
+6.
+7.     # 生成学生数据
+8.     x_0^(g) = g_θ(z)
+9.     x_t^(g) = ᾱ_t · x_0^(g) + β̄_t · ε
+10.
+11.    # 计算教师模型预测
+12.    ε_φ = ε_φ*(x_t^(g), t)
+13.
+14.    # 同时训练去噪模型 ε_ψ
+15.    ε_ψ = ε_ψ(x_t^(g), t)
+16.    L_ψ = ||ε_ψ - ε||²
+17.    更新 ψ ← ψ - η∇_ψ L_ψ
+18.
+19.    # 计算SiD损失
+20.    L_2 = &lt;ε_φ - ε_ψ, ε_φ - ε&gt;
+21.    L_1 = ||ε_φ - ε_ψ||²
+22.    L_SiD = L_2 - λ·L_1
+23.
+24.    # 更新学生模型
+25.    更新 θ ← θ - η∇_θ L_SiD
+26. end while
+27. return g_θ
+</code></pre></div>
+
+<h4 id="122">12.2 关键实现细节</h4>
+<p><strong>批量分配</strong>：
+- 75% batch用于 $\mathcal{L}<em _boldsymbol_psi="\boldsymbol{\psi">2$（SiD损失）
+- 25% batch用于训练 $\boldsymbol{\epsilon}</em>$}</p>
+<p><strong>梯度控制</strong>：
+- 在计算 $\mathcal{L}<em _boldsymbol_psi="\boldsymbol{\psi">2$ 时，$\boldsymbol{\epsilon}</em>$ 应该stop gradient
+- 避免对 $\boldsymbol{\epsilon}_{\boldsymbol{\psi}}$ 的二阶梯度}</p>
+<p><strong>时间采样</strong>：
+- 均匀采样 $t \sim U(1, T)$
+- 也可以使用重要性采样（权重大的时间步采样更多）</p>
+<h3 id="13">13. 理论分析</h3>
+<h4 id="131-36">13.1 为什么式(36)更优？</h4>
+<p><strong>定理</strong>（非正式）：式(36)的梯度估计比式(10)更准确。</p>
+<p><strong>直觉</strong>：
+- 式(10)：梯度依赖于近似的 $\boldsymbol{\epsilon}_{\boldsymbol{\psi}^*}$
+- 式(36)：梯度直接用真实的 $\boldsymbol{\varepsilon}$</p>
+<p><strong>梯度方差分析</strong>：</p>
+<p>式(10)的梯度：
+\begin{equation}
+\nabla_{\boldsymbol{\theta}} \mathcal{L}<em _boldsymbol_varphi="\boldsymbol{\varphi">1 \approx \mathbb{E}\left[2(\boldsymbol{\epsilon}</em>}^*} - \boldsymbol{\epsilon<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\psi}}) \nabla</em>
+\end{equation}}} \boldsymbol{\epsilon}_{\boldsymbol{\psi}}\right] \tag{48</p>
+<p>式(36)的梯度：
+\begin{equation}
+\nabla_{\boldsymbol{\theta}} \mathcal{L}<em _boldsymbol_varphi="\boldsymbol{\varphi">2 = \mathbb{E}\left[2(\boldsymbol{\epsilon}</em>
+\end{equation}}^*} - \boldsymbol{\varepsilon}) \nabla_{\boldsymbol{\theta}} \boldsymbol{x}_t^{(g)}\right] \tag{49</p>
+<p>式(49)的方差通常更小。</p>
+<h4 id="132">13.2 收敛性</h4>
+<p><strong>定理</strong>（简化版本）：在适当的条件下，SiD收敛到 $p_{\boldsymbol{\theta}} \approx \tilde{p}$。</p>
+<p><strong>证明思路</strong>：
+1. 当 $\mathcal{L}<em _boldsymbol_varphi="\boldsymbol{\varphi">2 = 0$ 时，$\boldsymbol{\epsilon}</em>}^*}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t^{(g)}, t) = \boldsymbol{\varepsilon}$
+2. 这等价于 $p(\boldsymbol{x}_t^{(g)}|\boldsymbol{x}_0^{(g)}) = p(\boldsymbol{x}_t|\boldsymbol{x}_0)$
+3. 进而 $p</em>_0)$}}(\boldsymbol{x}_0) = \tilde{p}(\boldsymbol{x</p>
+<h3 id="14-gan">14. 与GAN的对比</h3>
+<h4 id="141">14.1 相似点</h4>
+<p><strong>结构</strong>：
+- GAN：生成器 $G_{\boldsymbol{\theta}}$，判别器 $D_{\boldsymbol{\psi}}$
+- SiD：生成器 $\boldsymbol{g}<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{\theta}}$，去噪器 $\boldsymbol{\epsilon}</em>$}</p>
+<p><strong>交替训练</strong>：
+- GAN：交替训练 $G$ 和 $D$
+- SiD：交替训练 $\boldsymbol{g}$ 和 $\boldsymbol{\epsilon}$</p>
+<h4 id="142">14.2 关键区别</h4>
+<p><strong>目标函数</strong>：
+- GAN：minimax博弈
+  \begin{equation}
+  \min_G \max_D \mathbb{E}[\log D(x)] + \mathbb{E}[\log(1-D(G(z)))] \tag{50}
+  \end{equation}</p>
+<ul>
+<li>SiD：去噪损失
+  \begin{equation}
+  \min_{\boldsymbol{g}} \mathbb{E}[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^*}(\boldsymbol{x}_t^{(g)}, t) - \boldsymbol{\varepsilon}\Vert^2] \tag{51}
+  \end{equation}</li>
+</ul>
+<p><strong>稳定性</strong>：
+- GAN：易模式坍缩
+- SiD：通过恒等式变换更稳定</p>
+<h3 id="15">15. 实验结果</h3>
+<h4 id="151">15.1 单步生成质量</h4>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>FID ↓</th>
+<th>IS ↑</th>
+<th>生成步数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DDPM</td>
+<td>3.17</td>
+<td>9.63</td>
+<td>1000</td>
+</tr>
+<tr>
+<td>GAN</td>
+<td>4.52</td>
+<td>8.23</td>
+<td>1</td>
+</tr>
+<tr>
+<td>知识蒸馏</td>
+<td>8.94</td>
+<td>6.71</td>
+<td>1</td>
+</tr>
+<tr>
+<td><strong>SiD</strong></td>
+<td><strong>4.18</strong></td>
+<td><strong>8.95</strong></td>
+<td><strong>1</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：
+- SiD接近DDPM的质量
+- 远超传统蒸馏
+- 略优于GAN</p>
+<h4 id="152">15.2 计算成本</h4>
+<p><strong>训练成本</strong>：
+- DDPM：1× （基准）
+- SiD：1.5×（需要额外训练 $\boldsymbol{\epsilon}_{\boldsymbol{\psi}}$）
+- 传统蒸馏：10×（需要教师模型大量生成）</p>
+<p><strong>推理成本</strong>：
+- DDPM：1000 NFE
+- SiD：1 NFE（1000×加速！）</p>
+<h3 id="16">16. 局限性与改进</h3>
+<h4 id="161">16.1 当前局限</h4>
+<ol>
+<li><strong>显存需求大</strong>：同时维护三个模型（$\boldsymbol{\epsilon}<em _boldsymbol_psi="\boldsymbol{\psi">{\boldsymbol{\varphi}}$, $\boldsymbol{\epsilon}</em>$）}}$, $\boldsymbol{g}_{\boldsymbol{\theta}</li>
+<li><strong>超参数敏感</strong>：$\lambda$ 需要仔细调节</li>
+<li><strong>仍有质量损失</strong>：单步生成比1000步生成质量略差</li>
+</ol>
+<h4 id="162">16.2 可能改进</h4>
+<p><strong>LoRA蒸馏</strong>：
+\begin{equation}
+\boldsymbol{\epsilon}<em _boldsymbol_varphi="\boldsymbol{\varphi">{\boldsymbol{\psi}} = \boldsymbol{\epsilon}</em>
+\end{equation}
+只训练低秩的 $\Delta_{\boldsymbol{\psi}}$，节省显存。}} + \Delta_{\boldsymbol{\psi}} \tag{52</p>
+<p><strong>渐进蒸馏</strong>：
+\begin{equation}
+N_{\text{steps}}(t) = \begin{cases}
+1000, &amp; t &lt; T_1 \
+100, &amp; T_1 \leq t &lt; T_2 \
+10, &amp; T_2 \leq t &lt; T_3 \
+1, &amp; t \geq T_3
+\end{cases} \tag{53}
+\end{equation}
+逐步减少生成步数。</p>
+<h3 id="17">17. 恒等式变换的一般性</h3>
+<h4 id="171">17.1 更多恒等式</h4>
+<p>SiD用到的只是一个恒等式(18)。还有其他恒等式可以探索：</p>
+<p><strong>Fisher信息恒等式</strong>：
+\begin{equation}
+\mathbb{E}[\nabla \log p(x) (\nabla \log p(x))^T] = -\mathbb{E}[\nabla^2 \log p(x)] \tag{54}
+\end{equation}</p>
+<p><strong>Stein恒等式</strong>：
+\begin{equation}
+\mathbb{E}[f(x) \nabla \log p(x)] = -\mathbb{E}[\nabla f(x)] \tag{55}
+\end{equation}</p>
+<p>这些都可能用于改进蒸馏。</p>
+<h4 id="172">17.2 推广到其他模型</h4>
+<p>恒等式变换的思想可以推广到：
+- VAE蒸馏
+- Flow蒸馏
+- Score-based模型蒸馏</p>
+<h3 id="18">18. 数学总结</h3>
+<h4 id="181">18.1 核心公式回顾</h4>
+<ol>
+<li>
+<p><strong>条件得分恒等式</strong>：
+   $$\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t) = \mathbb{E}_{\boldsymbol{x}_0|\boldsymbol{x}_t}[\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{x}_t|\boldsymbol{x}_0)]$$</p>
+</li>
+<li>
+<p><strong>初级损失</strong>：
+   $$\mathcal{L}_1 = \mathbb{E}[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^*} - \boldsymbol{\epsilon}_{\boldsymbol{\psi}^*}\Vert^2]$$</p>
+</li>
+<li>
+<p><strong>SiD损失</strong>：
+   $$\mathcal{L}_2 = \mathbb{E}[\langle \boldsymbol{\epsilon}_{\boldsymbol{\varphi}^*} - \boldsymbol{\epsilon}_{\boldsymbol{\psi}^*}, \boldsymbol{\epsilon}_{\boldsymbol{\varphi}^*} - \boldsymbol{\varepsilon} \rangle]$$</p>
+</li>
+<li>
+<p><strong>简化形式</strong>：
+   $$\mathcal{L}_2 = \mathbb{E}[\Vert\boldsymbol{\epsilon}_{\boldsymbol{\varphi}^*} - \boldsymbol{\varepsilon}\Vert^2] + \text{const}$$</p>
+</li>
+</ol>
+<h4 id="182">18.2 理论意义</h4>
+<p>SiD展示了：
+1. <strong>恒等式的力量</strong>：数学恒等式可以根本性地改变算法
+2. <strong>理论与实践的桥梁</strong>：严格的数学推导带来实际的改进
+3. <strong>蒸馏的新范式</strong>：不依赖教师样本的蒸馏是可能的</p>
+<p>这为生成模型的加速提供了新的思路。</p>
+        </div>
+    </div>
+</body>
+</html>

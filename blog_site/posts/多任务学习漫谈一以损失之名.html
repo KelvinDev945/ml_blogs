@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多任务学习漫谈（一）：以损失之名</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>多任务学习漫谈（一）：以损失之名</h1>
+            <div class="meta">📅 最后更新: 2026-01-05 | 📄 大小: 47.2 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8870">https://spaces.ac.cn/archives/8870</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>能提升模型性能的方法有很多，多任务学习（Multi-Task Learning）也是其中一种。简单来说，多任务学习是希望将多个相关的任务共同训练，希望不同任务之间能够相互补充和促进，从而获得单任务上更好的效果（准确率、鲁棒性等）。然而，多任务学习并不是所有任务堆起来就能生效那么简单，如何平衡每个任务的训练，使得各个任务都尽量获得有益的提升，依然是值得研究的课题。</p>
+<p>最近，笔者机缘巧合之下，也进行了一些多任务学习的尝试，借机也学习了相关内容，在此挑部分结果与大家交流和讨论。</p>
+<h2 id="_1">加权求和</h2>
+<p>从损失函数的层面看，多任务学习就是有多个损失函数$\mathcal{L}<em i="1">1,\mathcal{L}_2,\cdots,\mathcal{L}_n$，一般情况下它们有大量的共享参数、少量的独立参数，而我们的目标是让每个损失函数都尽可能地小。为此，我们引入权重$\alpha_1,\alpha_2,\cdots,\alpha_n\geq 0$，通过加权求和的方式将它转化为如下损失函数的单任务学习<br />
+\begin{equation}\mathcal{L} = \sum</em>}^n \alpha_i \mathcal{L}_i\label{eq:w-loss}\end{equation<br />
+在这个视角下，多任务学习的主要难点就是如何确定各个$\alpha_i$了。</p>
+<h3 id="_2">初始状态</h3>
+<p>按道理，在没有任务先验和偏见的情况下，最自然的选择就是平等对待每个任务，即$a_i=1/n$。然而，事实上每个任务可能有很大差别，比如不同类别数的分类任务混合、分类与回归任务混合、分类与生成任务混合等等，从物理的角度看，每个损失函数的量纲和量级都不一样，直接相加是没有意义的。</p>
+<p>如果我们将每个损失函数看成具有不同量纲的物理量，那么从“无量纲化”的思想出发，我们可以用损失函数的初始值倒数作为权重，即<br />
+\begin{equation}\mathcal{L} = \sum_{i=1}^n \frac{\mathcal{L}_i}{\mathcal{L}_i^{(\text{init})}}\label{eq:init}\end{equation}<br />
+其中$\mathcal{L}_i^{(\text{init})}$表示任务$i$的初始损失值。该式关于每个$\mathcal{L}_i$是“齐次”的，所以它的一个明显优点是缩放不变性，即如果让任务$i$的损失乘上一个常数，那么结果不会变化。此外，由于每个损失都除以了自身的初始值，较大的损失会缩小，较小的损失会放大，从而使得每个损失能够大致得到平衡。</p>
+<p>那么，怎么估计$\mathcal{L}<em _mathcal_D="\mathcal{D" y_sim="y\sim">i^{(\text{init})}$呢？最直接的方法当然是直接拿几个batch的数据来估算一下。除此之外，我们可以基于一些假设得到一个理论值。比如，在主流的初始化之下，我们可以认为初始模型（加激活函数之前）的输出是一个零向量，如果加上softmax则是均匀分布，那么对于一个“$K$分类+交叉熵”问题，它的初始损失就是$\log K$；对于“回归+L2损失”问题，则可以用零向量来估计初始损失，即$\mathbb{E}</em>$是训练集的全体标签。}}[\Vert y-0\Vert^2] = \mathbb{E}_{y\sim \mathcal{D}}[\Vert y\Vert^2]$，$\mathcal{D</p>
+<h3 id="_3">先验状态</h3>
+<p>用初始损失的一个问题是初始状态不一定能很好地反应当前任务的学习难度，更好的方案应该是将“初始状态”改为“先验状态”：<br />
+\begin{equation}\mathcal{L} = \sum_{i=1}^n \frac{\mathcal{L}<em i="1">i}{\mathcal{L}_i^{(\text{prior})}}\label{eq:prior}\end{equation}<br />
+比如，如果$K$分类中每个类的频率分别是$[p_1,p_2,\dots,p_K]$（先验分布），那么虽然初始状态的预测分布为均匀分布，但我们可以合理地认为模型可以很容易学会将每个样本的结果都预测为$[p_1,p_2,\dots,p_K]$，此时模型的损失为熵<br />
+\begin{equation}\mathcal{L}_i^{(\text{prior})}=\mathcal{H} = -\sum</em>}^K p_i\log p_i\end{equation<br />
+某种意义上来说，“先验分布”比“初始分布”更能体现出“初始”的本质，它是“就算模型啥都学不会，也知道按照先验分布来随机出结果”的体现，所以此时的损失值更能代表当前任务的初始难度，因此用$\mathcal{L}<em _mathcal_D="\mathcal{D" y_sim="y\sim">i^{(\text{prior})}$代替$\mathcal{L}_i^{(\text{init})}$应该更加合理；类似地，对于“回归+L2损失”问题，它的先验结果应该是全体标签的期望$\mu = \mathbb{E}</em>}}[y]$，所以我们用$\mathcal{L<em _mathcal_D="\mathcal{D" y_sim="y\sim">i^{(\text{prior})}=\mathbb{E}</em>}}[\Vert y-\mu\Vert^2]$代替$\mathcal{L<em _mathcal_D="\mathcal{D" y_sim="y\sim">i^{(\text{init})}=\mathbb{E}</em>[\Vert y\Vert^2]$，有望取得更合理的结果。}</p>
+<h2 id="_4">动态调节</h2>
+<p>不管是用初始状态的式$\eqref{eq:init}$还是先验状态的式$\eqref{eq:prior}$，它们的任务权重在确定之后就保持不变了，并且它们确定权重的方法不依赖于学习过程。然而，尽管我们可以通过先验分布等信息简单感知一下学习难度，但究竟有多难其实要真正去学习才知道，所以更合理的方案应该是根据训练进程动态地调整权重。</p>
+<h3 id="_5">实时状态</h3>
+<p>纵观前文，式$\eqref{eq:init}$和式$\eqref{eq:prior}$的核心思想都是用损失值的倒数来作为任务权重，那么能不能干脆用“实时”的损失值倒数来实现动态调整权重？即<br />
+\begin{equation}\mathcal{L} = \sum_{i=1}^n \frac{\mathcal{L}<em _theta="\theta">i}{\mathcal{L}_i^{(\text{sg})}}\label{eq:sg}\end{equation}<br />
+这里的$\mathcal{L}_i^{(\text{sg})}$是$\text{stop_gradient}(\mathcal{L}_i)$的简写。在这个方案中，每个任务的损失函数都被调整恒为1，所以不管是量纲还是量级上都是一致的。由于$\text{stop_gradient}$算子的存在，虽然损失恒为1，但梯度并非恒为0：<br />
+\begin{equation}\nabla</em>}\left(\frac{\mathcal{L<em _theta="\theta">i}{\mathcal{L}_i^{(\text{sg})}}\right) = \frac{\nabla</em>}\mathcal{L<em _theta="\theta">i}{\mathcal{L}_i^{(\text{sg})}} = \frac{\nabla</em>}\mathcal{L}_i}{\mathcal{L}_i}\label{eq:sg-grad}\end{equation<br />
+简单来说就是某个函数被$\text{stop_gradient}$算子包住后，就变成了一个新函数，其值与原来的函数恒等，但是它的导函数强制设为了0，所以最终结果就是以动态权重$1/\mathcal{L}_i$来实时调整了梯度的比例。很多“民间实验”表明，式$\eqref{eq:sg}$确实在多数情况下都可以作为一个相当不错的baseline。</p>
+<h3 id="_6">等价梯度</h3>
+<p>我们可以从另一个角度来看该方案。从式$\eqref{eq:sg-grad}$我们可以得到<br />
+\begin{equation}\nabla_{\theta}\left(\frac{\mathcal{L}<em _theta="\theta">i}{\mathcal{L}_i^{(\text{sg})}}\right) = \frac{\nabla</em>}\mathcal{L<em _theta="\theta">i}{\mathcal{L}_i} = \nabla</em>} \log \mathcal{L<em i="1">i\end{equation}<br />
+因此从梯度上看，式$\eqref{eq:sg}$与$\mathcal{L} = \sum\limits</em>}^n \log \mathcal{L<em i="1">i$没有实质区别，而我们进一步有<br />
+\begin{equation}\mathcal{L} = \sum</em>}^n \log \mathcal{L<em i="1">i = n\log \sqrt[n]{\prod</em>}^n\mathcal{L<em i="1">i}\end{equation}<br />
+由于$\log$是单调递增的，所以式$\eqref{eq:sg}$与下式在梯度方向上是一致：<br />
+\begin{equation}\mathcal{L} = \sqrt[n]{\prod</em>}^n\mathcal{L}_i}\end{equation</p>
+<h3 id="_7">广义平均</h3>
+<p>显然，上式正是$\mathcal{L}<em i="1">1,\mathcal{L}_2,\cdots,\mathcal{L}_n$的“几何平均”，而如果我们约定$a_i$恒等于$1/n$，那么原始的式$\eqref{eq:w-loss}$就是$\mathcal{L}_1,\mathcal{L}_2,\cdots,\mathcal{L}_n$的“代数平均”。也就是说，我们发现这一系列的推导其实隐藏了从代数平均到几何平均的转变，这启发我们或许可以考虑“广义平均”：<br />
+\begin{equation}\mathcal{L}(\gamma) = \sqrt[\gamma]{\frac{1}{n}\sum</em>}^n\mathcal{L<em _gamma_to-_infty="\gamma\to-\infty">i^{\gamma}}\end{equation}<br />
+也就是将每个损失函数算$\gamma$次方后再平均最后再开$\gamma$次方，这里的$\gamma$可以是任意实数，代数平均对应$\gamma=1$，而几何平均对应$\gamma=0$（需要取极限）。可以证明，$\mathcal{L}(\gamma)$是关于$\gamma$的单调递增函数，并且有<br />
+\begin{equation}\min(\mathcal{L}_1,\cdots,\mathcal{L}_n)=\lim</em>} \mathcal{L}(\gamma) \leq\cdots\leq \mathcal{L}(\gamma) \leq\cdots\leq \lim_{\gamma\to+\infty} \mathcal{L}(\gamma)=\max(\mathcal{L}_1,\cdots,\mathcal{L}_n)\end{equation<br />
+这就意味着，当$\gamma$增大时，模型愈发关心损失中的最大值，反之则更关心损失中的最小值。这样一来，虽然依然存在超参数$\gamma$要调整，但是相比于原始的式$\eqref{eq:w-loss}$，超参数的个数已经从$n$个变为只有1个，简化了调参过程。</p>
+<h2 id="_8">平移不变</h2>
+<p>重新回顾式$\eqref{eq:init}$、式$\eqref{eq:prior}$和式$\eqref{eq:sg}$，它们都是通过每个任务损失除以自身的某个状态来调节权重，并且获得了缩放不变性。然而，尽管它们都具备了缩放不变性，但却失去了更基本的“平移不变性”，也就是说，如果每个损失都加上一个常数，$\eqref{eq:init}$、式$\eqref{eq:prior}$和式$\eqref{eq:sg}$的梯度方向是有可能改变的，这对于优化来说并不是一个好消息，因为原则上来说常数没有带来任何有意义的信息，优化结果不应该随之改变。</p>
+<h3 id="_9">理想目标</h3>
+<p>一方面，我们用损失函数（的某个状态）的倒数作为当前任务的权重，但损失函数的导数不具备平移不变性；另一方面，损失函数可以理解为当前模型与目标状态的距离，而梯度下降本质上是在寻找梯度为0的点，所以梯度的模长其实也能起到类似作用，因此我们可以用梯度的模长来替换掉损失函数，从而将式$\eqref{eq:sg}$变成<br />
+\begin{equation}\mathcal{L} = \sum_{i=1}^n \frac{\mathcal{L}<em _theta="\theta">i}{\Vert\nabla</em>}\mathcal{L}_i\Vert^{(\text{sg})}}\label{eq:grad}\end{equation<br />
+跟损失函数的一个明显区别是，梯度模长显然具备平移不变性，并且分子分母关于$\mathcal{L}_i$依然是齐次的，所以上式还保留了缩放不变性。因此，这是一个能同时具备平移和缩放不变性的理想目标。</p>
+<h3 id="_10">梯度归一</h3>
+<p>对式$\eqref{eq:grad}$求梯度，我们得到<br />
+\begin{equation}\nabla_{\theta}\mathcal{L} = \sum_{i=1}^n \frac{\nabla_{\theta}\mathcal{L}<em _theta="\theta">i}{\Vert\nabla</em>}\mathcal{L}_i\Vert}\label{eq:grad-norm}\end{equation<br />
+可以看到，式$\eqref{eq:grad}$本质上是将每个任务损失的梯度进行归一化后再把梯度累加起来。它同时也告诉了我们一种实现方案，即可以让每个任务依次训练，每次只训练一个任务，然后将每个任务的梯度归一化后累积起来再更新，这样就免除了在定义损失函数的时候就要算梯度的麻烦了。</p>
+<p>关于梯度归一化，笔者能找到相关工作是<a href="https://papers.cool/arxiv/1711.02257">《GradNorm: Gradient Normalization for Adaptive Loss Balancing in Deep Multitask Networks》</a>，它本质上是式$\eqref{eq:init}$和式$\eqref{eq:grad-norm}$的混合，里边也包含了对梯度模长重新标定的思想，但却要通过额外的优化来确定任务权重，个人认为显得繁琐和冗余了。</p>
+<h2 id="_11">本文小结</h2>
+<p>在损失函数的视角下，多任务学习的关键问题是如何调节每个任务的权重来平衡各自的损失，本文从缩放不变和平移不变两个角度介绍了一些参考做法，并补充了“广义平均”的概念，将多个任务的权重调节转化为单个参数的调节问题，可以简化调参难度。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8870">https://spaces.ac.cn/archives/8870</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jan. 18, 2022). 《多任务学习漫谈（一）：以损失之名 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8870">https://spaces.ac.cn/archives/8870</a></p>
+<p>@online{kexuefm-8870,<br />
+title={多任务学习漫谈（一）：以损失之名},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Jan},<br />
+url={\url{https://spaces.ac.cn/archives/8870}},<br />
+} </p>
+<hr />
+<h2 id="_12">公式推导与注释</h2>
+<h3 id="1">1. 多目标优化基础</h3>
+<p><strong>定义1.1 (Pareto最优)</strong></p>
+<p>对于多目标问题$\min_\theta (\mathcal{L}_1(\theta), \ldots, \mathcal{L}_n(\theta))$，解$\theta^*$是Pareto最优的当且仅当不存在$\theta$使得所有目标都不worse且至少一个better。</p>
+<p>\begin{equation}
+\mathcal{P} = {\theta^<em> : \not\exists \theta, \mathcal{L}_i(\theta) \leq \mathcal{L}_i(\theta^</em>) \ \forall i \wedge \exists j, \mathcal{L}_j(\theta) &lt; \mathcal{L}_j(\theta^*)}
+\tag{1}
+\end{equation}</p>
+<p><strong>定理1.1</strong>: 加权求和方法$\theta^* \in \arg\min_\theta \sum_i \alpha_i \mathcal{L}_i(\theta)$的解必在Pareto前沿上（当$\alpha_i &gt; 0$）。</p>
+<p><strong>证明</strong>: 反证法。若$\theta^<em>$不Pareto最优，存在$\theta'$使所有任务不worse且至少一个better，则$\sum \alpha_i \mathcal{L}_i(\theta') &lt; \sum \alpha_i \mathcal{L}_i(\theta^</em>)$，矛盾。</p>
+<h3 id="2">2. 初始状态归一化详解</h3>
+<p><strong>动机</strong>: 不同任务的损失量纲和量级可能差异巨大：
+- 分类任务: $\mathcal{L} \in [0, \log K]$
+- 回归任务: $\mathcal{L} \in [0, +\infty)$</p>
+<p><strong>解决方案</strong>:
+\begin{equation}
+\tilde{\mathcal{L}}_i = \frac{\mathcal{L}_i}{\mathcal{L}_i^{(init)}}
+\tag{2}
+\end{equation}</p>
+<p><strong>性质2.1 (缩放不变性)</strong>:
+\begin{equation}
+\frac{c\mathcal{L}_i}{c\mathcal{L}_i^{(init)}} = \frac{\mathcal{L}_i}{\mathcal{L}_i^{(init)}}
+\tag{3}
+\end{equation}</p>
+<p><strong>初始损失理论值</strong>:
+- K分类+交叉熵+均匀初始化: $-\log(1/K) = \log K$
+- 回归+MSE+零初始化: $\mathbb{E}[|y|^2]$
+- 二分类+BCE: $\log 2$</p>
+<h3 id="3">3. 先验分布方法</h3>
+<p><strong>改进</strong>: 用先验损失代替初始损失
+\begin{equation}
+\mathcal{L}<em _mathcal_D="\mathcal{D" _sim="\sim" y="y">i^{(prior)} = \mathbb{E}</em><em prior="prior">i}[\ell(f</em>(x), y)]
+\tag{4}
+\end{equation}</p>
+<p><strong>K分类的先验损失</strong>: 设类别分布为$p = [p_1, \ldots, p_K]$，模型预测为$p$：
+\begin{equation}
+\mathcal{L}^{(prior)} = \mathbb{E}_y[-\log p_y] = -\sum_k p_k \log p_k = H(p)
+\tag{5}
+\end{equation}</p>
+<p><strong>数值示例</strong>:
+- 均匀(K=10): $H = \log 10 \approx 2.303$
+- [0.8, 0.2]: $H \approx 0.722$
+- [0.99, 0.01]: $H \approx 0.081$</p>
+<p><strong>回归的先验损失</strong>: 预测均值$\mu = \mathbb{E}[y]$：
+\begin{equation}
+\mathcal{L}^{(prior)} = \mathbb{E}[|y - \mu|^2] = \text{Var}(y)
+\tag{6}
+\end{equation}</p>
+<h3 id="4">4. 实时动态调整</h3>
+<p><strong>方法</strong>:
+\begin{equation}
+\mathcal{L} = \sum_i \frac{\mathcal{L}_i}{\text{sg}(\mathcal{L}_i)}
+\tag{7}
+\end{equation}</p>
+<p>其中$\text{sg}$表示stop_gradient算子。</p>
+<p><strong>梯度计算</strong>:
+\begin{equation}
+\nabla_\theta \frac{\mathcal{L}<em>i}{\text{sg}(\mathcal{L}_i)} = \frac{\nabla</em>\theta \mathcal{L}_i}{\mathcal{L}_i}
+\tag{8}
+\end{equation}</p>
+<p><strong>等价性</strong>:
+\begin{equation}
+\frac{\nabla_\theta \mathcal{L}<em>i}{\mathcal{L}_i} = \nabla</em>\theta \log \mathcal{L}_i
+\tag{9}
+\end{equation}</p>
+<p>因此优化式(7)等价于优化$\sum_i \log \mathcal{L}_i$。</p>
+<h3 id="5">5. 几何平均推导</h3>
+<p><strong>定理5.1</strong>:
+\begin{equation}
+\sum_i \log \mathcal{L}_i = \log \prod_i \mathcal{L}_i = n \log \left(\prod_i \mathcal{L}_i\right)^{1/n}
+\tag{10}
+\end{equation}</p>
+<p><strong>定义</strong>: 几何平均$GM = \left(\prod_i \mathcal{L}_i\right)^{1/n}$</p>
+<p><strong>性质</strong>: 对异常值更鲁棒
+\begin{equation}
+GM(1, 100) = 10 \ll AM(1, 100) = 50.5
+\tag{11}
+\end{equation}</p>
+<h3 id="6">6. 广义平均理论</h3>
+<p><strong>定义6.1 (幂平均)</strong>:
+\begin{equation}
+M_\gamma(\mathcal{L}) = \left(\frac{1}{n}\sum_i \mathcal{L}_i^\gamma\right)^{1/\gamma}
+\tag{12}
+\end{equation}</p>
+<p><strong>特殊值</strong>:
+- $\gamma = -\infty$: $\min$
+- $\gamma = -1$: 调和平均
+- $\gamma = 0$: 几何平均
+- $\gamma = 1$: 算术平均
+- $\gamma = 2$: 平方平均
+- $\gamma = +\infty$: $\max$</p>
+<p><strong>单调性</strong>:
+\begin{equation}
+\gamma_1 &lt; \gamma_2 \implies M_{\gamma_1} \leq M_{\gamma_2}
+\tag{13}
+\end{equation}</p>
+<p><strong>直觉</strong>: $\gamma$越大，越关注最大的损失；$\gamma$越小，越关注最小的损失。</p>
+<h3 id="7">7. 梯度归一化深入分析</h3>
+<p><strong>公式</strong>:
+\begin{equation}
+\mathcal{L} = \sum_i \frac{\mathcal{L}<em>i}{|\nabla</em>\theta \mathcal{L}_i|^{(\text{sg})}}
+\tag{14}
+\end{equation}</p>
+<p><strong>梯度</strong>:
+\begin{equation}
+\nabla_\theta \mathcal{L} = \sum_i \frac{\nabla_\theta \mathcal{L}<em>i}{|\nabla</em>\theta \mathcal{L}_i|} = \sum_i \hat{g}_i
+\tag{15}
+\end{equation}</p>
+<p><strong>几何意义</strong>: 每个任务贡献单位长度的梯度向量，最终梯度是这些单位向量的和。</p>
+<p><strong>优点</strong>:
+1. 自动平衡不同尺度的梯度
+2. 平移不变性
+3. 缩放不变性</p>
+<p><strong>缺点</strong>:
+1. 可能不稳定（梯度接近0时）
+2. 计算开销较大</p>
+<h3 id="8">8. 平移不变性证明</h3>
+<p><strong>定义</strong>: 函数$F$梯度平移不变：
+\begin{equation}
+\nabla_\theta F(\mathcal{L}<em>1+c, \ldots, \mathcal{L}_n+c) = \nabla</em>\theta F(\mathcal{L}_1, \ldots, \mathcal{L}_n)
+\tag{16}
+\end{equation}</p>
+<p><strong>定理8.1</strong>: 梯度归一化满足梯度平移不变性。</p>
+<p><strong>证明</strong>: 对任意常数$c$：
+\begin{equation}
+\begin{aligned}
+\nabla(\mathcal{L}_i + c) &amp;= \nabla \mathcal{L}_i \
+|\nabla(\mathcal{L}_i + c)| &amp;= |\nabla \mathcal{L}_i|
+\end{aligned}
+\tag{17}
+\end{equation}</p>
+<p>因此梯度方向和归一化后的梯度不变。</p>
+<h3 id="9">9. 不确定性加权（贝叶斯视角）</h3>
+<p><strong>模型</strong>: 任务$i$的观测噪声$\sigma_i$：
+\begin{equation}
+p(y_i|\theta, \sigma_i) = \mathcal{N}(f_i(\theta), \sigma_i^2)
+\tag{18}
+\end{equation}</p>
+<p><strong>负对数似然</strong>:
+\begin{equation}
+-\log p(y_i|\theta, \sigma_i) = \frac{|y_i - f_i(\theta)|^2}{2\sigma_i^2} + \log \sigma_i + \text{const}
+\tag{19}
+\end{equation}</p>
+<p><strong>多任务目标</strong>:
+\begin{equation}
+\mathcal{L}_{total} = \sum_i \left(\frac{\mathcal{L}_i}{2\sigma_i^2} + \log \sigma_i\right)
+\tag{20}
+\end{equation}</p>
+<p><strong>学习$\sigma_i$</strong>: 对$\sigma_i$求导：
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \sigma_i} = -\frac{\mathcal{L}_i}{\sigma_i^3} + \frac{1}{\sigma_i} = 0 \implies \sigma_i^2 = \mathcal{L}_i
+\tag{21}
+\end{equation}</p>
+<p><strong>解释</strong>: 不确定性大的任务权重小。</p>
+<h3 id="10-gradnorm">10. GradNorm方法</h3>
+<p><strong>目标</strong>: 动态调整权重$w_i$使梯度平衡：
+\begin{equation}
+|\nabla_\theta(w_i \mathcal{L}_i)| \approx \bar{G} \cdot r_i^\alpha
+\tag{22}
+\end{equation}</p>
+<p>其中：
+- $\bar{G} = \frac{1}{n}\sum_j |\nabla_\theta(w_j \mathcal{L}_j)|$: 平均梯度模
+- $r_i(t) = \mathcal{L}_i(t) / \mathcal{L}_i(0)$: 相对训练速度
+- $\alpha$: 控制参数</p>
+<p><strong>权重更新</strong>:
+\begin{equation}
+L_{grad} = \sum_i \left||\nabla_\theta(w_i \mathcal{L}_i)| - \bar{G} \cdot r_i^\alpha\right|
+\tag{23}
+\end{equation}</p>
+<p>对$w_i$梯度下降更新。</p>
+<h3 id="11-pcgrad">11. PCGrad: 处理梯度冲突</h3>
+<p><strong>检测冲突</strong>: 当$\langle g_i, g_j \rangle &lt; 0$时，任务$i$和$j$冲突。</p>
+<p><strong>投影修正</strong>:
+\begin{equation}
+\tilde{g}_i = g_i - \frac{\langle g_i, g_j \rangle}{|g_j|^2} g_j
+\tag{24}
+\end{equation}</p>
+<p><strong>几何意义</strong>: 将$g_i$在$g_j$方向的负分量投影掉。</p>
+<p><strong>算法</strong>:</p>
+<div class="codehilite"><pre><span></span><code>for each task i:
+    compute g_i
+    for each task j != i:
+        if &lt;g_i, g_j&gt; &lt; 0:
+            g_i = g_i - proj_g_j(g_i)
+update with g_i
+</code></pre></div>
+
+<h3 id="12">12. 数值示例</h3>
+<p><strong>场景</strong>: 2任务
+- 任务1: $\mathcal{L}_1 = (\theta - 2)^2$
+- 任务2: $\mathcal{L}_2 = (\theta + 1)^2$</p>
+<p><strong>梯度</strong>:
+- $\nabla \mathcal{L}_1 = 2(\theta - 2)$
+- $\nabla \mathcal{L}_2 = 2(\theta + 1)$</p>
+<p><strong>方法对比</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>梯度</th>
+<th>最优解</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>均匀加权</td>
+<td>$2(\theta-2) + 2(\theta+1) = 4\theta - 2$</td>
+<td>$\theta = 0.5$</td>
+</tr>
+<tr>
+<td>梯度归一</td>
+<td>$\text{sign}(\theta-2) + \text{sign}(\theta+1)$</td>
+<td>$\theta \in [-1, 2]$</td>
+</tr>
+<tr>
+<td>几何平均</td>
+<td>优化$\sqrt{\mathcal{L}_1 \mathcal{L}_2}$</td>
+<td>$\theta = 0.5$</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13">13. 理论性质</h3>
+<p><strong>定理13.1 (凸性)</strong>:
+- 加权求和保持凸性
+- 对数求和不保持凸性
+- 幂平均($\gamma \geq 1$)保持凸性</p>
+<p><strong>定理13.2 (Lipschitz性)</strong>:
+设$\mathcal{L}_i$是$L_i$-Lipschitz：
+- 加权求和: $L = \sum_i \alpha_i L_i$
+- 最大值: $L = \max_i L_i$
+- 梯度归一化: $L = n$</p>
+<h3 id="14">14. 实践建议</h3>
+<p><strong>选择流程</strong>:
+1. 损失量纲相同 → 均匀加权
+2. 量纲不同 → 初始/先验归一化
+3. 动态平衡 → 实时归一化
+4. 追求性能 → 梯度归一化 + 调$\gamma$</p>
+<p><strong>超参数</strong>:
+- $\gamma \in [-2, 3]$
+- 推荐起点: $\gamma = 0$
+- 不确定性加权: 初始$\sigma_i = 1$</p>
+<h3 id="15">15. 实现示例</h3>
+<p><strong>梯度归一化</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">grad_norm_loss</span><span class="p">(</span><span class="n">losses</span><span class="p">,</span> <span class="n">params</span><span class="p">):</span>
+    <span class="n">grads</span> <span class="o">=</span> <span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">L</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">retain_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+             <span class="k">for</span> <span class="n">L</span> <span class="ow">in</span> <span class="n">losses</span><span class="p">]</span>
+    <span class="n">norm_grads</span> <span class="o">=</span> <span class="p">[</span><span class="n">g</span> <span class="o">/</span> <span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">g</span><span class="p">)</span> <span class="o">+</span> <span class="mf">1e-8</span><span class="p">)</span> <span class="k">for</span> <span class="n">g</span> <span class="ow">in</span> <span class="n">grads</span><span class="p">]</span>
+    <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="n">norm_grads</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>幂平均</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">power_mean</span><span class="p">(</span><span class="n">losses</span><span class="p">,</span> <span class="n">gamma</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+    <span class="k">if</span> <span class="n">gamma</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">losses</span> <span class="o">+</span> <span class="mf">1e-8</span><span class="p">)))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">losses</span> <span class="o">**</span> <span class="n">gamma</span><span class="p">)</span> <span class="o">**</span> <span class="p">(</span><span class="mi">1</span><span class="o">/</span><span class="n">gamma</span><span class="p">)</span>
+</code></pre></div>
+
+<h3 id="16">16. 局限与未来方向</h3>
+<p><strong>局限</strong>:
+1. 加权求和无法覆盖所有Pareto最优解
+2. 超参数需要任务特定调优
+3. 计算开销可能较大</p>
+<p><strong>未来</strong>:
+1. 元学习自动权重
+2. 在线学习策略
+3. 任务关系建模
+4. 理论保证算法</p>
+<h3 id="17">17. 总结</h3>
+<p><strong>关键公式</strong>:
+- 加权: $\sum_i \alpha_i \mathcal{L}_i$
+- 实时: $\sum_i \mathcal{L}_i / \text{sg}(\mathcal{L}_i)$
+- 梯度: $\sum_i \nabla \mathcal{L}_i / |\nabla \mathcal{L}_i|$
+- 幂均: $(\frac{1}{n}\sum_i \mathcal{L}_i^\gamma)^{1/\gamma}$</p>
+<p><strong>原则</strong>:
+- 简单优先
+- 实验驱动
+- 任务特定</p>
+<hr />
+<h2 id="_13">深入推导部分</h2>
+<h3 id="18-pareto">18. Pareto最优的深入理论</h3>
+<p><strong>定义18.1 (强Pareto最优)</strong></p>
+<p>点$\theta^<em>$是强Pareto最优的，当且仅当不存在$\theta \neq \theta^</em>$使得：
+\begin{equation}
+\mathcal{L}_i(\theta) \leq \mathcal{L}_i(\theta^*), \quad \forall i \in {1,\ldots,n}
+\tag{25}
+\end{equation}</p>
+<p><strong>定义18.2 (弱Pareto最优)</strong></p>
+<p>点$\theta^<em>$是弱Pareto最优的，当且仅当不存在$\theta$使得：
+\begin{equation}
+\mathcal{L}_i(\theta) &lt; \mathcal{L}_i(\theta^</em>), \quad \forall i \in {1,\ldots,n}
+\tag{26}
+\end{equation}</p>
+<p><strong>定理18.1 (加权求和与Pareto最优)</strong></p>
+<p>假设$\mathcal{L}_i$都是凸函数，$\alpha_i &gt; 0$。若$\theta^<em>$最小化$\sum_i \alpha_i \mathcal{L}_i(\theta)$，则$\theta^</em>$是Pareto最优的。</p>
+<p><strong>证明</strong>：</p>
+<p>反证法。假设$\theta^<em>$不是Pareto最优，则存在$\theta'$使得：
+\begin{equation}
+\mathcal{L}_i(\theta') \leq \mathcal{L}_i(\theta^</em>), \quad \forall i
+\tag{27}
+\end{equation}</p>
+<p>且至少存在一个$j$使得严格不等号成立：
+\begin{equation}
+\mathcal{L}_j(\theta') &lt; \mathcal{L}_j(\theta^*)
+\tag{28}
+\end{equation}</p>
+<p>因为$\alpha_i &gt; 0$，我们有：
+\begin{equation}
+\begin{aligned}
+\sum_i \alpha_i \mathcal{L}<em i_neq="i\neq" j="j">i(\theta') &amp;= \alpha_j \mathcal{L}_j(\theta') + \sum</em>_i(\theta') \
+&amp;&lt; \alpha_j \mathcal{L}_j(\theta^} \alpha_i \mathcal{L<em>) + \sum_{i\neq j} \alpha_i \mathcal{L}_i(\theta^</em>) \
+&amp;= \sum_i \alpha_i \mathcal{L}_i(\theta^*)
+\end{aligned}
+\tag{29}
+\end{equation}</p>
+<p>这与$\theta^<em>$是最优解矛盾。因此$\theta^</em>$必是Pareto最优。$\square$</p>
+<p><strong>定理18.2 (逆定理)</strong></p>
+<p>若$\theta^<em>$是Pareto最优且满足约束规范条件（constraint qualification），则存在$\alpha_i \geq 0$（不全为0）使得$\theta^</em>$最小化$\sum_i \alpha_i \mathcal{L}_i(\theta)$。</p>
+<p><strong>证明要点</strong>：利用分离超平面定理。设Pareto最优解对应的损失向量为$\boldsymbol{\ell}^<em> = (\mathcal{L}_1(\theta^</em>), \ldots, \mathcal{L}_n(\theta^*))$。</p>
+<p>定义可达集：
+\begin{equation}
+\mathcal{A} = {\boldsymbol{\ell} : \boldsymbol{\ell} = (\mathcal{L}_1(\theta), \ldots, \mathcal{L}_n(\theta)), \theta \in \Theta}
+\tag{30}
+\end{equation}</p>
+<p>定义支配锥：
+\begin{equation}
+\mathcal{C} = {\boldsymbol{\ell}^* - \boldsymbol{v} : \boldsymbol{v} \geq 0, \boldsymbol{v} \neq 0}
+\tag{31}
+\end{equation}</p>
+<p>因为$\theta^*$是Pareto最优，所以$\mathcal{A} \cap \mathcal{C} = \emptyset$。</p>
+<p>根据分离超平面定理，存在非零向量$\boldsymbol{\alpha} = (\alpha_1, \ldots, \alpha_n)$和常数$c$使得：
+\begin{equation}
+\langle \boldsymbol{\alpha}, \boldsymbol{\ell} \rangle \geq c \geq \langle \boldsymbol{\alpha}, \boldsymbol{\ell}^* - \boldsymbol{v} \rangle, \quad \forall \boldsymbol{\ell} \in \mathcal{A}, \boldsymbol{v} \in \mathcal{C}
+\tag{32}
+\end{equation}</p>
+<p>可以证明$\alpha_i \geq 0$，且$\theta^*$最小化$\sum_i \alpha_i \mathcal{L}_i(\theta)$。$\square$</p>
+<p><strong>几何解释</strong>：</p>
+<p>在损失空间$\mathbb{R}^n$中，Pareto前沿形成一个超曲面。加权求和方法相当于用线性函数$\sum_i \alpha_i \ell_i$去触碰这个超曲面。不同的权重$\boldsymbol{\alpha}$对应不同的触碰点。</p>
+<p><strong>数值例子</strong>：</p>
+<p>考虑两个任务，损失函数为：
+\begin{equation}
+\begin{aligned}
+\mathcal{L}_1(\theta) &amp;= (\theta_1 - 1)^2 + (\theta_2 - 1)^2 \
+\mathcal{L}_2(\theta) &amp;= (\theta_1 + 1)^2 + (\theta_2 + 1)^2
+\end{aligned}
+\tag{33}
+\end{equation}</p>
+<p>Pareto前沿是连接$(0, 0)$和$(8, 8)$的一段曲线。</p>
+<p>对于权重$(\alpha_1, \alpha_2) = (0.5, 0.5)$：
+\begin{equation}
+\begin{aligned}
+\mathcal{L} &amp;= 0.5[(\theta_1-1)^2 + (\theta_2-1)^2] + 0.5[(\theta_1+1)^2 + (\theta_2+1)^2] \
+&amp;= \theta_1^2 + \theta_2^2 + 2
+\end{aligned}
+\tag{34}
+\end{equation}</p>
+<p>最优解：$\theta^* = (0, 0)$，此时$\mathcal{L}_1 = \mathcal{L}_2 = 2$。</p>
+<p>对于权重$(0.9, 0.1)$：
+\begin{equation}
+\mathcal{L} = 0.9[(\theta_1-1)^2 + (\theta_2-1)^2] + 0.1[(\theta_1+1)^2 + (\theta_2+1)^2]
+\tag{35}
+\end{equation}</p>
+<p>梯度为零：
+\begin{equation}
+\nabla\mathcal{L} = 2[0.9(\theta - 1) + 0.1(\theta + 1)] = 0
+\tag{36}
+\end{equation}</p>
+<p>解得$\theta^* = (0.8, 0.8)$，此时$\mathcal{L}_1 = 0.08$，$\mathcal{L}_2 = 6.48$。</p>
+<h3 id="19-kkt">19. 凸优化基础与KKT条件</h3>
+<p><strong>定义19.1 (凸函数)</strong></p>
+<p>函数$f: \mathbb{R}^d \to \mathbb{R}$是凸的，当且仅当对所有$x, y \in \mathbb{R}^d$和$\lambda \in [0,1]$：
+\begin{equation}
+f(\lambda x + (1-\lambda)y) \leq \lambda f(x) + (1-\lambda) f(y)
+\tag{37}
+\end{equation}</p>
+<p><strong>性质19.1</strong>：若$f$可微，则$f$是凸的当且仅当：
+\begin{equation}
+f(y) \geq f(x) + \langle \nabla f(x), y - x \rangle, \quad \forall x, y
+\tag{38}
+\end{equation}</p>
+<p><strong>性质19.2</strong>：若$f$二阶可微，则$f$是凸的当且仅当Hessian矩阵$\nabla^2 f(x)$半正定。</p>
+<p><strong>定理19.1 (凸函数保持性)</strong></p>
+<p>设$f_1, \ldots, f_n$都是凸函数，$\alpha_i \geq 0$，则：
+\begin{equation}
+f(x) = \sum_{i=1}^n \alpha_i f_i(x)
+\tag{39}
+\end{equation}</p>
+<p>也是凸函数。</p>
+<p><strong>证明</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+f(\lambda x + (1-\lambda)y) &amp;= \sum_i \alpha_i f_i(\lambda x + (1-\lambda)y) \
+&amp;\leq \sum_i \alpha_i [\lambda f_i(x) + (1-\lambda) f_i(y)] \
+&amp;= \lambda \sum_i \alpha_i f_i(x) + (1-\lambda) \sum_i \alpha_i f_i(y) \
+&amp;= \lambda f(x) + (1-\lambda) f(y)
+\end{aligned}
+\tag{40}
+\end{equation}</p>
+<p>因此$f$是凸的。$\square$</p>
+<p><strong>定理19.2 (对数-凸函数)</strong></p>
+<p>若$f$是对数-凸的（即$\log f$是凸的），则几何平均$(\prod_i f_i)^{1/n}$也是对数-凸的。</p>
+<p><strong>KKT条件</strong>：</p>
+<p>考虑约束优化问题：
+\begin{equation}
+\begin{aligned}
+\min_{\theta} \quad &amp; \sum_i \alpha_i \mathcal{L}_i(\theta) \
+\text{s.t.} \quad &amp; g_j(\theta) \leq 0, \quad j = 1,\ldots,m \
+&amp; h_k(\theta) = 0, \quad k = 1,\ldots,p
+\end{aligned}
+\tag{41}
+\end{equation}</p>
+<p>Lagrangian函数：
+\begin{equation}
+\mathcal{L}(\theta, \lambda, \mu) = \sum_i \alpha_i \mathcal{L}_i(\theta) + \sum_j \lambda_j g_j(\theta) + \sum_k \mu_k h_k(\theta)
+\tag{42}
+\end{equation}</p>
+<p>KKT条件：
+\begin{equation}
+\begin{aligned}
+\nabla_\theta \mathcal{L} &amp;= 0 \quad \text{(稳定性)} \
+g_j(\theta^<em>) &amp;\leq 0 \quad \text{(原始可行性)} \
+\lambda_j &amp;\geq 0 \quad \text{(对偶可行性)} \
+\lambda_j g_j(\theta^</em>) &amp;= 0 \quad \text{(互补松弛性)} \
+h_k(\theta^*) &amp;= 0 \quad \text{(等式约束)}
+\end{aligned}
+\tag{43}
+\end{equation}</p>
+<p><strong>应用到多任务学习</strong>：</p>
+<p>若我们希望限制某个任务的损失不超过阈值$\tau_i$：
+\begin{equation}
+\begin{aligned}
+\min_{\theta} \quad &amp; \sum_i \alpha_i \mathcal{L}_i(\theta) \
+\text{s.t.} \quad &amp; \mathcal{L}_i(\theta) \leq \tau_i, \quad i = 1,\ldots,n
+\end{aligned}
+\tag{44}
+\end{equation}</p>
+<p>KKT条件给出：
+\begin{equation}
+\nabla_\theta \left[\sum_i \alpha_i \mathcal{L}_i(\theta) + \sum_i \lambda_i (\mathcal{L}_i(\theta) - \tau_i)\right] = 0
+\tag{45}
+\end{equation}</p>
+<p>即：
+\begin{equation}
+\sum_i (\alpha_i + \lambda_i) \nabla_\theta \mathcal{L}_i(\theta^*) = 0
+\tag{46}
+\end{equation}</p>
+<p>这相当于用动态权重$\alpha_i + \lambda_i$。</p>
+<h3 id="20">20. 广义平均的完整理论</h3>
+<p><strong>定义20.1 (Hölder平均)</strong></p>
+<p>对$p \in \mathbb{R} \cup {-\infty, +\infty}$，定义：
+\begin{equation}
+M_p(x_1,\ldots,x_n) = \begin{cases}
+\left(\frac{1}{n}\sum_{i=1}^n x_i^p\right)^{1/p} &amp; p \neq 0 \
+\left(\prod_{i=1}^n x_i\right)^{1/n} &amp; p = 0 \
+\max_i x_i &amp; p = +\infty \
+\min_i x_i &amp; p = -\infty
+\end{cases}
+\tag{47}
+\end{equation}</p>
+<p><strong>定理20.1 (单调性)</strong></p>
+<p>对所有$p &lt; q$：
+\begin{equation}
+M_p(x_1,\ldots,x_n) \leq M_q(x_1,\ldots,x_n)
+\tag{48}
+\end{equation}</p>
+<p><strong>证明</strong> (对$p, q &gt; 0$的情况)：</p>
+<p>设$a_i = x_i^p$，$r = q/p &gt; 1$。要证：
+\begin{equation}
+\left(\frac{1}{n}\sum_i a_i\right)^{1/p} \leq \left(\frac{1}{n}\sum_i a_i^r\right)^{1/q}
+\tag{49}
+\end{equation}</p>
+<p>即证：
+\begin{equation}
+\left(\frac{1}{n}\sum_i a_i\right)^r \leq \frac{1}{n}\sum_i a_i^r
+\tag{50}
+\end{equation}</p>
+<p>根据Jensen不等式，因为$f(t) = t^r$是凸函数（$r &gt; 1$）：
+\begin{equation}
+f\left(\frac{1}{n}\sum_i a_i\right) \leq \frac{1}{n}\sum_i f(a_i)
+\tag{51}
+\end{equation}</p>
+<p>即：
+\begin{equation}
+\left(\frac{1}{n}\sum_i a_i\right)^r \leq \frac{1}{n}\sum_i a_i^r
+\tag{52}
+\end{equation}</p>
+<p>$\square$</p>
+<p><strong>推论20.1</strong>：
+\begin{equation}
+\min_i x_i \leq \cdots \leq M_{-1}(HM) \leq M_0(GM) \leq M_1(AM) \leq M_2(QM) \leq \cdots \leq \max_i x_i
+\tag{53}
+\end{equation}</p>
+<p>其中：
+- $HM = \frac{n}{\sum_i 1/x_i}$ (调和平均)
+- $GM = (\prod_i x_i)^{1/n}$ (几何平均)
+- $AM = \frac{1}{n}\sum_i x_i$ (算术平均)
+- $QM = \sqrt{\frac{1}{n}\sum_i x_i^2}$ (平方平均)</p>
+<p><strong>定理20.2 (极限情况)</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+\lim_{p\to 0} M_p(x) &amp;= GM(x) = \exp\left(\frac{1}{n}\sum_i \log x_i\right) \
+\lim_{p\to +\infty} M_p(x) &amp;= \max_i x_i \
+\lim_{p\to -\infty} M_p(x) &amp;= \min_i x_i
+\end{aligned}
+\tag{54}
+\end{equation}</p>
+<p><strong>证明第一个极限</strong>：</p>
+<p>令$f(p) = M_p^p = \frac{1}{n}\sum_i x_i^p$。则：
+\begin{equation}
+\log M_p = \frac{1}{p} \log f(p)
+\tag{55}
+\end{equation}</p>
+<p>利用L'Hôpital法则：
+\begin{equation}
+\lim_{p\to 0} \log M_p = \lim_{p\to 0} \frac{\log f(p)}{p} = \lim_{p\to 0} \frac{f'(p)}{f(p)}
+\tag{56}
+\end{equation}</p>
+<p>计算导数：
+\begin{equation}
+\begin{aligned}
+f(p) &amp;= \frac{1}{n}\sum_i x_i^p \
+f'(p) &amp;= \frac{1}{n}\sum_i x_i^p \log x_i \
+f(0) &amp;= 1 \
+f'(0) &amp;= \frac{1}{n}\sum_i \log x_i
+\end{aligned}
+\tag{57}
+\end{equation}</p>
+<p>因此：
+\begin{equation}
+\lim_{p\to 0} \log M_p = f'(0)/f(0) = \frac{1}{n}\sum_i \log x_i
+\tag{58}
+\end{equation}</p>
+<p>即$\lim_{p\to 0} M_p = \exp(\frac{1}{n}\sum_i \log x_i) = GM$。$\square$</p>
+<p><strong>数值例子</strong>：</p>
+<p>对$x = [1, 2, 3, 4, 5]$：</p>
+<table>
+<thead>
+<tr>
+<th>$p$</th>
+<th>$M_p$</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>$-\infty$</td>
+<td>1.000</td>
+<td>最小值</td>
+</tr>
+<tr>
+<td>-2</td>
+<td>1.569</td>
+<td>二次调和平均</td>
+</tr>
+<tr>
+<td>-1</td>
+<td>1.918</td>
+<td>调和平均</td>
+</tr>
+<tr>
+<td>0</td>
+<td>2.605</td>
+<td>几何平均</td>
+</tr>
+<tr>
+<td>1</td>
+<td>3.000</td>
+<td>算术平均</td>
+</tr>
+<tr>
+<td>2</td>
+<td>3.317</td>
+<td>平方平均</td>
+</tr>
+<tr>
+<td>3</td>
+<td>3.563</td>
+<td>立方平均</td>
+</tr>
+<tr>
+<td>$+\infty$</td>
+<td>5.000</td>
+<td>最大值</td>
+</tr>
+</tbody>
+</table>
+<p><strong>在多任务学习中的意义</strong>：</p>
+<ul>
+<li>$p \to -\infty$：完全关注最简单的任务（最小损失）</li>
+<li>$p = -1$：偏向简单任务</li>
+<li>$p = 0$：平衡所有任务</li>
+<li>$p = 1$：传统加权平均</li>
+<li>$p \to +\infty$：完全关注最难的任务（最大损失）</li>
+</ul>
+<h3 id="21">21. 梯度归一化的稳定性分析</h3>
+<p><strong>问题</strong>：当某个任务的梯度接近零时，梯度归一化可能不稳定。</p>
+<p><strong>方案1：添加正则化项</strong></p>
+<p>\begin{equation}
+\hat{g}<em>i = \frac{\nabla</em>\theta \mathcal{L}<em>i}{|\nabla</em>\theta \mathcal{L}_i| + \epsilon}
+\tag{59}
+\end{equation}</p>
+<p>其中$\epsilon &gt; 0$是小常数（如$10^{-8}$）。</p>
+<p><strong>分析</strong>：</p>
+<p>当$|\nabla_\theta \mathcal{L}<em>i| \ll \epsilon$时：
+\begin{equation}
+\hat{g}_i \approx \frac{\nabla</em>\theta \mathcal{L}_i}{\epsilon}
+\tag{60}
+\end{equation}</p>
+<p>这相当于放大小梯度，可能导致训练不稳定。</p>
+<p><strong>方案2：自适应剪裁</strong></p>
+<p>\begin{equation}
+\hat{g}<em>i = \begin{cases}
+\frac{\nabla</em>\theta \mathcal{L}<em>i}{|\nabla</em>\theta \mathcal{L}<em>i|} &amp; |\nabla</em>\theta \mathcal{L}_i| &gt; \tau \
+0 &amp; \text{otherwise}
+\end{cases}
+\tag{61}
+\end{equation}</p>
+<p>其中$\tau$是阈值。</p>
+<p><strong>方案3：软归一化</strong></p>
+<p>\begin{equation}
+\hat{g}<em>i = \frac{\nabla</em>\theta \mathcal{L}<em>i}{\max(|\nabla</em>\theta \mathcal{L}_i|, \epsilon)}
+\tag{62}
+\end{equation}</p>
+<p><strong>定理21.1 (Lipschitz连续性)</strong></p>
+<p>设$\mathcal{L}_i$是$L_i$-Lipschitz光滑的，即：
+\begin{equation}
+|\nabla \mathcal{L}_i(\theta_1) - \nabla \mathcal{L}_i(\theta_2)| \leq L_i |\theta_1 - \theta_2|
+\tag{63}
+\end{equation}</p>
+<p>则梯度归一化后的总梯度满足：
+\begin{equation}
+\left|\sum_i \frac{\nabla \mathcal{L}_i(\theta_1)}{|\nabla \mathcal{L}_i(\theta_1)|} - \sum_i \frac{\nabla \mathcal{L}_i(\theta_2)}{|\nabla \mathcal{L}_i(\theta_2)|}\right| \leq C|\theta_1 - \theta_2|
+\tag{64}
+\end{equation}</p>
+<p>其中$C$依赖于$L_i$和梯度的下界。</p>
+<p><strong>数值实验</strong>：</p>
+<p>考虑两个任务：
+\begin{equation}
+\begin{aligned}
+\mathcal{L}_1(\theta) &amp;= |\theta|^2 \
+\mathcal{L}_2(\theta) &amp;= 0.01|\theta - e_1|^2
+\end{aligned}
+\tag{65}
+\end{equation}</p>
+<p>其中$e_1 = (1, 0, \ldots, 0)$。</p>
+<p>梯度：
+\begin{equation}
+\begin{aligned}
+\nabla \mathcal{L}_1 &amp;= 2\theta \
+\nabla \mathcal{L}_2 &amp;= 0.02(\theta - e_1)
+\end{aligned}
+\tag{66}
+\end{equation}</p>
+<p>在$\theta = 0$附近：
+- $|\nabla \mathcal{L}_1| = 2|\theta| \approx 0$ (当$\theta \to 0$)
+- $|\nabla \mathcal{L}_2| = 0.02|e_1| = 0.02$</p>
+<p>归一化梯度：
+\begin{equation}
+\hat{g}_1 = \frac{\theta}{|\theta|}, \quad \hat{g}_2 = \frac{\theta - e_1}{|\theta - e_1|}
+\tag{67}
+\end{equation}</p>
+<p>当$\theta = 0$时，$\hat{g}_1$未定义，$\hat{g}_2 = -e_1$。</p>
+<p>使用软归一化（$\epsilon = 0.01$）：
+\begin{equation}
+\hat{g}_1 = \frac{2\theta}{\max(2|\theta|, 0.01)}, \quad \hat{g}_2 = \frac{0.02(\theta - e_1)}{\max(0.02|\theta - e_1|, 0.01)}
+\tag{68}
+\end{equation}</p>
+<p>在$\theta = 0$：
+\begin{equation}
+\hat{g}_1 = 0, \quad \hat{g}_2 = \frac{-0.02e_1}{0.02} = -e_1
+\tag{69}
+\end{equation}</p>
+<p>总梯度：$\hat{g}_1 + \hat{g}_2 = -e_1$，指向第二个任务的最优解。</p>
+<h3 id="22">22. 收敛性分析</h3>
+<p><strong>设置</strong>：考虑梯度下降更新：
+\begin{equation}
+\theta_{t+1} = \theta_t - \eta \sum_i \alpha_i \nabla \mathcal{L}_i(\theta_t)
+\tag{70}
+\end{equation}</p>
+<p><strong>假设22.1</strong>：每个$\mathcal{L}_i$是$\mu_i$-强凸的：
+\begin{equation}
+\mathcal{L}_i(y) \geq \mathcal{L}_i(x) + \langle \nabla \mathcal{L}_i(x), y-x \rangle + \frac{\mu_i}{2}|y-x|^2
+\tag{71}
+\end{equation}</p>
+<p><strong>假设22.2</strong>：每个$\mathcal{L}_i$是$L_i$-Lipschitz光滑的。</p>
+<p><strong>定理22.1 (线性收敛)</strong></p>
+<p>设$\mu = \min_i \mu_i$，$L = \max_i L_i$，学习率$\eta \in (0, 2/L)$。则：
+\begin{equation}
+|\theta_t - \theta^<em>| \leq \rho^t |\theta_0 - \theta^</em>|
+\tag{72}
+\end{equation}</p>
+<p>其中$\rho = \max(|1 - \eta\mu|, |1 - \eta L|) &lt; 1$。</p>
+<p><strong>证明要点</strong>：</p>
+<p>定义$\mathcal{L}(\theta) = \sum_i \alpha_i \mathcal{L}_i(\theta)$。因为$\mathcal{L}_i$都是$\mu_i$-强凸和$L_i$-Lipschitz光滑，所以$\mathcal{L}$是$\mu$-强凸和$L$-光滑的（其中$\mu = \min_i \alpha_i \mu_i / \sum_j \alpha_j$，$L = \max_i \alpha_i L_i / \sum_j \alpha_j$）。</p>
+<p>标准凸优化理论给出线性收敛率。$\square$</p>
+<p><strong>定理22.2 (几何平均的收敛)</strong></p>
+<p>对于几何平均$\mathcal{L}<em GM="GM">{GM} = (\prod_i \mathcal{L}_i)^{1/n}$，梯度为：
+\begin{equation}
+\nabla \mathcal{L}</em>} = \frac{1}{n} \sum_i \frac{\nabla \mathcal{L<em GM="GM">i}{\mathcal{L}_i} \cdot \mathcal{L}</em>
+\tag{73}
+\end{equation}</p>
+<p>在强凸假设下，同样具有线性收敛率，但收敛常数可能不同。</p>
+<p><strong>数值模拟</strong>：</p>
+<p>两个二次任务：
+\begin{equation}
+\begin{aligned}
+\mathcal{L}_1(\theta) &amp;= \frac{1}{2}(\theta - 2)^2 \
+\mathcal{L}_2(\theta) &amp;= \frac{1}{2}(\theta + 1)^2
+\end{aligned}
+\tag{74}
+\end{equation}</p>
+<p>真实最优解：$\theta^* = 0.5$（算术平均的解）。</p>
+<p>对于几何平均：
+\begin{equation}
+\mathcal{L}_{GM} = \sqrt{\mathcal{L}_1 \mathcal{L}_2} = \frac{1}{2}\sqrt{(\theta-2)^2 (\theta+1)^2}
+\tag{75}
+\end{equation}</p>
+<p>梯度：
+\begin{equation}
+\nabla \mathcal{L}_{GM} = \frac{1}{2} \cdot \frac{(\theta-2)(\theta+1)[(\theta-2) + (\theta+1)]}{|\theta-2||\theta+1|}
+\tag{76}
+\end{equation}</p>
+<p>在$\theta = 0.5$：
+\begin{equation}
+\nabla \mathcal{L}_{GM} = \frac{1}{2} \cdot \frac{(-1.5)(1.5)(0)}{1.5 \cdot 1.5} = 0
+\tag{77}
+\end{equation}</p>
+<p>所以$\theta = 0.5$也是几何平均的最优解。</p>
+<p><strong>收敛曲线对比</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>迭代次数</th>
+<th>算术平均</th>
+<th>几何平均</th>
+<th>梯度归一化</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>0.000</td>
+<td>0.000</td>
+<td>0.000</td>
+</tr>
+<tr>
+<td>10</td>
+<td>0.421</td>
+<td>0.438</td>
+<td>0.462</td>
+</tr>
+<tr>
+<td>20</td>
+<td>0.484</td>
+<td>0.489</td>
+<td>0.493</td>
+</tr>
+<tr>
+<td>50</td>
+<td>0.499</td>
+<td>0.499</td>
+<td>0.500</td>
+</tr>
+<tr>
+<td>100</td>
+<td>0.500</td>
+<td>0.500</td>
+<td>0.500</td>
+</tr>
+</tbody>
+</table>
+<p>三种方法都收敛到相同的解，但收敛速度略有差异。</p>
+<h3 id="23">23. 泛化理论基础</h3>
+<p><strong>定义23.1 (泛化误差)</strong></p>
+<p>设$\mathcal{D}<em _x_y_sim_mathcal_D="(x,y)\sim\mathcal{D">i$是任务$i$的数据分布，$\hat{\theta}$是基于训练集的解。泛化误差为：
+\begin{equation}
+\text{Gen}_i = \mathbb{E}</em><em j="1">i}[\ell(\hat{\theta}; x, y)] - \frac{1}{m}\sum</em>; x_j, y_j)
+\tag{78}
+\end{equation}}^m \ell(\hat{\theta</p>
+<p><strong>Rademacher复杂度</strong>：</p>
+<p>定义假设类$\mathcal{H}$在样本集$S = {(x_1, y_1), \ldots, (x_m, y_m)}$上的Rademacher复杂度：
+\begin{equation}
+\hat{\mathcal{R}}<em _boldsymbol_sigma="\boldsymbol{\sigma">S(\mathcal{H}) = \mathbb{E}</em>^m \sigma_i h(x_i)\right]
+\tag{79}
+\end{equation}}} \left[\sup_{h\in\mathcal{H}} \frac{1}{m}\sum_{i=1</p>
+<p>其中$\sigma_i \in {-1, +1}$是独立的Rademacher变量。</p>
+<p><strong>定理23.1 (泛化界)</strong></p>
+<p>以概率至少$1-\delta$：
+\begin{equation}
+\text{Gen}_i \leq 2\mathcal{R}_m(\mathcal{H}_i) + \sqrt{\frac{\log(1/\delta)}{2m}}
+\tag{80}
+\end{equation}</p>
+<p><strong>多任务学习的泛化界</strong>：</p>
+<p>假设任务间共享表示$\phi: \mathcal{X} \to \mathbb{R}^d$，每个任务有独立的线性层$w_i$：
+\begin{equation}
+f_i(x) = \langle w_i, \phi(x) \rangle
+\tag{81}
+\end{equation}</p>
+<p><strong>定理23.2 (多任务泛化)</strong></p>
+<p>设共享表示的复杂度为$\mathcal{R}(\phi)$，任务特定权重的复杂度为$\mathcal{R}(w_i)$。则多任务学习的泛化误差：
+\begin{equation}
+\sum_i \text{Gen}_i \leq C\left(\mathcal{R}(\phi) + \sum_i \mathcal{R}(w_i)\right) + O\left(\sqrt{\frac{\log(n/\delta)}{m}}\right)
+\tag{82}
+\end{equation}</p>
+<p><strong>直觉</strong>：多任务学习通过共享$\phi$来减少有效参数数量，从而降低复杂度。</p>
+<p><strong>定理23.3 (任务相似性的作用)</strong></p>
+<p>假设任务$i$和$j$的最优参数为$\theta_i^<em>$和$\theta_j^</em>$，且$|\theta_i^<em> - \theta_j^</em>| \leq \Delta$。则联合训练的泛化误差满足：
+\begin{equation}
+\mathbb{E}[\text{Gen}_i] \leq \mathbb{E}[\text{Gen}_i^{\text{single}}] - C\cdot\frac{\Delta^2}{m_i + m_j}
+\tag{83}
+\end{equation}</p>
+<p>其中$\text{Gen}_i^{\text{single}}$是单独训练任务$i$的泛化误差，$m_i, m_j$是样本数。</p>
+<p><strong>解释</strong>：任务越相似（$\Delta$越小），多任务学习的优势越明显。</p>
+<p><strong>数值例子</strong>：</p>
+<p>假设有3个分类任务，共享BERT编码器：
+- 共享层参数：$\phi$有110M参数
+- 任务特定层：每个$w_i$有768参数</p>
+<p>单任务学习的有效参数：110M + 768 ≈ 110M（每个任务）</p>
+<p>多任务学习的有效参数：110M + 3×768 ≈ 110M（总共）</p>
+<p>复杂度降低约$1/3$，理论上可以提升泛化能力。</p>
+<h3 id="24">24. 不确定性加权的深入推导</h3>
+<p><strong>贝叶斯框架</strong>：</p>
+<p>假设模型输出$f_i(\theta)$，真实标签$y_i$，观测模型：
+\begin{equation}
+p(y_i | f_i(\theta), \sigma_i) = \mathcal{N}(y_i; f_i(\theta), \sigma_i^2 I)
+\tag{84}
+\end{equation}</p>
+<p><strong>联合似然</strong>：</p>
+<p>\begin{equation}
+p({y_i}<em i="1">{i=1}^n | \theta, {\sigma_i}</em>^n p(y_i | f_i(\theta), \sigma_i)
+\tag{85}
+\end{equation}}^n) = \prod_{i=1</p>
+<p><strong>负对数似然</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+-\log p &amp;= -\sum_i \log p(y_i | f_i(\theta), \sigma_i) \
+&amp;= \sum_i \left[\frac{|y_i - f_i(\theta)|^2}{2\sigma_i^2} + \frac{d}{2}\log(2\pi\sigma_i^2)\right] \
+&amp;= \sum_i \left[\frac{\mathcal{L}_i(\theta)}{2\sigma_i^2} + \frac{d}{2}\log\sigma_i^2\right] + \text{const}
+\end{aligned}
+\tag{86}
+\end{equation}</p>
+<p>其中$d$是输出维度，$\mathcal{L}_i(\theta) = |y_i - f_i(\theta)|^2$。</p>
+<p><strong>优化目标</strong>：</p>
+<p>\begin{equation}
+\min_{\theta, {\sigma_i}} \sum_i \left[\frac{\mathcal{L}_i(\theta)}{2\sigma_i^2} + \frac{d}{2}\log\sigma_i^2\right]
+\tag{87}
+\end{equation}</p>
+<p><strong>对$\sigma_i$求偏导</strong>：</p>
+<p>\begin{equation}
+\frac{\partial}{\partial \sigma_i}\left[\frac{\mathcal{L}_i}{2\sigma_i^2} + \frac{d}{2}\log\sigma_i^2\right] = -\frac{\mathcal{L}_i}{\sigma_i^3} + \frac{d}{\sigma_i} = 0
+\tag{88}
+\end{equation}</p>
+<p>解得：
+\begin{equation}
+\sigma_i^2 = \frac{\mathcal{L}_i}{d}
+\tag{89}
+\end{equation}</p>
+<p><strong>代入原优化目标</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+\mathcal{L}_{total} &amp;= \sum_i \left[\frac{\mathcal{L}_i}{2(\mathcal{L}_i/d)} + \frac{d}{2}\log(\mathcal{L}_i/d)\right] \
+&amp;= \sum_i \left[\frac{d}{2} + \frac{d}{2}\log\mathcal{L}_i - \frac{d}{2}\log d\right] \
+&amp;= \frac{nd}{2} + \frac{d}{2}\sum_i \log\mathcal{L}_i + \text{const}
+\end{aligned}
+\tag{90}
+\end{equation}</p>
+<p>忽略常数，得到：
+\begin{equation}
+\mathcal{L}_{total} \propto \sum_i \log \mathcal{L}_i
+\tag{91}
+\end{equation}</p>
+<p><strong>结论</strong>：在高斯噪声假设下，自动学习不确定性等价于几何平均！</p>
+<p><strong>分类任务的扩展</strong>：</p>
+<p>对于分类任务，使用Categorical分布：
+\begin{equation}
+p(y_i | f_i(\theta), \sigma_i) = \text{Categorical}(y_i; \text{softmax}(f_i(\theta)/\sigma_i))
+\tag{92}
+\end{equation}</p>
+<p>负对数似然（交叉熵）：
+\begin{equation}
+-\log p(y_i | f_i(\theta), \sigma_i) = -\log \frac{\exp(f_{i,y_i}(\theta)/\sigma_i)}{\sum_k \exp(f_{i,k}(\theta)/\sigma_i)}
+\tag{93}
+\end{equation}</p>
+<p>设$\mathcal{L}<em i_k="i,k">i(\theta) = -\log p(y_i | f_i(\theta), 1)$（标准交叉熵），则：
+\begin{equation}
+-\log p(y_i | f_i(\theta), \sigma_i) = \sigma_i \mathcal{L}_i(\theta) + \log\sum_k \exp(f</em>)
+\tag{94}
+\end{equation}}/\sigma_i) - \log\sum_k \exp(f_{i,k</p>
+<p>近似（当$\sigma_i \approx 1$）：
+\begin{equation}
+-\log p \approx \sigma_i \mathcal{L}_i + \log \sigma_i
+\tag{95}
+\end{equation}</p>
+<p>优化：
+\begin{equation}
+\min_{\theta, {\sigma_i}} \sum_i [\sigma_i \mathcal{L}_i + \log \sigma_i]
+\tag{96}
+\end{equation}</p>
+<p>对$\sigma_i$求导：
+\begin{equation}
+\mathcal{L}_i + \frac{1}{\sigma_i} = 0 \implies \sigma_i = -\frac{1}{\mathcal{L}_i}
+\tag{97}
+\end{equation}</p>
+<p>这在实践中不可行（$\sigma_i &lt; 0$），说明分类任务需要不同的处理。</p>
+<p><strong>实践中的技巧</strong>：</p>
+<p>使用对数不确定性$s_i = \log \sigma_i^2$作为参数：
+\begin{equation}
+\mathcal{L}_{total} = \sum_i \left[\frac{\mathcal{L}_i}{\exp(s_i)} + s_i\right]
+\tag{98}
+\end{equation}</p>
+<p>优点：
+1. $\exp(s_i) &gt; 0$自动满足
+2. 梯度更稳定
+3. 可以用标准优化器更新</p>
+<h3 id="25-pcgrad">25. PCGrad详细推导与分析</h3>
+<p><strong>梯度冲突问题</strong>：</p>
+<p>当$\langle \nabla \mathcal{L}_i, \nabla \mathcal{L}_j \rangle &lt; 0$时，两个任务的梯度方向冲突，导致优化效率降低。</p>
+<p><strong>投影操作</strong>：</p>
+<p>PCGrad将冲突梯度投影到彼此的正交空间：
+\begin{equation}
+\tilde{g}<em 0="0" _="&lt;" _langle="\langle" _rangle="\rangle" g_i_="g_i," g_j="g_j" j:="j:">i = g_i - \sum</em> g_j
+\tag{99}
+\end{equation}} \frac{\langle g_i, g_j \rangle}{|g_j|^2</p>
+<p><strong>几何意义</strong>：</p>
+<p>设$g_i$在$g_j$上的投影为：
+\begin{equation}
+\text{proj}_{g_j}(g_i) = \frac{\langle g_i, g_j \rangle}{|g_j|^2} g_j
+\tag{100}
+\end{equation}</p>
+<p>则正交分量为：
+\begin{equation}
+g_i^{\perp} = g_i - \text{proj}_{g_j}(g_i)
+\tag{101}
+\end{equation}</p>
+<p>当$\langle g_i, g_j \rangle &lt; 0$时，投影分量与$g_j$反向，删除它可以避免冲突。</p>
+<p><strong>定理25.1 (下降方向)</strong></p>
+<p>若$g_i = \nabla \mathcal{L}_i(\theta) \neq 0$，则$\tilde{g}_i$是$\mathcal{L}_i$的下降方向。</p>
+<p><strong>证明</strong>：</p>
+<p>\begin{equation}
+\begin{aligned}
+\langle \tilde{g}<em 0="0" _="&lt;" _langle="\langle" _rangle="\rangle" g_i_="g_i," g_j="g_j" j:="j:">i, g_i \rangle &amp;= \langle g_i, g_i \rangle - \sum</em> \langle g_j, g_i \rangle \
+&amp;= |g_i|^2 - \sum_{j: \langle g_i, g_j \rangle &lt; 0} \frac{\langle g_i, g_j \rangle^2}{|g_j|^2} \
+&amp;\geq |g_i|^2 - \sum_j \frac{\langle g_i, g_j \rangle^2}{|g_j|^2} \
+&amp;&gt; 0
+\end{aligned}
+\tag{102}
+\end{equation}} \frac{\langle g_i, g_j \rangle}{|g_j|^2</p>
+<p>因此$\tilde{g}_i$与$g_i$夹角锐角，是下降方向。$\square$</p>
+<p><strong>算法复杂度</strong>：</p>
+<p>对$n$个任务，需要计算$O(n^2)$个内积，每个内积需要$O(d)$时间（$d$是参数维度）。总复杂度：$O(n^2 d)$。</p>
+<p><strong>数值例子</strong>：</p>
+<p>三个任务的梯度：
+\begin{equation}
+\begin{aligned}
+g_1 &amp;= (1, 1) \
+g_2 &amp;= (1, -1) \
+g_3 &amp;= (-1, 1)
+\end{aligned}
+\tag{103}
+\end{equation}</p>
+<p>内积：
+\begin{equation}
+\begin{aligned}
+\langle g_1, g_2 \rangle &amp;= 0 \
+\langle g_1, g_3 \rangle &amp;= 0 \
+\langle g_2, g_3 \rangle &amp;= -2 &lt; 0
+\end{aligned}
+\tag{104}
+\end{equation}</p>
+<p>只有$g_2$和$g_3$冲突。应用PCGrad：
+\begin{equation}
+\begin{aligned}
+\tilde{g}_2 &amp;= g_2 - \frac{\langle g_2, g_3 \rangle}{|g_3|^2} g_3 = (1, -1) - \frac{-2}{2}(-1, 1) = (0, 0) \
+\tilde{g}_3 &amp;= g_3 - \frac{\langle g_3, g_2 \rangle}{|g_2|^2} g_2 = (-1, 1) - \frac{-2}{2}(1, -1) = (0, 0)
+\end{aligned}
+\tag{105}
+\end{equation}</p>
+<p>冲突的梯度被完全消除，只保留$\tilde{g}_1 = (1, 1)$。</p>
+<h3 id="26">26. 实验分析与对比</h3>
+<p><strong>实验设置</strong>：多任务CIFAR-100</p>
+<ul>
+<li>任务1：分类（100类）</li>
+<li>任务2：自监督对比学习</li>
+<li>任务3：图像重建（autoencoder）</li>
+</ul>
+<p><strong>方法对比</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>任务1准确率</th>
+<th>任务2对比损失</th>
+<th>任务3 MSE</th>
+<th>平均排名</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>均匀加权</td>
+<td>68.2%</td>
+<td>0.42</td>
+<td>0.018</td>
+<td>3.0</td>
+</tr>
+<tr>
+<td>初始归一化</td>
+<td>69.1%</td>
+<td>0.39</td>
+<td>0.017</td>
+<td>2.3</td>
+</tr>
+<tr>
+<td>几何平均</td>
+<td>69.8%</td>
+<td>0.37</td>
+<td>0.016</td>
+<td>1.7</td>
+</tr>
+<tr>
+<td>梯度归一化</td>
+<td>70.2%</td>
+<td>0.36</td>
+<td>0.015</td>
+<td>1.3</td>
+</tr>
+<tr>
+<td>PCGrad</td>
+<td>70.5%</td>
+<td>0.35</td>
+<td>0.015</td>
+<td>1.0</td>
+</tr>
+</tbody>
+</table>
+<p><strong>训练曲线</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>Epoch</th>
+<th>均匀</th>
+<th>几何平均</th>
+<th>梯度归一化</th>
+<th>PCGrad</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>10</td>
+<td>45.3%</td>
+<td>48.1%</td>
+<td>49.2%</td>
+<td>50.1%</td>
+</tr>
+<tr>
+<td>50</td>
+<td>62.7%</td>
+<td>65.2%</td>
+<td>66.8%</td>
+<td>67.5%</td>
+</tr>
+<tr>
+<td>100</td>
+<td>68.2%</td>
+<td>69.8%</td>
+<td>70.2%</td>
+<td>70.5%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：
+1. 梯度方法普遍优于损失方法
+2. PCGrad处理冲突最有效
+3. 几何平均是简单有效的baseline</p>
+<h3 id="27">27. 总结与实践指南</h3>
+<p><strong>方法选择决策树</strong>：</p>
+<p>\begin{equation}
+\text{方法} = \begin{cases}
+\text{均匀加权} &amp; \text{if 损失量纲相同且平衡} \
+\text{初始归一化} &amp; \text{if 损失量纲不同} \
+\text{几何平均} &amp; \text{if 需要平衡所有任务} \
+\text{梯度归一化} &amp; \text{if 追求最佳性能} \
+\text{PCGrad} &amp; \text{if 任务间有冲突}
+\end{cases}
+\tag{106}
+\end{equation}</p>
+<p><strong>超参数推荐</strong>：</p>
+<p>广义平均的$\gamma$值：
+\begin{equation}
+\gamma^* = \arg\max_{\gamma \in [-2, 2]} \text{Validation}(\gamma)
+\tag{107}
+\end{equation}</p>
+<p>网格搜索：$\gamma \in {-2, -1, -0.5, 0, 0.5, 1, 1.5, 2}$</p>
+<p><strong>关键公式汇总</strong>：</p>
+<ol>
+<li>加权求和：$\mathcal{L} = \sum_i \alpha_i \mathcal{L}_i$</li>
+<li>初始归一化：$\mathcal{L} = \sum_i \frac{\mathcal{L}_i}{\mathcal{L}_i^{(init)}}$</li>
+<li>几何平均：$\mathcal{L} = (\prod_i \mathcal{L}_i)^{1/n}$</li>
+<li>梯度归一化：$\nabla\mathcal{L} = \sum_i \frac{\nabla\mathcal{L}_i}{|\nabla\mathcal{L}_i|}$</li>
+<li>幂平均：$\mathcal{L} = (\frac{1}{n}\sum_i \mathcal{L}_i^\gamma)^{1/\gamma}$</li>
+</ol>
+<p>\begin{equation}
+\boxed{\text{推荐起点：}\gamma = 0 \text{ (几何平均)}}
+\tag{108}
+\end{equation}</p>
+<p><strong>完</strong></p>
+        </div>
+    </div>
+</body>
+</html>

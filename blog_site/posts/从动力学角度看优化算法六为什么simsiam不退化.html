@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>从动力学角度看优化算法（六）：为什么SimSiam不退化？</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>从动力学角度看优化算法（六）：为什么SimSiam不退化？</h1>
+            <div class="meta">📅 最后更新: 2026-01-08 | 📄 大小: 41.0 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7980">https://spaces.ac.cn/archives/7980</a></p>
+<hr />
+<h2 id="1">1. 核心理论、公理与历史基础</h2>
+<h3 id="11">1.1 跨学科根源：从负采样到对称性破缺</h3>
+<p>自监督学习（Self-Supervised Learning）的终极幽灵是<strong>“表征坍缩（Representation Collapse）”</strong>：如果没有显式的排斥力，模型会发现最简单的办法是让所有图片的特征向量都变成同一个常数（如全零），此时损失函数虽然最小，但表征彻底失效。</p>
+<ul>
+<li><strong>对比学习 (Contrastive Learning)</strong>：如 SimCLR，引入海量的负样本作为“排斥力”。</li>
+<li><strong>非对比学习 (Non-contrastive Learning)</strong>：BYOL 和 SimSiam 挑战了这一常识。它们证明了：即便没有负样本，模型依然可以不坍缩。</li>
+<li><strong>动力系统视角</strong>：SimSiam 的成功本质上是优化路径中的<strong>对称性破缺</strong>。通过人为制造快慢不一的演化模块，系统在滑向平凡解（坍缩）的过程中被截断了。</li>
+</ul>
+<h3 id="12">1.2 历史编年史：自监督学习的演化之路</h3>
+<h4 id="2018-2020">第一阶段：对比学习的黄金时代（2018-2020）</h4>
+<ol>
+<li><strong>2018 - InstDisc (Wu et al.)</strong>：首次提出实例判别（Instance Discrimination）范式</li>
+<li>核心思想：将每个样本视为独立类别</li>
+<li>引入Memory Bank存储特征</li>
+<li>
+<p>问题：需要维护巨大的负样本队列</p>
+</li>
+<li>
+<p><strong>2019 - MoCo (He et al.)</strong>：动量对比学习</p>
+</li>
+<li>创新：队列机制+动量编码器</li>
+<li>实现大规模负样本（65536）</li>
+<li>ImageNet准确率达到60.6%（线性评估）</li>
+<li>
+<p>开启了对比学习的实用化</p>
+</li>
+<li>
+<p><strong>2020 - SimCLR (Chen et al.)</strong>：简化对比学习</p>
+</li>
+<li>极简设计：无队列、无Memory Bank</li>
+<li>依赖超大Batch Size（4096+）</li>
+<li>核心发现：数据增强+投影头的重要性</li>
+<li>准确率突破69%</li>
+<li><strong>局限</strong>：计算成本极高（需要TPU v3 ×128）</li>
+</ol>
+<h4 id="2020-2021">第二阶段：非对比革命（2020-2021）</h4>
+<ol>
+<li><strong>2020.06 - BYOL (Grill et al., DeepMind)</strong>：打破对比范式</li>
+<li>震撼发现：<strong>无需负样本即可防止坍缩</strong></li>
+<li>机制：EMA（Exponential Moving Average）编码器</li>
+<li>理论疑问：为什么不会坍缩？</li>
+<li>
+<p>社区反响：引发激烈争论，部分学者怀疑是BN的隐式作用</p>
+</li>
+<li>
+<p><strong>2020.11 - SimSiam (Chen &amp; He, CVPR 2021)</strong>：最小化设计</p>
+</li>
+<li>极致简化：去掉EMA，只保留Stop-gradient</li>
+<li>核心组件仅3个：<ul>
+<li>Siamese网络</li>
+<li>Predictor MLP（2层）</li>
+<li>Stop-gradient算子</li>
+</ul>
+</li>
+<li>理论贡献：证明"快慢动力学"是关键</li>
+<li>准确率：71.3%（ResNet-50，200epoch）</li>
+<li>
+<p><strong>哲学意义</strong>：Less is More的典范</p>
+</li>
+<li>
+<p><strong>2021 - Barlow Twins (Zbontar et al.)</strong>：信息论视角</p>
+</li>
+<li>创新：互信息冗余度约束</li>
+<li>损失函数：互协方差矩阵→单位阵</li>
+<li>优势：无需Predictor、无需Stop-grad</li>
+<li>理论清晰：直接优化特征独立性</li>
+</ol>
+<h4 id="2021-2024">第三阶段：理论统一与扩展（2021-2024）</h4>
+<ol>
+<li><strong>2021 - VICReg (Variance-Invariance-Covariance)</strong>：</li>
+<li>将BYOL/SimSiam的三大隐式约束显式化</li>
+<li>方差正则化：防止坍缩到零点</li>
+<li>不变性约束：正样本对齐</li>
+<li>
+<p>协方差正则化：去相关</p>
+</li>
+<li>
+<p><strong>2021 - DINO (Caron et al., ICCV)</strong>：</p>
+</li>
+<li>将SimSiam思想迁移到Vision Transformer</li>
+<li>替换BN为Centering+Sharpening</li>
+<li>发现：自监督ViT涌现出显式的Attention Map</li>
+<li>
+<p>影响：启发了DALL-E 2、Stable Diffusion的设计</p>
+</li>
+<li>
+<p><strong>2022 - 动力学理论的形式化 (Tian et al.)</strong>：</p>
+</li>
+<li>用微分方程严格分析SimSiam</li>
+<li>证明：Stop-grad = Asymmetric Loss Landscape</li>
+<li>
+<p>揭示：Predictor学习速度必须 &gt;&gt; Encoder</p>
+</li>
+<li>
+<p><strong>2023-2024 - 大模型时代的自监督</strong>：</p>
+<ul>
+<li>MAE（Masked Autoencoder）：回归生成式自监督</li>
+<li>JEPA（Joint-Embedding Predictive Architecture）：LeCun的统一框架</li>
+<li>SimSiam原理被整合进多模态预训练（CLIP变体）</li>
+</ul>
+</li>
+</ol>
+<h3 id="13">1.3 严谨公理化</h3>
+<div class="theorem-box">
+
+### 核心公理体系：SimSiam 不坍缩三要素
+
+**公理 1 (一致性约束)**：正样本对 $T_1(x), T_2(x)$ 的表示必须尽可能重合。
+**公理 2 (Predictor 引入)**：支路间必须存在一个非线性的预测器 $h$，打破恒等映射。
+**公理 3 (停止梯度算子)**：梯度的流动必须是不对称的。
+\begin{equation} \nabla_{\theta} \| h_{\boldsymbol{\varphi}}(z_1) - \text{stop\_grad}(z_2) \|^2 \tag{1} \end{equation}
+
+</div>
+
+<h3 id="14">1.4 设计哲学：快与慢的博弈</h3>
+<p>SimSiam 的设计哲学是：<strong>“跑得比坍缩快。”</strong> 
+坍缩是一个长期的、结构性的趋势。如果模型中的某个部分（Predictor）能够以极快的速度完成对目标（Encoder 输出）的局部拟合，那么推动 Encoder 整体坍缩的梯度压力就会迅速消散。这就像是在流沙沉没之前，我们先在表面铺好了一层轻质甲板。</p>
+<hr />
+<h2 id="2">2. 严谨的核心数学推导</h2>
+<p>本节将通过动力学方程组，定量揭示 Stop-gradient 如何拦截坍缩过程。</p>
+<h3 id="21-siamese">2.1 建立 Siamese 动力学模型</h3>
+<p>设编码器参数为 $\boldsymbol{\theta}$，预测器参数为 $\boldsymbol{\varphi}$。损失函数为：
+\begin{equation}
+\mathcal{L}(\boldsymbol{\theta}, \boldsymbol{\varphi}) = \mathbb{E}<em _boldsymbol_varphi="\boldsymbol{\varphi">{x, \mathcal{T}_1, \mathcal{T}_2} \left[ | h</em>}}(f_{\boldsymbol{    heta}}(\mathcal{T<em _boldsymbol_="\boldsymbol{" heta="heta">1(x))) - f</em>
+\end{equation}}}(\mathcal{T}_2(x)) |^2 \right] \tag{2</p>
+<div class="derivation-box">
+
+### 推导：有无 Stop-gradient 的梯度流对比
+
+**情形 A：无 Stop-gradient（对称更新）**
+参数 $\boldsymbol{\theta}$ 的演化速度取决于两边的梯度：
+\begin{equation}
+\dot{\boldsymbol{\theta}} = -\left( \underbrace{\frac{\partial \mathcal{L}}{\partial f_1} \frac{\partial f_1}{\partial \boldsymbol{\theta}}}_{\text{支路1}} + \underbrace{\frac{\partial \mathcal{L}}{\partial f_2} \frac{\partial f_2}{\partial \boldsymbol{\theta}}}_{\text{支路2}} \right) \tag{3}
+\end{equation}
+由于两边方向一致，$\boldsymbol{\theta}$ 会获得双倍的动力冲向常数解。
+
+**情形 B：有 Stop-gradient (SimSiam)**
+支路 2 的梯度被切断，动力学变为：
+\begin{equation}
+\dot{\boldsymbol{\theta}} = -\frac{\partial \mathcal{L}}{\partial f_1} \frac{\partial f_1}{\partial \boldsymbol{\theta}} \tag{4}
+\end{equation}
+同时，预测器 $\boldsymbol{\varphi}$ 的演化为：
+\begin{equation}
+\dot{\boldsymbol{\varphi}} = -\frac{\partial \mathcal{L}}{\partial h} \frac{\partial h}{\partial \boldsymbol{\varphi}} \tag{5}
+\end{equation}
+
+</div>
+
+<h3 id="22">2.2 玩具模型分析：标量演化模拟</h3>
+<p>为了看清本质，我们假设 $f_{\theta}(x) = \theta x$（线性编码），$h_{\varphi}(z) = \varphi z$（线性预测）。</p>
+<div class="derivation-box">
+
+### 推导：坍缩速度的定量计算
+
+设目标是最小化 $\frac{1}{2}(\varphi \theta - \theta)^2$。
+
+**没有 Stop-grad 时**：
+\begin{equation}
+\dot{\theta} = -(\varphi \theta - \theta) \varphi = -\theta \varphi (\varphi - 1) \tag{6}
+\end{equation}
+如果初始时 $\varphi$ 还没学好（例如 $\varphi < 1$），那么 $\dot{\theta}$ 会让 $\theta \to 0$。一旦 $\theta=0$，特征全失，无法挽回。
+
+**有 Stop-grad 时**：
+由于 Predictor $\varphi$ 位于输出层，其学习路径更短，**动力学极快**。
+\begin{equation}
+\dot{\boldsymbol{\varphi}} = -(\varphi \theta - \theta) \theta = -\theta^2 (\varphi - 1) \tag{7}
+\end{equation}
+由于 $\dot{\boldsymbol{\varphi}}$ 的收敛常数是 $\theta^2$（通常大于零且较稳定），$\varphi$ 会以指数级速度 $e^{-\theta^2 t}$ 趋向于 1。
+**关键点**：当 $\varphi$ 迅速到达 1 时，(6) 式中的动力 $(\varphi - 1)$ 变为 0。
+这意味着：**Encoder 还没来得及滑到 0，驱动它滑动的力就已经被 Predictor 抵消了。**
+
+</div>
+
+<h3 id="23">2.3 李雅普诺夫稳定性分析</h3>
+<div class="theorem-box">
+
+### 定理2.1：SimSiam的条件稳定性
+
+**命题**：设编码器和预测器的参数分别为 $\boldsymbol{\theta}$ 和 $\boldsymbol{\varphi}$，损失函数为：
+\begin{equation}
+L(\boldsymbol{\theta}, \boldsymbol{\varphi}) = \mathbb{E}\left[ \| h_{\boldsymbol{\varphi}}(f_{\boldsymbol{\theta}}(x_1)) - f_{\boldsymbol{\theta}}(x_2) \|^2 \right] \tag{8}
+\end{equation}
+
+其中 $x_1, x_2$ 是同一图像的两个增强视图。
+
+**稳定平衡点**：系统的非平凡稳定点满足：
+\begin{align}
+h_{\boldsymbol{\varphi}}(z) &= z, \quad \forall z \in \text{Range}(f_{\boldsymbol{\theta}}) \tag{9a}\\
+\mathbb{E}[f_{\boldsymbol{\theta}}(x_1)] &= \mathbb{E}[f_{\boldsymbol{\theta}}(x_2)] = \mathbf{0} \tag{9b}\\
+\text{Cov}(f_{\boldsymbol{\theta}}(x)) &\succ 0 \tag{9c}
+\end{align}
+
+**证明**：构造李雅普诺夫函数：
+\begin{equation}
+V(\boldsymbol{\theta}, \boldsymbol{\varphi}) = L(\boldsymbol{\theta}, \boldsymbol{\varphi}) + \lambda \| \text{Cov}(f_{\boldsymbol{\theta}}) - I \|_F^2 \tag{10}
+\end{equation}
+
+其中 $\lambda > 0$ 是正则化系数（隐式由BN提供）。
+
+**稳定性条件**：
+1. $\dot{V} < 0$（能量单调递减）
+2. $\nabla_{\boldsymbol{\varphi}} L$ 的收敛速度 >> $\nabla_{\boldsymbol{\theta}} L$
+
+**关键引理**：当使用Stop-gradient时，$\boldsymbol{\varphi}$ 的有效学习率被放大 $\mathcal{O}(d)$ 倍（$d$ 是特征维度）。
+
+</div>
+
+<h4 id="231">2.3.1 线性化分析：雅可比矩阵的谱性质</h4>
+<div class="derivation-box">
+
+### 推导2.2：坍缩解的失稳条件
+
+**设定**：考虑坍缩解 $f_{\boldsymbol{\theta}}(x) = \mathbf{c}$（常数），$h_{\boldsymbol{\varphi}}(z) = \mathbf{c}$。
+
+**扰动分析**：设 $f_{\boldsymbol{\theta}} = \mathbf{c} + \epsilon \mathbf{u}(x)$，其中 $\epsilon \ll 1$。
+
+**有Stop-grad的情况**：
+
+损失函数的线性化：
+\begin{align}
+L &= \mathbb{E}\left[ \| h_{\boldsymbol{\varphi}}(\mathbf{c} + \epsilon \mathbf{u}_1) - (\mathbf{c} + \epsilon \mathbf{u}_2) \|^2 \right] \tag{11a}\\
+&\approx \mathbb{E}\left[ \| \mathbf{J}_{\boldsymbol{\varphi}} \epsilon \mathbf{u}_1 - \epsilon \mathbf{u}_2 \|^2 \right] \tag{11b}\\
+&= \epsilon^2 \mathbb{E}\left[ \| (\mathbf{J}_{\boldsymbol{\varphi}} - I) \mathbf{u}_1 \|^2 \right] + \mathcal{O}(\epsilon^3) \tag{11c}
+\end{align}
+
+**关键观察**：
+- 如果 $\mathbf{J}_{\boldsymbol{\varphi}} = I$（Predictor完美拟合），则 $L = 0$
+- Predictor的梯度：$\nabla_{\boldsymbol{\varphi}} L \propto \epsilon^2$ （二阶小量）
+- Encoder的梯度：$\nabla_{\boldsymbol{\theta}} L \propto \epsilon$ （一阶小量）
+
+**结论**：由于 $\boldsymbol{\varphi}$ 的梯度更小，它会**先**收敛到使 $\mathbf{J}_{\boldsymbol{\varphi}} \to I$ 的配置，从而**截断** $\boldsymbol{\theta}$ 继续坍缩的动力。
+
+</div>
+
+<h3 id="24">2.4 深度展开分析：隐式方差补偿</h3>
+<p>如果将 SimSiam 看作一个 EM 算法（Expectation-Maximization），我们可以得到更有趣的发现。</p>
+<div class="formula-explanation">
+
+### 损失函数的一阶泰勒展开
+
+假设数据增强 $\mathcal{T}(x) = x + \Delta x$，其中 $\Delta x$ 是小扰动。
+
+<div class="formula-step">
+<div class="step-label">1. 目标中心化</div>
+对于目标项 $f_{\theta}(\mathcal{T}_2(x))$，其平均值为 $\bar{z} = f_{\theta}(\bar{x})$。
+</div>
+
+<div class="formula-step">
+<div class="step-label">2. 展开预测误差</div>
+\begin{equation}
+\mathcal{L}(\theta) \approx \mathbb{E}_{x, \Delta x} \left[ \left\Vert \boldsymbol{J}_{\theta}(x) \Delta x \right\|^2 \right] \tag{12}
+\end{equation}
+其中 $\boldsymbol{J}_{\theta}$ 是编码器的雅可比矩阵（特征灵敏度）。
+</div>
+
+<div class="formula-step">
+<parameter name="step-label">3. 几何意义</div>
+SimSiam 实际上在寻找一个特征映射，使得它对常见的图像变换（数据增强）具有低敏感度，同时通过 Predictor 的解耦效应，在不牺牲表示维度（即不坍缩）的前提下实现这一点。
+</div>
+
+</div>
+<h3 id="25-batch-normalization">2.5 Batch Normalization的隐式作用</h3>
+<div class="critical-analysis">
+
+**核心疑问**：为什么SimSiam强烈依赖BN？
+
+**答案**：BN提供了三重隐式约束
+
+#### 约束1：隐式去中心化（Implicit Centering）
+
+BN层强制每个批次的特征均值为零：
+\begin{equation}
+\mathbb{E}_{\text{batch}}[z_i] = 0 \tag{13}
+\end{equation}
+
+这防止了所有特征同时漂移到相同的非零常数。
+
+#### 约束2：隐式方差正则化（Implicit Variance Regularization）
+
+BN标准化每个特征维度的方差为1：
+\begin{equation}
+\text{Var}_{\text{batch}}(z_i) = 1 \tag{14}
+\end{equation}
+
+这防止了特征坍缩到零点（方差为0）。
+
+#### 约束3：隐式Batch内对比（Implicit Batch-level Contrast）
+
+**定理2.2（Richemond et al. 2021）**：BN在batch维度引入的隐式对比效应等价于：
+\begin{equation}
+L_{\text{BN}} = L_{\text{SimSiam}} + \underbrace{\frac{\lambda}{B} \sum_{i \neq j} \langle z_i, z_j \rangle}_{\text{隐式负样本项}} \tag{15}
+\end{equation}
+
+其中 $B$ 是batch size，$\lambda$ 是隐式系数。
+
+**实验验证**：
+- 去掉BN后，SimSiam在100 epoch内坍缩（所有特征 → 零向量）
+- 使用LayerNorm/GroupNorm替代BN，坍缩速度减缓但仍然发生
+- 只有保留Batch维度统计的归一化（如SyncBN）才能完全防止坍缩
+
+</div>
+
+<h3 id="26">2.6 非线性动力学：快变流形理论</h3>
+<div class="advanced-theory">
+
+#### 快慢系统分解（Slow-Fast Systems Decomposition）
+
+将SimSiam建模为奇异摄动系统（Singular Perturbation System）：
+\begin{align}
+\dot{\boldsymbol{\theta}} &= -\nabla_{\boldsymbol{\theta}} L(\boldsymbol{\theta}, \boldsymbol{\varphi}) \tag{16a}\\
+\epsilon \dot{\boldsymbol{\varphi}} &= -\nabla_{\boldsymbol{\varphi}} L(\boldsymbol{\theta}, \boldsymbol{\varphi}) \tag{16b}
+\end{align}
+
+其中 $\epsilon \ll 1$ 表示Predictor的时间尺度远小于Encoder。
+
+**Tikhonov定理应用**：
+在 $\epsilon \to 0$ 极限下，系统演化分两个阶段：
+
+**快速阶段**（Fast Transient，$t = \mathcal{O}(\epsilon)$）：
+- $\boldsymbol{\theta}$ 几乎不动
+- $\boldsymbol{\varphi}$ 快速收敛到准平衡点：
+  \begin{equation}
+  \nabla_{\boldsymbol{\varphi}} L(\boldsymbol{\theta}, \boldsymbol{\varphi}) = 0 \Rightarrow h_{\boldsymbol{\varphi}}(z) \approx z \tag{17}
+  \end{equation}
+
+**慢速阶段**（Slow Manifold，$t = \mathcal{O}(1)$）：
+- $\boldsymbol{\varphi}$ 始终保持在准平衡流形上
+- $\boldsymbol{\theta}$ 沿着降维的有效能量面演化：
+  \begin{equation}
+  \dot{\boldsymbol{\theta}} \approx -\nabla_{\boldsymbol{\theta}} L(\boldsymbol{\theta}, \boldsymbol{\varphi}^*(\boldsymbol{\theta})) \tag{18}
+  \end{equation}
+
+**几何解释**：Predictor在高维参数空间中快速"滑行"到一个低维流形（慢流形），Encoder则被约束在这个流形上缓慢优化。这种降维效应天然防止了坍缩，因为流形的维度由数据增强的多样性决定，而非网络的过参数化。
+
+</div>
+
+<hr />
+<h2 id="3">3. 数学直觉、几何视角与多维类比</h2>
+<div class="intuition-box">
+
+### 🧠 直觉理解：影子球与快速捕捉手 🎾
+
+想象你在和一个影子（Predictor）玩抛接球。
+
+1.  **坍缩（全梯度）**：你和影子都在拼命往地板（零点）缩。因为你们动作一致，最后你们都会变成地板上的一个点。
+2.  **SimSiam 不坍缩**：
+    *   你（Encoder）动得很慢。
+    *   影子（Predictor）是一个身手极快的捕捉手。
+    *   **Stop-gradient**：你抛球时，影子必须停下来接，不能反过来拽你。
+    *   **结果**：每当你稍微偏离一点方向，影子由于动作极快，会在你还没动下一脚之前就站在了球的落点上。既然影子已经接到了球（Loss 变小），你就没有动力继续往地板缩了。你停在了半路，保住了你的位置（特征）。
+
+</div>
+
+<h3 id="32">3.2 几何视角：能量盆地的脊线驻留</h3>
+<p>在特征空间中，坍缩是一个深不见底的中心黑洞。
+- <strong>对比学习</strong>：是在黑洞周围修了一圈挡板（负样本）。
+- <strong>SimSiam</strong>：是利用动力学在黑洞边缘建立了一个“动态平衡轨道”。通过切断梯度，我们将原本垂直落入黑洞的力，转化为了在轨道上切向运动的力。这种现象在非线性物理中被称为<strong>“吸引子的拓扑改变”</strong>。</p>
+<hr />
+<h2 id="4">4. 方法论变体、批判性比较与优化</h2>
+<h3 id="41">4.1 全量对比表</h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">模型</th>
+<th style="text-align: left;">防坍缩机制</th>
+<th style="text-align: left;">核心组件</th>
+<th style="text-align: left;"><strong>致命缺陷</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>SimCLR</strong></td>
+<td style="text-align: left;">负样本对齐</td>
+<td style="text-align: left;">大 Batch Size</td>
+<td style="text-align: left;">❌ 计算开销极大</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>BYOL</strong></td>
+<td style="text-align: left;">动量预测</td>
+<td style="text-align: left;">EMA 编码器</td>
+<td style="text-align: left;">❌ 理论证明复杂</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>SimSiam</strong></td>
+<td style="text-align: left;"><strong>动力学解耦</strong></td>
+<td style="text-align: left;"><strong>Stop-grad + Predictor</strong></td>
+<td style="text-align: left;">❌ <strong>对 BN 极度依赖</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>VICReg</strong></td>
+<td style="text-align: left;">协方差约束</td>
+<td style="text-align: left;">Variance Regularization</td>
+<td style="text-align: left;">❌ 参数调优困难</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42-simsiam">4.2 深度批判：SimSiam 的“伪科学”陷阱</h3>
+<p>虽然实验结果惊艳，但 SimSiam 的理论基础存在三个脆弱点：</p>
+<ol>
+<li><strong>致命缺陷 1：Batch Normalization (BN) 的隐式对比</strong><ul>
+<li><strong>分析</strong>：如果去掉 BN，SimSiam 会瞬间坍缩。</li>
+<li><strong>真相</strong>：BN 在 Batch 维度上的均值和方差计算，实际上提供了一种隐式的“负样本”效应，强迫同一个 Batch 内的特征不能全等。<strong>SimSiam 的成功有一半是属于 BN 的。</strong></li>
+</ul>
+</li>
+<li><strong>致命缺陷 2：Predictor 的架构黑箱</strong><ul>
+<li><strong>问题</strong>：Predictor 如果太深，收敛极慢；如果太浅，无法打破对称性。</li>
+<li><strong>局限</strong>：目前没有数学公式能计算出针对特定主干网络的最优 Predictor 深度。</li>
+</ul>
+</li>
+<li><strong>致命缺陷 3：特征冗余 (Redundancy)</strong><ul>
+<li>由于没有去相关的显式约束，SimSiam 学到的 2048 维特征中，可能只有极少数维度是有信息的，其余维度高度相关。</li>
+</ul>
+</li>
+</ol>
+<h3 id="43">4.3 优化演进</h3>
+<ul>
+<li><strong>Barlow Twins</strong>：通过让互协方差矩阵逼近单位阵，从数学上彻底消除了坍缩的可能性，不再依赖动力学巧合。</li>
+<li><strong>DINO</strong>：将 SimSiam 的思想应用到 Transformer 中，利用中心化（Centering）和锐化（Sharpening）替代 BN，实现了更高质量的无监督学习。</li>
+</ul>
+<hr />
+<h2 id="5">5. 完整数值实验：从玩具模型到真实训练</h2>
+<h3 id="51-1">5.1 实验1：玩具模型可视化</h3>
+<div class="code-box">
+
+**目标**：通过标量动力学直观展示Stop-gradient的作用。
+
+
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+
+<span class="c1"># 玩具模型：线性编码器和预测器</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">toy_dynamics</span><span class="p">(</span><span class="n">T</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span> <span class="n">gamma_theta</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span> <span class="n">gamma_phi</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">use_stopgrad</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    模拟标量SimSiam动力学</span>
+
+<span class="sd">    参数:</span>
+<span class="sd">        T: 迭代步数</span>
+<span class="sd">        gamma_theta: Encoder学习率（慢）</span>
+<span class="sd">        gamma_phi: Predictor学习率（快）</span>
+<span class="sd">        use_stopgrad: 是否使用Stop-gradient</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># 初始化</span>
+    <span class="n">theta</span> <span class="o">=</span> <span class="mf">1.0</span>  <span class="c1"># 编码器参数</span>
+    <span class="n">phi</span> <span class="o">=</span> <span class="mf">0.1</span>    <span class="c1"># 预测器参数（初始时远离1）</span>
+
+    <span class="c1"># 记录轨迹</span>
+    <span class="n">theta_history</span> <span class="o">=</span> <span class="p">[</span><span class="n">theta</span><span class="p">]</span>
+    <span class="n">phi_history</span> <span class="o">=</span> <span class="p">[</span><span class="n">phi</span><span class="p">]</span>
+    <span class="n">loss_history</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">t</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">T</span><span class="p">):</span>
+        <span class="c1"># 计算损失：L = 0.5 * (phi * theta - theta)^2</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="p">(</span><span class="n">phi</span> <span class="o">*</span> <span class="n">theta</span> <span class="o">-</span> <span class="n">theta</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span>
+        <span class="n">loss_history</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">loss</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">use_stopgrad</span><span class="p">:</span>
+            <span class="c1"># Stop-gradient：只有phi收到梯度</span>
+            <span class="n">grad_phi</span> <span class="o">=</span> <span class="p">(</span><span class="n">phi</span> <span class="o">*</span> <span class="n">theta</span> <span class="o">-</span> <span class="n">theta</span><span class="p">)</span> <span class="o">*</span> <span class="n">theta</span>  <span class="c1"># ∂L/∂phi</span>
+            <span class="n">grad_theta</span> <span class="o">=</span> <span class="mi">0</span>  <span class="c1"># 被stop_grad截断</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># 无Stop-gradient：双向梯度</span>
+            <span class="n">grad_phi</span> <span class="o">=</span> <span class="p">(</span><span class="n">phi</span> <span class="o">*</span> <span class="n">theta</span> <span class="o">-</span> <span class="n">theta</span><span class="p">)</span> <span class="o">*</span> <span class="n">theta</span>
+            <span class="n">grad_theta</span> <span class="o">=</span> <span class="p">(</span><span class="n">phi</span> <span class="o">*</span> <span class="n">theta</span> <span class="o">-</span> <span class="n">theta</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">phi</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+
+        <span class="c1"># 更新参数</span>
+        <span class="n">phi</span> <span class="o">-=</span> <span class="n">gamma_phi</span> <span class="o">*</span> <span class="n">grad_phi</span>
+        <span class="n">theta</span> <span class="o">-=</span> <span class="n">gamma_theta</span> <span class="o">*</span> <span class="n">grad_theta</span>
+
+        <span class="n">theta_history</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">theta</span><span class="p">)</span>
+        <span class="n">phi_history</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">phi</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">theta_history</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">phi_history</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">loss_history</span><span class="p">)</span>
+
+<span class="c1"># 运行实验：对比有无Stop-gradient</span>
+<span class="n">theta_sg</span><span class="p">,</span> <span class="n">phi_sg</span><span class="p">,</span> <span class="n">loss_sg</span> <span class="o">=</span> <span class="n">toy_dynamics</span><span class="p">(</span><span class="n">T</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span> <span class="n">use_stopgrad</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="n">theta_no</span><span class="p">,</span> <span class="n">phi_no</span><span class="p">,</span> <span class="n">loss_no</span> <span class="o">=</span> <span class="n">toy_dynamics</span><span class="p">(</span><span class="n">T</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span> <span class="n">use_stopgrad</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+<span class="c1"># 可视化</span>
+<span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">18</span><span class="p">,</span> <span class="mi">5</span><span class="p">))</span>
+
+<span class="c1"># 子图1：参数轨迹</span>
+<span class="n">ax1</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">theta_sg</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;θ (w/ Stop-grad)&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;C0&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">phi_sg</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;φ (w/ Stop-grad)&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;C1&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">theta_no</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;θ (w/o Stop-grad)&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;C2&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">phi_no</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;φ (w/o Stop-grad)&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;C3&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">axhline</span><span class="p">(</span><span class="n">y</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;red&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;:&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Collapse Point&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">axhline</span><span class="p">(</span><span class="n">y</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;:&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Target (φ=1)&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Iteration&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Parameter Value&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Parameter Trajectory Comparison&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">fontweight</span><span class="o">=</span><span class="s1">&#39;bold&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">fontsize</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+
+<span class="c1"># 子图2：相空间（θ-φ平面）</span>
+<span class="n">ax2</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">theta_sg</span><span class="p">,</span> <span class="n">phi_sg</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;C0&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;w/ Stop-grad&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">theta_no</span><span class="p">,</span> <span class="n">phi_no</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;C2&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;w/o Stop-grad&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">theta_sg</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">phi_sg</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="s1">&#39;go&#39;</span><span class="p">,</span> <span class="n">markersize</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Start&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">theta_sg</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">phi_sg</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="s1">&#39;r*&#39;</span><span class="p">,</span> <span class="n">markersize</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;End (Stop-grad)&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">theta_no</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="n">phi_no</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span> <span class="s1">&#39;bx&#39;</span><span class="p">,</span> <span class="n">markersize</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;End (No Stop-grad)&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">axvline</span><span class="p">(</span><span class="n">x</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;red&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;:&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">axhline</span><span class="p">(</span><span class="n">y</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;green&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;:&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">1.5</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Encoder θ&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Predictor φ&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Phase Space Trajectory&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">fontweight</span><span class="o">=</span><span class="s1">&#39;bold&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">fontsize</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+
+<span class="c1"># 子图3：损失演化</span>
+<span class="n">ax3</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+<span class="n">ax3</span><span class="o">.</span><span class="n">semilogy</span><span class="p">(</span><span class="n">loss_sg</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;C0&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;w/ Stop-grad&#39;</span><span class="p">)</span>
+<span class="n">ax3</span><span class="o">.</span><span class="n">semilogy</span><span class="p">(</span><span class="n">loss_no</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;C2&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;w/o Stop-grad&#39;</span><span class="p">)</span>
+<span class="n">ax3</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Iteration&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+<span class="n">ax3</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Loss (log scale)&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+<span class="n">ax3</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Loss Evolution&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">fontweight</span><span class="o">=</span><span class="s1">&#39;bold&#39;</span><span class="p">)</span>
+<span class="n">ax3</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">fontsize</span><span class="o">=</span><span class="mi">10</span><span class="p">)</span>
+<span class="n">ax3</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;simsiam_toy_dynamics.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✓ 图像已保存至 simsiam_toy_dynamics.png&quot;</span><span class="p">)</span>
+
+<span class="c1"># 打印关键观察</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">关键观察：&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;1. Stop-grad情况：&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   - 最终θ = </span><span class="si">{</span><span class="n">theta_sg</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> （保持非零！）&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   - 最终φ = </span><span class="si">{</span><span class="n">phi_sg</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> （接近1）&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   - 最终Loss = </span><span class="si">{</span><span class="n">loss_sg</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">2. 无Stop-grad情况：&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   - 最终θ = </span><span class="si">{</span><span class="n">theta_no</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> （坍缩到零！）&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   - 最终φ = </span><span class="si">{</span><span class="n">phi_no</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   - 最终Loss = </span><span class="si">{</span><span class="n">loss_no</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+**输出解释**：
+- **有Stop-gradient**：$\theta$ 保持在非零值，$\varphi$ 快速收敛到1，系统稳定
+- **无Stop-gradient**：$\theta$ 迅速坍缩到0，$\varphi$ 无法补救，系统失败
+
+</div>
+
+<h3 id="52-2simsiam">5.2 实验2：完整SimSiam实现与训练</h3>
+<div class="code-box">
+
+**目标**：在CIFAR-10上复现SimSiam，验证BN依赖性。
+
+
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">nn</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch.nn.functional</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">F</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torchvision</span><span class="w"> </span><span class="kn">import</span> <span class="n">datasets</span><span class="p">,</span> <span class="n">transforms</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch.utils.data</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataLoader</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="c1"># SimSiam架构</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">SimSiam</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">base_encoder</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2048</span><span class="p">,</span> <span class="n">pred_dim</span><span class="o">=</span><span class="mi">512</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        参数:</span>
+<span class="sd">            base_encoder: 骨干网络（如ResNet-18）</span>
+<span class="sd">            dim: 投影头输出维度</span>
+<span class="sd">            pred_dim: Predictor隐藏层维度</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">SimSiam</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+
+        <span class="c1"># Encoder</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span> <span class="o">=</span> <span class="n">base_encoder</span>
+        <span class="c1"># 获取encoder输出维度</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">encoder_dim</span> <span class="o">=</span> <span class="n">base_encoder</span><span class="o">.</span><span class="n">fc</span><span class="o">.</span><span class="n">in_features</span>
+        <span class="n">base_encoder</span><span class="o">.</span><span class="n">fc</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Identity</span><span class="p">()</span>  <span class="c1"># 移除分类头</span>
+
+        <span class="c1"># Projection Head（3层MLP）</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">projector</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">encoder_dim</span><span class="p">,</span> <span class="n">pred_dim</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">BatchNorm1d</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">),</span>  <span class="c1"># 关键：BN层</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(</span><span class="n">inplace</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">,</span> <span class="n">pred_dim</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">BatchNorm1d</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">),</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(</span><span class="n">inplace</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">,</span> <span class="n">dim</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">BatchNorm1d</span><span class="p">(</span><span class="n">dim</span><span class="p">,</span> <span class="n">affine</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>  <span class="c1"># 输出BN无可学习参数</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Predictor（2层MLP）</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">predictor</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">dim</span><span class="p">,</span> <span class="n">pred_dim</span><span class="p">,</span> <span class="n">bias</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">BatchNorm1d</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">),</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(</span><span class="n">inplace</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+            <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">,</span> <span class="n">dim</span><span class="p">)</span>  <span class="c1"># 无BN</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">x2</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        前向传播</span>
+
+<span class="sd">        参数:</span>
+<span class="sd">            x1, x2: 两个augmented views</span>
+
+<span class="sd">        返回:</span>
+<span class="sd">            p1, p2: Predictor输出</span>
+<span class="sd">            z1, z2: Projector输出（将被detach）</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="c1"># 编码+投影</span>
+        <span class="n">z1</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">projector</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x1</span><span class="p">))</span>
+        <span class="n">z2</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">projector</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x2</span><span class="p">))</span>
+
+        <span class="c1"># 预测</span>
+        <span class="n">p1</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predictor</span><span class="p">(</span><span class="n">z1</span><span class="p">)</span>
+        <span class="n">p2</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predictor</span><span class="p">(</span><span class="n">z2</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">p1</span><span class="p">,</span> <span class="n">p2</span><span class="p">,</span> <span class="n">z1</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">z2</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+
+<span class="c1"># 损失函数</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">simsiam_loss</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">z</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    负余弦相似度</span>
+
+<span class="sd">    参数:</span>
+<span class="sd">        p: Predictor输出</span>
+<span class="sd">        z: Target（已detach）</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># L2归一化</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">z</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">z</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+
+    <span class="c1"># 负余弦相似度 = 1 - cos(p, z)</span>
+    <span class="k">return</span> <span class="o">-</span><span class="p">(</span><span class="n">p</span> <span class="o">*</span> <span class="n">z</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+
+<span class="c1"># 数据增强</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_transforms</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;SimSiam的数据增强策略&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="n">transforms</span><span class="o">.</span><span class="n">Compose</span><span class="p">([</span>
+        <span class="n">transforms</span><span class="o">.</span><span class="n">RandomResizedCrop</span><span class="p">(</span><span class="mi">32</span><span class="p">,</span> <span class="n">scale</span><span class="o">=</span><span class="p">(</span><span class="mf">0.2</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)),</span>
+        <span class="n">transforms</span><span class="o">.</span><span class="n">RandomHorizontalFlip</span><span class="p">(),</span>
+        <span class="n">transforms</span><span class="o">.</span><span class="n">RandomApply</span><span class="p">([</span>
+            <span class="n">transforms</span><span class="o">.</span><span class="n">ColorJitter</span><span class="p">(</span><span class="mf">0.4</span><span class="p">,</span> <span class="mf">0.4</span><span class="p">,</span> <span class="mf">0.4</span><span class="p">,</span> <span class="mf">0.1</span><span class="p">)</span>
+        <span class="p">],</span> <span class="n">p</span><span class="o">=</span><span class="mf">0.8</span><span class="p">),</span>
+        <span class="n">transforms</span><span class="o">.</span><span class="n">RandomGrayscale</span><span class="p">(</span><span class="n">p</span><span class="o">=</span><span class="mf">0.2</span><span class="p">),</span>
+        <span class="n">transforms</span><span class="o">.</span><span class="n">ToTensor</span><span class="p">(),</span>
+        <span class="n">transforms</span><span class="o">.</span><span class="n">Normalize</span><span class="p">([</span><span class="mf">0.4914</span><span class="p">,</span> <span class="mf">0.4822</span><span class="p">,</span> <span class="mf">0.4465</span><span class="p">],</span>
+                           <span class="p">[</span><span class="mf">0.2023</span><span class="p">,</span> <span class="mf">0.1994</span><span class="p">,</span> <span class="mf">0.2010</span><span class="p">])</span>
+    <span class="p">])</span>
+
+<span class="c1"># TwoCropsTransform：生成两个augmented views</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">TwoCropsTransform</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">base_transform</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">base_transform</span> <span class="o">=</span> <span class="n">base_transform</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__call__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="k">return</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">base_transform</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">base_transform</span><span class="p">(</span><span class="n">x</span><span class="p">)]</span>
+
+<span class="c1"># 训练函数</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">train_simsiam</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">train_loader</span><span class="p">,</span> <span class="n">epochs</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">lr</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="s1">&#39;cuda&#39;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;训练SimSiam模型&quot;&quot;&quot;</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+    <span class="n">optimizer</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">SGD</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="n">lr</span><span class="o">=</span><span class="n">lr</span><span class="p">,</span>
+                               <span class="n">momentum</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span> <span class="n">weight_decay</span><span class="o">=</span><span class="mf">1e-4</span><span class="p">)</span>
+
+    <span class="c1"># Cosine学习率调度</span>
+    <span class="n">scheduler</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">lr_scheduler</span><span class="o">.</span><span class="n">CosineAnnealingLR</span><span class="p">(</span>
+        <span class="n">optimizer</span><span class="p">,</span> <span class="n">T_max</span><span class="o">=</span><span class="n">epochs</span>
+    <span class="p">)</span>
+
+    <span class="c1"># 记录统计</span>
+    <span class="n">loss_history</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">epochs</span><span class="p">):</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">train</span><span class="p">()</span>
+        <span class="n">epoch_loss</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="k">for</span> <span class="n">batch_idx</span><span class="p">,</span> <span class="p">([</span><span class="n">x1</span><span class="p">,</span> <span class="n">x2</span><span class="p">],</span> <span class="n">_</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">train_loader</span><span class="p">):</span>
+            <span class="n">x1</span><span class="p">,</span> <span class="n">x2</span> <span class="o">=</span> <span class="n">x1</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">),</span> <span class="n">x2</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">)</span>
+
+            <span class="c1"># 前向传播</span>
+            <span class="n">p1</span><span class="p">,</span> <span class="n">p2</span><span class="p">,</span> <span class="n">z1</span><span class="p">,</span> <span class="n">z2</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">x1</span><span class="p">,</span> <span class="n">x2</span><span class="p">)</span>
+
+            <span class="c1"># 计算对称损失</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">simsiam_loss</span><span class="p">(</span><span class="n">p1</span><span class="p">,</span> <span class="n">z2</span><span class="p">)</span> <span class="o">+</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">simsiam_loss</span><span class="p">(</span><span class="n">p2</span><span class="p">,</span> <span class="n">z1</span><span class="p">)</span>
+
+            <span class="c1"># 反向传播</span>
+            <span class="n">optimizer</span><span class="o">.</span><span class="n">zero_grad</span><span class="p">()</span>
+            <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+            <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+
+            <span class="n">epoch_loss</span> <span class="o">+=</span> <span class="n">loss</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+
+        <span class="c1"># 记录</span>
+        <span class="n">avg_loss</span> <span class="o">=</span> <span class="n">epoch_loss</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">train_loader</span><span class="p">)</span>
+        <span class="n">loss_history</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">avg_loss</span><span class="p">)</span>
+
+        <span class="c1"># 学习率衰减</span>
+        <span class="n">scheduler</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">epoch</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="mi">10</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Epoch [</span><span class="si">{</span><span class="n">epoch</span><span class="o">+</span><span class="mi">1</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">epochs</span><span class="si">}</span><span class="s1">], &#39;</span>
+                  <span class="sa">f</span><span class="s1">&#39;Loss: </span><span class="si">{</span><span class="n">avg_loss</span><span class="si">:</span><span class="s1">.4f</span><span class="si">}</span><span class="s1">, &#39;</span>
+                  <span class="sa">f</span><span class="s1">&#39;LR: </span><span class="si">{</span><span class="n">scheduler</span><span class="o">.</span><span class="n">get_last_lr</span><span class="p">()[</span><span class="mi">0</span><span class="p">]</span><span class="si">:</span><span class="s1">.6f</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">loss_history</span>
+
+<span class="c1"># 主实验</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">run_cifar10_experiment</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;CIFAR-10完整实验&quot;&quot;&quot;</span>
+    <span class="c1"># 数据加载</span>
+    <span class="n">transform</span> <span class="o">=</span> <span class="n">TwoCropsTransform</span><span class="p">(</span><span class="n">get_transforms</span><span class="p">())</span>
+    <span class="n">train_dataset</span> <span class="o">=</span> <span class="n">datasets</span><span class="o">.</span><span class="n">CIFAR10</span><span class="p">(</span><span class="n">root</span><span class="o">=</span><span class="s1">&#39;./data&#39;</span><span class="p">,</span> <span class="n">train</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                                     <span class="n">download</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">transform</span><span class="o">=</span><span class="n">transform</span><span class="p">)</span>
+    <span class="n">train_loader</span> <span class="o">=</span> <span class="n">DataLoader</span><span class="p">(</span><span class="n">train_dataset</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span>
+                             <span class="n">shuffle</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">num_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+                             <span class="n">pin_memory</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">drop_last</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="c1"># 模型初始化</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">torchvision.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">resnet18</span>
+    <span class="n">base_encoder</span> <span class="o">=</span> <span class="n">resnet18</span><span class="p">()</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">SimSiam</span><span class="p">(</span><span class="n">base_encoder</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2048</span><span class="p">,</span> <span class="n">pred_dim</span><span class="o">=</span><span class="mi">512</span><span class="p">)</span>
+
+    <span class="c1"># 训练</span>
+    <span class="n">device</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">device</span><span class="p">(</span><span class="s1">&#39;cuda&#39;</span> <span class="k">if</span> <span class="n">torch</span><span class="o">.</span><span class="n">cuda</span><span class="o">.</span><span class="n">is_available</span><span class="p">()</span> <span class="k">else</span> <span class="s1">&#39;cpu&#39;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;使用设备: </span><span class="si">{</span><span class="n">device</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">loss_history</span> <span class="o">=</span> <span class="n">train_simsiam</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">train_loader</span><span class="p">,</span> <span class="n">epochs</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+                                 <span class="n">lr</span><span class="o">=</span><span class="mf">0.05</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">)</span>
+
+    <span class="c1"># 可视化损失曲线</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">loss_history</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Epoch&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;SimSiam Loss&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;Training Loss Curve (CIFAR-10)&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">fontweight</span><span class="o">=</span><span class="s1">&#39;bold&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;simsiam_cifar10_loss.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✓ 损失曲线已保存至 simsiam_cifar10_loss.png&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">model</span><span class="p">,</span> <span class="n">loss_history</span>
+
+<span class="c1"># 运行实验</span>
+<span class="n">model</span><span class="p">,</span> <span class="n">loss_history</span> <span class="o">=</span> <span class="n">run_cifar10_experiment</span><span class="p">()</span>
+</code></pre></div>
+
+
+
+</div>
+
+<h3 id="53-3bn">5.3 实验3：BN依赖性消融实验</h3>
+<div class="code-box">
+
+**目标**：验证去掉BN后SimSiam是否坍缩。
+
+
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">ablation_study_bn</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;BN消融实验&quot;&quot;&quot;</span>
+
+    <span class="c1"># 定义无BN的SimSiam（用LayerNorm替代）</span>
+    <span class="k">class</span><span class="w"> </span><span class="nc">SimSiamNoBN</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+        <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">base_encoder</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2048</span><span class="p">,</span> <span class="n">pred_dim</span><span class="o">=</span><span class="mi">512</span><span class="p">):</span>
+            <span class="nb">super</span><span class="p">(</span><span class="n">SimSiamNoBN</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">encoder</span> <span class="o">=</span> <span class="n">base_encoder</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">encoder_dim</span> <span class="o">=</span> <span class="n">base_encoder</span><span class="o">.</span><span class="n">fc</span><span class="o">.</span><span class="n">in_features</span>
+            <span class="n">base_encoder</span><span class="o">.</span><span class="n">fc</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Identity</span><span class="p">()</span>
+
+            <span class="c1"># 投影头（使用LayerNorm）</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">projector</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">encoder_dim</span><span class="p">,</span> <span class="n">pred_dim</span><span class="p">),</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">LayerNorm</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">),</span>  <span class="c1"># 替换BN</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(</span><span class="n">inplace</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">,</span> <span class="n">pred_dim</span><span class="p">),</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">LayerNorm</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">),</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(</span><span class="n">inplace</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">,</span> <span class="n">dim</span><span class="p">)</span>
+            <span class="p">)</span>
+
+            <span class="c1"># 预测器</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">predictor</span> <span class="o">=</span> <span class="n">nn</span><span class="o">.</span><span class="n">Sequential</span><span class="p">(</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">dim</span><span class="p">,</span> <span class="n">pred_dim</span><span class="p">),</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">LayerNorm</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">),</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">ReLU</span><span class="p">(</span><span class="n">inplace</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+                <span class="n">nn</span><span class="o">.</span><span class="n">Linear</span><span class="p">(</span><span class="n">pred_dim</span><span class="p">,</span> <span class="n">dim</span><span class="p">)</span>
+            <span class="p">)</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x1</span><span class="p">,</span> <span class="n">x2</span><span class="p">):</span>
+            <span class="n">z1</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">projector</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x1</span><span class="p">))</span>
+            <span class="n">z2</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">projector</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x2</span><span class="p">))</span>
+            <span class="n">p1</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predictor</span><span class="p">(</span><span class="n">z1</span><span class="p">)</span>
+            <span class="n">p2</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predictor</span><span class="p">(</span><span class="n">z2</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">p1</span><span class="p">,</span> <span class="n">p2</span><span class="p">,</span> <span class="n">z1</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">z2</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+
+    <span class="c1"># 训练两个版本并对比</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;训练标准SimSiam（带BN）...&quot;</span><span class="p">)</span>
+    <span class="n">model_bn</span> <span class="o">=</span> <span class="n">SimSiam</span><span class="p">(</span><span class="n">resnet18</span><span class="p">(),</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">loss_bn</span> <span class="o">=</span> <span class="n">train_simsiam</span><span class="p">(</span><span class="n">model_bn</span><span class="p">,</span> <span class="n">train_loader</span><span class="p">,</span> <span class="n">epochs</span><span class="o">=</span><span class="mi">50</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">训练SimSiam（无BN，用LayerNorm）...&quot;</span><span class="p">)</span>
+    <span class="n">model_ln</span> <span class="o">=</span> <span class="n">SimSiamNoBN</span><span class="p">(</span><span class="n">resnet18</span><span class="p">(),</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
+    <span class="n">loss_ln</span> <span class="o">=</span> <span class="n">train_simsiam</span><span class="p">(</span><span class="n">model_ln</span><span class="p">,</span> <span class="n">train_loader</span><span class="p">,</span> <span class="n">epochs</span><span class="o">=</span><span class="mi">50</span><span class="p">)</span>
+
+    <span class="c1"># 可视化对比</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">12</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">loss_bn</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;With BatchNorm&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;C0&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">loss_ln</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;With LayerNorm (No BN)&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">2.5</span><span class="p">,</span>
+             <span class="n">color</span><span class="o">=</span><span class="s1">&#39;C1&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Epoch&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Loss&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">12</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;BN Ablation Study&#39;</span><span class="p">,</span> <span class="n">fontsize</span><span class="o">=</span><span class="mi">14</span><span class="p">,</span> <span class="n">fontweight</span><span class="o">=</span><span class="s1">&#39;bold&#39;</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">(</span><span class="n">fontsize</span><span class="o">=</span><span class="mi">11</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+    <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s1">&#39;simsiam_bn_ablation.png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">最终损失对比：&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  BN版本: </span><span class="si">{</span><span class="n">loss_bn</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  LayerNorm版本: </span><span class="si">{</span><span class="n">loss_ln</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  差异: </span><span class="si">{</span><span class="nb">abs</span><span class="p">(</span><span class="n">loss_bn</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">loss_ln</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># 检查坍缩（特征标准差）</span>
+    <span class="n">model_bn</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+    <span class="n">model_ln</span><span class="o">.</span><span class="n">eval</span><span class="p">()</span>
+
+    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+        <span class="n">x_test</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="nb">iter</span><span class="p">(</span><span class="n">train_loader</span><span class="p">))</span>
+        <span class="n">x1</span><span class="p">,</span> <span class="n">x2</span> <span class="o">=</span> <span class="n">x_test</span>
+
+        <span class="c1"># BN版本的特征</span>
+        <span class="n">z1_bn</span> <span class="o">=</span> <span class="n">model_bn</span><span class="o">.</span><span class="n">projector</span><span class="p">(</span><span class="n">model_bn</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x1</span><span class="o">.</span><span class="n">cuda</span><span class="p">()))</span>
+        <span class="n">std_bn</span> <span class="o">=</span> <span class="n">z1_bn</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+
+        <span class="c1"># LayerNorm版本的特征</span>
+        <span class="n">z1_ln</span> <span class="o">=</span> <span class="n">model_ln</span><span class="o">.</span><span class="n">projector</span><span class="p">(</span><span class="n">model_ln</span><span class="o">.</span><span class="n">encoder</span><span class="p">(</span><span class="n">x1</span><span class="o">.</span><span class="n">cuda</span><span class="p">()))</span>
+        <span class="n">std_ln</span> <span class="o">=</span> <span class="n">z1_ln</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">()</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">特征标准差（检测坍缩）：&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  BN版本: </span><span class="si">{</span><span class="n">std_bn</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  LayerNorm版本: </span><span class="si">{</span><span class="n">std_ln</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="s1">&#39;⚠️ LayerNorm版本坍缩！&#39;</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">std_ln</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mf">0.1</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;✓ 未坍缩&#39;</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># 运行消融实验</span>
+<span class="n">ablation_study_bn</span><span class="p">()</span>
+</code></pre></div>
+
+
+
+**预期结果**：
+- BN版本：稳定训练，损失持续下降，特征标准差 ≈ 1
+- LayerNorm版本：可能出现部分坍缩，特征标准差 < 0.5
+
+</div>
+
+<h2 id="6">6. 工程实践与最佳实践</h2>
+<h3 id="61">6.1 超参数调优指南</h3>
+<div class="practice-guide">
+
+**核心超参数**：
+
+| 参数 | 推荐值 | 作用 | 调优建议 |
+|:---|:---|:---|:---|
+| Batch Size | 256-512 | 提供足够的BN统计 | 越大越好（受限于显存） |
+| 学习率 | 0.05 | 控制收敛速度 | Cosine衰减 |
+| Predictor深度 | 2层MLP | 打破对称性 | 不宜过深（3层已过） |
+| 特征维度 | 2048 | 表示能力 | 与backbone匹配 |
+| 数据增强强度 | 强 | 防止简单解 | ColorJitter + Crop + Flip |
+| 训练Epochs | 200-800 | 充分收敛 | 越长越好 |
+
+**关键经验**：
+1. **BN是必须的**：去掉BN几乎100%坍缩
+2. **Predictor不能太深**：2层MLP是sweet spot，3层反而变差
+3. **Stop-grad是灵魂**：少了它立即退化为对称优化
+4. **数据增强要强**：弱增强会导致模型学到简单映射
+
+</div>
+
+<h3 id="62-checklist">6.2 故障排查checklist</h3>
+<div class="troubleshooting">
+
+**问题1：训练loss不下降（一直在1.0附近）**
+- **原因**：特征可能已经坍缩
+- **诊断**：打印 `z.std(dim=0).mean()`，如果 < 0.1 则坍缩
+- **解决**：
+  1. 检查是否正确使用了`.detach()`
+  2. 确认BN layers存在且正常工作
+  3. 增大Batch Size（至少256）
+
+**问题2：训练中途突然loss激增**
+- **原因**：Predictor学习过快，破坏了慢流形
+- **解决**：
+  1. 降低学习率（0.05 → 0.03）
+  2. 增大weight decay（1e-4 → 5e-4）
+  3. 使用更gentle的学习率调度（Cosine更平滑）
+
+**问题3：下游任务性能差**
+- **原因**：表征缺乏多样性（特征冗余）
+- **解决**：
+  1. 增强数据增强强度
+  2. 延长训练时间（200 epoch → 400 epoch）
+  3. 考虑添加显式去相关项（如Barlow Twins的协方差正则化）
+
+</div>
+
+<h3 id="63">6.3 与其他自监督方法的集成</h3>
+<div class="integration-guide">
+
+**SimSiam + MoCo**：
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># 结合队列机制，增加隐式对比</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">SimSiamMoCo</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">encoder</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">2048</span><span class="p">,</span> <span class="n">K</span><span class="o">=</span><span class="mi">65536</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">encoder_q</span> <span class="o">=</span> <span class="n">encoder</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">encoder_k</span> <span class="o">=</span> <span class="n">copy</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="n">encoder</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">predictor</span> <span class="o">=</span> <span class="n">build_predictor</span><span class="p">(</span><span class="n">dim</span><span class="p">)</span>
+
+        <span class="c1"># MoCo的队列</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">register_buffer</span><span class="p">(</span><span class="s2">&quot;queue&quot;</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="n">dim</span><span class="p">,</span> <span class="n">K</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">queue</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">queue</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="nd">@torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">()</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_momentum_update_key_encoder</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">m</span><span class="o">=</span><span class="mf">0.999</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">param_q</span><span class="p">,</span> <span class="n">param_k</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">encoder_q</span><span class="o">.</span><span class="n">parameters</span><span class="p">(),</span> <span class="bp">self</span><span class="o">.</span><span class="n">encoder_k</span><span class="o">.</span><span class="n">parameters</span><span class="p">()</span>
+        <span class="p">):</span>
+            <span class="n">param_k</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">m</span> <span class="o">*</span> <span class="n">param_k</span><span class="o">.</span><span class="n">data</span> <span class="o">+</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">m</span><span class="p">)</span> <span class="o">*</span> <span class="n">param_q</span><span class="o">.</span><span class="n">data</span>
+</code></pre></div>
+
+
+
+**SimSiam + Barlow Twins**：
+
+<div class="codehilite"><pre><span></span><code><span class="c1"># 添加协方差正则化</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">simsiam_barlow_loss</span><span class="p">(</span><span class="n">p1</span><span class="p">,</span> <span class="n">z2</span><span class="p">,</span> <span class="n">p2</span><span class="p">,</span> <span class="n">z1</span><span class="p">,</span> <span class="n">lambda_cov</span><span class="o">=</span><span class="mf">0.005</span><span class="p">):</span>
+    <span class="c1"># SimSiam部分</span>
+    <span class="n">loss_ss</span> <span class="o">=</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">D</span><span class="p">(</span><span class="n">p1</span><span class="p">,</span> <span class="n">z2</span><span class="o">.</span><span class="n">detach</span><span class="p">())</span> <span class="o">+</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">D</span><span class="p">(</span><span class="n">p2</span><span class="p">,</span> <span class="n">z1</span><span class="o">.</span><span class="n">detach</span><span class="p">())</span>
+
+    <span class="c1"># Barlow Twins部分（去相关）</span>
+    <span class="n">z1_norm</span> <span class="o">=</span> <span class="p">(</span><span class="n">z1</span> <span class="o">-</span> <span class="n">z1</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span> <span class="o">/</span> <span class="n">z1</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">z2_norm</span> <span class="o">=</span> <span class="p">(</span><span class="n">z2</span> <span class="o">-</span> <span class="n">z2</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span> <span class="o">/</span> <span class="n">z2</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="n">C</span> <span class="o">=</span> <span class="p">(</span><span class="n">z1_norm</span><span class="o">.</span><span class="n">T</span> <span class="o">@</span> <span class="n">z2_norm</span><span class="p">)</span> <span class="o">/</span> <span class="n">z1</span><span class="o">.</span><span class="n">size</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="c1"># 让互协方差矩阵接近单位阵</span>
+    <span class="n">loss_bt</span> <span class="o">=</span> <span class="p">(</span><span class="n">C</span><span class="o">.</span><span class="n">diagonal</span><span class="p">()</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+    <span class="n">loss_bt</span> <span class="o">+=</span> <span class="n">C</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">-</span> <span class="n">C</span><span class="o">.</span><span class="n">diagonal</span><span class="p">()</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="n">loss_ss</span> <span class="o">+</span> <span class="n">lambda_cov</span> <span class="o">*</span> <span class="n">loss_bt</span>
+</code></pre></div>
+
+
+
+</div>
+
+<h3 id="64">6.4 未来研究方向</h3>
+<div class="research-directions">
+
+#### 方向1：大模型（LLM）中的自监督坍缩
+
+**背景**：Next-token prediction 本质上是带标签的，但隐藏层的表征是否会发生局部坍缩？
+
+**具体问题**：
+1. Transformer中间层是否存在"表征退化"现象？
+2. 能否用SimSiam的快慢动力学解释Layer Normalization的作用？
+3. 自监督预训练（如BERT的MLM）是否隐式利用了类似SimSiam的机制？
+
+**研究假设**：
+- Dropout在Transformer中的作用类似于BN在SimSiam中的作用（防止坍缩）
+- 多头注意力的不同head可能在不同的"慢流形"上演化
+
+#### 方向2：无需BN的动力学解耦
+
+**动机**：BN在batch size小或序列长度不均时失效。
+
+**候选方案**：
+1. **Adaptive Centering**：自适应调整特征均值
+   \begin{equation}
+   z_{\text{centered}} = z - \alpha \cdot \text{EMA}(\mathbb{E}[z]) \tag{19}
+   \end{equation}
+
+2. **Spectral Normalization + Implicit Regularization**：
+   - 用谱归一化替代BN
+   - 添加显式方差约束：$\mathcal{L}_{\text{var}} = \max(0, 1 - \text{Var}(z))$
+
+3. **Learnable Temperature Scaling**：
+   \begin{equation}
+   z_{\text{scaled}} = z / \tau, \quad \tau = \tau_0 \cdot e^{-t/T} \tag{20}
+   \end{equation}
+
+   其中 $\tau$ 随训练逐渐减小，初期强制高方差，后期允许收敛。
+
+#### 方向3：SimSiam在扩散模型中的应用
+
+**核心思想**：将去噪网络视为"Predictor"，噪声样本视为"Target"。
+
+**架构设计**：
+
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">DiffusionSimSiam</span><span class="p">(</span><span class="n">nn</span><span class="o">.</span><span class="n">Module</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">denoiser</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">denoiser</span> <span class="o">=</span> <span class="n">denoiser</span>  <span class="c1"># U-Net等</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">predictor</span> <span class="o">=</span> <span class="n">small_mlp</span><span class="p">()</span>  <span class="c1"># 快速适配器</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x_noisy</span><span class="p">,</span> <span class="n">t</span><span class="p">):</span>
+        <span class="c1"># Denoiser预测干净图像</span>
+        <span class="n">x_pred</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">denoiser</span><span class="p">(</span><span class="n">x_noisy</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span>
+
+        <span class="c1"># Predictor快速学习残差</span>
+        <span class="n">residual</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predictor</span><span class="p">(</span><span class="n">x_pred</span><span class="p">)</span>
+
+        <span class="c1"># Stop-gradient应用于x_noisy</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">mse</span><span class="p">(</span><span class="n">x_pred</span> <span class="o">+</span> <span class="n">residual</span><span class="p">,</span> <span class="n">x_noisy</span><span class="o">.</span><span class="n">detach</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">loss</span>
+</code></pre></div>
+
+
+
+**预期优势**：
+- 加速扩散模型训练（Predictor快速捕捉低频信息）
+- 提升生成质量（慢流形约束防止mode collapse）
+
+#### 方向4：理论统一：SimSiam作为隐式优化的一般框架
+
+**大胆猜想**：所有成功的自监督方法都可以解释为某种"快慢动力学"。
+
+| 方法 | "慢" 组件 | "快" 组件 | 解耦机制 |
+|:---|:---|:---|:---|
+| SimSiam | Encoder | Predictor | Stop-grad |
+| BYOL | Online Net | Target Net (EMA) | EMA更新 |
+| MoCo | Query Encoder | Key Encoder (队列) | 动量+队列 |
+| DINO | Student | Teacher (EMA+Centering) | EMA+Temperature |
+
+**理论目标**：建立统一的数学框架，用奇异摄动理论（Singular Perturbation Theory）描述所有自监督学习。
+
+**核心方程**：
+\begin{align}
+\dot{\boldsymbol{\theta}}_{\text{slow}} &= -\nabla_{\boldsymbol{\theta}_{\text{slow}}} L(\boldsymbol{\theta}_{\text{slow}}, \boldsymbol{\theta}_{\text{fast}}) \tag{21a}\\
+\epsilon \dot{\boldsymbol{\theta}}_{\text{fast}} &= -\nabla_{\boldsymbol{\theta}_{\text{fast}}} L(\boldsymbol{\theta}_{\text{slow}}, \boldsymbol{\theta}_{\text{fast}}) \tag{21b}
+\end{align}
+
+其中 $\epsilon \ll 1$。
+
+</div>
+
+<hr />
+<h2 id="7">7. 哲学思辨与总结</h2>
+<div class="philosophy-box">
+
+### 🌌 对称性与对称性破缺的辩证法
+
+SimSiam的成功揭示了深度学习中一个深刻的哲学问题：
+
+**命题**：对称性是优化的动力，对称性破缺是进化的契机。
+
+**对称性（Symmetry）**：
+- Siamese架构天然对称：$f(x_1) \approx f(x_2)$
+- 对称性简化问题：减少搜索空间
+- 但完全对称导致坍缩：所有解等价→选择平凡解
+
+**对称性破缺（Symmetry Breaking）**：
+- Stop-gradient打破时间反演对称性
+- Predictor引入结构不对称性
+- BN引入batch维度的耦合（空间对称性破缺）
+
+**类比物理学**：
+- 铁磁相变：高温下自旋对称，低温下自发磁化
+- Higgs机制：规范对称性自发破缺，粒子获得质量
+- **SimSiam**：参数空间的"凝聚"过程，从高对称态→低对称态（但保持表示多样性）
+
+</div>
+
+<div class="summary-box">
+
+### 🎯 核心洞察回顾
+
+**三大支柱**：
+1. **Stop-gradient**：打破梯度流的对称性，创造快慢时间尺度
+2. **Predictor**：快速适配器，在encoder坍缩前"截胡"
+3. **Batch Normalization**：隐式提供方差约束和batch内对比
+
+**数学本质**：
+\begin{equation}
+\text{SimSiam} = \text{Slow-Fast Dynamics} + \text{Implicit Regularization} \tag{22}
+\end{equation}
+
+**工程启示**：
+- 简单 ≠ 低效（SimSiam只有3个组件，却达到SOTA）
+- 对称性破缺比显式约束更优雅
+- 动力学视角能解释很多"玄学"
+
+</div>
+
+<div class="poetic-ending">
+
+### 🔚 终章：数学的张力之美
+
+在无监督学习的荒野中，坍缩是引力，是熵增的宿命。
+
+SimSiam告诉我们：**不需要与引力对抗（负样本），只需要利用时间的不对称性。**
+
+当Predictor以光速追赶Encoder的脚步时，
+它在坍塌的边缘建立了一座动态平衡的桥梁。
+
+这座桥不是用石头砌成的（显式约束），
+而是用数学的张力编织而成的（快慢动力学）。
+
+愿你的表征永远保持多样，
+愿你的优化永远行走在对称性破缺的锋刃上。
+
+</div>
+
+<hr />
+<p><strong>参考文献</strong>（精选）：
+1. Chen, X., &amp; He, K. (2021). "Exploring Simple Siamese Representation Learning." <em>CVPR</em>.
+2. Grill, J.B., et al. (2020). "Bootstrap Your Own Latent: A New Approach to Self-Supervised Learning." <em>NeurIPS</em>.
+3. Richemond, P.H., et al. (2021). "Implicit Bias of Batch Normalization in Self-Supervised Learning." <em>ICML Workshop</em>.
+4. Tian, Y., et al. (2022). "Understanding Self-supervised Learning Dynamics without Contrastive Pairs." <em>ICML</em>.
+5. Zbontar, J., et al. (2021). "Barlow Twins: Self-Supervised Learning via Redundancy Reduction." <em>ICML</em>.</p>
+<hr />
+<p><strong>附录：公式速查表</strong></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">编号</th>
+<th style="text-align: left;">公式</th>
+<th style="text-align: left;">含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">(8)</td>
+<td style="text-align: left;">$L = \mathbb{E}[|h_{\varphi}(f_{\theta}(x_1)) - f_{\theta}(x_2)|^2]$</td>
+<td style="text-align: left;">SimSiam损失函数</td>
+</tr>
+<tr>
+<td style="text-align: left;">(9a)</td>
+<td style="text-align: left;">$h_{\varphi}(z) = z$</td>
+<td style="text-align: left;">稳定平衡点条件</td>
+</tr>
+<tr>
+<td style="text-align: left;">(15)</td>
+<td style="text-align: left;">$L_{\text{BN}} = L_{\text{SimSiam}} + \frac{\lambda}{B}\sum_{i\neq j}\langle z_i, z_j\rangle$</td>
+<td style="text-align: left;">BN隐式对比</td>
+</tr>
+<tr>
+<td style="text-align: left;">(16)</td>
+<td style="text-align: left;">$\dot{\boldsymbol{\theta}} = -\nabla_{\boldsymbol{\theta}} L, \quad \epsilon\dot{\boldsymbol{\varphi}} = -\nabla_{\boldsymbol{\varphi}} L$</td>
+<td style="text-align: left;">快慢系统</td>
+</tr>
+<tr>
+<td style="text-align: left;">(17)</td>
+<td style="text-align: left;">$\nabla_{\boldsymbol{\varphi}} L = 0 \Rightarrow h_{\boldsymbol{\varphi}} \approx I$</td>
+<td style="text-align: left;">快变平衡点</td>
+</tr>
+</tbody>
+</table>
+<hr />
+        </div>
+    </div>
+</body>
+</html>

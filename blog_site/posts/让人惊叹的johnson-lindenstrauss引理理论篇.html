@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>让人惊叹的Johnson-Lindenstrauss引理：理论篇</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>让人惊叹的Johnson-Lindenstrauss引理：理论篇</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 18.0 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8679">https://spaces.ac.cn/archives/8679</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>今天我们来学习Johnson-Lindenstrauss引理，由于名字比较长，下面都简称“JL引理”。</p>
+<p>个人认为，JL引理是每一个计算机科学的同学都必须了解的神奇结论之一，它是一个关于降维的著名的结果，它也是高维空间中众多反直觉的“维度灾难”现象的经典例子之一。可以说，JL引理是机器学习中各种降维、Hash等技术的理论基础，此外，在现代机器学习中，JL引理也为我们理解、调试模型维度等相关参数提供了重要的理论支撑。</p>
+<h2 id="_1">对数的维度</h2>
+<p>JL引理，可以非常通俗地表达为：</p>
+<blockquote>
+<p><strong>通俗版JL引理</strong> ： 塞下$N$个向量，只需要$\mathcal{O}(\log N)$维空间。</p>
+</blockquote>
+<p>具体来说，JL引理说的是，不管这$N$个向量原来是多少维的，我们都可以将它们降到$\mathcal{O}(\log N)$，并将相对距离的误差控制在一定范围内。可以想象，这是一个 <em>非常强、非常反直觉、非常实用</em> 的结论，比如我们要做向量检索，原本的向量维度可能非常大，这样全量检索一次的成本也非常大，而JL引理告诉我们，可以将它们变换到$\mathcal{O}(\log N)$维，并且检索效果近似不变，这简直就是“天上掉馅饼”的好事！</p>
+<p>可能读者会有疑问：这么强的结论，那么对应的降维方法会不会特别复杂？答案是刚刚相反，降维过程仅仅用到随机线性投影！甚至有评价说，JL引理是一个“证明比理解更容易的结论”，也就是说，从数学上证明它还真不算特别困难，但如何直观地理解这个反直觉的结论，反而是不那么容易的。</p>
+<p>无独有偶，我们之前其实就介绍过两个反直觉的结果：在文章<a href="/archives/7076">《n维空间下两个随机向量的夹角分布》</a>中，我们就介绍过“高维空间中任意两个向量几乎都是垂直的”，这显然与二维、三维空间的结果差距甚远；在文章<a href="/archives/7180">《从几何视角来理解模型参数的初始化策略》</a>中，这个结果进一步升级为“从$\mathcal{N}(0,1/n)$采样出来的$n\times n$矩阵几乎是一个正交矩阵”，这更与我们一直理解的“正交性是非常苛刻的（要求转置等于逆）”有严重出入。</p>
+<p>但事实上，这两个结论不仅对，而且还跟JL引理直接相关。可以说，JL引理可以看成是它们的细化和应用。所以，我们需要先用更定量的语言来刻画这两个结论，比如“几乎垂直”，那垂直的概率究竟有多少，比如“近似正交”，那误差究竟有多大。</p>
+<h2 id="_2">概率不等式</h2>
+<p>为此，我们需要一些概率知识，其中最主要是“马尔可夫不等式”：</p>
+<blockquote>
+<p><strong>马尔可夫不等式</strong> ：如果$x$是非负随机变量，$a &gt; 0$，那么 \begin{equation}P(x\geq a)\leq \frac{\mathbb{E}[x]}{a}\end{equation}</p>
+</blockquote>
+<p>注意该不等式并没有对$x$所服从的分布有其他特别的限制，只要求随机变量的取值空间是非负的（或者等价地，负的$x$的概率恒为0），证明其实非常简单：<br />
+\begin{equation}\mathbb{E}[x]=\int_0^{\infty}x p(x) \geq \int_a^{\infty}x p(x) \geq \int_a^{\infty} a p(x) = a P(x\geq a)\end{equation}</p>
+<p>马尔可夫不等式要求随机变量是非负的，但我们平时要处理的随机变量不一定是非负的，所以通常需要变换一下才能用。比如$x - \mathbb{E}[x]$不是非负的，但$|x - \mathbb{E}[x]|$是非负的，于是利用马尔可夫不等式有：<br />
+\begin{equation}P(|x - \mathbb{E}[x]|\geq a) = P((x - \mathbb{E}[x])^2\geq a^2) \leq \frac{\mathbb{E}[(x - \mathbb{E}[x])^2]}{a^2}=\frac{\mathbb{V}ar[x]}{a^2}\end{equation}<br />
+这就是“切比雪夫不等式”。</p>
+<p>另外一个经典技巧称为“Cramér-Chernoff方法”，也是我们后面主要利用到的方法，它通过指数函数将随机变量变成非负的：对于任意$\lambda &gt; 0$，我们有<br />
+\begin{equation}x \geq a \quad\Leftrightarrow\quad \lambda x \geq \lambda a \quad\Leftrightarrow\quad e^{\lambda x} \geq e^{\lambda a}\end{equation}<br />
+所以利用马尔可夫不等式有<br />
+\begin{equation}P(x \geq a) = P(e^{\lambda x} \geq e^{\lambda a})\leq e^{-\lambda a}\mathbb{E}[e^{\lambda x}]\end{equation}<br />
+最左端是跟$\lambda$无关的，但是最右端有一个$\lambda$，而这不等式是对于任意$\lambda &gt; 0$都成立的。所以理论上，我们可以找到使得最右端最小的$\lambda$，以获得最高的估计精度：<br />
+\begin{equation}P(x \geq a) \leq \min_{\lambda &gt; 0} e^{-\lambda a}\mathbb{E}[e^{\lambda x}]\end{equation}</p>
+<h2 id="_3">引理的引理</h2>
+<p>现在，我们可以引入如下结果，它是JL引理的引理，甚至可以说，它是本文一切结论的理论基础：</p>
+<blockquote>
+<p><strong>单位模引理</strong> ： 设$u\in\mathbb{R}^{n}$是独立重复采样自$\mathcal{N}(0,1/n)$的向量，$\varepsilon \in (0, 1)$是给定常数，那么我们有 \begin{equation}P(|\Vert u\Vert^2 - 1| \geq \varepsilon) \leq 2\exp\left(-\frac{\varepsilon^2 n}{8}\right)\end{equation}</p>
+</blockquote>
+<p>该引理告诉我们，当$n$足够大的时候，$u$的模长明显偏离1的概率是非常小的（给定$\varepsilon$后，将以$n$的指数形式递减至0），所以从$\mathcal{N}(0,1/n)$采样出来的$n$维向量将会非常接近单位向量。</p>
+<p>它的证明正是用到“Cramér-Chernoff方法”：首先$|\Vert u\Vert^2 - 1| \geq \varepsilon$意味着$\Vert u\Vert^2 - 1 \geq \varepsilon$或$1 - \Vert u\Vert^2\geq \varepsilon$，我们需要分别进行推导，不失一般性，先推导$\Vert u\Vert^2 - 1 \geq \varepsilon$的概率，根据Cramér-Chernoff方法，有<br />
+\begin{equation}P(\Vert u\Vert^2 - 1 \geq \varepsilon) \leq \min_{\lambda &gt; 0} e^{-\lambda \varepsilon}\mathbb{E}\big[e^{\lambda (\Vert u\Vert^2 - 1)}\big] = \min_{\lambda &gt; 0} e^{-\lambda (\varepsilon + 1)}\mathbb{E}\big[e^{\lambda \Vert u\Vert^2}\big]\end{equation}<br />
+将$u$写成分量形式$(u_1, u_2, \cdots, u_n)$，其中每个分量都是独立的，分布均为$\mathcal{N}(0,1/n)$，那么我们有<br />
+\begin{equation}\mathbb{E}\big[e^{\lambda \Vert u\Vert^2}\big] = \mathbb{E}\big[e^{\lambda\sum\limits_i u_i^2}\big] = \mathbb{E}\big[\prod_i e^{\lambda u_i^2}\big]=\prod_i \mathbb{E}\big[ e^{\lambda u_i^2}\big]\end{equation}<br />
+而$\mathbb{E}\big[ e^{\lambda u_i^2}\big]=\int_{-\infty}^{\infty} \frac{1}{\sqrt{2\pi}}e^{-u_i^2/2}e^{\lambda u_i^2/n} du_i=\sqrt{n/(n-2\lambda)}$，所以<br />
+\begin{equation}P(\Vert u\Vert^2 - 1 \geq \varepsilon) \leq \min_{\lambda &gt; 0} e^{-\lambda (\varepsilon + 1)}\left(\frac{n}{n-2\lambda}\right)^{n/2}\end{equation}<br />
+右端的极小值在$\lambda = \frac{n\varepsilon}{2(1+\varepsilon)}$取到，推导过程就留给读者了，然后代入得到<br />
+\begin{equation}P(\Vert u\Vert^2 - 1 \geq \varepsilon) \leq e^{n(\log(1+\varepsilon) - \varepsilon)/2}\leq e^{-n\varepsilon^2/8}\end{equation}<br />
+其中$\log(1+\varepsilon) - \varepsilon \leq -\varepsilon^2/4$的证明也留给读者了。类似地，我们可以对$1 - \Vert u\Vert^2\geq \varepsilon$的概率进行推导，结果为：<br />
+\begin{equation}P(1 - \Vert u\Vert^2\geq \varepsilon) \leq e^{n(\log(1-\varepsilon) + \varepsilon)/2}\leq e^{-n\varepsilon^2/8}\end{equation}<br />
+其中可证$\log(1-\varepsilon) + \varepsilon \leq \log(1+\varepsilon) - \varepsilon$，所以上式沿用了$\log(1+\varepsilon) - \varepsilon$的不等关系。现在两式相加，我们得到$P(|\Vert u\Vert^2 - 1| \geq \varepsilon)\leq 2e^{-n\varepsilon^2/8}$。证毕。</p>
+<p>从“单位模引理”出发，我们可以证明“正交性引理”：</p>
+<blockquote>
+<p><strong>正交性引理</strong> ： 设$u,v\in\mathbb{R}^{n}$是独立重复采样自$\mathcal{N}(0,1/n)$的两个向量，$\varepsilon \in (0, 1)$是给定常数，那么我们有 \begin{equation}P(|\langle u, v\rangle| \geq \varepsilon) \leq 4\exp\left(-\frac{\varepsilon^2 n}{8}\right)\end{equation}</p>
+</blockquote>
+<p>该引理告诉我们，当$n$足够大的时候，$u,v$的内积明显偏离0的概率是非常小的（给定$\varepsilon$后，将以$n$的指数形式递减至0），所以从$\mathcal{N}(0,1/n)$采样出来的两个$n$维向量将会非常接近正交。而结合“单位模引理”，我们就得到“从$\mathcal{N}(0,1/n)$采样出来的$n\times n$矩阵几乎是一个正交矩阵”的结论了。</p>
+<p>有了“单位模引理”铺垫，它的证明不算难。我们知道如果$u,v\sim \mathcal{N}(0,1/n)$，那么$\frac{u\pm v}{\sqrt{2}}\sim \mathcal{N}(0,1/n)$，所以根据“单位模引理”的证明，我们有<br />
+\begin{equation}P\left(\left\Vert \frac{u+v}{\sqrt{2}}\right\Vert^2 - 1 \geq \varepsilon\right) \leq e^{-n\varepsilon^2/8},\quad P\left(1-\left\Vert \frac{u-v}{\sqrt{2}}\right\Vert^2 \geq \varepsilon\right) \leq e^{-n\varepsilon^2/8}\end{equation}<br />
+注意$\left\Vert \frac{u+v}{\sqrt{2}}\right\Vert^2 - 1 \geq \varepsilon$和$1-\left\Vert \frac{u-v}{\sqrt{2}}\right\Vert^2 \geq \varepsilon$两式相加后可以得出$\langle u, v\rangle\geq \varepsilon$，所以<br />
+\begin{equation}P(\langle u, v\rangle\geq \varepsilon) \leq P\left(\left\Vert \frac{u+v}{\sqrt{2}}\right\Vert^2 - 1 \geq \varepsilon\right) + P\left(1-\left\Vert \frac{u-v}{\sqrt{2}}\right\Vert^2 \geq \varepsilon\right) \leq 2e^{-n\varepsilon^2/8}\end{equation}<br />
+同理可证$P(-\langle u, v\rangle\geq \varepsilon) \leq 2e^{-n\varepsilon^2/8}$，两者结合就得到“正交性引理”。</p>
+<h2 id="_4">证明的过程</h2>
+<p>现在我们就可以着手证明JL引理了，下面是它的数学表述：</p>
+<blockquote>
+<p><strong>数学版JL引理</strong> ： 给定$N$个向量$v_1,v_2,\cdots,v_N\in\mathbb{R}^m$和$n &gt; \frac{24\log N}{\varepsilon^2}$，而随机矩阵$A\in\mathbb{R}^{n\times m}$独立重复采样自$\mathcal{N}(0,1/n)$，$\varepsilon \in (0, 1)$是给定常数，那么至少有$\frac{N-1}{N}$的概率，使得对于所有的$i\neq j$，都成立 \begin{equation}(1-\varepsilon)\Vert v_i - v_j\Vert^2 \leq \Vert Av_i - A v_j\Vert^2 \leq (1+\varepsilon)\Vert v_i - v_j\Vert^2\label{eq:bound}\end{equation} </p>
+</blockquote>
+<p>引理告诉我们，不管原来的向量维数$m$是多少，只需要$n &gt; \frac{24\log N}{\varepsilon^2}$的维度，我们就可以容纳下$N$个向量，使得它们相对距离的偏离都不超过$\varepsilon$。而且JL引理还告诉我们降维方法：只需要从$\mathcal{N}(0,1/n)$随机采样一个$n\times m$的矩阵$A$，然后变换$v\to Av$就有$\frac{N-1}{N}$的可能性达到目的。真可谓是简单实用了～</p>
+<p>证明过程也是“单位模引理”的直接应用。首先，如果$u\in\mathbb{R}^m$是给定的单位向量，而$A\in\mathbb{R}^{n\times m}$独立重复采样自$\mathcal{N}(0,1/n)$，那么$Au$的每个分量都独立地服从$\mathcal{N}(0,1/n)$。证明也并不难，根据定义每个分量$(Au)<em i_j="i,j">i = \sum\limits_j A</em>$相互独立，所以$(Au)}u_j$，由于$A_{i,j<em i_j="i,j">i$显然相互独立，并且由于$A</em>$。}\sim\mathcal{N}(0,1/n)$，正态随机变量和的分布依然是正态分布，所以$(Au)_i$服从正态分布，其均值为$\sum\limits_j u_j\times 0=0$，其方差则为$\sum\limits_j u_j^2\times \frac{1}{n} = \frac{1}{n</p>
+<p>所以，说白了，$Au$相当于从$\mathcal{N}(0,1/n)$独立重复采样出来的$n$维向量。现在代入$u=\frac{v_i - v_j}{\Vert v_i - v_j\Vert}$，利用“单位模引理”，得到<br />
+\begin{equation}P\left(\left|\left\Vert \frac{A(v_i - v_j)}{\Vert v_i - v_j\Vert}\right\Vert^2 - 1\right| \geq \varepsilon\right) \leq 2\exp\left(-\frac{\varepsilon^2 n}{8}\right)\end{equation}<br />
+此结果对于任意$i\neq j$都成立，那么遍历所有的$i\neq j$的组合，我们得到至少有一项$\geq \varepsilon$的概率不超过<br />
+\begin{equation}P\left(\exists (i,j):\,\left|\left\Vert \frac{A(v_i - v_j)}{\Vert v_i - v_j\Vert}\right\Vert^2 - 1\right| \geq \varepsilon\right) \leq 2 {N\choose 2} \exp\left(-\frac{\varepsilon^2 n}{8}\right)\end{equation}<br />
+或者反过来说，对于任意$i\neq j$，都成立$\left|\left\Vert \frac{A(v_i - v_j)}{\Vert v_i - v_j\Vert}\right\Vert^2 - 1\right| \leq \varepsilon$（等价于$\eqref{eq:bound}$）的概率不小于<br />
+\begin{equation}1 - 2 {N\choose 2} \exp\left(-\frac{\varepsilon^2 n}{8}\right) = 1 - N(N-1)\exp\left(-\frac{\varepsilon^2 n}{8}\right)\end{equation}<br />
+代入$n &gt; \frac{24\log N}{\varepsilon^2}$，可以得到<br />
+\begin{equation}1 - N(N-1)\exp\left(-\frac{\varepsilon^2 n}{8}\right)\geq 1 - N(N-1)N^{-3}\geq 1-N^{-1}\end{equation}<br />
+至此，证明已经完成。</p>
+<p>上面的JL引理中保持的是欧氏距离近似不变，很多时候我们检索用的是内积（比如余弦相似度）而不是欧氏距离。对此，我们有</p>
+<blockquote>
+<p><strong>内积版JL引理</strong> ： 给定$N$个单位向量$v_1,v_2,\cdots,v_N\in\mathbb{R}^m$和$n &gt; \frac{24\log N}{\varepsilon^2}$，而随机矩阵$A\in\mathbb{R}^{n\times m}$独立重复采样自$\mathcal{N}(0,1/n)$，$\varepsilon \in (0, 1)$是给定常数，那么至少有$\frac{N-2}{N}$的概率，使得对于所有的$i\neq j$，都成立 \begin{equation}\left|\langle Av_i, Av_j\rangle - \langle v_i, v_j\rangle\right|\leq\varepsilon\end{equation} </p>
+</blockquote>
+<p>证明很简单，模仿“正交性引理”的证明即可。根据JL引理的证明，我们可以得到在相同的条件下，至少有$\frac{N-2}{N}$的概率同时满足对于任意$i\neq j$有<br />
+\begin{equation}\begin{aligned}<br />
+(1-\varepsilon)\Vert v_i - v_j\Vert^2 \leq \Vert Av_i - A v_j\Vert^2 \leq (1+\varepsilon)\Vert v_i - v_j\Vert^2 \\\<br />
+(1-\varepsilon)\Vert v_i + v_j\Vert^2 \leq \Vert Av_i + A v_j\Vert^2 \leq (1+\varepsilon)\Vert v_i + v_j\Vert^2<br />
+\end{aligned}\end{equation}<br />
+将第一乘上$-1$得到$-(1+\varepsilon)\Vert v_i - v_j\Vert^2 \leq -\Vert Av_i - A v_j\Vert^2 \leq -(1-\varepsilon)\Vert v_i - v_j\Vert^2$，然后加到第二式得到<br />
+\begin{equation}4\langle v_i, v_j\rangle-2\varepsilon(\Vert v_i\Vert^2 + \Vert v_j\Vert)\leq 4\langle Av_i, Av_j\rangle \leq 4\langle v_i, v_j\rangle + 2\varepsilon(\Vert v_i\Vert^2 + \Vert v_j\Vert)\end{equation}<br />
+注意到$v_i,v_j$是单位向量，所以上式等价于$\left|\langle Av_i, Av_j\rangle - \langle v_i, v_j\rangle\right|\leq\varepsilon$。</p>
+<h2 id="_5">极度的充分</h2>
+<p>动手去推过一次JL引理证明的同学应该能感觉到，JL引理的结论中之所以能够出现$\log N$，本质上是因为“单位模引理”中的概率项$2\exp\left(-\frac{\varepsilon^2 n}{8}\right)$是指数衰减的，而我们可以放宽这个衰减速度，让其变成多项式衰减，从而出现了$\log N$。</p>
+<p>总的来说，JL引理告诉我们，以误差$\varepsilon$塞下$N$个向量，只需要$\mathcal{O}\left(\frac{\log N}{\varepsilon^2}\right)$维的空间，至于$\frac{\log N}{\varepsilon^2}$前面的常数是多少，其实不大重要。因为事实上JL引理是一个非常充分的条件，实际情况中条件往往更加宽松。比如，在JL引理的证明中如果我们将条件改为$n &gt; \frac{16\log N}{\varepsilon^2}$，那么式$\eqref{eq:bound}$成立的概率就不小于<br />
+\begin{equation}1 - N(N-1)\exp\left(-\frac{\varepsilon^2 n}{8}\right)\geq 1 - N(N-1)N^{-2}=1/N\end{equation}<br />
+注意$1/N$虽然小，但终究是大于0的，所以此时依然是存在$A$使得$\eqref{eq:bound}$成立，只不过寻找$A$的成本更大罢了（每次命中的概率只有$1/N$），而如果我们只关心存在性，那么这也够了。</p>
+<p>而且，JL引理只考虑了在随机线性投影下的降维，就已经得到$n &gt; \frac{16\log N}{\varepsilon^2}$了，如果是其他更精细的降维，比如基于SVD的降维，是有可能得到更好的结果的（前面的系数更小）；如果非线性的降维方法也考虑进去，那么结果又能变得更优了。所以说，不需要太关心$\frac{\log N}{\varepsilon^2}$前面的常数是多少，我们只需要知道$\mathcal{O}\left(\frac{\log N}{\varepsilon^2}\right)$的量级，如果真要用到它，通常还需要根据实际情况确定前面的常数，而不是调用理论结果。</p>
+<h2 id="_6">且待下回续</h2>
+<p>在这篇文章中，我们介绍了Johnson–Lindenstrauss引理（JL引理），它是关于降维的一个重要而奇妙的结论，是高维空间的不同寻常之处的重要体现之一。它告诉我们“只需要$\mathcal{O}(\log N)$维空间就可以塞下$N$个向量”，使得原本高维空间中的检索问题可以降低到$\mathcal{O}(\log N)$维空间中。</p>
+<p>本文主要讨论了JL引理的相关理论证明细节，下一篇文章我们则尝试应用它来理解一些机器学习问题，敬请期待～</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8679">https://spaces.ac.cn/archives/8679</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Sep. 17, 2021). 《让人惊叹的Johnson-Lindenstrauss引理：理论篇 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8679">https://spaces.ac.cn/archives/8679</a></p>
+<p>@online{kexuefm-8679,<br />
+title={让人惊叹的Johnson-Lindenstrauss引理：理论篇},<br />
+author={苏剑林},<br />
+year={2021},<br />
+month={Sep},<br />
+url={\url{https://spaces.ac.cn/archives/8679}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

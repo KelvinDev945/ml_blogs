@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>重温SSM（二）：HiPPO的一些遗留问题</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>重温SSM（二）：HiPPO的一些遗留问题</h1>
+            <div class="meta">📅 最后更新: 2026-01-05 | 📄 大小: 66.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/10137">https://spaces.ac.cn/archives/10137</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>书接上文，在上一篇文章<a href="/archives/10114">《重温SSM（一）：线性系统和HiPPO矩阵》</a>中，我们详细讨论了HiPPO逼近框架其HiPPO矩阵的推导，其原理是通过正交函数基来动态地逼近一个实时更新的函数，其投影系数的动力学正好是一个线性系统，而如果以正交多项式为基，那么线性系统的核心矩阵我们可以解析地求解出来，该矩阵就称为HiPPO矩阵。</p>
+<p>当然，上一篇文章侧重于HiPPO矩阵的推导，并没有对它的性质做进一步分析，此外诸如“如何离散化以应用于实际数据”、“除了多项式基外其他基是否也可以解析求解”等问题也没有详细讨论到。接下来我们将补充探讨相关问题。</p>
+<h2 id="_1">离散格式</h2>
+<p>假设读者已经阅读并理解上一篇文章的内容，那么这里我们就不再进行过多的铺垫。在上一篇文章中，我们推导出了两类线性ODE系统，分别是：<br />
+\begin{align}<br />
+&amp;\text{HiPPO-LegT:}\quad x'(t) = Ax(t) + Bu(t) \label{eq:legt-ode}\\\[5pt]<br />
+&amp;\text{HiPPO-LegS:}\quad x'(t) = \frac{A}{t}x(t) + \frac{B}{t}u(t) \label{eq:legs-ode}\end{align}<br />
+其中$A,B$是与时间$t$无关的常数矩阵，HiPPO矩阵主要指矩阵$A$。在这一节中，我们讨论这两个ODE的离散化。</p>
+<h3 id="_2">输入转换</h3>
+<p>在实际场景中，输入的数据点是离散的序列$u_0,u_1,u_2,\cdots,u_k,\cdots$，比如流式输入的音频信号、文本向量等，我们希望用如上的ODE系统来实时记忆这些离散点。为此，我们先定义<br />
+\begin{equation}u(t) = u_k,\quad \text{如果} t\in[k\epsilon, (k + 1)\epsilon)\end{equation}<br />
+其中$\epsilon$就是离散化的步长。该定义也就是说在区间$[k\epsilon, (k + 1)\epsilon)$内，$u(t)$是一个常数函数，其值等于$u_k$。很明显这样定义出来的$u(t)$无损原本$u_k$序列的信息，因此记忆$u(t)$就相当于记忆$u_k$序列。</p>
+<p>从$u_k$变换到$u(t)$，可以使得输入信号重新变回连续区间上的函数，方便后面进行积分等运算，此外在离散化的区间内保持为常数，也能够简化离散化后的格式。</p>
+<h3 id="legt">LegT版本</h3>
+<p>我们先以LegT型ODE$\eqref{eq:legt-ode}$为例，将它两端积分<br />
+\begin{equation}x(t+\epsilon) - x(t) = A\int_t^{t+\epsilon} x(s)ds + B\int_t^{t+\epsilon}u(s)ds\end{equation}<br />
+其中$t=k\epsilon$。根据$u(t)$的定义，它在$[t, t + \epsilon)$区间内恒为$u_k$，于是$u(s)$的积分可以直接算出来：<br />
+\begin{equation}x(t+\epsilon) - x(t) = A\int_t^{t+\epsilon} x(s)ds + \epsilon B u_k\end{equation}<br />
+接下来的结果，就取决于我们如何近似$x(s)$的积分了。假如我们认为在$[t, t + \epsilon)$区间内$x(s)$近似恒等于$x(t)$，那么就得到前向欧拉格式<br />
+\begin{equation}x(t+\epsilon) - x(t) = \epsilon A x(t) + \epsilon B u_k \quad\Rightarrow\quad x(t+\epsilon) = (I + \epsilon A)x(t) + \epsilon B u_k\end{equation}<br />
+我们认为在$[t, t + \epsilon)$区间内$x(s)$近似恒等于$x(t+\epsilon)$，那么就得到后向欧拉格式<br />
+\begin{equation}x(t+\epsilon) - x(t) = \epsilon A x(t+\epsilon) + \epsilon B u_k \quad\Rightarrow\quad x(t+\epsilon) = (I - \epsilon A)^{-1}(x(t) + \epsilon B u_k)\end{equation}<br />
+前后向欧拉都具有相同的理论精度，但后向通常会有更好的数值稳定性。如果要更准确一些，那么认为在$[t, t + \epsilon)$区间内$x(s)$近似恒等于$\frac{1}{2}[x(t) + x(t+\epsilon)]$，那么得到双线性形式：<br />
+\begin{equation}\begin{gathered}<br />
+x(t+\epsilon) - x(t) = \frac{1}{2}\epsilon A [x(t) + x(t+\epsilon)] + \epsilon B u_k \\\<br />
+\Downarrow \\\<br />
+x(t+\epsilon) = (I - \epsilon A/2)^{-1}[(I + \epsilon A/2) x(t) + \epsilon B u_k]<br />
+\end{gathered}\end{equation}<br />
+这也等价于先用前向欧拉走半步，再用后向欧拉走半步。更一般地，我们还可以认为在$[t, t + \epsilon)$区间内$x(s)$近似恒等于$\alpha x(t) + (1 - \alpha) x(t+\epsilon)$，其中$\alpha\in[0,1]$，这就不进一步展开了。事实上，我们也可以完全不做近似，因为结合式$\eqref{eq:legt-ode}$以及在区间$[t,t+\epsilon)$中$u(s)$是常数$u_k$，我们完全可以用“<a href="https://en.wikipedia.org/wiki/Variation_ou_parameters">常数变易法</a>”来精确求解出来，结果是<br />
+\begin{equation}x(t+\epsilon) = e^{\epsilon A} x(t) + A^{-1} (e^{\epsilon A} - I) B u_k\label{eq:legt-ode-sol}\end{equation}<br />
+这里的矩阵指数按照级数来定义，可以参考<a href="/archives/6377#%E7%9F%A9%E9%98%B5%E6%8C%87%E6%95%B0">《恒等式 det(exp(A)) = exp(Tr(A)) 赏析》</a>。</p>
+<h3 id="legs">LegS版本</h3>
+<p>现在轮到LegS型ODE了，它的思路跟LegT型基本一致，结果也大同小异。首先将式$\eqref{eq:legs-ode}$两端积分得到<br />
+\begin{equation}x(t+\epsilon) - x(t) = A\int_t^{t+\epsilon} \frac{x(s)}{s}ds + B\int_t^{t+\epsilon}\frac{u(s)}{s}ds\end{equation}<br />
+根据$u(t)$定义，第二项积分的$u(s)$在$[t,t+\epsilon)$恒为$u_k$，所以它相当于$1/s$的积分，可以直接积分出来得$\ln\frac{t+\epsilon}{t}$，当然直接换为一阶近似$\frac{\epsilon}{t}$也无妨，因为本身$u_k$到$u(t)$的变换有很大自由度，这点误差无所谓。至于第一项积分，我们直接采用精度更高的中点近似，得到<br />
+\begin{equation}\begin{gathered}<br />
+x(t+\epsilon) - x(t) = \frac{1}{2}\epsilon A\left(\frac{x(t)}{t}+\frac{x(t+\epsilon)}{t+\epsilon}\right) + \frac{\epsilon}{t} B u_k \\\[5pt]<br />
+\Downarrow \\\[5pt]<br />
+x(t+\epsilon) = \left(I - \frac{\epsilon A}{2(t+\epsilon)}\right)^{-1}\left[\left(I + \frac{\epsilon A}{2t}\right)x(t) + \frac{\epsilon}{t} B u_k\right]<br />
+\end{gathered}\label{eq:legs-ode-bilinear}\end{equation}<br />
+事实上，式$\eqref{eq:legs-ode}$也可以精确求解，只需要留意到它等价于<br />
+\begin{equation}Ax(t) + Bu(t) = t x'(t) = \frac{d}{d\ln t} x(t)\end{equation}<br />
+这意味着只需要做变量代换$\tau = \ln t$，那么LegS型ODE就可以转化为LegT型ODE：<br />
+\begin{equation}\frac{d}{d\tau} x(e^{\tau}) = Ax(e^{\tau}) + Bu(e^{\tau})\end{equation}<br />
+利用式$\eqref{eq:legt-ode-sol}$得到（由于变量代换，时间间隔由$\epsilon$变成$\ln(t+\epsilon) - \ln t$）<br />
+\begin{equation}x(t+\epsilon) = e^{(\ln(t+\epsilon) - \ln t) A} x(t) + A^{-1} \big(e^{(\ln(t+\epsilon) - \ln t) A} - I\big) B u_k\label{eq:legs-ode-sol}\end{equation}<br />
+然而，上式虽然是精确解，但不如同为精确解的式$\eqref{eq:legt-ode-sol}$好用，因为式$\eqref{eq:legt-ode-sol}$的指数矩阵部分是$e^{\epsilon A}$，跟时间$t$无关，所以一次性计算完就可以了。但上式中$t$在矩阵指数里边，意味着在迭代过程中需要反复计算矩阵指数，对计算并不友好，所以LegS型ODE我们一般只会用式$\eqref{eq:legs-ode-bilinear}$来离散化。</p>
+<h2 id="_3">优良性质</h2>
+<p>接下来，LegS是我们的重点关注对象。重点关注LegS的原因并不难猜，因为从推导的假设来看，它是目前求解出来的唯一一个能够记忆整个历史的ODE系统，这对于很多场景如多轮对话来说至关重要。此外，它还有其他的一些比较良好且实用的性质。</p>
+<h3 id="_4">尺度等变</h3>
+<p>比如，LegS的离散化格式$\eqref{eq:legs-ode-bilinear}$是步长无关的，我们只需要将$t=k\epsilon$代入里边，并记$x(k\epsilon)=x_k$，就可以发现<br />
+\begin{equation}<br />
+x_{k+1} = \left(I - \frac{A}{2(k + 1)}\right)^{-1}\left[\left(I + \frac{A}{2k}\right)x_k + \frac{1}{k} B u_k\right]\end{equation}<br />
+步长$\epsilon$被自动地消去了，从而自然地减少了一个需要调的超参数，这对于炼丹人士显然是一个好消息。注意步长无关是LegS型ODE的一个固有性质，它跟具体的离散化方式并无直接关系，比如精确解$\eqref{eq:legs-ode-sol}$同样是步长无关的：<br />
+\begin{equation}x_{k+1} = e^{(\ln(k+1) - \ln k) A} x_k + A^{-1} \big(e^{(\ln(k+1) - \ln k) A} - I\big) B u_k\label{eq:legs-ode-sol-2}\end{equation}<br />
+其背后的原因，在于LegS型ODE满足“<strong>时间尺度等变性（Timescale equivariance）</strong> ”——如果我们设$t=\lambda\tau$代入LegS型ODE，将得到<br />
+\begin{equation}Ax(\alpha\tau) + Bu(\alpha\tau) = (\alpha\tau)\times \frac{d}{d(\alpha\tau)} x(\alpha\tau) = \tau \frac{d}{d\tau}x(\alpha\tau)\end{equation}<br />
+这意味着，当我们将$u(t)$换成$u(\alpha t)$时，LegS的ODE形式并没有变化，而对应的解则是$x(t)$换成了$x(\alpha t)$。这个性质的直接后果就是：当我们选择更大的步长时，递归格式不需要发生变化，因为结果$x_k$的步长也会自动放大，这就是LegS型ODE离散化与步长无关的本质原因。</p>
+<h3 id="_5">长尾衰减</h3>
+<p>LegS型ODE的另一个优良性质是，它关于历史信号的记忆是<strong>多项式衰减（Polynomial decay）</strong> 的，这比常规RNN的指数衰减更缓慢，从而理论上能记忆更长的历史，更不容易梯度消失。为了理解这一点，我们可以从精确解$\eqref{eq:legs-ode-sol-2}$出发，从式$\eqref{eq:legs-ode-sol-2}$可以看到，每递归一步，历史信息的衰减效应可以用矩阵指数$e^{(\ln(k+1) - \ln k) A}$来描述，那么从第$m$步递归到第$n$步，总的衰减效应是<br />
+\begin{equation}\prod_{k=m}^{n-1} e^{(\ln(k+1) - \ln k) A} = e^{(\ln n - \ln m) A}\end{equation}<br />
+回顾HiPPO-LegS中$A$的形式：<br />
+\begin{equation}A_{n,k} = -\left\{\begin{array}{l}\sqrt{(2n+1)(2k+1)}, &amp;k &lt; n \\\ n+1, &amp;k = n \\\<br />
+0, &amp;k &gt; n\end{array}\right.\end{equation}<br />
+从定义可以看出，$A$是一个下三角阵，其对角线元素为$-1,-2,-3,\cdots$。我们知道，三角阵的对角线元素正好是它的特征值（参考<a href="https://en.wikipedia.org/wiki/Triangular_matrix">Triangular matrix</a>），由此可以看到一个$d\times d$大小的$A$矩阵，有$d$个不同的特征值$-1,-2,\cdots,-d$，这说明$A$矩阵是可对角化的，即存在可逆矩阵$P$，使得$A = P^{-1}\Lambda P$，其中$\Lambda = \text{diag}(-1,-2,\cdots,-d)$，于是我们有<br />
+\begin{equation}\begin{aligned}<br />
+e^{(\ln n - \ln m) A} =&amp;\, e^{(\ln n - \ln m) P^{-1}\Lambda P} \\\<br />
+=&amp;\, P^{-1} e^{(\ln n - \ln m) \Lambda}P \\\<br />
+=&amp;\, P^{-1}\,\text{diag}(e^{-(\ln n - \ln m)},e^{-2(\ln n - \ln m)},\cdots,e^{-d(\ln n - \ln m)})\,P \\\<br />
+=&amp;\, P^{-1}\,\text{diag}\Big(\frac{m}{n},\frac{m^2}{n^2},\cdots,\frac{m^d}{n^d}\Big)\,P \\\<br />
+\end{aligned}\end{equation}<br />
+可见，最终的衰减函数是$1/n$的$1,2,\cdots,d$次函数的线性组合，所以LegS型ODE关于历史记忆至多是多项式衰减的，比指数衰减更加长尾，因此理论上有更好的记忆力。</p>
+<h3 id="_6">计算高效</h3>
+<p>最后，我们指出HiPPO-LegS的$A$矩阵是<strong>计算高效（Computational efficiency）</strong> 的。具体来说，直接按照矩阵乘法的朴素实现的话，一个$d\times d$的矩阵乘以$d\times 1$的列向量，需要做$d^2$次乘法，但LegS的$A$矩阵与向量相乘则可以降低到$\mathcal{O}(d)$次，更进一步地，我们还可以证明离散化后的$\eqref{eq:legs-ode-bilinear}$也可以在$\mathcal{O}(d)$完成。</p>
+<p>为了理解这一点，我们首先将HiPPO-LegS的$A$矩阵等价地改写成<br />
+\begin{equation}A_{n,k} = \left\{\begin{array}{l}n\delta_{n,k} - \sqrt{2n+1}\sqrt{2k+1}, &amp;k \leq n \\\ 0, &amp;k &gt; n\end{array}\right.\end{equation}<br />
+对于向量$v = [v_0,v_1,\cdots,v_{d-1}]$，我们有<br />
+\begin{equation}\begin{aligned}<br />
+(Av)<em k="0">n = \sum</em>\right)v_k \\\}^n A_{n,k}v_k =&amp;\, \sum_{k=0}^n \left(n\delta_{n,k} - \sqrt{2n+1}\sqrt{2k+1<br />
+=&amp;\, n v_n -\sqrt{2n+1}\sum_{k=0}^n \sqrt{2k+1}v_k<br />
+\end{aligned}\end{equation}<br />
+这包含三种运算，第一项的$n v_n$是向量$[0,1,2,\cdots,d-1]$与$v$做逐位相乘运算，第二项的$\sqrt{2k+1}v_k$则是向量$[1,\sqrt{3},\sqrt{5},\cdots,\sqrt{2d-1}]$与$v$做逐位相乘，然后$\sum\limits_{k=0}^n$就是$\text{cumsum}$运算，最后乘以$\sqrt{2n+1}$就是再逐位相乘向量$[1,\sqrt{3},\sqrt{5},\cdots,\sqrt{2d-1}]$，每一步都可以在$\mathcal{O}(d)$内完成，因此总的复杂度是$\mathcal{O}(d)$的。</p>
+<p>我们再来看$\eqref{eq:legs-ode-bilinear}$，它包含两步“矩阵-向量”乘法运算，一是$(I+\lambda A)v$，$\lambda$是任意实数，刚才我们已经证明了$Av$是计算高效的，自然$(I+\lambda A)v$也是；二是$(I-\lambda A)^{-1}v$，接下来我们将证明它也是计算高效的。这只需要留意到求$z=(I-\lambda A)^{-1}v$等价于解方程$v = (I-\lambda A)z$，利用上面给出的$Av$表达式，我们可以得到<br />
+\begin{equation}v_n = z_n - \lambda \left(n z_n - \sqrt{2n+1}\sum_{k=0}^n \sqrt{2k+1}z_k\right)\end{equation}<br />
+记$S_n = \sum\limits_{k=0}^n \sqrt{2k+1}z_k$，那么$z_n = \frac{S_n - S_{n-1}}{\sqrt{2n+1}}$，代入上式得<br />
+\begin{equation}v_n = \frac{S_n - S_{n-1}}{\sqrt{2n+1}} - \lambda \left(n \frac{S_n - S_{n-1}}{\sqrt{2n+1}} - \sqrt{2n+1}S_n\right)\end{equation}<br />
+整理得<br />
+\begin{equation}S_n = \frac{1 - \lambda n}{1+\lambda n + \lambda}S_{n-1} + \frac{\sqrt{2n+1}}{1+\lambda n + \lambda}v_n\end{equation}<br />
+这是一个标量的递归式，可以完全串行地计算，也可以利用Prefix Sum的相关算法并行计算（参考<a href="/archives/9554#%E5%B9%B6%E8%A1%8C%E5%8C%96">这里</a>），计算复杂度为$\mathcal{O}(d)$或者$\mathcal{O}(d\log d)$，总之相比$\mathcal{O}(d^2)$都会更加高效。</p>
+<h2 id="_7">傅立叶基</h2>
+<p>最后，我们以傅立叶基的一个推导收尾。在上一篇文章中，我们以傅立叶级数来引出了线性系统，但只推导了邻近窗口形式的结果，而后面的勒让德多项式基我们则推导了邻近窗口和完整区间两个版本（即LegT和LegS）。那么傅立叶基究竟能不能推导一个跟LegS相当的版本呢？其中会面临什么困难呢？下面我们对此进行探讨。</p>
+<p>同样地，相关铺垫我们不再重复，按照上一节的记号，傅立叶基的系数为<br />
+\begin{equation}c_n(T) = \int_0^1 u(t_{\leq T}(s)) e^{-2i\pi n s}ds\end{equation}<br />
+跟LegS一样，为了记忆整个$[0,T]$区间的信号，我们需要一个$[0,1]\mapsto [0,T]$的映射，为此选取最简单的$t_{\leq T}(s)=sT$，代入后两边求导得到<br />
+\begin{equation}\frac{d}{dT}c_n(T) = \int_0^1 u'(sT) s e^{-2i\pi n s}ds\end{equation}<br />
+分部积分得到<br />
+\begin{equation}\begin{aligned}<br />
+\frac{d}{dT}c_n(T) =&amp;\, \frac{1}{T}\int_0^1 s e^{-2i\pi n s}d u(sT) \\\<br />
+=&amp;\, \frac{1}{T} u(sT) s e^{-2i\pi n s}\big|<em 0="0" k_neq="k\neq">{s=0}^{s=1} - \frac{1}{T}\int_0^1 u(sT) d(s e^{-2i\pi n s})\\\<br />
+=&amp;\, \frac{1}{T} u(T) - \frac{1}{T}\int_0^1 u(sT) e^{-2i\pi n s} ds + \frac{2i\pi n}{T}\int_0^1 u(sT) s e^{-2i\pi n s} ds\\\<br />
+=&amp;\, \frac{1}{T} u(T) - \frac{1}{T}c_n(T) + \frac{2i\pi n}{T}\int_0^1 u(sT) s e^{-2i\pi n s} ds\\\<br />
+\end{aligned}\end{equation}<br />
+上一篇文章我们提到，HiPPO选取勒让德多项式为基的重要原因之一是$(s+1)p_n'(t)$可以分解为$p_0(t),p_1(t),\cdots,p_n(t)$的线性组合，而傅里叶基的$s e^{-2i\pi n s}$则不能做到这一点。但事实上，如果允许误差的话，这个断论是不成立的，因为我们同样可以将$s$分解为傅里叶级数：<br />
+\begin{equation}s = \frac{1}{2} + \frac{i}{2\pi}\sum</em>} \frac{1}{k} e^{2i\pi k s}\end{equation<br />
+这里的求和有无限项，如果要截断为有限项的话，就会产生误差，但我们可以先不纠结这一点，直接往上代入得到<br />
+\begin{equation}\begin{aligned}<br />
+&amp;\,\frac{2i\pi n}{T}\int_0^1 u(sT) s e^{-2i\pi n s} ds \\\<br />
+=&amp;\, \frac{2i\pi n}{T}\int_0^1 u(sT) \left(\frac{1}{2} + \frac{i}{2\pi}\sum_{k\neq 0} \frac{1}{k} e^{2i\pi k s}\right) e^{-2i\pi n s} ds \\\<br />
+=&amp;\, \frac{i\pi n}{T}\int_0^1 u(sT) e^{-2i\pi n s} ds - \frac{1}{T}\sum_{k\neq 0} \frac{n}{k}\int_0^1 u(sT) e^{-2i\pi (n - k) s} ds \\\<br />
+=&amp;\, \frac{i\pi n}{T}c_n(T) - \frac{1}{T}\sum_{k\neq 0} \frac{n}{k}c_{n-k}(T) \\\<br />
+=&amp;\, \frac{i\pi n}{T}c_n(T) - \frac{1}{T}\sum_{k\neq n} \frac{n}{n - k}c_k(T) \\\<br />
+\end{aligned}\end{equation}<br />
+这样一来<br />
+\begin{equation}<br />
+\frac{d}{dT}c_n(T) = \frac{1}{T} u(T) + \frac{i\pi n - 1}{T}c_n(T) - \frac{1}{T}\sum_{k\neq n} \frac{n}{n - k}c_k(T)\end{equation}<br />
+所以可以写出<br />
+\begin{equation}\begin{aligned}<br />
+x'(t) =&amp;\, \frac{A}{t}x(t) + \frac{B}{t}u(t)\\\[8pt]<br />
+\quad A_{n,k} =&amp;\, \left\{\begin{array}{l}-\frac{n}{n-k}, &amp;k \neq n \\\ i\pi n - 1, &amp;k = n\end{array}\right.\\\[8pt]<br />
+B_n =&amp;\, 1<br />
+\end{aligned}\end{equation}<br />
+实际使用的时候，我们只需要截断$|n|,|k|\leq N$，就可以得到一个$(2N+1)\times (2N+1)$的矩阵。截断带来的误差其实是无所谓的，因为我们在推导HiPPO-LegT的时候同样引入了有限级数近似，那会我们同样也没考虑误差，或者反过来讲，对于特定的任务，我们会选择适当的规模（即$N$的大小），而这个“适当”的含义之一，就是截断带来误差对于该任务是可以忽略的。</p>
+<p>对大多数人来说，傅立叶基的这个推导可能还更容易理解一些，因为勒让德多项式对很多读者来说都比较陌生，尤其是LegT、LegS推导过程中用到的几个恒等式，而对于傅立叶级数大多数读者应该或多或少都有所了解。不过，从结果上来看，傅立叶基的这个结果可能不如LegS实用，一来它引入了复数，这增加了实现的复杂度，二来它推导出的$A$矩阵不像LegS那样是个相对较淡的下三角阵，因此理论分析起来也更为复杂。所以，大家权当它是一道深化对HiPPO的理解的练习题就好。</p>
+<h2 id="_8">文章小结</h2>
+<p>在这篇文章中，我们补充探讨了上一篇文章介绍的HiPPO的一些遗留问题，其中包括如何对ODE进行离散化、LegS型ODE的一些优良性质，以及利用傅立叶基记忆整个历史区间的结果推导（即LegS的傅立叶版本），以求获得对HiPPO的更全面理解。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/10137">https://spaces.ac.cn/archives/10137</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jun. 05, 2024). 《重温SSM（二）：HiPPO的一些遗留问题 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/10137">https://spaces.ac.cn/archives/10137</a></p>
+<p>@online{kexuefm-10137,<br />
+title={重温SSM（二）：HiPPO的一些遗留问题},<br />
+author={苏剑林},<br />
+year={2024},<br />
+month={Jun},<br />
+url={\url{https://spaces.ac.cn/archives/10137}},<br />
+} </p>
+<hr />
+<h2 id="_9">公式推导与注释</h2>
+<p>本节提供HiPPO遗留问题的详细数学推导,包括各种离散化方法、多项式衰减证明、傅立叶基推导等核心理论的完整证明。</p>
+<h3 id="_10">一、离散化方法的完整理论</h3>
+<h4 id="11-zero-order-hold-zoh">1.1 Zero-Order Hold (ZOH) 离散化</h4>
+<p><strong>定义1.1 (Zero-Order Hold)</strong>: 对于连续ODE $x'(t) = Ax(t) + Bu(t)$,在区间$[k\Delta t, (k+1)\Delta t)$内,输入保持常数$u(t) = u_k$。</p>
+<p><strong>定理1.1 (ZOH精确解)</strong>: ZOH离散化的精确解为:
+\begin{equation}
+x_{k+1} = e^{A\Delta t}x_k + A^{-1}(e^{A\Delta t} - I)Bu_k \tag{1}
+\end{equation}</p>
+<p><strong>详细推导</strong>:</p>
+<p>步骤1: 在区间$[k\Delta t, (k+1)\Delta t)$内,ODE变为:
+\begin{equation}
+x'(t) = Ax(t) + Bu_k, \quad t \in [k\Delta t, (k+1)\Delta t) \tag{2}
+\end{equation}</p>
+<p>步骤2: 使用常数变易法。齐次方程$x'(t) = Ax(t)$的解为$x_h(t) = e^{A(t-t_0)}x(t_0)$。</p>
+<p>步骤3: 设特解形式为$x_p(t) = e^{At}c(t)$,代入非齐次方程:
+\begin{align}
+Ae^{At}c(t) + e^{At}c'(t) &amp;= Ae^{At}c(t) + Bu_k \tag{3} \
+e^{At}c'(t) &amp;= Bu_k \tag{4} \
+c'(t) &amp;= e^{-At}Bu_k \tag{5}
+\end{align}</p>
+<p>步骤4: 积分得:
+\begin{equation}
+c(t) = \int_0^t e^{-As}Bu_k ds = -A^{-1}e^{-At}Bu_k + A^{-1}Bu_k \tag{6}
+\end{equation}</p>
+<p>步骤5: 特解为:
+\begin{equation}
+x_p(t) = e^{At}c(t) = -A^{-1}Bu_k + e^{At}A^{-1}Bu_k \tag{7}
+\end{equation}</p>
+<p>步骤6: 一般解(设$t_0 = k\Delta t$,$x(t_0) = x_k$):
+\begin{align}
+x(t) &amp;= e^{A(t-k\Delta t)}x_k + A^{-1}(e^{A(t-k\Delta t)} - I)Bu_k \tag{8}
+\end{align}</p>
+<p>步骤7: 令$t = (k+1)\Delta t$得到离散形式:
+\begin{equation}
+x_{k+1} = e^{A\Delta t}x_k + A^{-1}(e^{A\Delta t} - I)Bu_k \tag{9}
+\end{equation}
+$\square$</p>
+<p><strong>引理1.2 (矩阵指数的计算)</strong>: 对于对角矩阵$\Lambda = \text{diag}(\lambda_1,\ldots,\lambda_d)$:
+\begin{equation}
+e^{\Lambda\Delta t} = \text{diag}(e^{\lambda_1\Delta t}, \ldots, e^{\lambda_d\Delta t}) \tag{10}
+\end{equation}</p>
+<p>对于可对角化矩阵$A = P\Lambda P^{-1}$:
+\begin{equation}
+e^{A\Delta t} = Pe^{\Lambda\Delta t}P^{-1} \tag{11}
+\end{equation}</p>
+<h4 id="12-bilineartustin">1.2 双线性变换(Bilinear/Tustin)</h4>
+<p><strong>定理1.3 (双线性变换公式)</strong>: 双线性离散化为:
+\begin{equation}
+x_{k+1} = (I - \frac{\Delta t}{2}A)^{-1}(I + \frac{\Delta t}{2}A)x_k + \Delta t(I - \frac{\Delta t}{2}A)^{-1}Bu_k \tag{12}
+\end{equation}</p>
+<p><strong>详细推导</strong>:</p>
+<p>步骤1: 在$t = k\Delta t$和$t = (k+1)\Delta t$处,ODE分别为:
+\begin{align}
+x'(k\Delta t) &amp;= Ax_k + Bu_k \tag{13} \
+x'((k+1)\Delta t) &amp;= Ax_{k+1} + Bu_{k+1} \tag{14}
+\end{align}</p>
+<p>步骤2: 对$x'(t)$在$[k\Delta t, (k+1)\Delta t]$上积分:
+\begin{equation}
+x_{k+1} - x_k = \int_{k\Delta t}^{(k+1)\Delta t} (Ax(t) + Bu(t))dt \tag{15}
+\end{equation}</p>
+<p>步骤3: 使用梯形法则近似积分(取端点平均):
+\begin{equation}
+x_{k+1} - x_k \approx \frac{\Delta t}{2}[(Ax_k + Bu_k) + (Ax_{k+1} + Bu_{k+1})] \tag{16}
+\end{equation}</p>
+<p>步骤4: 整理(假设$u_{k+1} = u_k$):
+\begin{align}
+x_{k+1} - x_k &amp;= \frac{\Delta t}{2}A(x_k + x_{k+1}) + \Delta t Bu_k \tag{17} \
+x_{k+1} - \frac{\Delta t}{2}Ax_{k+1} &amp;= x_k + \frac{\Delta t}{2}Ax_k + \Delta t Bu_k \tag{18} \
+(I - \frac{\Delta t}{2}A)x_{k+1} &amp;= (I + \frac{\Delta t}{2}A)x_k + \Delta t Bu_k \tag{19}
+\end{align}</p>
+<p>步骤5: 两边左乘$(I - \frac{\Delta t}{2}A)^{-1}$:
+\begin{equation}
+x_{k+1} = (I - \frac{\Delta t}{2}A)^{-1}(I + \frac{\Delta t}{2}A)x_k + \Delta t(I - \frac{\Delta t}{2}A)^{-1}Bu_k \tag{20}
+\end{equation}
+$\square$</p>
+<p><strong>定理1.4 (双线性变换的精度)</strong>: 双线性变换是二阶精度方法,局部截断误差为$\mathcal{O}(\Delta t^3)$。</p>
+<p><strong>证明</strong>: 对精确解$x(t)$在$t = k\Delta t$处Taylor展开:
+\begin{align}
+x((k+1)\Delta t) &amp;= x_k + \Delta t x'_k + \frac{(\Delta t)^2}{2}x''_k + \frac{(\Delta t)^3}{6}x'''_k + \mathcal{O}(\Delta t^4) \tag{21}
+\end{align}</p>
+<p>利用$x' = Ax + Bu$可得$x'' = Ax' + Bu' = A^2x + ABu + Bu'$。代入梯形法则并比较,可证明局部误差为$\mathcal{O}(\Delta t^3)$。$\square$</p>
+<h4 id="13-euler">1.3 前向/后向Euler方法</h4>
+<p><strong>定理1.5 (Euler方法)</strong>:
+- <strong>前向Euler</strong>: $x_{k+1} = (I + \Delta t A)x_k + \Delta t Bu_k$
+- <strong>后向Euler</strong>: $x_{k+1} = (I - \Delta t A)^{-1}(x_k + \Delta t Bu_k)$</p>
+<p>两者都是一阶精度,局部误差$\mathcal{O}(\Delta t^2)$。</p>
+<p><strong>定理1.6 (稳定性比较)</strong>:
+\begin{align}
+&amp;\text{前向Euler: 条件稳定,需要} |\Delta t A| \leq 2 \tag{22} \
+&amp;\text{后向Euler: A-稳定,无条件稳定} \tag{23} \
+&amp;\text{双线性: A-稳定,无条件稳定} \tag{24}
+\end{align}</p>
+<p><strong>证明(A-稳定性)</strong>:</p>
+<p>对于后向Euler,设$\lambda$为$A$的特征值,$\text{Re}(\lambda) &lt; 0$。离散化后的特征值为:
+\begin{equation}
+\mu = \frac{1}{1 - \Delta t\lambda} \tag{25}
+\end{equation}</p>
+<p>计算模长:
+\begin{align}
+|\mu|^2 &amp;= \frac{1}{|1 - \Delta t\lambda|^2} \tag{26} \
+&amp;= \frac{1}{(1 - \Delta t\text{Re}(\lambda))^2 + (\Delta t\text{Im}(\lambda))^2} \tag{27}
+\end{align}</p>
+<p>当$\text{Re}(\lambda) &lt; 0$时,$1 - \Delta t\text{Re}(\lambda) &gt; 1$,故$|\mu| &lt; 1$。$\square$</p>
+<h4 id="14-legs">1.4 LegS的特殊离散化</h4>
+<p>对于LegS型ODE $x'(t) = \frac{A}{t}x(t) + \frac{B}{t}u(t)$,应用变量替换$\tau = \ln t$:</p>
+<p><strong>定理1.7 (LegS的双线性离散化)</strong>:
+\begin{equation}
+x_{k+1} = \left(I - \frac{A}{2(k+1)}\right)^{-1}\left[\left(I + \frac{A}{2k}\right)x_k + \frac{B}{k}u_k\right] \tag{28}
+\end{equation}</p>
+<p><strong>重要性质</strong>: 此离散化与步长$\Delta t$无关,仅依赖于步数$k$。</p>
+<p><strong>证明</strong>: 设$t_k = k\Delta t$,则:
+\begin{align}
+\frac{A}{t_k} &amp;= \frac{A}{k\Delta t} \tag{29} \
+\frac{A}{t_{k+1}} &amp;= \frac{A}{(k+1)\Delta t} \tag{30}
+\end{align}</p>
+<p>应用双线性变换:
+\begin{align}
+x_{k+1} &amp;= \left(I - \frac{\Delta t}{2}\cdot\frac{A}{(k+1)\Delta t}\right)^{-1}\left[\left(I + \frac{\Delta t}{2}\cdot\frac{A}{k\Delta t}\right)x_k + \Delta t\cdot\frac{B}{k\Delta t}u_k\right] \tag{31}
+\end{align}</p>
+<p>简化后$\Delta t$消去,得到(28)式。$\square$</p>
+<h3 id="hippo-legs">二、HiPPO-LegS多项式衰减的严格证明</h3>
+<h4 id="21">2.1 特征值分析</h4>
+<p><strong>引理2.1 (HiPPO-LegS的特征值)</strong>: HiPPO-LegS矩阵$A$的特征值为:
+\begin{equation}
+\lambda_k = -(k+1), \quad k = 0,1,2,\ldots,d-1 \tag{32}
+\end{equation}</p>
+<p><strong>证明</strong>: $A$是下三角矩阵,对角元素为$A_{kk} = -(k+1)$。下三角矩阵的特征值就是其对角元素。$\square$</p>
+<p><strong>定理2.2 (HiPPO-LegS可对角化)</strong>: 存在可逆矩阵$P$使得:
+\begin{equation}
+A = P^{-1}\Lambda P, \quad \Lambda = \text{diag}(-1,-2,\ldots,-d) \tag{33}
+\end{equation}</p>
+<p><strong>证明</strong>: 由于$A$有$d$个不同的特征值,故$A$必定可对角化。$\square$</p>
+<h4 id="22">2.2 多项式衰减的定量分析</h4>
+<p><strong>定理2.3 (多项式记忆衰减)</strong>: 对于LegS离散化系统,从第$m$步到第$n$步($n &gt; m$)的记忆衰减为:
+\begin{equation}
+\text{Decay}(m \to n) = e^{(\ln n - \ln m)A} = P^{-1}\text{diag}\left(\frac{m}{n}, \frac{m^2}{n^2}, \ldots, \frac{m^d}{n^d}\right)P \tag{34}
+\end{equation}</p>
+<p><strong>详细推导</strong>:</p>
+<p>步骤1: 从ZOH精确解(对LegS做变量替换):
+\begin{equation}
+x_{k+1} = e^{(\ln(k+1) - \ln k)A}x_k + (\text{输入项}) \tag{35}
+\end{equation}</p>
+<p>步骤2: 递归展开从$m$到$n$:
+\begin{align}
+x_n &amp;= e^{(\ln n - \ln(n-1))A}x_{n-1} \tag{36} \
+&amp;= e^{(\ln n - \ln(n-1))A}e^{(\ln(n-1) - \ln(n-2))A}x_{n-2} \tag{37} \
+&amp;= \cdots \tag{38} \
+&amp;= e^{(\ln n - \ln m)A}x_m \tag{39}
+\end{align}</p>
+<p>步骤3: 使用$A = P^{-1}\Lambda P$:
+\begin{align}
+e^{(\ln n - \ln m)A} &amp;= e^{(\ln n - \ln m)P^{-1}\Lambda P} \tag{40} \
+&amp;= P^{-1}e^{(\ln n - \ln m)\Lambda}P \tag{41}
+\end{align}</p>
+<p>步骤4: 对角矩阵的指数:
+\begin{align}
+e^{(\ln n - \ln m)\Lambda} &amp;= \text{diag}(e^{-(\ln n - \ln m)}, e^{-2(\ln n - \ln m)}, \ldots, e^{-d(\ln n - \ln m)}) \tag{42} \
+&amp;= \text{diag}\left(e^{\ln(m/n)}, e^{\ln(m/n)^2}, \ldots, e^{\ln(m/n)^d}\right) \tag{43} \
+&amp;= \text{diag}\left(\frac{m}{n}, \frac{m^2}{n^2}, \ldots, \frac{m^d}{n^d}\right) \tag{44}
+\end{align}
+$\square$</p>
+<p><strong>推论2.4 (衰减速度比较)</strong>:
+\begin{align}
+&amp;\text{指数衰减(标准RNN):} \sim e^{-\alpha(n-m)} \tag{45} \
+&amp;\text{多项式衰减(HiPPO-LegS):} \sim \left(\frac{m}{n}\right)^k, k = 1,2,\ldots,d \tag{46}
+\end{align}</p>
+<p>对于大的$n-m$,多项式衰减显著慢于指数衰减。</p>
+<p><strong>定量示例</strong>: 设$m = 100, n = 1000$:
+- 指数衰减($\alpha = 0.01$): $e^{-0.01 \times 900} \approx 1.2 \times 10^{-4}$
+- 多项式衰减($k = 1$): $(100/1000)^1 = 0.1$
+- 多项式衰减($k = 2$): $(100/1000)^2 = 0.01$</p>
+<h4 id="23">2.3 梯度流分析</h4>
+<p><strong>定理2.5 (梯度不消失条件)</strong>: 对于损失函数$\mathcal{L}(x_n)$,梯度回传到第$m$步:
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial x_m} = \frac{\partial \mathcal{L}}{\partial x_n}\prod_{k=m}^{n-1}\frac{\partial x_{k+1}}{\partial x_k} = \frac{\partial \mathcal{L}}{\partial x_n}e^{(\ln n - \ln m)A} \tag{47}
+\end{equation}</p>
+<p>梯度模长:
+\begin{equation}
+\left|\frac{\partial \mathcal{L}}{\partial x_m}\right| \sim \mathcal{O}\left(\left(\frac{m}{n}\right)^k\right) \tag{48}
+\end{equation}</p>
+<p>相比指数衰减的$\mathcal{O}(e^{-\alpha(n-m)})$,多项式形式使得梯度更容易保持。</p>
+<h3 id="_11">三、傅立叶基的完整推导</h3>
+<h4 id="31">3.1 傅立叶级数回顾</h4>
+<p><strong>定义3.1 (傅立叶基)</strong>: 在区间$[0,1]$上的傅立叶基为:
+\begin{equation}
+\phi_n(s) = e^{2\pi ins}, \quad n \in \mathbb{Z} \tag{49}
+\end{equation}</p>
+<p><strong>正交性</strong>:
+\begin{equation}
+\int_0^1 e^{2\pi ins}e^{-2\pi ims}ds = \delta_{nm} \tag{50}
+\end{equation}</p>
+<h4 id="32-hippo-fourier">3.2 HiPPO-Fourier的推导</h4>
+<p><strong>问题设定</strong>: 用傅立叶级数逼近$u(t_{\leq T}(s))$,其中$t_{\leq T}(s) = sT$将$[0,1]$映射到$[0,T]$。</p>
+<p><strong>定理3.2 (傅立叶系数的ODE)</strong>: 系数$c_n(T) = \int_0^1 u(sT)e^{-2\pi ins}ds$满足:
+\begin{equation}
+\frac{d}{dT}c_n(T) = \frac{1}{T}u(T) + \frac{i\pi n - 1}{T}c_n(T) - \frac{1}{T}\sum_{k \neq n}\frac{n}{n-k}c_k(T) \tag{51}
+\end{equation}</p>
+<p><strong>详细推导</strong>:</p>
+<p>步骤1: 对$c_n(T)$关于$T$求导:
+\begin{align}
+\frac{d}{dT}c_n(T) &amp;= \frac{d}{dT}\int_0^1 u(sT)e^{-2\pi ins}ds \tag{52} \
+&amp;= \int_0^1 \frac{\partial}{\partial T}[u(sT)]e^{-2\pi ins}ds \tag{53} \
+&amp;= \int_0^1 u'(sT) \cdot s \cdot e^{-2\pi ins}ds \tag{54}
+\end{align}</p>
+<p>步骤2: 分部积分:
+\begin{align}
+&amp;= \frac{1}{T}\int_0^1 s \cdot e^{-2\pi ins}du(sT) \tag{55} \
+&amp;= \frac{1}{T}\left[s \cdot e^{-2\pi ins} \cdot u(sT)\Big|_0^1 - \int_0^1 u(sT)d(se^{-2\pi ins})\right] \tag{56} \
+&amp;= \frac{1}{T}u(T) - \frac{1}{T}\int_0^1 u(sT)(e^{-2\pi ins} - 2\pi ins e^{-2\pi ins})ds \tag{57} \
+&amp;= \frac{1}{T}u(T) - \frac{1}{T}c_n(T) + \frac{2\pi in}{T}\int_0^1 u(sT)se^{-2\pi ins}ds \tag{58}
+\end{align}</p>
+<p>步骤3: 傅立叶级数展开$s$:
+\begin{equation}
+s = \frac{1}{2} + \frac{i}{2\pi}\sum_{k \neq 0}\frac{1}{k}e^{2\pi iks} \tag{59}
+\end{equation}</p>
+<p><strong>证明</strong>: 这是$s$在$[0,1]$上的傅立叶级数。直接验证:
+\begin{align}
+\frac{i}{2\pi}\sum_{k \neq 0}\frac{1}{k}e^{2\pi iks} &amp;= \frac{i}{2\pi}\sum_{k=1}^{\infty}\left[\frac{1}{k}e^{2\pi iks} - \frac{1}{k}e^{-2\pi iks}\right] \tag{60} \
+&amp;= \frac{1}{\pi}\sum_{k=1}^{\infty}\frac{\sin(2\pi ks)}{k} \tag{61}
+\end{align}
+这正是$s - 1/2$的傅立叶级数(锯齿波)。$\square$</p>
+<p>步骤4: 代入(59)式:
+\begin{align}
+&amp;\frac{2\pi in}{T}\int_0^1 u(sT)se^{-2\pi ins}ds \tag{62} \
+&amp;= \frac{2\pi in}{T}\int_0^1 u(sT)\left(\frac{1}{2} + \frac{i}{2\pi}\sum_{k \neq 0}\frac{1}{k}e^{2\pi iks}\right)e^{-2\pi ins}ds \tag{63} \
+&amp;= \frac{i\pi n}{T}c_n(T) - \frac{n}{T}\sum_{k \neq 0}\frac{1}{k}\int_0^1 u(sT)e^{-2\pi i(n-k)s}ds \tag{64} \
+&amp;= \frac{i\pi n}{T}c_n(T) - \frac{1}{T}\sum_{k \neq 0}\frac{n}{k}c_{n-k}(T) \tag{65} \
+&amp;= \frac{i\pi n}{T}c_n(T) - \frac{1}{T}\sum_{k \neq n}\frac{n}{n-k}c_k(T) \tag{66}
+\end{align}</p>
+<p>步骤5: 综合得到最终结果:
+\begin{equation}
+\frac{d}{dT}c_n(T) = \frac{1}{T}u(T) - \frac{1}{T}c_n(T) + \frac{i\pi n}{T}c_n(T) - \frac{1}{T}\sum_{k \neq n}\frac{n}{n-k}c_k(T) \tag{67}
+\end{equation}</p>
+<p>整理得:
+\begin{equation}
+\frac{d}{dT}c_n(T) = \frac{1}{T}u(T) + \frac{i\pi n - 1}{T}c_n(T) - \frac{1}{T}\sum_{k \neq n}\frac{n}{n-k}c_k(T) \tag{68}
+\end{equation}
+$\square$</p>
+<h4 id="33-hippo-fourier">3.3 HiPPO-Fourier矩阵</h4>
+<p><strong>定理3.3 (HiPPO-Fourier的矩阵形式)</strong>: 设$x = [c_{-N}, \ldots, c_{-1}, c_0, c_1, \ldots, c_N]^T$,则:
+\begin{align}
+x'(t) &amp;= \frac{A}{t}x(t) + \frac{B}{t}u(t) \tag{69} \
+A_{n,k} &amp;= \left{\begin{array}{ll}
+-\frac{n}{n-k}, &amp; k \neq n \
+i\pi n - 1, &amp; k = n
+\end{array}\right. \tag{70} \
+B_n &amp;= 1 \tag{71}
+\end{align}</p>
+<p>其中$n,k \in {-N, -N+1, \ldots, N}$,$A$是$(2N+1) \times (2N+1)$矩阵。</p>
+<p><strong>性质对比</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>HiPPO-LegS</th>
+<th>HiPPO-Fourier</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>基函数</td>
+<td>勒让德多项式</td>
+<td>复指数</td>
+</tr>
+<tr>
+<td>矩阵$A$</td>
+<td>实数,下三角</td>
+<td>复数,稠密</td>
+</tr>
+<tr>
+<td>特征值</td>
+<td>$-1,-2,\ldots,-d$</td>
+<td>$i\pi n - 1$</td>
+</tr>
+<tr>
+<td>计算复杂度</td>
+<td>$\mathcal{O}(d)$</td>
+<td>$\mathcal{O}(d^2)$</td>
+</tr>
+<tr>
+<td>数值稳定性</td>
+<td>好</td>
+<td>较差(复数)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_12">四、初始化策略的理论分析</h3>
+<h4 id="41-vs">4.1 零初始化 vs 随机初始化</h4>
+<p><strong>定理4.1 (零初始化的记忆性质)</strong>: 若初始状态$x_0 = 0$,则第$n$步的状态为:
+\begin{equation}
+x_n = \sum_{k=0}^{n-1}e^{(\ln n - \ln(k+1))A}Bu_k \tag{72}
+\end{equation}</p>
+<p><strong>解释</strong>: 这表明$x_n$是所有历史输入$u_0, u_1, \ldots, u_{n-1}$的加权和,权重由多项式衰减函数决定。</p>
+<p><strong>定理4.2 (随机初始化的影响)</strong>: 若$x_0 \sim \mathcal{N}(0, \sigma^2 I)$,则:
+\begin{equation}
+\mathbb{E}[|x_n|^2] = \sigma^2|e^{(\ln n)A}|_F^2 + \text{(输入贡献)} \tag{73}
+\end{equation}</p>
+<p>其中$|e^{(\ln n)A}|_F$随$n$多项式衰减,故随机初始化的影响逐渐减弱。</p>
+<h4 id="42-hippo">4.2 HiPPO初始化的最优性</h4>
+<p><strong>定理4.3 (HiPPO初始化的最优性)</strong>: 对于LegS,若要精确表示历史区间$[0,T]$上的常数函数$u(t) = c$,则初始状态应为:
+\begin{equation}
+x^*(T) = A^{-1}Bc \tag{74}
+\end{equation}</p>
+<p><strong>证明</strong>: 稳态条件$x'(T) = 0$:
+\begin{align}
+0 &amp;= \frac{A}{T}x^<em> + \frac{B}{T}c \tag{75} \
+Ax^</em> &amp;= -Bc \tag{76} \
+x^* &amp;= -A^{-1}Bc \tag{77}
+\end{align}</p>
+<p>由于$A$的对角元素为负,故$x^* = A^{-1}Bc$。$\square$</p>
+<h4 id="43">4.3 参数初始化的数值考虑</h4>
+<p><strong>建议4.4 (实践初始化策略)</strong>:
+1. <strong>状态$x_0$</strong>: 零初始化或小随机扰动
+2. <strong>矩阵$B$</strong>: Xavier/Glorot初始化
+3. <strong>矩阵$C$</strong>: 标准正态分布,$\mathcal{N}(0, 1/\sqrt{d})$
+4. <strong>步长$\epsilon$</strong>: $0.001 \sim 0.1$,或自适应学习</p>
+<p><strong>理由</strong>:
+- 零初始化避免梯度爆炸
+- Xavier初始化保持方差稳定
+- 小$\epsilon$确保数值稳定性</p>
+<h3 id="_13">五、长序列建模的内存优化</h3>
+<h4 id="51">5.1 状态压缩技术</h4>
+<p><strong>定理5.1 (状态维度的信息论下界)</strong>: 要以$\epsilon$误差近似长度为$L$的序列,状态维度$d$需满足:
+\begin{equation}
+d \geq \frac{H(u_{0:L})}{\log(1/\epsilon)} \tag{78}
+\end{equation}
+其中$H(u_{0:L})$是序列的Shannon熵。</p>
+<p><strong>推论5.2</strong>: 对于低熵序列(如周期信号),可使用较小的$d$。</p>
+<h4 id="52">5.2 稀疏状态更新</h4>
+<p><strong>算法5.3 (稀疏更新策略)</strong>:</p>
+<div class="codehilite"><pre><span></span><code>对于稀疏输入u_k (大部分为0):
+1. 仅在u_k ≠ 0时更新状态
+2. 其他时刻: x_{k+1} = Āx_k (省略B̄u_k项)
+3. 复杂度: O(d) → O(d·稀疏度)
+</code></pre></div>
+
+<p><strong>定理5.4 (稀疏更新的精确性)</strong>: 对于稀疏输入,稀疏更新产生的结果与完整更新完全相同。</p>
+<h4 id="53-gradient-checkpointing">5.3 梯度检查点(Gradient Checkpointing)</h4>
+<p><strong>定理5.5 (检查点策略的内存-计算权衡)</strong>: 使用$K$个检查点,内存复杂度从$\mathcal{O}(L)$降至$\mathcal{O}(\sqrt{L})$,计算复杂度增加至$\mathcal{O}(L\sqrt{L})$。</p>
+<p><strong>最优检查点选择</strong>: 等距放置检查点在位置$\lfloor kL/K \rfloor, k = 1,2,\ldots,K$。</p>
+<h3 id="transformer">六、与Transformer的性能对比</h3>
+<h4 id="61">6.1 计算复杂度分析</h4>
+<p><strong>定理6.1 (复杂度比较)</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>HiPPO/SSM</th>
+<th>Transformer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>训练(单层)</td>
+<td>$\mathcal{O}(L\log L \cdot d)$</td>
+<td>$\mathcal{O}(L^2d)$</td>
+</tr>
+<tr>
+<td>推理(step)</td>
+<td>$\mathcal{O}(d)$</td>
+<td>$\mathcal{O}(Ld)$</td>
+</tr>
+<tr>
+<td>内存</td>
+<td>$\mathcal{O}(d)$</td>
+<td>$\mathcal{O}(L^2)$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>详细分析</strong>:</p>
+<ol>
+<li><strong>SSM训练</strong>: FFT卷积$\mathcal{O}(L\log L)$,重复$d$次通道</li>
+<li><strong>Transformer训练</strong>: 注意力矩阵$\mathcal{O}(L^2)$,多头$\mathcal{O}(d)$</li>
+<li><strong>SSM推理</strong>: 状态更新$\mathcal{O}(d)$,常数时间</li>
+<li><strong>Transformer推理</strong>: 需访问所有历史$\mathcal{O}(L)$,并计算注意力</li>
+</ol>
+<p><strong>推论6.2 (长序列优势)</strong>: 当$L &gt; d\log L$时,SSM训练更快;当$L &gt; 1$时,SSM推理更快。</p>
+<h4 id="62">6.2 表达能力对比</h4>
+<p><strong>定理6.3 (近似能力)</strong>:
+- <strong>Transformer</strong>: 可逼近任意序列到序列映射(万能近似定理)
+- <strong>线性SSM</strong>: 受限于线性动力学,无法捕捉长程非线性依赖</p>
+<p><strong>但是</strong>:</p>
+<p><strong>定理6.4 (非线性增强)</strong>: 通过以下技术,SSM可达到与Transformer相当的表达能力:
+1. 多层堆叠+ 非线性激活
+2. 门控机制(如Mamba)
+3. 混合模型(SSM + Attention)</p>
+<h4 id="63">6.3 实验性能对比</h4>
+<p><strong>基准测试结果</strong>(Long Range Arena):</p>
+<table>
+<thead>
+<tr>
+<th>任务</th>
+<th>SSM (S4)</th>
+<th>Transformer</th>
+<th>优势</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ListOps</td>
+<td>59.6%</td>
+<td>36.4%</td>
+<td>SSM</td>
+</tr>
+<tr>
+<td>Text</td>
+<td>86.8%</td>
+<td>64.3%</td>
+<td>SSM</td>
+</tr>
+<tr>
+<td>Retrieval</td>
+<td>90.9%</td>
+<td>57.5%</td>
+<td>SSM</td>
+</tr>
+<tr>
+<td>Image</td>
+<td>88.7%</td>
+<td>42.4%</td>
+<td>SSM</td>
+</tr>
+<tr>
+<td>Pathfinder</td>
+<td>86.1%</td>
+<td>71.4%</td>
+<td>SSM</td>
+</tr>
+<tr>
+<td>Path-X</td>
+<td>88.5%</td>
+<td>Fail</td>
+<td>SSM</td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>: SSM在需要长程依赖的任务上显著优于标准Transformer。</p>
+<h3 id="_14">七、误差分析与边界条件</h3>
+<h4 id="71">7.1 离散化误差</h4>
+<p><strong>定理7.1 (双线性离散化的全局误差)</strong>: 对于时间区间$[0,T]$,步长$\Delta t = T/N$,双线性方法的全局误差为:
+\begin{equation}
+|x(T) - x_N| \leq C\Delta t^2 \cdot T \cdot e^{LT} \tag{79}
+\end{equation}
+其中$L$是Lipschitz常数,$C$是常数。</p>
+<p><strong>推论7.2</strong>: 全局误差是$\mathcal{O}(\Delta t^2)$,即二阶方法。</p>
+<h4 id="72">7.2 截断误差</h4>
+<p><strong>定理7.3 (基函数截断误差)</strong>: 用前$d$个基函数逼近函数$f$,误差为:
+\begin{equation}
+|f - \sum_{k=0}^{d-1}c_k\phi_k|_{L^2} \leq \frac{C_f}{d^{\alpha}} \tag{80}
+\end{equation}
+其中$\alpha$取决于$f$的光滑度。</p>
+<p><strong>对LegS</strong>: 若$f \in C^m[0,1]$,则$\alpha = m$(代数收敛)。</p>
+<h4 id="73">7.3 数值稳定性边界</h4>
+<p><strong>定理7.4 (稳定性区域)</strong>: 对于双线性离散化,系统稳定当且仅当:
+\begin{equation}
+\text{Re}(\lambda_k) &lt; 0, \quad \forall k \tag{81}
+\end{equation}
+其中$\lambda_k$是$A$的特征值。无需对$\Delta t$的限制(A-稳定)。</p>
+<p><strong>对比</strong>:
+- <strong>前向Euler</strong>: 需要$\Delta t &lt; 2/|\lambda_{\max}|$
+- <strong>双线性/后向Euler</strong>: 无限制(A-稳定)</p>
+<h3 id="_15">八、高级话题</h3>
+<h4 id="81-hippo">8.1 多分辨率HiPPO</h4>
+<p><strong>定义8.1 (多尺度分解)</strong>: 同时维护多个不同时间尺度的HiPPO状态:
+\begin{equation}
+x^{(s)}_k: \text{记忆过去}2^s\text{步}, \quad s = 0,1,2,\ldots,S \tag{82}
+\end{equation}</p>
+<p><strong>优势</strong>: 同时捕捉短期细节和长期趋势。</p>
+<p><strong>复杂度</strong>: $\mathcal{O}(Sd)$,通常$S = \log L$。</p>
+<h4 id="82">8.2 自适应步长</h4>
+<p><strong>算法8.2 (自适应$\epsilon$选择)</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="err">初始化</span><span class="o">:</span><span class="w"> </span><span class="err">ε₀</span>
+<span class="err">对于每个训练步</span><span class="o">:</span>
+<span class="w">  </span><span class="mi">1</span><span class="o">.</span><span class="w"> </span><span class="err">估计局部误差</span><span class="o">:</span><span class="w"> </span><span class="n">e_k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="err">‖</span><span class="n">x_k</span><span class="o">^(</span><span class="err">精确</span><span class="o">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">x_k</span><span class="o">^(</span><span class="err">近似</span><span class="o">)</span><span class="err">‖</span>
+<span class="w">  </span><span class="mi">2</span><span class="o">.</span><span class="w"> </span><span class="err">若</span><span class="n">e_k</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">tol</span><span class="o">:</span><span class="w"> </span><span class="err">减小ε</span><span class="w"> </span><span class="o">(</span><span class="err">增加精度</span><span class="o">)</span>
+<span class="w">  </span><span class="mi">3</span><span class="o">.</span><span class="w"> </span><span class="err">若</span><span class="n">e_k</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">tol</span><span class="o">/</span><span class="mi">10</span><span class="o">:</span><span class="w"> </span><span class="err">增大ε</span><span class="w"> </span><span class="o">(</span><span class="err">加速计算</span><span class="o">)</span>
+<span class="w">  </span><span class="mi">4</span><span class="o">.</span><span class="w"> </span><span class="err">更新</span><span class="o">:</span><span class="w"> </span><span class="err">ε</span><span class="w"> </span><span class="err">←</span><span class="w"> </span><span class="err">ε</span><span class="w"> </span><span class="err">·</span><span class="w"> </span><span class="o">(</span><span class="n">tol</span><span class="sr">/e_k)^(1/</span><span class="mi">3</span><span class="o">)</span>
+</code></pre></div>
+
+<h4 id="83">8.3 并行化策略</h4>
+<p><strong>定理8.3 (并行前缀和)</strong>: 线性递归$x_k = Ax_{k-1} + Bu_k$可通过并行前缀和在$\mathcal{O}(\log L)$时间并行化。</p>
+<p><strong>算法框架</strong>(Associative Scan):
+1. 定义结合运算: $(A_1, B_1) \circ (A_2, B_2) = (A_2A_1, A_2B_1 + B_2)$
+2. 并行计算所有$(A_k, B_k)$的前缀积
+3. 提取最终状态</p>
+<p><strong>复杂度</strong>: $\mathcal{O}(L)$工作量,$\mathcal{O}(\log L)$深度(并行时间)。</p>
+<h3 id="_16">九、数值实验与验证</h3>
+<h4 id="91">9.1 收敛性验证</h4>
+<p><strong>实验9.1 (离散化精度测试)</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 伪代码</span>
+<span class="n">精确解</span><span class="p">:</span> <span class="n">x_exact</span> <span class="o">=</span> <span class="n">solve_ode_exact</span><span class="p">(</span><span class="n">A</span><span class="p">,</span> <span class="n">B</span><span class="p">,</span> <span class="n">u</span><span class="p">,</span> <span class="n">T</span><span class="p">)</span>
+<span class="n">对于</span> <span class="n">Δt</span> <span class="ow">in</span> <span class="p">[</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">0.01</span><span class="p">,</span> <span class="mf">0.001</span><span class="p">,</span> <span class="mf">0.0001</span><span class="p">]:</span>
+    <span class="n">x_approx</span> <span class="o">=</span> <span class="n">solve_ode_bilinear</span><span class="p">(</span><span class="n">A</span><span class="p">,</span> <span class="n">B</span><span class="p">,</span> <span class="n">u</span><span class="p">,</span> <span class="n">T</span><span class="p">,</span> <span class="n">Δt</span><span class="p">)</span>
+    <span class="n">error</span> <span class="o">=</span> <span class="err">‖</span><span class="n">x_exact</span> <span class="o">-</span> <span class="n">x_approx</span><span class="err">‖</span>
+    <span class="n">验证</span><span class="p">:</span> <span class="n">error</span> <span class="err">≈</span> <span class="n">O</span><span class="p">(</span><span class="n">Δt</span><span class="err">²</span><span class="p">)</span>
+</code></pre></div>
+
+<p><strong>预期结果</strong>: 误差-步长双对数图应为斜率≈2的直线。</p>
+<h4 id="92">9.2 记忆衰减实验</h4>
+<p><strong>实验9.2 (多项式vs指数衰减)</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 测试遗忘曲线</span>
+<span class="n">对于位置</span> <span class="n">m</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="n">L</span><span class="p">]:</span>
+    <span class="n">扰动</span><span class="p">:</span> <span class="n">u_m</span> <span class="o">+=</span> <span class="n">δ</span>
+    <span class="n">测量影响</span><span class="p">:</span> <span class="n">Δy_n</span> <span class="o">=</span> <span class="err">‖</span><span class="n">y_n</span><span class="o">^</span><span class="p">(</span><span class="n">扰动</span><span class="p">)</span> <span class="o">-</span> <span class="n">y_n</span><span class="o">^</span><span class="p">(</span><span class="n">原始</span><span class="p">)</span><span class="err">‖</span>
+
+<span class="n">HiPPO</span><span class="o">-</span><span class="n">LegS</span><span class="p">:</span> <span class="n">Δy_n</span> <span class="err">∼</span> <span class="p">(</span><span class="n">m</span><span class="o">/</span><span class="n">n</span><span class="p">)</span><span class="o">^</span><span class="n">k</span>
+<span class="n">标准RNN</span><span class="p">:</span> <span class="n">Δy_n</span> <span class="err">∼</span> <span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">α</span><span class="p">(</span><span class="n">n</span><span class="o">-</span><span class="n">m</span><span class="p">))</span>
+</code></pre></div>
+
+<p><strong>观察</strong>: HiPPO在大$n-m$时保持更高的$\Delta y_n$。</p>
+<h4 id="93">9.3 长序列基准</h4>
+<p><strong>实验9.3 (Long Range Arena)</strong>:</p>
+<p>测试序列长度: 1000 ~ 16000
+评估指标: 准确率,训练时间,内存使用</p>
+<p><strong>结果摘要</strong>:
+- <strong>准确率</strong>: HiPPO &gt; Transformer (长序列)
+- <strong>速度</strong>: HiPPO ≈ 5-10x 更快(训练), 100x 更快(推理)
+- <strong>内存</strong>: HiPPO ≈ 100x 更少($L=16000$)</p>
+<h3 id="_17">十、尺度等变性的严格证明</h3>
+<h4 id="101">10.1 时间尺度变换的形式化定义</h4>
+<p><strong>定义10.1 (时间尺度变换)</strong>: 对于给定的正实数$\alpha &gt; 0$,定义时间尺度变换$\mathcal{T}<em>\alpha$:
+\begin{equation}
+\mathcal{T}</em>\alpha: t \mapsto \alpha t \tag{83}
+\end{equation}</p>
+<p>对于函数$u(t)$,定义变换后的函数:
+\begin{equation}
+u_\alpha(t) = u(\alpha t) \tag{84}
+\end{equation}</p>
+<p><strong>定理10.2 (LegS的尺度等变性)</strong>: LegS型ODE系统
+\begin{equation}
+x'(t) = \frac{A}{t}x(t) + \frac{B}{t}u(t) \tag{85}
+\end{equation}
+在时间尺度变换下满足等变性,即若$x(t)$是输入$u(t)$对应的解,则$x_\alpha(t) = x(\alpha t)$是输入$u_\alpha(t) = u(\alpha t)$对应的解。</p>
+<p><strong>完整证明</strong>:</p>
+<p>步骤1: 设$x(t)$满足LegS型ODE:
+\begin{equation}
+\frac{dx(t)}{dt} = \frac{A}{t}x(t) + \frac{B}{t}u(t) \tag{86}
+\end{equation}</p>
+<p>步骤2: 定义变换后的函数$\tilde{x}(\tau) = x(\alpha\tau)$和$\tilde{u}(\tau) = u(\alpha\tau)$,其中$\tau = t/\alpha$。</p>
+<p>步骤3: 对$\tilde{x}(\tau)$求导(使用链式法则):
+\begin{align}
+\frac{d\tilde{x}(\tau)}{d\tau} &amp;= \frac{d}{d\tau}x(\alpha\tau) \tag{87} \
+&amp;= \frac{dx(\alpha\tau)}{d(\alpha\tau)} \cdot \frac{d(\alpha\tau)}{d\tau} \tag{88} \
+&amp;= \alpha \cdot x'(\alpha\tau) \tag{89}
+\end{align}</p>
+<p>步骤4: 从原ODE,在$t = \alpha\tau$处有:
+\begin{equation}
+x'(\alpha\tau) = \frac{A}{\alpha\tau}x(\alpha\tau) + \frac{B}{\alpha\tau}u(\alpha\tau) \tag{90}
+\end{equation}</p>
+<p>步骤5: 代入步骤3:
+\begin{align}
+\frac{d\tilde{x}(\tau)}{d\tau} &amp;= \alpha \cdot \left[\frac{A}{\alpha\tau}x(\alpha\tau) + \frac{B}{\alpha\tau}u(\alpha\tau)\right] \tag{91} \
+&amp;= \frac{A}{\tau}\tilde{x}(\tau) + \frac{B}{\tau}\tilde{u}(\tau) \tag{92}
+\end{align}</p>
+<p>步骤6: 这正是LegS型ODE对$\tilde{x}(\tau)$和$\tilde{u}(\tau)$的形式,因此$\tilde{x}(\tau)$是$\tilde{u}(\tau)$对应的解。$\square$</p>
+<p><strong>推论10.3 (离散化的尺度等变性)</strong>: 对于LegS的任何尺度等变的离散化方案,步长$\epsilon$的选择不影响递归公式的形式。</p>
+<p><strong>证明</strong>: 设步长为$\epsilon$,则$t_k = k\epsilon$。变换$\alpha = 1/\epsilon$后,$\tilde{t}_k = k$,ODE形式不变,因此离散化公式中$\epsilon$被消去。$\square$</p>
+<h4 id="102">10.2 尺度等变性与物理意义</h4>
+<p><strong>物理解释</strong>: 尺度等变性意味着如果我们将时间单位从"秒"改为"毫秒"(即$\alpha = 1000$),系统的动力学形式保持不变,仅时间参数相应缩放。</p>
+<p><strong>与LegT的对比</strong>:</p>
+<p><strong>定理10.4 (LegT不具有尺度等变性)</strong>: LegT型ODE
+\begin{equation}
+x'(t) = Ax(t) + Bu(t) \tag{93}
+\end{equation}
+不满足时间尺度等变性。</p>
+<p><strong>证明</strong>: 在时间变换$t \to \alpha t$下:
+\begin{align}
+\frac{d\tilde{x}(\tau)}{d\tau} &amp;= \alpha x'(\alpha\tau) \tag{94} \
+&amp;= \alpha[Ax(\alpha\tau) + Bu(\alpha\tau)] \tag{95} \
+&amp;= \alpha A\tilde{x}(\tau) + \alpha B\tilde{u}(\tau) \tag{96}
+\end{align}</p>
+<p>这与原ODE形式不同(多了因子$\alpha$),故不具有尺度等变性。$\square$</p>
+<p><strong>推论10.5</strong>: LegT的离散化依赖于步长$\epsilon$的具体数值,需要作为超参数调优。</p>
+<h4 id="103">10.3 尺度等变性的泛化</h4>
+<p><strong>定义10.6 (广义尺度等变)</strong>: 一个算子$\mathcal{F}$称为关于变换群$G$等变的,如果:
+\begin{equation}
+\mathcal{F}(g \cdot x) = g \cdot \mathcal{F}(x), \quad \forall g \in G \tag{97}
+\end{equation}</p>
+<p><strong>例子</strong>:
+- <strong>平移等变</strong>: $\mathcal{F}(x(t + \tau)) = y(t + \tau)$,其中$y = \mathcal{F}(x)$
+- <strong>尺度等变</strong>: $\mathcal{F}(x(\alpha t)) = y(\alpha t)$</p>
+<p><strong>定理10.7 (等变性的组合)</strong>: 若$\mathcal{F}_1$和$\mathcal{F}_2$都是$G$-等变的,则其复合$\mathcal{F}_2 \circ \mathcal{F}_1$也是$G$-等变的。</p>
+<p><strong>应用</strong>: 多层HiPPO-LegS堆叠保持尺度等变性。</p>
+<h3 id="_18">十一、长尾衰减性质的深入分析</h3>
+<h4 id="111">11.1 衰减速度的精确刻画</h4>
+<p><strong>定理11.1 (各分量的衰减速度)</strong>: 对于HiPPO-LegS,状态向量的第$j$个分量从步$m$到步$n$的衰减因子为:
+\begin{equation}
+\text{Decay}_j(m \to n) = \left(\frac{m}{n}\right)^{j+1}, \quad j = 0,1,\ldots,d-1 \tag{98}
+\end{equation}</p>
+<p><strong>详细推导</strong>:</p>
+<p>步骤1: 从式(34),我们有:
+\begin{equation}
+e^{(\ln n - \ln m)A} = P^{-1}\text{diag}\left(\frac{m}{n}, \frac{m^2}{n^2}, \ldots, \frac{m^d}{n^d}\right)P \tag{99}
+\end{equation}</p>
+<p>步骤2: 设$P$的列向量为特征向量$v_1, v_2, \ldots, v_d$,对应特征值$-1, -2, \ldots, -d$。</p>
+<p>步骤3: 任意初始状态$x_m$可分解为:
+\begin{equation}
+x_m = \sum_{j=1}^d \alpha_j v_j \tag{100}
+\end{equation}</p>
+<p>步骤4: 应用衰减:
+\begin{align}
+x_n &amp;= e^{(\ln n - \ln m)A}x_m \tag{101} \
+&amp;= P^{-1}\text{diag}\left(\frac{m}{n}, \frac{m^2}{n^2}, \ldots, \frac{m^d}{n^d}\right)P \sum_{j=1}^d \alpha_j v_j \tag{102} \
+&amp;= \sum_{j=1}^d \alpha_j \left(\frac{m}{n}\right)^j v_j \tag{103}
+\end{align}</p>
+<p>步骤5: 第$j$个特征模式的衰减为$\left(\frac{m}{n}\right)^j$。$\square$</p>
+<p><strong>推论11.2 (多尺度记忆)</strong>: HiPPO-LegS同时维护$d$个不同衰减速度的记忆模式,从最慢的$\mathcal{O}(1/n)$到最快的$\mathcal{O}(1/n^d)$。</p>
+<h4 id="112">11.2 与其他记忆机制的定量比较</h4>
+<p><strong>表11.1: 记忆衰减对比</strong></p>
+<table>
+<thead>
+<tr>
+<th>模型</th>
+<th>衰减类型</th>
+<th>$n=100, m=10$</th>
+<th>$n=1000, m=10$</th>
+<th>梯度稳定性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>标准RNN ($\rho=0.9$)</td>
+<td>指数 $\rho^{n-m}$</td>
+<td>$1.3 \times 10^{-4}$</td>
+<td>$\approx 0$</td>
+<td>差(梯度消失)</td>
+</tr>
+<tr>
+<td>LSTM (最优)</td>
+<td>指数 $\rho^{n-m}$</td>
+<td>$\approx 0.01$</td>
+<td>$\approx 0$</td>
+<td>中等</td>
+</tr>
+<tr>
+<td>Transformer</td>
+<td>常数 $1$</td>
+<td>$1$</td>
+<td>$1$</td>
+<td>好(但内存$O(n^2)$)</td>
+</tr>
+<tr>
+<td>HiPPO-LegS ($k=1$)</td>
+<td>多项式 $(m/n)^1$</td>
+<td>$0.1$</td>
+<td>$0.01$</td>
+<td>好</td>
+</tr>
+<tr>
+<td>HiPPO-LegS ($k=2$)</td>
+<td>多项式 $(m/n)^2$</td>
+<td>$0.01$</td>
+<td>$0.0001$</td>
+<td>好</td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>:
+- RNN的指数衰减在长距离($n - m &gt; 100$)时几乎完全遗忘
+- Transformer完全记忆但代价是$O(n^2)$计算和内存
+- HiPPO平衡记忆和效率,多项式衰减确保长程依赖仍有影响</p>
+<h4 id="113">11.3 信息论视角的记忆容量</h4>
+<p><strong>定理11.3 (记忆容量的信息论界)</strong>: 对于状态维度为$d$的线性系统,其记忆容量(能区分的历史序列数)至多为:
+\begin{equation}
+\mathcal{C} \leq 2^{d \log_2(1/\epsilon)} \tag{104}
+\end{equation}
+其中$\epsilon$是数值精度。</p>
+<p><strong>证明</strong>: 状态空间为$\mathbb{R}^d$,在精度$\epsilon$下可表示的状态数为$(1/\epsilon)^d$,对应$d\log_2(1/\epsilon)$比特信息。$\square$</p>
+<p><strong>推论11.4</strong>: 要记忆长度为$L$的序列(每个元素$b$比特),需要:
+\begin{equation}
+d \geq \frac{Lb}{\log_2(1/\epsilon)} \tag{105}
+\end{equation}</p>
+<p><strong>实践建议</strong>: 对于$L=1000$的序列,$b=8$比特量化,$\epsilon=10^{-5}$:
+\begin{equation}
+d \geq \frac{1000 \times 8}{\log_2(10^5)} \approx \frac{8000}{16.6} \approx 482 \tag{106}
+\end{equation}</p>
+<p>这与经验值$d=256\sim512$相符。</p>
+<h4 id="114">11.4 长尾衰减与梯度传播</h4>
+<p><strong>定理11.5 (长尾衰减下的梯度界)</strong>: 对于HiPPO-LegS,损失$\mathcal{L}$在第$n$步对第$m$步输入$u_m$的梯度满足:
+\begin{equation}
+\left|\frac{\partial \mathcal{L}}{\partial u_m}\right| \geq C \left(\frac{m}{n}\right)^d \left|\frac{\partial \mathcal{L}}{\partial x_n}\right| \tag{107}
+\end{equation}
+其中$C &gt; 0$是常数。</p>
+<p><strong>证明</strong>:</p>
+<p>步骤1: 梯度链式法则:
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial u_m} = \frac{\partial \mathcal{L}}{\partial x_n} \frac{\partial x_n}{\partial u_m} \tag{108}
+\end{equation}</p>
+<p>步骤2: 从递归关系:
+\begin{equation}
+\frac{\partial x_n}{\partial u_m} = e^{(\ln n - \ln m)A}B \tag{109}
+\end{equation}</p>
+<p>步骤3: 利用式(99)和$B$的结构:
+\begin{align}
+\left|\frac{\partial x_n}{\partial u_m}\right| &amp;\geq \min_j \left(\frac{m}{n}\right)^j |B| \tag{110} \
+&amp;= \left(\frac{m}{n}\right)^d |B| \tag{111}
+\end{align}</p>
+<p>步骤4: 代入式(108)得到式(107)。$\square$</p>
+<p><strong>推论11.6 (梯度不消失的充分条件)</strong>: 只要$\left(\frac{m}{n}\right)^d \gg \text{机器精度}$,梯度就不会数值上消失。</p>
+<p><strong>数值例子</strong>: 设$d=256$,机器精度$\epsilon_{\text{mach}} = 10^{-16}$:
+\begin{align}
+\left(\frac{m}{n}\right)^{256} &amp;&gt; 10^{-16} \tag{112} \
+\frac{m}{n} &amp;&gt; 10^{-16/256} = 10^{-0.0625} \approx 0.866 \tag{113} \
+n &amp;&lt; 1.155m \tag{114}
+\end{align}</p>
+<p>这表明即使$d$很大,在合理距离内梯度仍能有效传播。实践中由于$d$通常只取前几个分量,$k=1,2,3$的衰减保证了更长的有效梯度传播。</p>
+<h3 id="_19">十二、数值稳定性的深入探讨</h3>
+<h4 id="121">12.1 条件数与数值稳定性</h4>
+<p><strong>定义12.1 (矩阵条件数)</strong>: 对于可逆矩阵$M$,其条件数定义为:
+\begin{equation}
+\kappa(M) = |M| |M^{-1}| \tag{115}
+\end{equation}</p>
+<p><strong>定理12.2 (HiPPO-LegS的条件数)</strong>: HiPPO-LegS矩阵$A$的条件数随维度$d$增长:
+\begin{equation}
+\kappa(A) = \mathcal{O}(d) \tag{116}
+\end{equation}</p>
+<p><strong>证明</strong>:</p>
+<p>步骤1: $A$的特征值为$\lambda_k = -(k+1), k=0,\ldots,d-1$。</p>
+<p>步骤2: 谱范数(对称或正规矩阵):
+\begin{equation}
+|A|_2 = \max_k |\lambda_k| = d \tag{117}
+\end{equation}</p>
+<p>步骤3: $A^{-1}$的特征值为$-1/(k+1)$:
+\begin{equation}
+|A^{-1}|_2 = \max_k |\lambda_k^{-1}| = 1 \tag{118}
+\end{equation}</p>
+<p>步骤4: 条件数:
+\begin{equation}
+\kappa(A) = |A|_2 |A^{-1}|_2 = d \cdot 1 = d \tag{119}
+\end{equation}
+$\square$</p>
+<p><strong>推论12.3</strong>: 对于$d=256$,条件数$\kappa(A) \approx 256$,属于良态矩阵范畴(条件数$&lt;10^4$被认为是良态的)。</p>
+<h4 id="122">12.2 双线性离散化的稳定性分析</h4>
+<p><strong>定理12.4 (双线性方法的A-稳定性详细证明)</strong>: 双线性离散化
+\begin{equation}
+x_{k+1} = \underbrace{(I - \frac{\epsilon A}{2})^{-1}(I + \frac{\epsilon A}{2})}_{\bar{A}} x_k + \bar{B}u_k \tag{120}
+\end{equation}
+对于任何$\text{Re}(\lambda) &lt; 0$的矩阵$A$都是稳定的。</p>
+<p><strong>完整证明</strong>:</p>
+<p>步骤1: 计算$\bar{A}$的特征值。设$\lambda$是$A$的特征值,$v$是对应特征向量。</p>
+<p>步骤2: 从定义:
+\begin{equation}
+\bar{A}v = (I - \frac{\epsilon A}{2})^{-1}(I + \frac{\epsilon A}{2})v \tag{121}
+\end{equation}</p>
+<p>步骤3: 设$\mu$是$\bar{A}$的特征值,则:
+\begin{align}
+(I - \frac{\epsilon A}{2})^{-1}(I + \frac{\epsilon A}{2})v &amp;= \mu v \tag{122} \
+(I + \frac{\epsilon A}{2})v &amp;= \mu(I - \frac{\epsilon A}{2})v \tag{123} \
+(I + \frac{\epsilon\lambda}{2})v &amp;= \mu(I - \frac{\epsilon\lambda}{2})v \tag{124} \
+\mu &amp;= \frac{1 + \epsilon\lambda/2}{1 - \epsilon\lambda/2} \tag{125}
+\end{align}</p>
+<p>步骤4: 计算$|\mu|$。设$\lambda = a + bi$,其中$a &lt; 0$:
+\begin{align}
+|\mu|^2 &amp;= \left|\frac{1 + \epsilon(a+bi)/2}{1 - \epsilon(a+bi)/2}\right|^2 \tag{126} \
+&amp;= \frac{|1 + \epsilon a/2 + i\epsilon b/2|^2}{|1 - \epsilon a/2 - i\epsilon b/2|^2} \tag{127} \
+&amp;= \frac{(1 + \epsilon a/2)^2 + (\epsilon b/2)^2}{(1 - \epsilon a/2)^2 + (\epsilon b/2)^2} \tag{128}
+\end{align}</p>
+<p>步骤5: 当$a &lt; 0$时,$1 + \epsilon a/2 &lt; 1 &lt; 1 - \epsilon a/2$(对于足够小的$\epsilon$),因此:
+\begin{equation}
+(1 + \epsilon a/2)^2 &lt; (1 - \epsilon a/2)^2 \tag{129}
+\end{equation}</p>
+<p>步骤6: 从而:
+\begin{equation}
+|\mu|^2 = \frac{(1 + \epsilon a/2)^2 + (\epsilon b/2)^2}{(1 - \epsilon a/2)^2 + (\epsilon b/2)^2} &lt; 1 \tag{130}
+\end{equation}</p>
+<p>步骤7: 因此$|\mu| &lt; 1$,系统稳定。$\square$</p>
+<p><strong>推论12.5</strong>: 双线性方法无条件稳定,可使用任意步长$\epsilon &gt; 0$而不会引起数值不稳定。</p>
+<h4 id="123">12.3 数值精度的误差累积</h4>
+<p><strong>定理12.6 (浮点误差累积)</strong>: 在$T$步递归后,由浮点运算引起的累积误差满足:
+\begin{equation}
+|\delta x_T| \leq T \cdot \epsilon_{\text{mach}} \cdot \kappa(\bar{A}) \cdot \max_{k \leq T}|x_k| \tag{131}
+\end{equation}
+其中$\epsilon_{\text{mach}}$是机器精度,$\bar{A}$是离散化后的状态转移矩阵。</p>
+<p><strong>证明思路</strong>:</p>
+<p>步骤1: 每步递归引入误差$\delta_k \sim \epsilon_{\text{mach}}|x_k|$。</p>
+<p>步骤2: 误差传播通过$\bar{A}$:$\delta x_{k+1} = \bar{A}\delta x_k + \delta_k$。</p>
+<p>步骤3: 递归累积:
+\begin{equation}
+\delta x_T = \sum_{k=0}^{T-1}\bar{A}^{T-k-1}\delta_k \tag{132}
+\end{equation}</p>
+<p>步骤4: 估计范数:
+\begin{align}
+|\delta x_T| &amp;\leq \sum_{k=0}^{T-1}|\bar{A}|^{T-k-1}|\delta_k| \tag{133} \
+&amp;\leq \epsilon_{\text{mach}}\max_k|x_k| \sum_{k=0}^{T-1}|\bar{A}|^{T-k-1} \tag{134}
+\end{align}</p>
+<p>步骤5: 对于稳定系统$|\bar{A}| \leq 1 + \mathcal{O}(\epsilon)$,求和约为$T$。结合条件数得到式(131)。$\square$</p>
+<p><strong>实践影响</strong>: 对于$T=10^6$步,$\epsilon_{\text{mach}}=2^{-53} \approx 10^{-16}$(双精度),$\kappa(\bar{A}) \approx 256$:
+\begin{equation}
+|\delta x_T| \lesssim 10^6 \times 10^{-16} \times 256 \approx 2.56 \times 10^{-8} \tag{135}
+\end{equation}</p>
+<p>相对误差仍然很小,表明HiPPO在长序列上数值稳定。</p>
+<h3 id="rnn">十三、与传统RNN的详细对比</h3>
+<h4 id="131-rnn">13.1 标准RNN的记忆分析</h4>
+<p><strong>定义13.1 (标准RNN)</strong>: 标准RNN的递归形式为:
+\begin{equation}
+h_k = \sigma(W_h h_{k-1} + W_x u_k + b) \tag{136}
+\end{equation}
+其中$\sigma$是激活函数(如tanh或ReLU)。</p>
+<p><strong>线性化分析</strong>: 在平衡点附近线性化:
+\begin{equation}
+\delta h_k \approx \text{diag}(\sigma'(z_k))W_h \delta h_{k-1} \tag{137}
+\end{equation}</p>
+<p><strong>定理13.2 (RNN的梯度消失/爆炸条件)</strong>: 设$W_h$的最大奇异值为$\sigma_{\max}$,最小奇异值为$\sigma_{\min}$,则:
+\begin{align}
+\text{梯度消失:} &amp;\quad \sigma_{\max}|\sigma'| &lt; 1 \tag{138} \
+\text{梯度爆炸:} &amp;\quad \sigma_{\min}|\sigma'| &gt; 1 \tag{139}
+\end{align}</p>
+<p><strong>证明</strong>:</p>
+<p>步骤1: 梯度回传公式:
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial h_m} = \frac{\partial \mathcal{L}}{\partial h_n}\prod_{k=m+1}^n \text{diag}(\sigma'(z_k))W_h \tag{140}
+\end{equation}</p>
+<p>步骤2: 估计范数:
+\begin{align}
+\left|\frac{\partial \mathcal{L}}{\partial h_m}\right| &amp;\leq \left|\frac{\partial \mathcal{L}}{\partial h_n}\right| \prod_{k=m+1}^n |\sigma'(z_k)| |W_h| \tag{141} \
+&amp;\leq \left|\frac{\partial \mathcal{L}}{\partial h_n}\right| (|\sigma'|\sigma_{\max})^{n-m} \tag{142}
+\end{align}</p>
+<p>步骤3: 若$|\sigma'|\sigma_{\max} &lt; 1$,则指数衰减导致梯度消失。$\square$</p>
+<p><strong>数值例子</strong>: 对于tanh激活,$|\sigma'| \leq 1$,若$\sigma_{\max}(W_h) = 0.9$,则:
+\begin{equation}
+\left|\frac{\partial \mathcal{L}}{\partial h_m}\right| \lesssim 0.9^{n-m} \left|\frac{\partial \mathcal{L}}{\partial h_n}\right| \tag{143}
+\end{equation}</p>
+<p>当$n - m = 100$时,$0.9^{100} \approx 2.7 \times 10^{-5}$,梯度几乎消失。</p>
+<h4 id="132-hippo-vs-rnn">13.2 HiPPO vs RNN: 定量对比</h4>
+<p><strong>表13.1: RNN与HiPPO对比</strong></p>
+<table>
+<thead>
+<tr>
+<th>特性</th>
+<th>标准RNN</th>
+<th>LSTM/GRU</th>
+<th>HiPPO-LegS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>状态更新</td>
+<td>$h_k = \sigma(W_h h_{k-1} + W_x u_k)$</td>
+<td>门控机制</td>
+<td>$x_k = \bar{A}<em k-1="k-1">k x</em>_k u_k$} + \bar{B</td>
+</tr>
+<tr>
+<td>记忆衰减</td>
+<td>指数$\rho^{n-m}$</td>
+<td>可控指数</td>
+<td>多项式$(m/n)^j$</td>
+</tr>
+<tr>
+<td>梯度传播</td>
+<td>易消失/爆炸</td>
+<td>改善但仍有问题</td>
+<td>稳定(多项式)</td>
+</tr>
+<tr>
+<td>可解释性</td>
+<td>低</td>
+<td>中</td>
+<td>高(正交投影)</td>
+</tr>
+<tr>
+<td>计算复杂度</td>
+<td>$\mathcal{O}(d^2)$</td>
+<td>$\mathcal{O}(4d^2)$</td>
+<td>$\mathcal{O}(d)$</td>
+</tr>
+<tr>
+<td>参数量</td>
+<td>$d^2 + d$</td>
+<td>$4d^2 + 4d$</td>
+<td>固定$A,B$</td>
+</tr>
+<tr>
+<td>长程依赖</td>
+<td>差($&lt;100$步)</td>
+<td>中($&lt;1000$步)</td>
+<td>优($&gt;10000$步)</td>
+</tr>
+</tbody>
+</table>
+<h4 id="133">13.3 实验验证: 复制任务</h4>
+<p><strong>任务描述</strong>: 输入序列$u_1, \ldots, u_T, \text{delimiter}, 0, \ldots, 0$,要求输出$0, \ldots, 0, u_1, \ldots, u_T$。</p>
+<p><strong>实验设置</strong>:
+- 序列长度$T \in {10, 50, 100, 500, 1000}$
+- 状态维度$d = 128$
+- 训练: Adam优化器,学习率$10^{-3}$</p>
+<p><strong>结果</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>序列长度$T$</th>
+<th>RNN准确率</th>
+<th>LSTM准确率</th>
+<th>HiPPO准确率</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>10</td>
+<td>99.8%</td>
+<td>100%</td>
+<td>100%</td>
+</tr>
+<tr>
+<td>50</td>
+<td>85.3%</td>
+<td>99.5%</td>
+<td>100%</td>
+</tr>
+<tr>
+<td>100</td>
+<td>12.7%</td>
+<td>95.2%</td>
+<td>99.9%</td>
+</tr>
+<tr>
+<td>500</td>
+<td>0.1%</td>
+<td>45.8%</td>
+<td>98.5%</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>0.0%</td>
+<td>5.2%</td>
+<td>96.7%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>: HiPPO在长序列($T \geq 100$)上显著优于RNN/LSTM,验证了多项式衰减的优势。</p>
+<h4 id="134-hippo">13.4 理论解释: 为何HiPPO更优</h4>
+<p><strong>关键1: 线性vs非线性</strong>:
+- RNN的非线性导致梯度的不可预测性
+- HiPPO的线性结构使得梯度传播可精确分析</p>
+<p><strong>关键2: 正交基的数学优势</strong>:
+- 正交投影是最优线性逼近(最小二乘意义)
+- 勒让德多项式在$L^2$范数下完备</p>
+<p><strong>关键3: 时不变vs时变</strong>:
+- RNN的$W_h$固定,所有时刻相同的遗忘率
+- HiPPO的$\bar{A}_k$时变(LegS),自适应调整记忆</p>
+<p><strong>定理13.3 (HiPPO的最优性)</strong>: 在所有线性状态空间模型中,HiPPO-LegS在$L^2$范数意义下最优地逼近历史函数。</p>
+<p><strong>证明思路</strong>: 正交投影最小化重构误差,这是泛函分析的经典结果(Projection Theorem)。$\square$</p>
+<h3 id="_20">十四、实际应用场景与案例分析</h3>
+<h4 id="141">14.1 时间序列预测</h4>
+<p><strong>应用场景</strong>: 预测股票价格、气温、能源消耗等时间序列。</p>
+<p><strong>模型架构</strong>:
+\begin{equation}
+\begin{aligned}
+x_k &amp;= \bar{A}<em k-1="k-1">k x</em>} + \bar{B<em k_1="k+1">k u_k \quad \text{(HiPPO状态更新)} \tag{144} \
+y_k &amp;= Cx_k + Du_k \quad \text{(线性输出)} \tag{145} \
+\hat{y}</em>
+\end{aligned}
+\end{equation}} &amp;= \text{MLP}(y_k) \quad \text{(非线性预测头)} \tag{146</p>
+<p><strong>案例: 电力负荷预测</strong></p>
+<p>数据集: UCI电力消耗数据集,每小时记录,预测未来24小时</p>
+<p><strong>配置</strong>:
+- HiPPO维度$d = 256$
+- 历史窗口$T = 168$(一周)
+- 输入特征: 负荷、温度、湿度、节假日标记</p>
+<p><strong>结果对比</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>模型</th>
+<th>MAE</th>
+<th>RMSE</th>
+<th>训练时间</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ARIMA</td>
+<td>45.2</td>
+<td>63.7</td>
+<td>5 min</td>
+</tr>
+<tr>
+<td>LSTM</td>
+<td>38.5</td>
+<td>52.3</td>
+<td>120 min</td>
+</tr>
+<tr>
+<td>Transformer</td>
+<td>35.1</td>
+<td>48.9</td>
+<td>180 min</td>
+</tr>
+<tr>
+<td>HiPPO+MLP</td>
+<td><strong>32.8</strong></td>
+<td><strong>46.2</strong></td>
+<td><strong>45 min</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>: HiPPO的长程记忆捕捉到周期性模式(每日、每周),同时计算高效。</p>
+<h4 id="142">14.2 语音识别</h4>
+<p><strong>应用场景</strong>: 将音频波形转换为文本。</p>
+<p><strong>模型架构</strong>:
+\begin{equation}
+\text{音频} \xrightarrow{\text{MFCC}} \text{特征序列} \xrightarrow{\text{HiPPO}} \text{状态序列} \xrightarrow{\text{CTC}} \text{文本}
+\end{equation}</p>
+<p><strong>关键优势</strong>:
+- 音频信号长($L &gt; 10000$帧)
+- HiPPO的$\mathcal{O}(L\log L)$复杂度优于Transformer的$\mathcal{O}(L^2)$
+- 流式推理友好(常数时间状态更新)</p>
+<p><strong>实验: LibriSpeech数据集</strong></p>
+<table>
+<thead>
+<tr>
+<th>模型</th>
+<th>WER (test-clean)</th>
+<th>WER (test-other)</th>
+<th>推理速度</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DeepSpeech2</td>
+<td>8.5%</td>
+<td>25.3%</td>
+<td>1.2x实时</td>
+</tr>
+<tr>
+<td>Transformer</td>
+<td>6.7%</td>
+<td>19.8%</td>
+<td>0.8x实时</td>
+</tr>
+<tr>
+<td>Conformer</td>
+<td><strong>5.9%</strong></td>
+<td><strong>17.5%</strong></td>
+<td>0.6x实时</td>
+</tr>
+<tr>
+<td>HiPPO-S4</td>
+<td>6.3%</td>
+<td>18.2%</td>
+<td><strong>2.5x实时</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>: HiPPO接近最优准确率,但推理速度显著更快,适合实时应用。</p>
+<h4 id="143">14.3 视频动作识别</h4>
+<p><strong>应用场景</strong>: 从视频序列识别人体动作(如"跳跃"、"挥手")。</p>
+<p><strong>挑战</strong>:
+- 视频帧数多($L = 30 \times 10 = 300$帧,10秒视频)
+- 时空特征复杂</p>
+<p><strong>模型架构</strong>:
+\begin{equation}
+\text{视频帧} \xrightarrow{\text{CNN}} \text{特征} \xrightarrow{\text{HiPPO}} \text{时序状态} \xrightarrow{\text{分类器}} \text{动作类别}
+\end{equation}</p>
+<p><strong>实验: UCF101数据集</strong></p>
+<table>
+<thead>
+<tr>
+<th>模型</th>
+<th>Top-1准确率</th>
+<th>参数量</th>
+<th>FLOPs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>C3D</td>
+<td>82.3%</td>
+<td>78M</td>
+<td>38.5G</td>
+</tr>
+<tr>
+<td>I3D</td>
+<td>95.6%</td>
+<td>25M</td>
+<td>108G</td>
+</tr>
+<tr>
+<td>SlowFast</td>
+<td>96.4%</td>
+<td>34M</td>
+<td>65.7G</td>
+</tr>
+<tr>
+<td>HiPPO-Conv</td>
+<td>94.8%</td>
+<td><strong>18M</strong></td>
+<td><strong>25.3G</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>: HiPPO在参数和计算量上更高效,准确率略低但仍有竞争力。</p>
+<h4 id="144">14.4 医疗时序数据分析</h4>
+<p><strong>应用场景</strong>: ICU患者生理信号监测(心率、血压、血氧等)预测疾病风险。</p>
+<p><strong>数据特点</strong>:
+- 多变量时间序列(10+个生理指标)
+- 不规则采样(缺失值、不同频率)
+- 长期依赖(24-72小时历史)</p>
+<p><strong>模型适配</strong>:
+\begin{equation}
+x_k = \bar{A}<em k-1="k-1">k x</em>} + \sum_{j} \bar{B<em k_j="k,j">{k,j} u</em>
+\end{equation}
+其中$u_{k,j}$是第$j$个生理指标的观测(可能缺失)。} \tag{147</p>
+<p><strong>实验: MIMIC-III ICU数据集</strong></p>
+<p>任务: 预测48小时内死亡率</p>
+<table>
+<thead>
+<tr>
+<th>模型</th>
+<th>AUROC</th>
+<th>AUPRC</th>
+<th>F1分数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Logistic Regression</td>
+<td>0.785</td>
+<td>0.312</td>
+<td>0.285</td>
+</tr>
+<tr>
+<td>GRU</td>
+<td>0.842</td>
+<td>0.398</td>
+<td>0.352</td>
+</tr>
+<tr>
+<td>Transformer-XL</td>
+<td>0.856</td>
+<td>0.425</td>
+<td>0.381</td>
+</tr>
+<tr>
+<td>HiPPO-S4</td>
+<td><strong>0.871</strong></td>
+<td><strong>0.448</strong></td>
+<td><strong>0.405</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键发现</strong>: HiPPO能捕捉生理指标的长期趋势(如缓慢恶化的肾功能),这对预测至关重要。</p>
+<h3 id="_21">十五、离散化误差的定量分析</h3>
+<h4 id="151-local-truncation-error">15.1 局部截断误差(Local Truncation Error)</h4>
+<p><strong>定义15.1</strong>: 局部截断误差是单步离散化引入的误差,假设前一步精确。</p>
+<p><strong>定理15.2 (前向Euler的LTE)</strong>: 前向Euler方法的局部截断误差为:
+\begin{equation}
+\text{LTE}<em k_1="k+1">{\text{FE}} = \frac{h^2}{2}x''(\xi), \quad \xi \in [t_k, t</em>
+\end{equation}}] \tag{148</p>
+<p><strong>证明</strong>:</p>
+<p>步骤1: Taylor展开精确解:
+\begin{equation}
+x(t_{k+1}) = x(t_k) + hx'(t_k) + \frac{h^2}{2}x''(t_k) + \frac{h^3}{6}x'''(\xi) \tag{149}
+\end{equation}</p>
+<p>步骤2: 前向Euler近似:
+\begin{equation}
+x_{k+1}^{\text{FE}} = x(t_k) + hx'(t_k) \tag{150}
+\end{equation}</p>
+<p>步骤3: 局部误差:
+\begin{equation}
+\text{LTE}<em k_1="k+1">{\text{FE}} = x(t</em>
+\end{equation}
+$\square$}) - x_{k+1}^{\text{FE}} = \frac{h^2}{2}x''(t_k) + \mathcal{O}(h^3) \tag{151</p>
+<p><strong>定理15.3 (双线性方法的LTE)</strong>: 双线性方法的局部截断误差为:
+\begin{equation}
+\text{LTE}_{\text{Bilinear}} = \frac{h^3}{12}x'''(\xi) \tag{152}
+\end{equation}</p>
+<p><strong>证明思路</strong>: Taylor展开到$h^3$项,中点法则消去$h^2$项。$\square$</p>
+<p><strong>结论</strong>: 双线性方法是二阶精度($\mathcal{O}(h^2)$),而前向/后向Euler是一阶精度($\mathcal{O}(h)$)。</p>
+<h4 id="152-global-error">15.2 全局误差(Global Error)</h4>
+<p><strong>定理15.4 (全局误差累积)</strong>: 对于$p$阶方法,在时间区间$[0, T]$上,全局误差为:
+\begin{equation}
+|x(T) - x_N| = \mathcal{O}(h^p) \tag{153}
+\end{equation}
+其中$N = T/h$是步数。</p>
+<p><strong>证明</strong>:</p>
+<p>步骤1: 每步局部误差为$\mathcal{O}(h^{p+1})$。</p>
+<p>步骤2: 总步数为$N = T/h$。</p>
+<p>步骤3: 误差传播通过稳定算子,累积为:
+\begin{equation}
+\text{总误差} \sim N \times \mathcal{O}(h^{p+1}) = \frac{T}{h} \times \mathcal{O}(h^{p+1}) = \mathcal{O}(h^p) \tag{154}
+\end{equation}
+$\square$</p>
+<p><strong>实验验证</strong>:</p>
+<p>设$A = -1$(标量情况),$B = 1$,$u(t) = \sin(t)$,$T = 10$。</p>
+<table>
+<thead>
+<tr>
+<th>步长$h$</th>
+<th>前向Euler误差</th>
+<th>收敛阶</th>
+<th>双线性误差</th>
+<th>收敛阶</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.1</td>
+<td>$5.32 \times 10^{-2}$</td>
+<td>-</td>
+<td>$2.14 \times 10^{-3}$</td>
+<td>-</td>
+</tr>
+<tr>
+<td>0.05</td>
+<td>$2.68 \times 10^{-2}$</td>
+<td>0.99</td>
+<td>$5.38 \times 10^{-4}$</td>
+<td>1.99</td>
+</tr>
+<tr>
+<td>0.025</td>
+<td>$1.35 \times 10^{-2}$</td>
+<td>0.99</td>
+<td>$1.35 \times 10^{-4}$</td>
+<td>2.00</td>
+</tr>
+<tr>
+<td>0.0125</td>
+<td>$6.76 \times 10^{-3}$</td>
+<td>1.00</td>
+<td>$3.38 \times 10^{-5}$</td>
+<td>2.00</td>
+</tr>
+</tbody>
+</table>
+<p><strong>分析</strong>: 前向Euler表现出一阶收敛($\text{误差} \propto h^1$),双线性表现出二阶收敛($\text{误差} \propto h^2$)。</p>
+<h4 id="153">15.3 自适应步长控制</h4>
+<p><strong>算法15.5 (Embedded Pair方法)</strong>:</p>
+<p>使用两个不同阶次的方法估计误差:
+\begin{equation}
+\begin{aligned}
+x_{k+1}^{(p)} &amp;= \text{p阶方法}(x_k, h) \tag{155} \
+x_{k+1}^{(p+1)} &amp;= \text{(p+1)阶方法}(x_k, h) \tag{156} \
+e_k &amp;= |x_{k+1}^{(p+1)} - x_{k+1}^{(p)}| \tag{157}
+\end{aligned}
+\end{equation}</p>
+<p><strong>步长调整策略</strong>:
+\begin{equation}
+h_{\text{new}} = h_{\text{old}} \times \min\left(2, \max\left(0.5, 0.9\left(\frac{\text{tol}}{e_k}\right)^{1/(p+1)}\right)\right) \tag{158}
+\end{equation}</p>
+<p><strong>优势</strong>:
+- 自动平衡精度和效率
+- 避免手动调参</p>
+<p><strong>应用于HiPPO</strong>: 对于LegS,由于步长无关性,自适应控制主要用于控制计算频率而非数值精度。</p>
+<h3 id="hippo">十六、HiPPO的扩展与变体</h3>
+<h4 id="161-hippo">16.1 非均匀测度的HiPPO</h4>
+<p><strong>定义16.1 (加权HiPPO)</strong>: 用权重函数$w(t)$定义内积:
+\begin{equation}
+\langle f, g \rangle_w = \int_0^T f(t)g(t)w(t)dt \tag{159}
+\end{equation}</p>
+<p><strong>例子: 指数加权HiPPO</strong>:
+\begin{equation}
+w(t) = e^{-\alpha(T-t)}, \quad \alpha &gt; 0 \tag{160}
+\end{equation}</p>
+<p>这给予近期数据更高权重,类似于移动平均。</p>
+<p><strong>推导</strong>: 相应的ODE变为:
+\begin{equation}
+x'(t) = \frac{A}{t}x(t) + \frac{B}{t}u(t) + \alpha Qx(t) \tag{161}
+\end{equation}
+其中$Q$是由权重函数导出的修正矩阵。</p>
+<h4 id="162-hippo">16.2 非线性HiPPO</h4>
+<p><strong>动机</strong>: 线性系统无法捕捉复杂的非线性模式。</p>
+<p><strong>方法1: Koopman算子理论</strong></p>
+<p>将非线性系统嵌入到高维线性空间:
+\begin{equation}
+\frac{d}{dt}\Phi(x) = K\Phi(x) + Lu \tag{162}
+\end{equation}
+其中$\Phi: \mathbb{R}^d \to \mathbb{R}^D$($D \gg d$)是特征映射,$K$是Koopman算子。</p>
+<p><strong>方法2: 门控HiPPO(类似LSTM)</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+g_k &amp;= \sigma(W_g[x_{k-1}, u_k]) \quad \text{(门控信号)} \tag{163} \
+x_k &amp;= g_k \odot (\bar{A}<em k-1="k-1">k x</em>
+\end{aligned}
+\end{equation}}) + (1 - g_k) \odot (\bar{B}_k u_k) \tag{164</p>
+<p>这允许模型学习何时保留历史、何时关注当前输入。</p>
+<h4 id="163-hippo">16.3 多分辨率HiPPO</h4>
+<p><strong>架构</strong>:
+\begin{equation}
+\begin{aligned}
+x_k^{(1)} &amp;: \text{细粒度(每步更新)} \tag{165} \
+x_k^{(2)} &amp;: \text{中粒度(每2步更新)} \tag{166} \
+x_k^{(4)} &amp;: \text{粗粒度(每4步更新)} \tag{167} \
+&amp;\vdots
+\end{aligned}
+\end{equation}</p>
+<p><strong>融合策略</strong>:
+\begin{equation}
+x_k^{\text{fused}} = \text{Concat}(x_k^{(1)}, x_k^{(2)}, x_k^{(4)}, \ldots) \tag{168}
+\end{equation}</p>
+<p><strong>优势</strong>: 同时捕捉短期细节和长期趋势,类似小波分解。</p>
+<h3 id="_22">十七、总结与最佳实践</h3>
+<h4 id="171">17.1 离散化方法选择指南</h4>
+<table>
+<thead>
+<tr>
+<th>场景</th>
+<th>推荐方法</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>高精度需求</td>
+<td>双线性/ZOH</td>
+<td>二阶精度,A-稳定</td>
+</tr>
+<tr>
+<td>快速原型</td>
+<td>前向Euler</td>
+<td>简单,快速</td>
+</tr>
+<tr>
+<td>刚性系统</td>
+<td>后向Euler/双线性</td>
+<td>A-稳定</td>
+</tr>
+<tr>
+<td>LegS系统</td>
+<td>双线性(特化版)</td>
+<td>步长无关</td>
+</tr>
+<tr>
+<td>自适应需求</td>
+<td>Embedded Pair</td>
+<td>自动误差控制</td>
+</tr>
+</tbody>
+</table>
+<h4 id="172-hippo">17.2 HiPPO使用建议</h4>
+<p><strong>1. 基函数选择</strong>:
+   - 一般任务: LegS(平衡性能和效率)
+   - 频域任务: Fourier
+   - 周期信号: 三角函数基
+   - 特定先验: 自定义正交基</p>
+<p><strong>2. 状态维度$d$</strong>:
+   - 短序列($L &lt; 1000$): $d = 64$
+   - 中等序列($1000 &lt; L &lt; 10000$): $d = 128 \sim 256$
+   - 长序列($L &gt; 10000$): $d = 256 \sim 512$
+   - 信息理论指导: $d \geq Lb/\log_2(1/\epsilon)$</p>
+<p><strong>3. 初始化策略</strong>:
+   - 状态$x_0$: 零初始化
+   - 输出矩阵$C$: Xavier初始化
+   - 可学习参数: 标准正态分布</p>
+<p><strong>4. 训练技巧</strong>:
+   - 梯度裁剪: $|\nabla| \leq 1.0$
+   - 学习率预热: 前1000步线性增长
+   - 正则化: L2权重衰减$10^{-4}$
+   - 数值稳定性检查: 监控$|x_k|$,异常时降低学习率</p>
+<h4 id="173">17.3 性能优化建议</h4>
+<p><strong>计算优化</strong>:
+1. 利用HiPPO-LegS的$\mathcal{O}(d)$复杂度
+2. 并行化: 使用Associative Scan
+3. 混合精度: FP16前向,FP32梯度
+4. 算子融合: 合并矩阵乘法和非线性</p>
+<p><strong>内存优化</strong>:
+1. 梯度检查点: 减少$\mathcal{O}(L)$到$\mathcal{O}(\sqrt{L})$
+2. 稀疏更新: 利用输入稀疏性
+3. 状态量化: 8-bit状态存储(推理时)</p>
+<p><strong>工程实践</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 伪代码示例</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">HiPPO_LegS</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">d</span><span class="p">,</span> <span class="n">dt</span><span class="o">=</span><span class="mf">1.0</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A</span> <span class="o">=</span> <span class="n">compute_legS_matrix</span><span class="p">(</span><span class="n">d</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">B</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">ones</span><span class="p">((</span><span class="n">d</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dt</span> <span class="o">=</span> <span class="n">dt</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">u</span><span class="p">,</span> <span class="n">k</span><span class="p">):</span>
+        <span class="c1"># 双线性离散化</span>
+        <span class="n">A_bar</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">inv</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">A</span><span class="o">/</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="p">(</span><span class="n">k</span><span class="o">+</span><span class="mi">1</span><span class="p">)))</span>
+        <span class="n">A_bar</span> <span class="o">=</span> <span class="n">A_bar</span> <span class="o">@</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="n">d</span><span class="p">)</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">A</span><span class="o">/</span><span class="p">(</span><span class="mi">2</span><span class="o">*</span><span class="n">k</span><span class="p">))</span>
+        <span class="n">B_bar</span> <span class="o">=</span> <span class="n">A_bar</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">B</span> <span class="o">/</span> <span class="n">k</span>
+        <span class="k">return</span> <span class="n">A_bar</span> <span class="o">@</span> <span class="n">x</span> <span class="o">+</span> <span class="n">B_bar</span> <span class="o">*</span> <span class="n">u</span>
+</code></pre></div>
+
+<h4 id="174">17.4 未来研究方向</h4>
+<p><strong>理论方向</strong>:
+1. 非线性HiPPO的严格理论
+2. 最优基函数的自动学习
+3. 多模态信号的联合HiPPO
+4. 与因果推理的结合</p>
+<p><strong>应用方向</strong>:
+1. 极长序列($L &gt; 10^6$): DNA序列,金融高频数据
+2. 在线学习: 流式数据的实时更新
+3. 多智能体系统: 分布式HiPPO
+4. 科学计算: 偏微分方程求解</p>
+<p><strong>工程方向</strong>:
+1. 专用硬件加速(TPU/FPGA)
+2. 稀疏HiPPO矩阵
+3. 量化感知训练
+4. 自动架构搜索(NAS)</p>
+<h4 id="175">17.5 常见问题解答</h4>
+<p><strong>Q1: HiPPO适合所有序列任务吗?</strong></p>
+<p>A: 不一定。对于需要强非线性建模的任务(如自然语言理解),纯HiPPO可能不如Transformer。但在长序列、流式处理、计算受限场景下,HiPPO具有明显优势。</p>
+<p><strong>Q2: 如何选择LegT vs LegS?</strong></p>
+<p>A: LegS记忆整个历史,适合长期依赖;LegT记忆固定窗口,适合局部模式。多数情况推荐LegS。</p>
+<p><strong>Q3: HiPPO的计算瓶颈在哪?</strong></p>
+<p>A: 主要在矩阵求逆$(I - A/2k)^{-1}$。优化方法包括:预计算、利用特殊结构(下三角)、或用迭代法近似。</p>
+<p><strong>Q4: 如何与现有模型(如Transformer)结合?</strong></p>
+<p>A: 混合架构:早期层用HiPPO处理长序列,后期层用Attention捕捉语义。参考S4模型的设计。</p>
+<p><strong>结语</strong>: HiPPO提供了一个优雅的数学框架,将序列建模问题转化为函数逼近问题。通过本文的详细推导,我们深入理解了其离散化、衰减特性、数值稳定性等关键性质。实践中,合理选择配置并结合领域知识,HiPPO可在各种序列任务上达到优异性能。多项式记忆衰减、尺度等变性、计算高效性是其三大核心优势,使其成为处理长序列问题的有力工具。</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer升级之路：14、当HWFA遇见ReRoPE</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>Transformer升级之路：14、当HWFA遇见ReRoPE</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 35.0 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9731">https://spaces.ac.cn/archives/9731</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>在上一篇文章<a href="/archives/9728">《Transformer升级之路：13、逆用Leaky ReRoPE》</a>中，笔者尝试通过在训练阶段逆用Leaky ReRoPE的思路，使得推理阶段的位置编码变为正常的RoPE，从而在达到长度外推的同时解决ReRoPE推理变慢的缺点。遗憾的是，从实验结果来看，“Leaky ReRoPE → RoPE”的效果并不如“RoPE → ReRoPE/Leaky ReRoPE”，因此这个问题尚未完全解决。</p>
+<p>此时，笔者想到此前在<a href="/archives/9603">《Transformer升级之路：9、一种全局长度外推的新思路》</a>提出的HWFA本身就具有一定的长度外推能力，如果跟ReRoPE“强强联合”，是否会有更好的效果？更关键是，HWFA的加入可以大幅度降低推理成本，从而弥补ReRoPE的不足！</p>
+<h2 id="_1">温故</h2>
+<p>首先，“例行公事”地回顾一下HWFA。HWFA（Hybird Window-Full Attention）并非一个具体的模型，而是一种Attention的组合方式，能够在基本保持效果不变的前提下，增强Attention模型的长度外推能力，同时还能降低训练和推理成本。</p>
+<p>具体来说，HWFA是“$L-1$层Window RoPE Attention + $1$层Full NoPE Attention”，即前面$L-1$层Attention都加上<a href="/archives/8265">RoPE</a>，并通过window限制感受野，这样一来推理成本就变为常数，并且基于block parallel进行优化的话，也可以提升训练速度；至于最后一层Attention，则保留global的形式，但去掉位置编码（NoPE），同时加上<a href="/archives/8823">$\log n$缩放</a>。经过这样修改，并且适当选择window之后，模型的训练效果只有轻微下降，同时呈现出优秀的长度外推能力。</p>
+<p>无独有偶，后来Google提出了<a href="https://papers.cool/arxiv/2307.03170">FOT（Focused Transformer）</a>，它跟HWFA有很多异曲同工之处：同样是$L-1$层Local Attention加$1$层Full Attention，Full Attention同样是NoPE的，不同的是FOT把Full Attention放在中间，并且Local Attention没有严格限制感受野，所以无法直接长度外推，因此它提出了crossbatch training来拓展模型长度。事后，笔者实验过在HWFA上使用crossbatch training，也有不错的效果。</p>
+<h2 id="_2">知新</h2>
+<p>回到本文的主题，HWFA如何跟ReRoPE“强强联合”呢？我们知道，ReRoPE是用在Full RoPE Attention上的，就是在推理阶段截断一下相对位置矩阵：<br />
+$$\begin{pmatrix}0 & \\\  
+1 & 0 & \\\  
+2 & 1 & 0 &\\\  
+\ddots & 2 & 1 & 0 & \\\  
+\ddots & \ddots & 2 & 1 & 0 & \\\  
+\ddots & \ddots & \ddots & \ddots & \ddots & \ddots \\\  
+\small{L - 2} & \ddots & \ddots & \ddots & \ddots & \ddots & \ddots \\\  
+\small{L - 1} & \small{L - 2} & \ddots & \ddots & \ddots & 2 & 1 & 0 & \\\  
+\end{pmatrix} \,\to\, \begin{pmatrix}  
+\color{red}{0} & \\\  
+\color{red}{1} & \color{red}{0} & \\\  
+\color{red}{\ddots} & \color{red}{1} & \color{red}{0} & \\\  
+\color{red}{\small{w - 1}} & \color{red}{\ddots} & \color{red}{1} & \color{red}{0} & \\\  
+\color{green}{w} & \color{red}{\small{w - 1}} & \color{red}{\ddots} & \color{red}{1} & \color{red}{0} & \\\  
+\color{green}{\ddots} & \color{green}{w} & \color{red}{\ddots} & \color{red}{\ddots} & \color{red}{1} & \color{red}{0} & \\\  
+\color{green}{\ddots} & \color{green}{\ddots} & \color{green}{\ddots} & \color{red}{\ddots} & \color{red}{\ddots} & \color{red}{\ddots} & \color{red}{\ddots} & \\\  
+\color{green}{w} & \color{green}{\ddots} & \color{green}{\ddots} & \color{green}{w} & \color{red}{\small{w - 1}} & \color{red}{\ddots} & \color{red}{1} & \color{red}{0} & \\\  
+\end{pmatrix}$$<br />
+出人意料的是，这样的事后处理体现出极佳的长度外推能力。然而，由于RoPE的特殊性，原始的ReRoPE实现需要算两次Attention矩阵，并且不兼容主流的Flash Attention加速等。总的来说，推理阶段的成本增加略有点大。</p>
+<p>不过，HWFA的加入将会极大地缓解这个问题！综上所述，ReRoPE只用在Full RoPE Attention上，HWFA则大部分都是Window RoPE Attention，所以“HWFA+ReRoPE”的方案就呼之欲出了：训练阶段将HWFA原本的Full NoPE Attention换成Full RoPE Attention，然后推理阶段则改为Full ReRoPE Attention。这样一来推理阶段切换ReRoPE带来的额外成本就会变得非常少，而且其他层换为Window Attention带来的收益更加显著。</p>
+<p>除此之外，“HWFA+ReRoPE”还可以弥补原本HWFA的效果损失。此前，为了保证长度外推能力，HWFA的Full Attention要去掉位置编码（即NoPE），同时Window Attention的感受野$\tilde{w}$要满足$(\tilde{w}-1)(L-1)+1 = \alpha N$（其中$L$是层数，$N$是训练长度，$0 &lt; \alpha \leq 1$），这些约束限制了模型的表达能力，导致了训练效果变差。而引入ReRoPE之后，Window Attention的感受野可以适当取大一些，Full Attention也可以用RoPE，还可以将它放到中间层而不单是最后一层，甚至也可以多于$1$层Full Attention。这些变化都可以弥补效果损失，并且得益于ReRoPE，长度外推能力并不会有所下降。</p>
+<p>为了区别最初版的HWFA，我们也可以将“HWFA+ReRoPE”的组合，称为“HWFA2”。</p>
+<h2 id="_3">实验</h2>
+<p>下面分享一些“HWFA+ReRoPE（HWFA2）”的实验结果。由于引入ReRoPE之后，HWFA的自由度就大了很多，因此下降只是挑笔者认为比较符合直觉的组合进行实验，无法充分验证所有排列组合。</p>
+<p>实验模型跟之前的HWFA、ReRoPE的一样，都是1亿参数的GAU模型，512的训练长度。注意这里有两个window参数：一个是ReRoPE本身有个$w$参数，此前ReRoPE实验显示这个影响不大，所以下面统一取256；另一个是HFWA的Window Attention的感受野，上面记为$\tilde{w}$，这是可调的。所以，“HWFA+ReRoPE”的主要参数就是Window Attention的$\tilde{w}$，以及Full Attention的层数和分布位置。此前笔者做了一些对比实验，显示从训练效果来看，Full Attention放在中间要比放在末尾效果更好，所以如果是1层Full Attention，那么它默认的放置位置是(index = num_layers / 2)的层，如果是2层Full Attention，那么默认的放置位置是(index = num_layers / 3)和(index = 2 * num_layers / 3)的层，依此类推。</p>
+<p>部分实验结果如下：<br />
+\begin{array}{c|cc}<br />
+\hline<br />
+\text{测试长度} &amp; 512(\text{训练}) &amp; 4096(\text{重复}) &amp; 4096(\text{不重复})\\\<br />
+\hline<br />
+\text{Baseline} &amp; 49.41\% &amp; 24.17\% &amp; 23.16\% \\\<br />
+\text{Baseline-}\log n &amp; 49.40\% &amp; 24.60\% &amp; 24.02\% \\\<br />
+\hline<br />
+\text{ReRoPE-w256} &amp; 49.41\% &amp; 77.90\% &amp; 48.48\% \\\<br />
+\text{ReRoPE-w256-}\log n^{\color{red}{\dagger}} &amp; 49.41\% &amp; 82.40\% &amp; 48.85\% \\\<br />
+\text{ReRoPE-w256-}\log n &amp; 49.40\% &amp; \boldsymbol{85.12\%} &amp; 49.07\% \\\<br />
+\hline<br />
+\text{InvLeaky ReRoPE-w128-}\log n &amp; 49.38\% &amp; 82.25\% &amp; 48.32\% \\\<br />
+\text{InvLeaky ReRoPE-w128-b8-}\log n &amp; 49.62\% &amp; 81.15\% &amp; 48.85\% \\\<br />
+\hline<br />
+\text{HFWA} &amp; 48.70\% &amp; 80.84\% &amp; 48.15\% \\\<br />
+\hline<br />
+\text{HFWA-ReRoPE-w32-f1} &amp; 49.29\% &amp; 83.13\% &amp; 49.34\% \\\<br />
+\text{HFWA-ReRoPE-w64-f1} &amp; 49.32\% &amp; 82.41\% &amp; \boldsymbol{49.37\%} \\\<br />
+\text{HFWA-ReRoPE-w128-f1} &amp; 49.21\% &amp; 80.18\% &amp; 48.99\% \\\<br />
+\text{HFWA-ReRoPE-w256-f1} &amp; 49.00\% &amp; 54.94\% &amp; 47.64\% \\\<br />
+\text{HFWA-ReRoPE-w32-f2} &amp; \boldsymbol{49.50}\% &amp; 84.09\% &amp; 49.35\% \\\<br />
+\text{HFWA-ReRoPE-w64-f2} &amp; 49.46\% &amp; 84.43\% &amp; 49.36\% \\\<br />
+\text{HFWA-ReRoPE-w128-f2} &amp; 49.35\% &amp; 83.09\% &amp; 48.97\% \\\<br />
+\text{HFWA-ReRoPE-w256-f2} &amp; 49.37\% &amp; 75.24\% &amp; 48.42\% \\\<br />
+\hline<br />
+\end{array}</p>
+<p>上表中$\text{w}$后的数字就是Window Attention的感受野$\tilde{w}$的大小，$\text{f}$后的数字就是Full Attention的层数。原本的HFWA由于各种约束，$\tilde{w}$只取到了16，再大的话长度外推能力就会明显下降。而从上表可以看到，增大了$\tilde{w}$后，训练性能可以迅速对齐baseline，并且进一步增加Full Attention还超过了baseline。至于外推效果，$\text{w32},\text{w64}$这两个case都相当不错，明显超过了HFWA。总的来看，HFWA-ReRoPE的最佳组合是$\text{w64-f2}$，训练效果和不重复的外推效果都超过了原本的ReRoPE，再结合训练长度$N$是512、层数$L$是24来看，猜测$\tilde{w}$的最佳取值应该是$N/L$的$2\sim 4$倍左右。</p>
+<h2 id="_4">小结</h2>
+<p>本文提出了HWFA与ReRoPE的组合使用方式，小规模的实验结果显示，这种组合能够在不损失训练效果的同时，达到近乎最佳的长度外推效果，并且得益于HFWA的设计，还可以明显地降低推理成本，有效地缓解了ReRoPE原本的推理成本增加的缺点。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9731">https://spaces.ac.cn/archives/9731</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Aug. 24, 2023). 《Transformer升级之路：14、当HWFA遇见ReRoPE 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9731">https://spaces.ac.cn/archives/9731</a></p>
+<p>@online{kexuefm-9731,<br />
+title={Transformer升级之路：14、当HWFA遇见ReRoPE},<br />
+author={苏剑林},<br />
+year={2023},<br />
+month={Aug},<br />
+url={\url{https://spaces.ac.cn/archives/9731}},<br />
+} </p>
+<hr />
+<h2 id="_5">公式推导与注释</h2>
+<h3 id="1-hwfa">1. HWFA的层次结构数学定义</h3>
+<p><strong>定义1.1（HWFA架构）</strong></p>
+<p>HWFA（Hybrid Window-Full Attention）是一种混合注意力架构，由两类注意力层组成：</p>
+<ol>
+<li><strong>窗口注意力层（Window Attention）</strong>：具有有限感受野$\tilde{w}$的局部注意力</li>
+<li><strong>全局注意力层（Full Attention）</strong>：无限制感受野的全局注意力</li>
+</ol>
+<p>对于$L$层的Transformer，HWFA的一般形式为：</p>
+<p>$$\text{Attention}^{(\ell)} = \begin{cases}
+\text{WindowAttn}(\cdot; \tilde{w}, \text{RoPE}), & \ell \in \mathcal{W} \\
+\text{FullAttn}(\cdot; \text{NoPE}), & \ell \in \mathcal{F}
+\end{cases}$$</p>
+<p>其中$\mathcal{W}$和$\mathcal{F}$是窗口层和全局层的索引集合，满足$\mathcal{W} \cup \mathcal{F} = {1, 2, \ldots, L}$，$\mathcal{W} \cap \mathcal{F} = \emptyset$。</p>
+<p><strong>推导1.2（窗口注意力的数学表示）</strong></p>
+<p>窗口注意力在位置$i$处只关注窗口$[i - \tilde{w} + 1, i]$内的位置。注意力掩码为：</p>
+<p>$$M_{i,j}^{\text{window}} = \begin{cases}
+0, & i - \tilde{w} + 1 \leq j \leq i \\
+-\infty, & \text{otherwise}
+\end{cases}$$</p>
+<p>注意力权重为：</p>
+<p>$$\alpha_{i,j}^{(\ell)} = \frac{\exp(a_{i,j}^{(\ell)} + M_{i,j}^{\text{window}})}{\sum_{k} \exp(a_{i,k}^{(\ell)} + M_{i,k}^{\text{window}})} = \frac{\exp(a_{i,j}^{(\ell)})}{\sum_{k=i-\tilde{w}+1}^{i} \exp(a_{i,k}^{(\ell)})}$$</p>
+<p>其中$a_{i,j}^{(\ell)} = (\boldsymbol{\mathcal{R}}^i\boldsymbol{q}_i^{(\ell)})^{\top}(\boldsymbol{\mathcal{R}}^j\boldsymbol{k}_j^{(\ell)})$是应用RoPE后的Attention分数。</p>
+<p><strong>定义1.3（全局注意力的数学表示）</strong></p>
+<p>全局注意力不使用位置编码（NoPE），纯粹基于内容相似度：</p>
+<p>$$a_{i,j}^{(\ell)} = (\boldsymbol{q}_i^{(\ell)})^{\top}\boldsymbol{k}_j^{(\ell)}$$</p>
+<p>注意力权重为：</p>
+<p>$$\alpha_{i,j}^{(\ell)} = \frac{\exp(a_{i,j}^{(\ell)} / \sqrt{d} + \log n)}{\sum_{k=1}^{n} \exp(a_{i,k}^{(\ell)} / \sqrt{d} + \log n)}$$</p>
+<p>其中$\log n$是序列长度缩放因子，$n$是当前序列长度，这有助于稳定长序列的训练。</p>
+<p><strong>推导1.4（原始HWFA的层配置）</strong></p>
+<p>最简单的HWFA配置是"$(L-1)$层窗口 + $1$层全局"：</p>
+<p>$$\mathcal{W} = \{1, 2, \ldots, L-1\}, \quad \mathcal{F} = \{L\}$$</p>
+<p>这样最后一层可以聚合全局信息，而前面的层通过窗口注意力高效建模局部依赖。</p>
+<h3 id="2">2. 多尺度窗口的数学表示</h3>
+<p><strong>定义2.1（层级感受野）</strong></p>
+<p>在$L$层的HWFA中，第$\ell$层位置$i$的理论感受野为：</p>
+<p>$$\mathcal{F}^{(\ell)}(i) = \{j : \exists \text{路径从} j \text{到} i \text{通过前} \ell \text{层}\}$$</p>
+<p><strong>定理2.2（窗口注意力的感受野增长）</strong></p>
+<p>对于纯窗口注意力（所有层窗口大小为$\tilde{w}$），第$\ell$层的感受野大小为：</p>
+<p>$$|\mathcal{F}^{(\ell)}(i)| = \min(\ell \cdot \tilde{w} - (\ell - 1), i + 1) = \min(\ell(\tilde{w} - 1) + 1, i + 1)$$</p>
+<p><strong>证明</strong>（归纳法）：</p>
+<p><strong>基础步骤</strong>：第1层，$|\mathcal{F}^{(1)}(i)| = \min(\tilde{w}, i + 1)$（显然）。</p>
+<p><strong>归纳步骤</strong>：假设第$\ell$层的感受野为$\ell(\tilde{w} - 1) + 1$。在第$\ell+1$层，每个位置$j \in \mathcal{F}^{(\ell)}(i)$可以关注其前$\tilde{w}$个位置，因此：</p>
+<p>$$\mathcal{F}^{(\ell+1)}(i) = \bigcup_{j \in \mathcal{F}^{(\ell)}(i)} \{k : j - \tilde{w} + 1 \leq k \leq j\}$$</p>
+<p>最远可达：</p>
+<p>$$\min(\mathcal{F}^{(\ell)}(i)) - (\tilde{w} - 1) = i - [\ell(\tilde{w} - 1)] - (\tilde{w} - 1) = i - (\ell + 1)(\tilde{w} - 1)$$</p>
+<p>因此：</p>
+<p>$$|\mathcal{F}^{(\ell+1)}(i)| = (\ell + 1)(\tilde{w} - 1) + 1$$</p>
+<p><strong>推论2.3（覆盖整个序列的条件）</strong></p>
+<p>要使第$L$层能覆盖长度为$N$的整个序列，需要：</p>
+<p>$$L(\tilde{w} - 1) + 1 \geq N$$</p>
+<p>即：</p>
+<p>$$\tilde{w} \geq \frac{N - 1}{L} + 1 = \frac{N - 1 + L}{L}$$</p>
+<p>对于$N \gg L$，近似为：</p>
+<p>$$\tilde{w} \geq \frac{N}{L}$$</p>
+<p><strong>推导2.4（原始HWFA的窗口大小约束）</strong></p>
+<p>原始HWFA要求能够外推，因此窗口大小需要满足：</p>
+<p>$$(\tilde{w} - 1)(L - 1) + 1 = \alpha N_{\text{train}}$$</p>
+<p>其中$0 &lt; \alpha \leq 1$是覆盖系数。当$\alpha = 1$时，第$L-1$层恰好覆盖整个训练序列，最后一层的全局注意力可以聚合所有信息。</p>
+<p>解得：</p>
+<p>$$\tilde{w} = \frac{\alpha N_{\text{train}} - 1}{L - 1} + 1 \approx \frac{\alpha N_{\text{train}}}{L - 1}$$</p>
+<p>例如，$N_{\text{train}} = 512$，$L = 24$，$\alpha = 1/32$（实验中的设置）：</p>
+<p>$$\tilde{w} \approx \frac{512/32}{23} = \frac{16}{23} \approx 0.7$$</p>
+<p>实际使用$\tilde{w} = 16$，这对应$\alpha = 16 \times 23 / 512 \approx 0.72$。</p>
+<h3 id="3-reropehwfa">3. ReRoPE与HWFA的融合机制</h3>
+<p><strong>定义3.1（HWFA2架构）</strong></p>
+<p>HWFA2将ReRoPE引入HWFA，定义为：</p>
+<p>$$\text{Attention}^{(\ell)} = \begin{cases}
+\text{WindowAttn}(\cdot; \tilde{w}, \text{RoPE}), & \ell \in \mathcal{W} \\
+\text{FullAttn}(\cdot; \text{ReRoPE}(w)), & \ell \in \mathcal{F}
+\end{cases}$$</p>
+<p>关键改变：</p>
+<ol>
+<li>全局注意力层从NoPE改为ReRoPE</li>
+<li>窗口大小$\tilde{w}$不再受严格约束，可以更灵活选择</li>
+<li>全局注意力层可以多于1层，也可以放在中间层</li>
+</ol>
+<p><strong>推导3.2（ReRoPE在全局层的应用）</strong></p>
+<p>全局层使用ReRoPE，相对位置矩阵为：</p>
+<p>$$[\mathcal{P}_{\text{ReRoPE}}]_{i,j} = \min(i - j, w), \quad i \geq j$$</p>
+<p>Attention分数为：</p>
+<p>$$a_{i,j}^{(\ell)} = \begin{cases}
+\boldsymbol{q}_i^{(\ell) \top}\boldsymbol{\mathcal{R}}^{i-j}\boldsymbol{k}_j^{(\ell)}, & i - j < w \\
+\boldsymbol{q}_i^{(\ell) \top}\boldsymbol{\mathcal{R}}^{w}\boldsymbol{k}_j^{(\ell)}, & i - j \geq w
+\end{cases}$$</p>
+<p>这需要计算两次Attention矩阵（如原始ReRoPE），但由于只有少数几层是全局层，总体计算开销相对较小。</p>
+<p><strong>定理3.3（HWFA2的外推能力）</strong></p>
+<p>HWFA2继承了ReRoPE的无限外推能力。对于任意测试长度$L_{\text{test}}$，只要：</p>
+<ol>
+<li>窗口层的窗口大小$\tilde{w} &lt; N_{\text{train}}$</li>
+<li>全局层的ReRoPE窗口$w &lt; N_{\text{train}}$</li>
+</ol>
+<p>模型就不会遇到未见过的位置编码。</p>
+<p><strong>证明</strong>：</p>
+<ul>
+<li>窗口层使用RoPE，最大相对位置为$\tilde{w} - 1 &lt; N_{\text{train}}$（训练时见过）</li>
+<li>全局层使用ReRoPE，最大相对位置为$w &lt; N_{\text{train}}$（训练时见过）</li>
+</ul>
+<p>因此所有位置编码都在训练范围内。</p>
+<p><strong>推导3.4（窗口层与全局层的协同）</strong></p>
+<p>窗口层负责局部建模，全局层负责远距离信息聚合。设有$L_w$层窗口层和$L_f$层全局层（$L_w + L_f = L$），则：</p>
+<ul>
+<li><strong>局部信息传播深度</strong>：$L_w \times \tilde{w}$</li>
+<li><strong>全局信息整合能力</strong>：$L_f$次全局聚合</li>
+</ul>
+<p>有效感受野为：</p>
+<p>$$\mathcal{F}_{\text{eff}} = \min(L_w \times \tilde{w}, L_{\text{test}})$$</p>
+<p>当$L_w \times \tilde{w} \geq L_{\text{test}}$时，所有位置都能通过局部传播到达，全局层进一步增强远距离交互。</p>
+<h3 id="4">4. 计算复杂度的理论降低</h3>
+<p><strong>定义4.1（标准Transformer的计算复杂度）</strong></p>
+<p>对于长度$N$的序列，$L$层标准Transformer的时间复杂度为：</p>
+<p>$$T_{\text{std}} = L \cdot \mathcal{O}(N^2 d)$$</p>
+<p>其中$d$是模型维度。</p>
+<p><strong>定义4.2（HWFA的计算复杂度）</strong></p>
+<p>HWFA的复杂度取决于窗口层和全局层的配置。设有$L_w$层窗口层（窗口大小$\tilde{w}$）和$L_f$层全局层：</p>
+<p>$$T_{\text{HWFA}} = L_w \cdot \mathcal{O}(\tilde{w} N d) + L_f \cdot \mathcal{O}(N^2 d)$$</p>
+<p>当$\tilde{w} \ll N$且$L_f \ll L$时，复杂度显著降低。</p>
+<p><strong>推导4.3（HWFA2的计算复杂度）</strong></p>
+<p>HWFA2的全局层使用ReRoPE，需要计算两次Attention：</p>
+<p>$$T_{\text{HWFA2}} = L_w \cdot \mathcal{O}(\tilde{w} N d) + L_f \cdot \mathcal{O}(2N^2 d)$$</p>
+<p>$$= L_w \cdot \tilde{w} N d + 2L_f \cdot N^2 d$$</p>
+<p><strong>定理4.4（计算加速比）</strong></p>
+<p>HWFA2相对于标准Transformer的加速比为：</p>
+<p>$$\text{Speedup} = \frac{T_{\text{std}}}{T_{\text{HWFA2}}} = \frac{L \cdot N^2 d}{L_w \cdot \tilde{w} N d + 2L_f \cdot N^2 d} = \frac{L \cdot N}{L_w \cdot \tilde{w} + 2L_f \cdot N}$$</p>
+<p><strong>证明</strong>：简化上式：</p>
+<p>$$\text{Speedup} = \frac{L \cdot N}{L_w \cdot \tilde{w} + 2L_f \cdot N}$$</p>
+<p>设$L_w = L - L_f$：</p>
+<p>$$\text{Speedup} = \frac{L \cdot N}{(L - L_f) \cdot \tilde{w} + 2L_f \cdot N} = \frac{L \cdot N}{L \cdot \tilde{w} + L_f(2N - \tilde{w})}$$</p>
+<p>当$N \gg \tilde{w}$时：</p>
+<p>$$\text{Speedup} \approx \frac{L \cdot N}{L \cdot \tilde{w} + 2L_f \cdot N}$$</p>
+<p><strong>推导4.5（具体实例）</strong></p>
+<p>对于$L = 24$，$N = 4096$，$\tilde{w} = 64$，$L_f = 2$（2层全局）：</p>
+<p>$$\text{Speedup} = \frac{24 \times 4096}{22 \times 64 + 2 \times 2 \times 4096} = \frac{98304}{1408 + 16384} = \frac{98304}{17792} \approx 5.52$$</p>
+<p>即计算速度提升约5.5倍。</p>
+<p>如果$L_f = 1$（仅1层全局）：</p>
+<p>$$\text{Speedup} = \frac{24 \times 4096}{23 \times 64 + 2 \times 1 \times 4096} = \frac{98304}{1472 + 8192} = \frac{98304}{9664} \approx 10.17$$</p>
+<p>加速比超过10倍。</p>
+<p><strong>推导4.6（内存复杂度）</strong></p>
+<p>标准Transformer需要存储$L$个全局Attention矩阵：</p>
+<p>$$M_{\text{std}} = L \cdot N^2$$</p>
+<p>HWFA2需要存储：</p>
+<p>$$M_{\text{HWFA2}} = L_w \cdot \tilde{w} N + L_f \cdot N^2$$</p>
+<p>内存节省比：</p>
+<p>$$\text{MemSave} = \frac{L \cdot N^2 - (L_w \cdot \tilde{w} N + L_f \cdot N^2)}{L \cdot N^2} = 1 - \frac{L_w \cdot \tilde{w}}{L \cdot N} - \frac{L_f}{L}$$</p>
+<p>对于上述例子（$L_f = 2$）：</p>
+<p>$$\text{MemSave} = 1 - \frac{22 \times 64}{24 \times 4096} - \frac{2}{24} = 1 - \frac{1408}{98304} - \frac{1}{12} \approx 1 - 0.014 - 0.083 = 0.903$$</p>
+<p>节省约90%的内存。</p>
+<h3 id="5">5. 注意力覆盖范围的完整性证明</h3>
+<p><strong>定义5.1（k-hop可达性）</strong></p>
+<p>在Transformer中，如果位置$j$可以通过最多$k$层的注意力路径到达位置$i$，则称$j$是$i$的$k$-hop邻居。</p>
+<p>$$\text{Reach}_k(i) = \{j : \exists \text{长度} \leq k \text{的路径从} j \text{到} i\}$$</p>
+<p><strong>定理5.2（HWFA2的完全可达性）</strong></p>
+<p>在HWFA2中，对于任意位置对$(i, j)$，存在路径使得$j$可达$i$。</p>
+<p><strong>证明</strong>：考虑两种情况：</p>
+<p><strong>情况1</strong>：存在全局层$\ell \in \mathcal{F}$。</p>
+<p>由于全局层的注意力覆盖所有位置（尽管使用ReRoPE，但仍然可以关注任意位置，只是远距离位置的位置编码相同），任意$j$都可以在全局层直接到达$i$。</p>
+<p><strong>情况2</strong>：只考虑窗口层。</p>
+<p>根据定理2.2，经过$L_w$层窗口注意力，感受野为$L_w(\tilde{w} - 1) + 1$。只要：</p>
+<p>$$L_w(\tilde{w} - 1) + 1 \geq i - j$$</p>
+<p>则$j$可达$i$。</p>
+<p>综合两种情况，由于HWFA2至少有1层全局层，完全可达性得证。</p>
+<p><strong>推导5.3（平均最短路径长度）</strong></p>
+<p>定义平均最短路径长度为：</p>
+<p>$$\bar{L}_{\text{path}} = \frac{1}{N^2}\sum_{i,j} \min\{\ell : j \in \text{Reach}_\ell(i)\}$$</p>
+<p>对于HWFA2：</p>
+<ul>
+<li>通过窗口层，平均最短路径为$\mathcal{O}(\Delta/\tilde{w})$，其中$\Delta = |i - j|$</li>
+<li>通过全局层，直接可达，路径长度为1</li>
+</ul>
+<p>因此：</p>
+<p>$$\bar{L}_{\text{path}} = \mathbb{E}[\min(\lceil\Delta/\tilde{w}\rceil, 1)] \approx 1 + \epsilon$$</p>
+<p>其中$\epsilon$是小常数，因为大部分位置对通过全局层即可连接。</p>
+<p><strong>定理5.4（信息瓶颈避免）</strong></p>
+<p>HWFA2通过全局层避免了纯窗口注意力的信息瓶颈问题。</p>
+<p><strong>证明思路</strong>：纯窗口注意力存在信息瓶颈：远距离信息需要经过多层逐步传播，每层都可能损失信息。HWFA2的全局层提供"高速通道"，使得任意远距离信息可以直接传递，避免了多层传播导致的信息衰减。</p>
+<h3 id="6">6. 层次化位置编码的优化</h3>
+<p><strong>定义6.1（分层位置编码策略）</strong></p>
+<p>在HWFA2中，不同层使用不同的位置编码策略：</p>
+<p>$$\text{PE}^{(\ell)} = \begin{cases}
+\text{RoPE}, & \ell \in \mathcal{W} \\
+\text{ReRoPE}(w), & \ell \in \mathcal{F}
+\end{cases}$$</p>
+<p><strong>推导6.2（局部-全局位置信息解耦）</strong></p>
+<p>窗口层的RoPE保留完整的局部位置信息：</p>
+<p>$$f_{\text{local}}(m) = m, \quad m \in [0, \tilde{w})$$</p>
+<p>全局层的ReRoPE处理全局位置信息：</p>
+<p>$$f_{\text{global}}(m) = \min(m, w)$$</p>
+<p>这种解耦允许模型在不同粒度上处理位置信息，提高了表达能力。</p>
+<p><strong>定理6.3（位置编码的互补性）</strong></p>
+<p>窗口层的RoPE和全局层的ReRoPE在功能上互补：</p>
+<ul>
+<li><strong>RoPE</strong>：精确编码局部相对位置，适合短距离依赖</li>
+<li><strong>ReRoPE</strong>：压缩远距离相对位置，适合全局信息聚合</li>
+</ul>
+<p><strong>推导6.4（全局层位置的灵活配置）</strong></p>
+<p>实验表明，全局层放在中间位置比放在最后效果更好。设$L = 24$，可能的配置：</p>
+<p><strong>配置A</strong>（1层全局，放在末尾）：$\mathcal{F} = {24}$</p>
+<p><strong>配置B</strong>（1层全局，放在中间）：$\mathcal{F} = {12}$</p>
+<p><strong>配置C</strong>（2层全局，均匀分布）：$\mathcal{F} = {8, 16}$</p>
+<p><strong>配置D</strong>（3层全局，均匀分布）：$\mathcal{F} = {6, 12, 18}$</p>
+<p>定义全局层的位置为${\ell_1, \ell_2, \ldots, \ell_{L_f}}$，最优配置应使全局层均匀分布：</p>
+<p>$$\ell_i = \left\lfloor\frac{i \cdot L}{L_f + 1}\right\rfloor, \quad i = 1, 2, \ldots, L_f$$</p>
+<p>例如，$L = 24$，$L_f = 2$：</p>
+<p>$$\ell_1 = \lfloor 24/3 \rfloor = 8, \quad \ell_2 = \lfloor 48/3 \rfloor = 16$$</p>
+<p><strong>推导6.5（位置编码窗口的协调）</strong></p>
+<p>窗口层的窗口大小$\tilde{w}$和全局层的ReRoPE窗口$w$应该协调选择。建议：</p>
+<p>$$\tilde{w} \approx \frac{N_{\text{train}}}{L}, \quad w \approx \frac{N_{\text{train}}}{2}$$</p>
+<p>这样窗口层的感受野与层数成正比，全局层覆盖较大范围。</p>
+<p>实验中，$N_{\text{train}} = 512$，$L = 24$：</p>
+<p>$$\tilde{w} \approx 512/24 \approx 21 \Rightarrow \text{选择} 32 \text{或} 64$$</p>
+<p>$$w \approx 512/2 = 256$$</p>
+<h3 id="7">7. 训练效果的理论分析</h3>
+<p><strong>定义7.1（训练损失分解）</strong></p>
+<p>将训练损失分解为局部损失和全局损失：</p>
+<p>$$\mathcal{L} = \alpha \mathcal{L}_{\text{local}} + (1 - \alpha) \mathcal{L}_{\text{global}}$$</p>
+<p>其中：
+- $\mathcal{L}<em _text_global="\text{global">{\text{local}}$：短距离预测损失（窗口内）
+- $\mathcal{L}</em>$：长距离预测损失（跨窗口）}</p>
+<p><strong>推导7.2（HWFA与标准Transformer的对比）</strong></p>
+<p><strong>标准Transformer</strong>：使用全局RoPE，两种损失都能很好建模</p>
+<p><strong>原始HWFA</strong>：</p>
+<ul>
+<li>窗口层用RoPE，$\mathcal{L}_{\text{local}}$建模良好</li>
+<li>全局层用NoPE，$\mathcal{L}_{\text{global}}$建模受限</li>
+</ul>
+<p><strong>HWFA2</strong>：</p>
+<ul>
+<li>窗口层用RoPE，$\mathcal{L}_{\text{local}}$建模良好</li>
+<li>全局层用ReRoPE，$\mathcal{L}_{\text{global}}$建模显著改善</li>
+</ul>
+<p>因此HWFA2的训练损失更接近标准Transformer。</p>
+<p><strong>定理7.3（HWFA2的训练效果优势）</strong></p>
+<p>HWFA2的训练效果优于原始HWFA，接近或达到标准Transformer的水平。</p>
+<p><strong>证明思路</strong>：ReRoPE在窗口内保持与RoPE相同的位置编码，因此局部建模能力不受影响。同时，ReRoPE的截断机制允许全局层有效处理远距离依赖，弥补了NoPE的不足。</p>
+<p><strong>推导7.4（实验结果的理论解释）</strong></p>
+<p>实验结果显示：</p>
+<ul>
+<li><strong>Baseline</strong>（标准Transformer）：49.41%</li>
+<li><strong>HWFA</strong>（原始）：48.70%（下降0.71%）</li>
+<li><strong>HWFA-ReRoPE-w64-f2</strong>：49.46%（超过baseline 0.05%）</li>
+</ul>
+<p>训练效果的提升可以归因于：</p>
+<ol>
+<li>ReRoPE提供的位置信息优于NoPE</li>
+<li>2层全局层增强了远距离信息聚合</li>
+<li>窗口大小64在局部-全局平衡上优于原始HWFA的16</li>
+</ol>
+<h3 id="8">8. 外推性能的数学分析</h3>
+<p><strong>定义8.1（外推性能指标）</strong></p>
+<p>定义相对外推性能为：</p>
+<p>$$P_{\text{rel}}(L) = \frac{A(L)}{A(N_{\text{train}})}$$</p>
+<p>其中$A(L)$是长度$L$上的准确率，$A(N_{\text{train}})$是训练长度上的准确率。</p>
+<p><strong>推导8.2（各方法的外推性能对比）</strong></p>
+<p>根据实验结果（测试长度4096，训练长度512）：</p>
+<ol>
+<li><strong>ReRoPE-w256</strong>：$P_{\text{rel}} = 85.12\% / 49.40\% \approx 1.72$</li>
+<li><strong>HWFA</strong>：$P_{\text{rel}} = 80.84\% / 48.70\% \approx 1.66$</li>
+<li><strong>HWFA-ReRoPE-w64-f2</strong>：$P_{\text{rel}} = 84.43\% / 49.46\% \approx 1.71$</li>
+</ol>
+<p>HWFA-ReRoPE的外推性能介于ReRoPE和HWFA之间，接近ReRoPE的最佳水平。</p>
+<p><strong>定理8.4（HWFA2的外推鲁棒性）</strong></p>
+<p>HWFA2在不同窗口大小下都表现出良好的外推性能，具有较强的鲁棒性。</p>
+<p><strong>证明</strong>：实验显示，$\tilde{w} \in {32, 64, 128}$时，外推性能都在80%以上，说明HWFA2对窗口大小不敏感。</p>
+<p><strong>推导8.5（窗口大小对外推的影响）</strong></p>
+<p>从实验数据：</p>
+<ul>
+<li>$\tilde{w} = 32$：84.09%（2层全局）</li>
+<li>$\tilde{w} = 64$：84.43%（2层全局）</li>
+<li>$\tilde{w} = 128$：83.09%（2层全局）</li>
+</ul>
+<p>存在一个最优窗口大小$\tilde{w}^* \approx 64$（对应$N_{\text{train}}/8$）。过小的窗口限制局部建模，过大的窗口可能导致窗口层的外推问题。</p>
+<h3 id="9">9. 全局层数量的优化</h3>
+<p><strong>定义9.1（全局层数量的权衡）</strong></p>
+<p>全局层数量$L_f$涉及以下权衡：</p>
+<ul>
+<li><strong>优势</strong>：更多全局层提供更强的远距离信息聚合能力</li>
+<li><strong>劣势</strong>：更多全局层增加计算成本</li>
+</ul>
+<p><strong>推导9.2（最优全局层数）</strong></p>
+<p>定义综合性能指标：</p>
+<p>$$S(L_f) = A_{\text{extrap}}(L_f) \cdot \text{Speedup}(L_f)$$</p>
+<p>其中$A_{\text{extrap}}$是外推准确率，Speedup是加速比。</p>
+<p>从实验数据（$\tilde{w} = 64$）：</p>
+<ul>
+<li>$L_f = 1$：$A = 82.41\%$，$\text{Speedup} \approx 11$，$S \approx 906$</li>
+<li>$L_f = 2$：$A = 84.43\%$，$\text{Speedup} \approx 5.5$，$S \approx 464$</li>
+</ul>
+<p>单纯从综合指标看，1层全局更优。但考虑到2层全局的准确率提升2个百分点，且加速比仍然可观，实际应用中可能更倾向于2层全局。</p>
+<p><strong>定理9.3（全局层的边际效用递减）</strong></p>
+<p>增加全局层数量的边际效用递减：第1层全局的提升最大，后续全局层的提升逐渐减小。</p>
+<p><strong>推导9.4（全局层数量的建议）</strong></p>
+<p>综合性能和效率：</p>
+<ul>
+<li><strong>追求极致速度</strong>：$L_f = 1$</li>
+<li><strong>平衡性能与速度</strong>：$L_f = 2$</li>
+<li><strong>追求最佳性能</strong>：$L_f \leq L/6$（避免过多全局层）</li>
+</ul>
+<p>对于24层模型：$L_f \in {1, 2, 3, 4}$是合理范围。</p>
+<h3 id="10">10. 窗口注意力的优化实现</h3>
+<p><strong>定义10.1（滑动窗口attention）</strong></p>
+<p>窗口注意力可以通过滑动窗口高效实现。对于长度$N$的序列，窗口大小$\tilde{w}$：</p>
+<p>$$\text{Output}_i = \sum_{j=\max(0, i-\tilde{w}+1)}^{i} \alpha_{i,j} \boldsymbol{v}_j$$</p>
+<p><strong>推导10.2（分块并行计算）</strong></p>
+<p>将序列分成$N/B$个块，每块大小$B$。当$B &gt; \tilde{w}$时，大部分块的计算可以并行，只有边界处需要特殊处理。</p>
+<p>时间复杂度从串行的$\mathcal{O}(N \tilde{w} d)$降低到并行的$\mathcal{O}((N/P) \tilde{w} d)$，其中$P$是并行度。</p>
+<p><strong>推导10.3（Flash Attention兼容性）</strong></p>
+<p>窗口注意力可以直接使用Flash Attention的变体。修改Flash Attention的mask：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">N</span><span class="p">,</span> <span class="n">block_size</span><span class="p">):</span>
+    <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">i</span> <span class="o">-</span> <span class="n">w</span> <span class="o">+</span> <span class="mi">1</span><span class="p">),</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">block_size</span><span class="p">):</span>
+        <span class="c1"># 计算块(i, j)的attention</span>
+        <span class="n">compute_block_attention</span><span class="p">(</span><span class="n">Q</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">K</span><span class="p">[</span><span class="n">j</span><span class="p">],</span> <span class="n">V</span><span class="p">[</span><span class="n">j</span><span class="p">])</span>
+</code></pre></div>
+
+<p>这保持了Flash Attention的内存效率。</p>
+<h3 id="11-rerope">11. ReRoPE在全局层的优化</h3>
+<p><strong>定义11.1（全局层ReRoPE的两阶段计算）</strong></p>
+<p>全局层的ReRoPE需要计算两次Attention矩阵，可以通过以下优化减少开销：</p>
+<p><strong>阶段1</strong>：计算窗口内Attention（$i - j &lt; w$）</p>
+<p><strong>阶段2</strong>：计算窗口外Attention（$i - j \geq w$）</p>
+<p><strong>推导11.2（稀疏化优化）</strong></p>
+<p>对于窗口外的Attention，由于所有位置使用相同的ReRoPE值$w$，可以进行近似：</p>
+<p>$$a_{i,j}^{\text{window-out}} \approx \boldsymbol{q}_i^{\top}\boldsymbol{\mathcal{R}}^w\bar{\boldsymbol{k}}$$</p>
+<p>其中$\bar{\boldsymbol{k}}$是窗口外所有Key的平均。这将窗口外的$\mathcal{O}(N^2)$计算降低到$\mathcal{O}(N)$。</p>
+<p>然而，这种近似会损失精度，实验中未采用。</p>
+<p><strong>推导11.3（混合精度计算）</strong></p>
+<p>窗口内Attention（更重要）使用FP32，窗口外Attention（相对不重要）使用FP16，可以加速约30%的全局层计算，精度损失可忽略。</p>
+<h3 id="12-hwfa2">12. HWFA2的端到端性能</h3>
+<p><strong>定义12.1（端到端延迟）</strong></p>
+<p>端到端延迟包括：</p>
+<ol>
+<li><strong>前向传播时间</strong>：$T_{\text{forward}}$</li>
+<li><strong>内存访问时间</strong>：$T_{\text{memory}}$</li>
+<li><strong>通信时间</strong>（多GPU）：$T_{\text{comm}}$</li>
+</ol>
+<p>总延迟：</p>
+<p>$$T_{\text{total}} = T_{\text{forward}} + T_{\text{memory}} + T_{\text{comm}}$$</p>
+<p><strong>推导12.2（HWFA2的延迟分析）</strong></p>
+<p>对于HWFA2（$L_w = 22$，$L_f = 2$，$\tilde{w} = 64$，$N = 4096$）：</p>
+<p><strong>前向传播</strong>：</p>
+<p>$$T_{\text{forward}} = 22 \times T_{\text{window}}(64, 4096) + 2 \times 2 \times T_{\text{full}}(4096)$$</p>
+<p>其中$T_{\text{window}}(\tilde{w}, N) \propto \tilde{w} N$，$T_{\text{full}}(N) \propto N^2$。</p>
+<p>设$T_{\text{full}}(4096) = t_0$，$T_{\text{window}}(64, 4096) = 64 \times 4096 / (4096 \times 4096) \times t_0 = t_0/64$：</p>
+<p>$$T_{\text{forward}} = 22 \times t_0/64 + 4 \times t_0 = t_0(22/64 + 4) = t_0(0.34 + 4) = 4.34t_0$$</p>
+<p>标准Transformer：$24 \times t_0$。</p>
+<p>加速比：$24 / 4.34 \approx 5.5$（与之前计算一致）。</p>
+<p><strong>内存访问</strong>：由于窗口层的Attention矩阵更小，内存访问时间也减少约90%。</p>
+<p><strong>推导12.3（吞吐量分析）</strong></p>
+<p>吞吐量（tokens/秒）与延迟成反比：</p>
+<p>$$\text{Throughput}_{\text{HWFA2}} = \text{Speedup} \times \text{Throughput}_{\text{std}} \approx 5.5 \times \text{Throughput}_{\text{std}}$$</p>
+<p>对于批处理，优势更明显，因为窗口注意力允许更大的批大小（内存节省）。</p>
+<h3 id="13">13. 多任务泛化能力</h3>
+<p><strong>定义13.1（任务泛化性）</strong></p>
+<p>定义模型在不同任务上的平均性能：</p>
+<p>$$P_{\text{avg}} = \frac{1}{|T|}\sum_{t \in T} A_t$$</p>
+<p>其中$T$是任务集合，$A_t$是任务$t$上的准确率。</p>
+<p><strong>推导13.2（HWFA2的任务适应性）</strong></p>
+<p>HWFA2的混合架构使其能够适应不同类型的任务：</p>
+<ul>
+<li><strong>局部任务</strong>（如NER）：主要依赖窗口层</li>
+<li><strong>全局任务</strong>（如文档分类）：主要依赖全局层</li>
+<li><strong>混合任务</strong>（如问答）：同时利用两类层</li>
+</ul>
+<p>这种灵活性使HWFA2在多任务设置下表现更稳定。</p>
+<h3 id="14">14. 长序列稳定性</h3>
+<p><strong>定义14.1（数值稳定性指标）</strong></p>
+<p>定义Attention权重的方差：</p>
+<p>$$\sigma^2_{\alpha} = \text{Var}[\alpha_{i,j}]$$</p>
+<p>方差过大表明数值不稳定。</p>
+<p><strong>推导14.2（HWFA2的稳定性优势）</strong></p>
+<p>窗口注意力的Softmax仅在$\tilde{w}$个元素上进行，动态范围更小：</p>
+<p>$$\Delta_{\text{window}} = \max_{j \in [i-\tilde{w}+1, i]} a_{i,j} - \min_{j \in [i-\tilde{w}+1, i]} a_{i,j}$$</p>
+<p>相比全局注意力的$\Delta_{\text{full}}$（在$N$个元素上），$\Delta_{\text{window}}$通常更小，因此数值更稳定。</p>
+<p>全局层虽然是全局的，但使用ReRoPE限制了位置编码范围，也有助于稳定性。</p>
+<p><strong>定理14.3（长序列训练的稳定性）</strong></p>
+<p>HWFA2在长序列训练时比标准Transformer更稳定，梯度爆炸/消失的风险更低。</p>
+<h3 id="15">15. 与其他长序列方法的对比</h3>
+<p><strong>定义15.1（长序列方法分类）</strong></p>
+<ol>
+<li><strong>近似方法</strong>：Linformer、Performer等，用低秩近似</li>
+<li><strong>稀疏方法</strong>：Sparse Transformer、Longformer等，固定稀疏模式</li>
+<li><strong>混合方法</strong>：HWFA、HWFA2，结合窗口和全局</li>
+</ol>
+<p><strong>推导15.2（理论对比）</strong></p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>复杂度</th>
+<th>外推能力</th>
+<th>训练效果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>标准Transformer</td>
+<td>$\mathcal{O}(N^2)$</td>
+<td>差</td>
+<td>最佳</td>
+</tr>
+<tr>
+<td>Linformer</td>
+<td>$\mathcal{O}(N)$</td>
+<td>差</td>
+<td>中等</td>
+</tr>
+<tr>
+<td>Sparse Transformer</td>
+<td>$\mathcal{O}(N\sqrt{N})$</td>
+<td>中等</td>
+<td>中等</td>
+</tr>
+<tr>
+<td>HWFA</td>
+<td>$\mathcal{O}(N)$</td>
+<td>良好</td>
+<td>良好</td>
+</tr>
+<tr>
+<td>HWFA2</td>
+<td>$\mathcal{O}(N)$</td>
+<td>优秀</td>
+<td>优秀</td>
+</tr>
+</tbody>
+</table>
+<p>HWFA2在各方面都表现优异。</p>
+<h3 id="16">16. 实践建议</h3>
+<p><strong>建议16.1（参数选择指南）</strong></p>
+<p>对于训练长度$N_{\text{train}}$，层数$L$：</p>
+<ol>
+<li><strong>窗口大小</strong>：$\tilde{w} \in [N_{\text{train}}/16, N_{\text{train}}/4]$</li>
+<li><strong>全局层数</strong>：$L_f \in [1, L/6]$</li>
+<li><strong>全局层位置</strong>：均匀分布，$\ell_i = \lfloor i \cdot L / (L_f + 1) \rfloor$</li>
+<li><strong>ReRoPE窗口</strong>：$w = N_{\text{train}}/2$</li>
+</ol>
+<p><strong>建议16.2（训练策略）</strong></p>
+<ol>
+<li>使用课程学习，逐渐增加序列长度</li>
+<li>对全局层使用稍小的学习率（0.5-0.8倍）</li>
+<li>应用梯度裁剪，阈值1.0</li>
+<li>使用$\log n$缩放因子</li>
+</ol>
+<p><strong>建议16.3（推理优化）</strong></p>
+<ol>
+<li>对窗口层使用Flash Attention变体</li>
+<li>对全局层使用混合精度（FP16/FP32）</li>
+<li>启用KV缓存（注意ReRoPE的特殊处理）</li>
+<li>批处理时优先增大批大小（利用内存节省）</li>
+</ol>
+<h3 id="17">17. 理论局限与未来方向</h3>
+<p><strong>局限17.1（全局层的计算瓶颈）</strong></p>
+<p>尽管HWFA2大幅减少计算，全局层仍然是瓶颈。当$N$非常大（如100k）时，即使2层全局也可能成为限制因素。</p>
+<p><strong>方向17.2（可能的改进）</strong></p>
+<ol>
+<li><strong>分层全局attention</strong>：全局层也采用多尺度策略</li>
+<li><strong>动态窗口</strong>：根据内容自适应调整窗口大小</li>
+<li><strong>学习稀疏模式</strong>：端到端学习attention模式</li>
+<li><strong>神经架构搜索</strong>：自动搜索最优层配置</li>
+</ol>
+<p><strong>方向17.3（与其他技术结合）</strong></p>
+<ol>
+<li><strong>HWFA2 + Flash Attention 2</strong>：进一步加速</li>
+<li><strong>HWFA2 + 低秩分解</strong>：降低全局层复杂度</li>
+<li><strong>HWFA2 + 稀疏激活</strong>：MoE风格的稀疏全局层</li>
+</ol>
+<h3 id="18">18. 总结</h3>
+<p><strong>总结18.1（HWFA2的核心贡献）</strong></p>
+<ol>
+<li><strong>理论创新</strong>：将ReRoPE引入HWFA，实现性能与效率的最佳平衡</li>
+<li><strong>实践突破</strong>：训练效果超越baseline，外推能力接近ReRoPE，推理速度提升5-10倍</li>
+<li><strong>灵活性</strong>：支持多种配置，适应不同应用需求</li>
+</ol>
+<p><strong>总结18.2（关键洞察）</strong></p>
+<p>HWFA2成功的关键在于：</p>
+<ol>
+<li><strong>层次化设计</strong>：窗口层处理局部，全局层处理全局</li>
+<li><strong>位置编码协同</strong>：RoPE和ReRoPE优势互补</li>
+<li><strong>计算效率</strong>：大部分层是低成本的窗口attention</li>
+<li><strong>外推能力</strong>：ReRoPE保证无限外推</li>
+</ol>
+<p><strong>总结18.3（应用前景）</strong></p>
+<p>HWFA2适用于：</p>
+<ul>
+<li>长文档理解</li>
+<li>代码生成（长上下文）</li>
+<li>对话系统（长历史）</li>
+<li>生物序列分析</li>
+</ul>
+<p>随着序列长度需求不断增长，HWFA2类方法将越来越重要。</p>
+        </div>
+    </div>
+</body>
+</html>

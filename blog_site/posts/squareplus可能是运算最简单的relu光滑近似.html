@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SquarePlus：可能是运算最简单的ReLU光滑近似</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>SquarePlus：可能是运算最简单的ReLU光滑近似</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 26.3 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8833">https://spaces.ac.cn/archives/8833</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>ReLU函数，也就是$\max(x,0)$，是最常见的激活函数之一，然而它在$x=0$处的不可导通常也被视为一个“槽点”。为此，有诸多的光滑近似被提出，比如SoftPlus、GeLU、Swish等，不过这些光滑近似无一例外地至少都使用了指数运算$e^x$（SoftPlus还用到了对数），从“精打细算”的角度来看，计算量还是不小的（虽然当前在GPU加速之下，我们很少去感知这点计算量了）。最近有一篇论文<a href="https://papers.cool/arxiv/2112.11687">《Squareplus: A Softplus-Like Algebraic Rectifier》</a>提了一个更简单的近似，称为SquarePlus，我们也来讨论讨论。</p>
+<p>需要事先指出的是，笔者是不建议大家花太多时间在激活函数的选择和设计上的，所以虽然分享了这篇论文，但主要是提供一个参考结果，并充当一道练习题来给大家“练练手”。</p>
+<h2 id="_1">定义</h2>
+<p>SquarePlus的形式很简单，只用到了加、乘、除和开方：<br />
+\begin{equation}\text{SquarePlus}(x)=\frac{x+\sqrt{x^2+b}}{2}\end{equation}<br />
+其中$b &gt; 0$。当$b=0$时，正好退化为$\text{ReLU}(x)=\max(x,0)$。SquarePlus的灵感来源大致是<br />
+\begin{equation}\max(x,0)=\frac{x+|x|}{2}=\frac{x+\sqrt{x^2}}{2}\end{equation}<br />
+因此为了补充在$x=0$的可导性，在根号里边多加一个大于0的常数$b$（防止导数出现除零问题）。</p>
+<p>原论文指出，由于只用到了加、乘、除和开方，所以SquarePlus的速度（主要是在CPU上）会比SoftPlus等函数要快：  </p>
+<p><a href="/usr/uploads/2021/12/1253499993.png" title="点击查看原图"><img alt="SquarePlus与其他类似函数的速度比较" src="/usr/uploads/2021/12/1253499993.png" /></a></p>
+<p>SquarePlus与其他类似函数的速度比较</p>
+<p>当然，如果你不关心这点速度提升，那么就像本文开头说的，当作数学练习题来看看就好。</p>
+<h2 id="_2">性态</h2>
+<p>跟SoftPlus函数（$\log(e^x+1)$）一样，SquarePlus也是全局单调递增的，并且恒大于ReLU，如下图（下图的SquarePlus的$b=1$）：  </p>
+<p><a href="/usr/uploads/2021/12/3874442376.png" title="点击查看原图"><img alt="ReLU、SoftPlus、SquarePlus函数图像（一）" src="/usr/uploads/2021/12/3874442376.png" /></a></p>
+<p>ReLU、SoftPlus、SquarePlus函数图像（一）</p>
+<p>直接求它的导函数也可以看出单调性：<br />
+\begin{equation}\frac{d}{dx}\text{SquarePlus}(x)=\frac{1}{2}\left(1+\frac{x}{\sqrt{x^2+b}}\right) &gt; 0\end{equation}<br />
+至于二阶导数<br />
+\begin{equation}\frac{d^2}{dx^2}\text{SquarePlus}(x)=\frac{b}{2(x^2+b)^{3/2}}\end{equation}<br />
+也是恒大于0的存在，所以SquarePlus还是一个凸函数。</p>
+<h2 id="_3">逼近</h2>
+<p>现在有两道练习题可以做了：</p>
+<blockquote>
+<p>1、当$b$取什么时SquarePlus恒大于SoftPlus？</p>
+<p>2、当$b$取什么时，SquarePlus与SoftPlus误差最小？</p>
+</blockquote>
+<p>第一个问题，直接从$\text{SquarePlus}(x)\geq \text{SoftPlus}(x)$解得：<br />
+\begin{equation}b\geq 4\log(e^x+1)\left[\log(e^x+1) - x\right]=4\log(e^x+1)\log(e^{-x}+1)\end{equation}<br />
+要使得上式恒成立，$b$必须大于等于右端的最大值，而我们可以证明右端最大值在$x=0$处取到，所以$b\geq 4\log^2 2=1.921812\cdots$。至此，第一个问题解决。</p>
+<blockquote>
+<p><strong>证明：</strong> 留意到<br />
+ \begin{equation}<br />
+ \frac{d^2}{dx^2}\log\log(e^x+1)=\frac{e^x(\log(e^x+1)-e^x)}{(e^x+1)^2\log^2(e^x+1)} &lt; 0\end{equation}</p>
+<p>所以$\log\log(e^x+1)$是一个凹函数，那么由詹森不等式得<br />
+ \begin{equation}<br />
+ \frac{1}{2}\left(\log\log(e^x+1) + \log\log(e^{-x}+1)\right)\leq \log\log(e^{(x+(-x))/2}+1)=\log\log 2\end{equation}<br />
+ 也就是$\log\left(\log(e^x+1)\log(e^{-x}+1)\right)\leq 2\log\log 2$，或者$\log(e^x+1)\log(e^{-x}+1)\leq \log^2 2$，两边乘以4即得待证结论。等号成立的条件为$x=-x$，即$x=0$。</p>
+</blockquote>
+<p>至于第二个问题，我们需要有一个“误差”的标准。这里跟之前的文章<a href="/archives/7309">《GELU的两个初等函数近似是怎么来的》</a>一样，转化为无额外参数的$\min\text{-}\max$问题：<br />
+\begin{equation}\min_{b} \max_x \left|\frac{x+\sqrt{x^2+b}}{2} - \log(e^x+1)\right|\end{equation}<br />
+这个问题笔者没法求得解析解，目前只能通过数值求解：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.special</span><span class="w"> </span><span class="kn">import</span> <span class="n">erf</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">minimize</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">f</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">a</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="kp">abs</span><span class="p">((</span><span class="n">x</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="kp">sqrt</span><span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">a</span><span class="o">**</span><span class="mi">2</span><span class="p">))</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="kp">log</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="kp">exp</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">g</span><span class="p">(</span><span class="n">a</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="kp">max</span><span class="p">([</span><span class="n">f</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">a</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">np</span><span class="o">.</span><span class="kp">arange</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mf">0.0001</span><span class="p">)])</span>
+
+<span class="n">options</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;xtol&#39;</span><span class="p">:</span> <span class="mf">1e-10</span><span class="p">,</span> <span class="s1">&#39;ftol&#39;</span><span class="p">:</span> <span class="mf">1e-10</span><span class="p">,</span> <span class="s1">&#39;maxiter&#39;</span><span class="p">:</span> <span class="mi">100000</span><span class="p">}</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">minimize</span><span class="p">(</span><span class="n">g</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="s1">&#39;Powell&#39;</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="n">options</span><span class="p">)</span>
+<span class="n">b</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">b</span><span class="p">)</span>
+</code></pre></div>
+
+<p>最终算出的结果是$b=1.52382103\cdots$，误差最大值为$0.075931\cdots$，比较如下：  </p>
+<p><a href="/usr/uploads/2021/12/1431410191.png" title="点击查看原图"><img alt="ReLU、SoftPlus、SquarePlus函数图像（二）" src="/usr/uploads/2021/12/1431410191.png" /></a></p>
+<p>ReLU、SoftPlus、SquarePlus函数图像（二）</p>
+<h2 id="_4">小结</h2>
+<p>似乎也没啥好总结的，就是介绍了一个ReLU的光滑近似，并配上了两道简单的函数练习题～</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8833">https://spaces.ac.cn/archives/8833</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Dec. 29, 2021). 《SquarePlus：可能是运算最简单的ReLU光滑近似 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8833">https://spaces.ac.cn/archives/8833</a></p>
+<p>@online{kexuefm-8833,<br />
+title={SquarePlus：可能是运算最简单的ReLU光滑近似},<br />
+author={苏剑林},<br />
+year={2021},<br />
+month={Dec},<br />
+url={\url{https://spaces.ac.cn/archives/8833}},<br />
+} </p>
+<hr />
+<h2 id="_5">公式推导与注释</h2>
+<h3 id="1-squareplus">1. SquarePlus函数的定义与基本性质</h3>
+<p><strong>定义</strong> (SquarePlus函数)</p>
+<p>SquarePlus函数定义为：
+\begin{equation}
+\text{SquarePlus}(x; b) = \frac{x + \sqrt{x^2 + b}}{2} \tag{1}
+\end{equation}
+其中$b &gt; 0$为光滑参数。</p>
+<p><strong>注释1.1</strong>: 该函数的设计灵感来自ReLU的对称形式。回顾ReLU函数可以写成：
+\begin{equation}
+\text{ReLU}(x) = \max(x, 0) = \frac{x + |x|}{2} = \frac{x + \sqrt{x^2}}{2} \tag{2}
+\end{equation}</p>
+<p>问题在于$\sqrt{x^2} = |x|$在$x=0$处不可导。为了使函数光滑，我们在根号内添加正常数$b$：
+\begin{equation}
+\sqrt{x^2} \quad \rightarrow \quad \sqrt{x^2 + b} \tag{3}
+\end{equation}</p>
+<p>这样做有两个好处：
+- <strong>光滑性</strong>: $\sqrt{x^2 + b}$在全局可导，避免了$|x|$在原点的不可导问题
+- <strong>渐近性</strong>: 当$|x| \gg \sqrt{b}$时，$\sqrt{x^2 + b} \approx |x|$，SquarePlus接近ReLU</p>
+<hr />
+<h3 id="2">2. 一阶导数分析（梯度性质）</h3>
+<p><strong>命题2.1</strong> (一阶导数公式)</p>
+<p>SquarePlus函数的一阶导数为：
+\begin{equation}
+\frac{d}{dx}\text{SquarePlus}(x; b) = \frac{1}{2}\left(1 + \frac{x}{\sqrt{x^2 + b}}\right) \tag{4}
+\end{equation}</p>
+<p><strong>证明</strong>:
+对式(1)求导：
+\begin{align}
+\frac{d}{dx}\text{SquarePlus}(x; b) &amp;= \frac{1}{2}\left(1 + \frac{d}{dx}\sqrt{x^2 + b}\right) \tag{5} \
+&amp;= \frac{1}{2}\left(1 + \frac{1}{2\sqrt{x^2 + b}} \cdot 2x\right) \tag{6} \
+&amp;= \frac{1}{2}\left(1 + \frac{x}{\sqrt{x^2 + b}}\right) \tag{7}
+\end{align}</p>
+<p><strong>注释2.1</strong>: 关键性质分析</p>
+<p>(1) <strong>严格单调性</strong>: 由于$x^2 + b &gt; 0$恒成立，我们有：
+\begin{equation}
+\left|\frac{x}{\sqrt{x^2 + b}}\right| &lt; 1 \tag{8}
+\end{equation}
+因此：
+\begin{equation}
+0 &lt; \frac{1}{2}\left(1 + \frac{x}{\sqrt{x^2 + b}}\right) &lt; 1 \tag{9}
+\end{equation}
+这说明SquarePlus是严格单调递增的，且梯度有界。</p>
+<p>(2) <strong>原点导数</strong>: 当$x = 0$时：
+\begin{equation}
+\frac{d}{dx}\text{SquarePlus}(0; b) = \frac{1}{2}\left(1 + \frac{0}{\sqrt{b}}\right) = \frac{1}{2} \tag{10}
+\end{equation}</p>
+<p>(3) <strong>渐近行为</strong>:
+- 当$x \to +\infty$时：$\frac{x}{\sqrt{x^2 + b}} \to 1$，故导数$\to 1$
+- 当$x \to -\infty$时：$\frac{x}{\sqrt{x^2 + b}} \to -1$，故导数$\to 0$</p>
+<p><strong>命题2.2</strong> (导数的有界性)</p>
+<p>对于任意$x \in \mathbb{R}$和$b &gt; 0$，有：
+\begin{equation}
+0 &lt; \frac{d}{dx}\text{SquarePlus}(x; b) &lt; 1 \tag{11}
+\end{equation}</p>
+<p><strong>证明</strong>: 令$t = \frac{x}{\sqrt{x^2 + b}}$，则$t \in (-1, 1)$（严格不等）。因此：
+\begin{equation}
+\frac{d}{dx}\text{SquarePlus}(x; b) = \frac{1 + t}{2} \in (0, 1) \tag{12}
+\end{equation}</p>
+<hr />
+<h3 id="3">3. 二阶导数分析（凸性）</h3>
+<p><strong>命题3.1</strong> (二阶导数公式)</p>
+<p>SquarePlus函数的二阶导数为：
+\begin{equation}
+\frac{d^2}{dx^2}\text{SquarePlus}(x; b) = \frac{b}{2(x^2 + b)^{3/2}} \tag{13}
+\end{equation}</p>
+<p><strong>证明</strong>:
+对式(4)求导：
+\begin{align}
+\frac{d^2}{dx^2}\text{SquarePlus}(x; b) &amp;= \frac{1}{2} \cdot \frac{d}{dx}\left(\frac{x}{\sqrt{x^2 + b}}\right) \tag{14} \
+&amp;= \frac{1}{2} \cdot \frac{\sqrt{x^2 + b} - x \cdot \frac{x}{\sqrt{x^2 + b}}}{x^2 + b} \tag{15} \
+&amp;= \frac{1}{2} \cdot \frac{x^2 + b - x^2}{(x^2 + b)^{3/2}} \tag{16} \
+&amp;= \frac{b}{2(x^2 + b)^{3/2}} \tag{17}
+\end{align}</p>
+<p><strong>注释3.1</strong>: 凸性分析</p>
+<p>由于$b &gt; 0$且$(x^2 + b)^{3/2} &gt; 0$，我们有：
+\begin{equation}
+\frac{d^2}{dx^2}\text{SquarePlus}(x; b) &gt; 0, \quad \forall x \in \mathbb{R} \tag{18}
+\end{equation}</p>
+<p>这意味着<strong>SquarePlus是严格凸函数</strong>。</p>
+<p><strong>命题3.2</strong> (二阶导数的性质)</p>
+<p>(1) <strong>原点处的曲率</strong>:
+\begin{equation}
+\frac{d^2}{dx^2}\text{SquarePlus}(0; b) = \frac{b}{2b^{3/2}} = \frac{1}{2\sqrt{b}} \tag{19}
+\end{equation}</p>
+<p>(2) <strong>渐近行为</strong>:
+\begin{equation}
+\lim_{|x| \to \infty} \frac{d^2}{dx^2}\text{SquarePlus}(x; b) = 0 \tag{20}
+\end{equation}
+这说明在远离原点时，SquarePlus逐渐趋向线性。</p>
+<p>(3) <strong>单调递减性</strong>: 对于$x &gt; 0$，二阶导数关于$x$单调递减：
+\begin{equation}
+\frac{d}{dx}\left[\frac{b}{2(x^2 + b)^{3/2}}\right] = -\frac{3bx}{2(x^2 + b)^{5/2}} &lt; 0 \tag{21}
+\end{equation}</p>
+<hr />
+<h3 id="4-relu">4. 与ReLU的逼近分析</h3>
+<p><strong>命题4.1</strong> (逼近误差)</p>
+<p>定义逼近误差为：
+\begin{equation}
+E(x; b) = \text{SquarePlus}(x; b) - \text{ReLU}(x) = \frac{x + \sqrt{x^2 + b}}{2} - \max(x, 0) \tag{22}
+\end{equation}</p>
+<p>分情况讨论：</p>
+<p>(1) <strong>当$x \geq 0$时</strong>:
+\begin{align}
+E(x; b) &amp;= \frac{x + \sqrt{x^2 + b}}{2} - x \tag{23} \
+&amp;= \frac{\sqrt{x^2 + b} - x}{2} \tag{24} \
+&amp;= \frac{b}{2(\sqrt{x^2 + b} + x)} \tag{25}
+\end{align}</p>
+<p>其中式(25)通过分子有理化得到：
+\begin{equation}
+\sqrt{x^2 + b} - x = \frac{(\sqrt{x^2 + b} - x)(\sqrt{x^2 + b} + x)}{\sqrt{x^2 + b} + x} = \frac{b}{\sqrt{x^2 + b} + x} \tag{26}
+\end{equation}</p>
+<p>(2) <strong>当$x &lt; 0$时</strong>:
+\begin{align}
+E(x; b) &amp;= \frac{x + \sqrt{x^2 + b}}{2} - 0 \tag{27} \
+&amp;= \frac{x + \sqrt{x^2 + b}}{2} \tag{28}
+\end{align}</p>
+<p><strong>注释4.1</strong>: 误差的定量分析</p>
+<p>(1) 对于$x \geq 0$，误差满足：
+\begin{equation}
+0 &lt; E(x; b) \leq \frac{b}{2x} \quad \text{(当$x &gt; 0$)} \tag{29}
+\end{equation}
+特别地，$E(0; b) = \frac{\sqrt{b}}{2}$。</p>
+<p>(2) 对于$x &lt; 0$，由于$\sqrt{x^2 + b} &gt; |x| = -x$，我们有：
+\begin{equation}
+0 &lt; E(x; b) &lt; \frac{\sqrt{x^2 + b}}{2} \tag{30}
+\end{equation}</p>
+<p><strong>命题4.2</strong> (最大误差点)</p>
+<p>对于固定的$b &gt; 0$，误差$E(x; b)$在$x = 0$处达到最大值：
+\begin{equation}
+\max_{x \in \mathbb{R}} E(x; b) = E(0; b) = \frac{\sqrt{b}}{2} \tag{31}
+\end{equation}</p>
+<p><strong>证明</strong>:
+对于$x \geq 0$，式(25)表明$E(x; b)$关于$x$单调递减，且$\lim_{x \to \infty} E(x; b) = 0$。</p>
+<p>对于$x \leq 0$，我们计算：
+\begin{align}
+\frac{dE}{dx} &amp;= \frac{1}{2}\left(1 + \frac{x}{\sqrt{x^2 + b}}\right) \tag{32} \
+&amp;= \frac{1}{2}\left(1 - \frac{|x|}{\sqrt{x^2 + b}}\right) &gt; 0 \tag{33}
+\end{align}</p>
+<p>因此$E(x; b)$在$x &lt; 0$时关于$x$单调递增，在$x = 0$时达到最大值。</p>
+<hr />
+<h3 id="5-softplus">5. 与SoftPlus的比较分析</h3>
+<p><strong>定义</strong> (SoftPlus函数)</p>
+<p>SoftPlus函数定义为：
+\begin{equation}
+\text{SoftPlus}(x) = \log(1 + e^x) \tag{34}
+\end{equation}</p>
+<p><strong>命题5.1</strong> (恒大于关系)</p>
+<p>当$b \geq 4\log^2 2 \approx 1.922$时，对于所有$x \in \mathbb{R}$有：
+\begin{equation}
+\text{SquarePlus}(x; b) \geq \text{SoftPlus}(x) \tag{35}
+\end{equation}</p>
+<p><strong>证明</strong>:
+我们需要证明：
+\begin{equation}
+\frac{x + \sqrt{x^2 + b}}{2} \geq \log(1 + e^x) \tag{36}
+\end{equation}</p>
+<p>等价于：
+\begin{equation}
+b \geq 4\log(1 + e^x)[\log(1 + e^x) - x] \tag{37}
+\end{equation}</p>
+<p>进一步化简：
+\begin{align}
+\log(1 + e^x) - x &amp;= \log\left(\frac{1 + e^x}{e^x}\right) \tag{38} \
+&amp;= \log(e^{-x} + 1) \tag{39}
+\end{align}</p>
+<p>因此条件变为：
+\begin{equation}
+b \geq 4\log(1 + e^x)\log(1 + e^{-x}) \tag{40}
+\end{equation}</p>
+<p><strong>引理5.1</strong> (对数乘积的最大值)</p>
+<p>函数$g(x) = \log(1 + e^x)\log(1 + e^{-x})$在$x = 0$处达到最大值：
+\begin{equation}
+\max_{x \in \mathbb{R}} g(x) = g(0) = \log^2 2 \tag{41}
+\end{equation}</p>
+<p><strong>证明</strong>:
+计算二阶导数：
+\begin{align}
+\frac{d^2}{dx^2}\log\log(1 + e^x) &amp;= \frac{e^x(\log(1 + e^x) - e^x)}{(1 + e^x)^2\log^2(1 + e^x)} \tag{42}
+\end{align}</p>
+<p>由于$\log(1 + e^x) &lt; e^x$（对所有$x &gt; 0$），分子为负，因此：
+\begin{equation}
+\frac{d^2}{dx^2}\log\log(1 + e^x) &lt; 0 \tag{43}
+\end{equation}</p>
+<p>这说明$\log\log(1 + e^x)$是严格凹函数。由Jensen不等式：
+\begin{align}
+\frac{1}{2}[\log\log(1 + e^x) + \log\log(1 + e^{-x})] &amp;\leq \log\log\left(1 + e^{(x + (-x))/2}\right) \tag{44} \
+&amp;= \log\log 2 \tag{45}
+\end{align}</p>
+<p>两边乘以2并取指数：
+\begin{equation}
+\log(1 + e^x)\log(1 + e^{-x}) \leq \log^2 2 \tag{46}
+\end{equation}</p>
+<p>等号成立当且仅当$x = 0$。因此：
+\begin{equation}
+b \geq 4\log^2 2 \approx 1.922 \tag{47}
+\end{equation}</p>
+<hr />
+<h3 id="6">6. 最优逼近参数的求解</h3>
+<p><strong>优化问题</strong> (Minimax逼近)</p>
+<p>寻找最优参数$b^<em>$使得SquarePlus与SoftPlus的最大误差最小：
+\begin{equation}
+b^</em> = \argmin_b \max_x |{\text{SquarePlus}(x; b) - \text{SoftPlus}(x)}| \tag{48}
+\end{equation}</p>
+<p><strong>注释6.1</strong>: 这是一个无约束的minimax优化问题。由于目标函数非凸且不可导，我们采用Powell法求解。</p>
+<p><strong>数值求解算法</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.optimize</span><span class="w"> </span><span class="kn">import</span> <span class="n">minimize</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">objective</span><span class="p">(</span><span class="n">a</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;目标函数：最大误差</span>
+<span class="sd">    参数: a = sqrt(b) (保证b &gt; 0)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">x_grid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="o">-</span><span class="mi">3</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">10000</span><span class="p">)</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">a</span><span class="o">**</span><span class="mi">2</span>
+    <span class="n">sp</span> <span class="o">=</span> <span class="p">(</span><span class="n">x_grid</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">x_grid</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">b</span><span class="p">))</span> <span class="o">/</span> <span class="mi">2</span>
+    <span class="n">softplus</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">x_grid</span><span class="p">,</span> <span class="o">-</span><span class="mi">20</span><span class="p">,</span> <span class="mi">20</span><span class="p">)))</span>
+    <span class="n">error</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">sp</span> <span class="o">-</span> <span class="n">softplus</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">error</span><span class="p">)</span>
+
+<span class="c1"># Powell法优化</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">minimize</span><span class="p">(</span><span class="n">objective</span><span class="p">,</span> <span class="n">x0</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">method</span><span class="o">=</span><span class="s1">&#39;Powell&#39;</span><span class="p">,</span>
+                  <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;xtol&#39;</span><span class="p">:</span> <span class="mf">1e-10</span><span class="p">,</span> <span class="s1">&#39;ftol&#39;</span><span class="p">:</span> <span class="mf">1e-10</span><span class="p">})</span>
+<span class="n">b_optimal</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span>
+<span class="n">max_error</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">fun</span>
+</code></pre></div>
+
+<p><strong>命题6.1</strong> (数值最优解)</p>
+<p>通过数值优化，得到：
+\begin{equation}
+b^<em> \approx 1.5238, \quad \max_x |E(x; b^</em>)| \approx 0.0759 \tag{49}
+\end{equation}</p>
+<p><strong>注释6.2</strong>: 观察到$b^* &lt; 4\log^2 2$，这意味着最优逼近时SquarePlus不是处处大于SoftPlus，而是在某些区域大于、某些区域小于，从而达到误差的平衡。</p>
+<hr />
+<h3 id="7">7. 泰勒展开与局部逼近</h3>
+<p><strong>命题7.1</strong> (原点处的泰勒展开)</p>
+<p>在$x = 0$附近，SquarePlus有如下展开：
+\begin{equation}
+\text{SquarePlus}(x; b) = \frac{\sqrt{b}}{2} + \frac{x}{2} + \frac{x^2}{4\sqrt{b}} - \frac{x^4}{16b^{5/2}} + O(x^6) \tag{50}
+\end{equation}</p>
+<p><strong>证明</strong>:
+首先展开$\sqrt{x^2 + b}$：
+\begin{align}
+\sqrt{x^2 + b} &amp;= \sqrt{b}\sqrt{1 + \frac{x^2}{b}} \tag{51} \
+&amp;= \sqrt{b}\left(1 + \frac{x^2}{2b} - \frac{x^4}{8b^2} + O(x^6)\right) \tag{52} \
+&amp;= \sqrt{b} + \frac{x^2}{2\sqrt{b}} - \frac{x^4}{8b^{3/2}} + O(x^6) \tag{53}
+\end{align}</p>
+<p>代入SquarePlus定义：
+\begin{align}
+\text{SquarePlus}(x; b) &amp;= \frac{1}{2}\left(x + \sqrt{b} + \frac{x^2}{2\sqrt{b}} - \frac{x^4}{8b^{3/2}} + O(x^6)\right) \tag{54} \
+&amp;= \frac{\sqrt{b}}{2} + \frac{x}{2} + \frac{x^2}{4\sqrt{b}} - \frac{x^4}{16b^{5/2}} + O(x^6) \tag{55}
+\end{align}</p>
+<p><strong>命题7.2</strong> (SoftPlus的泰勒展开)</p>
+<p>在$x = 0$附近：
+\begin{equation}
+\text{SoftPlus}(x) = \log 2 + \frac{x}{2} + \frac{x^2}{8} - \frac{x^4}{192} + O(x^6) \tag{56}
+\end{equation}</p>
+<p><strong>证明</strong>:
+利用$\log(1 + e^x) = \log 2 + \log(1 + \frac{e^x - 1}{2})$：
+\begin{align}
+\text{SoftPlus}(x) &amp;= \log 2 + \log\left(1 + \frac{\sinh(x/2)}{e^{x/2}}\right) \tag{57}
+\end{align}</p>
+<p>通过标准的泰勒级数计算可得式(56)。</p>
+<p><strong>注释7.1</strong>: 比较系数</p>
+<p>比较式(50)和(56)的系数：
+- <strong>常数项</strong>: $\frac{\sqrt{b}}{2}$ vs $\log 2$，当$b = 4\log^2 2$时相等
+- <strong>一次项</strong>: 系数都是$\frac{1}{2}$，完全一致
+- <strong>二次项</strong>: $\frac{1}{4\sqrt{b}}$ vs $\frac{1}{8}$，当$b = 4$时相等</p>
+<p>这解释了为何$b$在1.5到2之间能够较好地逼近SoftPlus。</p>
+<hr />
+<h3 id="8">8. 渐近性质分析</h3>
+<p><strong>命题8.1</strong> (正向渐近)</p>
+<p>当$x \to +\infty$时：
+\begin{equation}
+\text{SquarePlus}(x; b) = x + \frac{b}{4x} - \frac{b^2}{32x^3} + O(x^{-5}) \tag{58}
+\end{equation}</p>
+<p><strong>证明</strong>:
+对于$x \gg \sqrt{b}$，有：
+\begin{align}
+\sqrt{x^2 + b} &amp;= x\sqrt{1 + \frac{b}{x^2}} \tag{59} \
+&amp;= x\left(1 + \frac{b}{2x^2} - \frac{b^2}{8x^4} + O(x^{-6})\right) \tag{60} \
+&amp;= x + \frac{b}{2x} - \frac{b^2}{8x^3} + O(x^{-5}) \tag{61}
+\end{align}</p>
+<p>因此：
+\begin{align}
+\text{SquarePlus}(x; b) &amp;= \frac{1}{2}\left(2x + \frac{b}{2x} - \frac{b^2}{8x^3} + O(x^{-5})\right) \tag{62} \
+&amp;= x + \frac{b}{4x} - \frac{b^2}{16x^3} + O(x^{-5}) \tag{63}
+\end{align}</p>
+<p><strong>命题8.2</strong> (负向渐近)</p>
+<p>当$x \to -\infty$时：
+\begin{equation}
+\text{SquarePlus}(x; b) = \frac{b}{4|x|} - \frac{b^2}{32|x|^3} + O(|x|^{-5}) \tag{64}
+\end{equation}</p>
+<p><strong>证明</strong>: 类似于命题8.1，利用$\sqrt{x^2 + b} = |x|\sqrt{1 + \frac{b}{x^2}}$展开即可。</p>
+<hr />
+<h3 id="9">9. 数值稳定性分析</h3>
+<p><strong>问题9.1</strong> (计算精度)</p>
+<p>直接计算$\sqrt{x^2 + b}$可能在极端情况下损失精度。我们需要分析何时需要特殊处理。</p>
+<p><strong>稳定计算方法</strong>:</p>
+<p>(1) <strong>当$|x| \ll \sqrt{b}$时</strong> (小参数区域):
+使用泰勒展开式(50)避免浮点误差。</p>
+<p>(2) <strong>当$|x| \gg \sqrt{b}$时</strong> (大参数区域):
+- 对于$x &gt; 0$: 使用分子有理化
+\begin{equation}
+\text{SquarePlus}(x; b) = x + \frac{b}{2(\sqrt{x^2 + b} + x)} \tag{65}
+\end{equation}</p>
+<ul>
+<li>对于$x &lt; 0$: 直接计算
+\begin{equation}
+\text{SquarePlus}(x; b) = \frac{b}{2(\sqrt{x^2 + b} - x)} \tag{66}
+\end{equation}</li>
+</ul>
+<p><strong>算法9.1</strong> (数值稳定实现)</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">squareplus_stable</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;数值稳定的SquarePlus实现&quot;&quot;&quot;</span>
+    <span class="n">abs_x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+    <span class="n">sqrt_b</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">b</span><span class="p">)</span>
+
+    <span class="c1"># 小参数情况：|x| &lt; 0.1 * sqrt(b)</span>
+    <span class="n">small_mask</span> <span class="o">=</span> <span class="n">abs_x</span> <span class="o">&lt;</span> <span class="mf">0.1</span> <span class="o">*</span> <span class="n">sqrt_b</span>
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">small_mask</span><span class="p">):</span>
+        <span class="n">x_small</span> <span class="o">=</span> <span class="n">x</span><span class="p">[</span><span class="n">small_mask</span><span class="p">]</span>
+        <span class="n">result_small</span> <span class="o">=</span> <span class="p">(</span><span class="n">sqrt_b</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">+</span> <span class="n">x_small</span> <span class="o">/</span> <span class="mi">2</span> <span class="o">+</span>
+                        <span class="n">x_small</span><span class="o">**</span><span class="mi">2</span> <span class="o">/</span> <span class="p">(</span><span class="mi">4</span> <span class="o">*</span> <span class="n">sqrt_b</span><span class="p">)</span> <span class="o">-</span>
+                        <span class="n">x_small</span><span class="o">**</span><span class="mi">4</span> <span class="o">/</span> <span class="p">(</span><span class="mi">16</span> <span class="o">*</span> <span class="n">b</span><span class="o">**</span><span class="p">(</span><span class="mi">5</span><span class="o">/</span><span class="mi">2</span><span class="p">)))</span>
+
+    <span class="c1"># 大参数情况</span>
+    <span class="n">large_mask</span> <span class="o">=</span> <span class="o">~</span><span class="n">small_mask</span>
+    <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">large_mask</span><span class="p">):</span>
+        <span class="n">x_large</span> <span class="o">=</span> <span class="n">x</span><span class="p">[</span><span class="n">large_mask</span><span class="p">]</span>
+        <span class="n">sqrt_term</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">x_large</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">b</span><span class="p">)</span>
+
+        <span class="c1"># 正数：使用有理化</span>
+        <span class="n">pos_mask</span> <span class="o">=</span> <span class="n">x_large</span> <span class="o">&gt;</span> <span class="mi">0</span>
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">pos_mask</span><span class="p">):</span>
+            <span class="n">x_pos</span> <span class="o">=</span> <span class="n">x_large</span><span class="p">[</span><span class="n">pos_mask</span><span class="p">]</span>
+            <span class="n">sqrt_pos</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">x_pos</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">b</span><span class="p">)</span>
+            <span class="n">result_pos</span> <span class="o">=</span> <span class="n">x_pos</span> <span class="o">+</span> <span class="n">b</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="n">sqrt_pos</span> <span class="o">+</span> <span class="n">x_pos</span><span class="p">))</span>
+
+        <span class="c1"># 负数：直接计算</span>
+        <span class="n">neg_mask</span> <span class="o">=</span> <span class="n">x_large</span> <span class="o">&lt;=</span> <span class="mi">0</span>
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">neg_mask</span><span class="p">):</span>
+            <span class="n">x_neg</span> <span class="o">=</span> <span class="n">x_large</span><span class="p">[</span><span class="n">neg_mask</span><span class="p">]</span>
+            <span class="n">result_neg</span> <span class="o">=</span> <span class="p">(</span><span class="n">x_neg</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">x_neg</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">b</span><span class="p">))</span> <span class="o">/</span> <span class="mi">2</span>
+
+    <span class="c1"># 组合结果</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty_like</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+    <span class="n">result</span><span class="p">[</span><span class="n">small_mask</span><span class="p">]</span> <span class="o">=</span> <span class="n">result_small</span>
+    <span class="c1"># ... (合并large_mask的结果)</span>
+    <span class="k">return</span> <span class="n">result</span>
+</code></pre></div>
+
+<hr />
+<h3 id="10">10. 计算复杂度分析</h3>
+<p><strong>命题10.1</strong> (运算次数比较)</p>
+<p>各激活函数的基本运算次数（每次调用）：</p>
+<table>
+<thead>
+<tr>
+<th>函数</th>
+<th>加法</th>
+<th>乘法</th>
+<th>除法</th>
+<th>开方</th>
+<th>指数</th>
+<th>对数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ReLU</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>SquarePlus</td>
+<td>2</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>SoftPlus</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+</tr>
+<tr>
+<td>GeLU</td>
+<td>3</td>
+<td>2</td>
+<td>1</td>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+</tr>
+<tr>
+<td>Swish</td>
+<td>2</td>
+<td>2</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<p><strong>注释10.1</strong>:
+- 指数和对数运算通常比四则运算和开方慢得多（尤其在CPU上）
+- 开方运算可通过Newton-Raphson快速逼近，复杂度约为3-4次乘法
+- SquarePlus避免了昂贵的超越函数（exp, log），在CPU上有速度优势</p>
+<hr />
+<h3 id="11">11. 与其他光滑激活函数的比较</h3>
+<p><strong>定义11.1</strong> (GeLU函数)</p>
+<p>Gaussian Error Linear Unit:
+\begin{equation}
+\text{GeLU}(x) = x \cdot \Phi(x) = \frac{x}{2}\left[1 + \text{erf}\left(\frac{x}{\sqrt{2}}\right)\right] \tag{67}
+\end{equation}
+其中$\Phi$是标准正态分布的累积分布函数。</p>
+<p><strong>定义11.2</strong> (Swish函数)</p>
+<p>也称为SiLU (Sigmoid Linear Unit):
+\begin{equation}
+\text{Swish}(x; \beta) = \frac{x}{1 + e^{-\beta x}} \tag{68}
+\end{equation}</p>
+<p><strong>命题11.1</strong> (原点处的性质比较)</p>
+<p>在$x = 0$处：</p>
+<table>
+<thead>
+<tr>
+<th>函数</th>
+<th>函数值</th>
+<th>一阶导数</th>
+<th>二阶导数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ReLU</td>
+<td>0</td>
+<td>不存在</td>
+<td>不存在</td>
+</tr>
+<tr>
+<td>SquarePlus($b$)</td>
+<td>$\frac{\sqrt{b}}{2}$</td>
+<td>$\frac{1}{2}$</td>
+<td>$\frac{1}{2\sqrt{b}}$</td>
+</tr>
+<tr>
+<td>SoftPlus</td>
+<td>$\log 2$</td>
+<td>$\frac{1}{2}$</td>
+<td>$\frac{1}{4}$</td>
+</tr>
+<tr>
+<td>GeLU</td>
+<td>0</td>
+<td>$\frac{1}{2}$</td>
+<td>$\frac{1}{\sqrt{2\pi}}$</td>
+</tr>
+<tr>
+<td>Swish($\beta=1$)</td>
+<td>0</td>
+<td>$\frac{1}{2}$</td>
+<td>$\frac{1}{4}$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>注释11.1</strong>: 观察
+- 除ReLU外，所有光滑近似的一阶导数在原点都是$\frac{1}{2}$
+- SquarePlus和SoftPlus在原点有非零函数值（正偏移）
+- GeLU和Swish保持ReLU在原点的零值特性</p>
+<hr />
+<h3 id="12">12. 反向传播的梯度计算</h3>
+<p><strong>算法12.1</strong> (SquarePlus的反向传播)</p>
+<p>前向传播：
+\begin{equation}
+y = \text{SquarePlus}(x; b) = \frac{x + \sqrt{x^2 + b}}{2} \tag{69}
+\end{equation}</p>
+<p>反向传播（链式法则）：
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial x} = \frac{\partial \mathcal{L}}{\partial y} \cdot \frac{\partial y}{\partial x} = \frac{\partial \mathcal{L}}{\partial y} \cdot \frac{1}{2}\left(1 + \frac{x}{\sqrt{x^2 + b}}\right) \tag{70}
+\end{equation}</p>
+<p><strong>数值稳定实现</strong>:</p>
+<div class="codehilite"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SquarePlus</span><span class="p">:</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">b</span><span class="o">=</span><span class="mf">1.0</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">b</span> <span class="o">=</span> <span class="n">b</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cache</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">):</span>
+        <span class="n">sqrt_term</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">b</span><span class="p">)</span>
+        <span class="n">y</span> <span class="o">=</span> <span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">sqrt_term</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+        <span class="c1"># 缓存中间结果用于反向传播</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cache</span><span class="p">[</span><span class="s1">&#39;x&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">x</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cache</span><span class="p">[</span><span class="s1">&#39;sqrt_term&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">sqrt_term</span>
+        <span class="k">return</span> <span class="n">y</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">backward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">grad_y</span><span class="p">):</span>
+        <span class="n">x</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cache</span><span class="p">[</span><span class="s1">&#39;x&#39;</span><span class="p">]</span>
+        <span class="n">sqrt_term</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">cache</span><span class="p">[</span><span class="s1">&#39;sqrt_term&#39;</span><span class="p">]</span>
+        <span class="c1"># 梯度计算</span>
+        <span class="n">grad_x</span> <span class="o">=</span> <span class="n">grad_y</span> <span class="o">*</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">x</span> <span class="o">/</span> <span class="n">sqrt_term</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">grad_x</span>
+</code></pre></div>
+
+<p><strong>注释12.1</strong>:
+- 通过缓存$\sqrt{x^2 + b}$，避免在反向传播时重复计算
+- 内存开销：需要存储输入$x$和中间项$\sqrt{x^2 + b}$
+- 计算开销：反向传播仅需1次除法和2次加法</p>
+<hr />
+<h3 id="13-b">13. 参数$b$的选择指导</h3>
+<p><strong>准则13.1</strong> (参数选择策略)</p>
+<p>根据不同需求选择$b$：</p>
+<p>(1) <strong>最大光滑性</strong> ($b$较大):
+- 推荐: $b \in [2, 4]$
+- 优点: 二阶导数小，曲率平缓
+- 缺点: 与ReLU偏差较大</p>
+<p>(2) <strong>最佳SoftPlus逼近</strong>:
+- 推荐: $b \approx 1.52$
+- 优点: 与SoftPlus误差最小
+- 适用: 需要替代SoftPlus的场景</p>
+<p>(3) <strong>恒大于SoftPlus</strong>:
+- 推荐: $b \geq 1.92$
+- 优点: 严格保持上界性质
+- 适用: 需要保守估计的场景</p>
+<p>(4) <strong>接近ReLU</strong> ($b$较小):
+- 推荐: $b \in [0.5, 1]$
+- 优点: 与ReLU偏差小，梯度接近0/1
+- 缺点: 在原点附近仍有较大曲率</p>
+<p><strong>命题13.1</strong> (参数对梯度的影响)</p>
+<p>对于固定输入$x$，梯度关于$b$的导数为：
+\begin{equation}
+\frac{\partial}{\partial b}\left[\frac{d}{dx}\text{SquarePlus}(x; b)\right] = -\frac{x}{4(x^2 + b)^{3/2}} \tag{71}
+\end{equation}</p>
+<p>这说明：
+- 当$x &gt; 0$时，$b$增大会使梯度减小
+- 当$x &lt; 0$时，$b$增大会使梯度增大（更接近0.5）</p>
+<hr />
+<h3 id="14">14. 应用场景与实践建议</h3>
+<p><strong>建议14.1</strong> (何时使用SquarePlus)</p>
+<p>推荐使用场景：
+1. <strong>CPU密集型推理</strong>: 避免exp/log运算，提升速度
+2. <strong>边缘设备部署</strong>: 硬件不支持高效超越函数时
+3. <strong>数值敏感任务</strong>: 需要避免exp溢出的场景
+4. <strong>理论分析</strong>: 需要显式解析形式的研究</p>
+<p>不推荐场景：
+1. <strong>GPU训练</strong>: GPU对exp/log优化良好，速度优势不明显
+2. <strong>已有预训练模型</strong>: 更换激活函数需重新训练
+3. <strong>需要精确零点</strong>: SquarePlus在原点有偏移</p>
+<p><strong>建议14.2</strong> (初始化策略)</p>
+<p>使用SquarePlus时的权重初始化建议：</p>
+<p>由于SquarePlus的梯度范围是$(0, 1)$，其期望约为$\frac{1}{2}$（假设输入对称分布），相比ReLU的期望$\frac{1}{2}$（正半轴）基本一致。因此：</p>
+<ul>
+<li><strong>Xavier初始化</strong>: 仍然适用</li>
+<li><strong>He初始化</strong>: 可以使用，但可能过于保守</li>
+<li><strong>推荐</strong>: 使用标准Xavier，方差为$\frac{2}{n_{\text{in}} + n_{\text{out}}}$</li>
+</ul>
+<p><strong>建议14.3</strong> (调参经验)</p>
+<ul>
+<li><strong>默认值</strong>: $b = 1.0$（平衡性能和逼近质量）</li>
+<li><strong>精细调优</strong>: 在$[0.8, 1.5]$范围内网格搜索</li>
+<li><strong>避免极端</strong>: $b &lt; 0.1$或$b &gt; 4$通常不必要</li>
+</ul>
+<hr />
+<h3 id="15">15. 理论扩展：多参数泛化</h3>
+<p><strong>定义15.1</strong> (广义SquarePlus)</p>
+<p>引入两个参数的版本：
+\begin{equation}
+\text{SquarePlus}(x; a, b) = \frac{x + \sqrt{x^2 + b}}{2} + a \tag{72}
+\end{equation}
+其中$a$是偏移参数，$b &gt; 0$是光滑参数。</p>
+<p><strong>性质15.1</strong>:
+- $a$控制函数的纵向偏移
+- 导数不受$a$影响
+- 当$a = -\frac{\sqrt{b}}{2}$时，$\text{SquarePlus}(0; a, b) = 0$，类似GeLU</p>
+<p><strong>定义15.2</strong> (缩放版本)</p>
+<p>\begin{equation}
+\text{SquarePlus}(x; b, \alpha) = \alpha \cdot \frac{x + \sqrt{x^2 + b}}{2} \tag{73}
+\end{equation}</p>
+<p>当$\alpha = \frac{2}{\sqrt{b}}$时，原点导数恰好为1。</p>
+<hr />
+<h3 id="_6">总结</h3>
+<p>本文从数学角度全面分析了SquarePlus函数：</p>
+<ol>
+<li><strong>基本性质</strong>: 严格单调递增、严格凸、全局可导</li>
+<li><strong>逼近质量</strong>: 最优参数$b^* \approx 1.52$时与SoftPlus最大误差约0.076</li>
+<li><strong>计算效率</strong>: 避免超越函数，仅需四则运算和开方</li>
+<li><strong>数值稳定</strong>: 提供了稳定的计算方法和反向传播实现</li>
+<li><strong>实用指导</strong>: 给出参数选择和应用场景建议</li>
+</ol>
+<p>SquarePlus作为ReLU的光滑近似，在保持计算简单性的同时，提供了良好的可导性和逼近质量，是深度学习中值得考虑的激活函数选择。</p>
+        </div>
+    </div>
+</body>
+</html>

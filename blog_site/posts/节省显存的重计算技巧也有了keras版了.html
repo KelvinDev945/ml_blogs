@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>节省显存的重计算技巧也有了Keras版了</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>节省显存的重计算技巧也有了Keras版了</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 5.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7367">https://spaces.ac.cn/archives/7367</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>不少读者最近可能留意到了公众号文章<a href="https://mp.weixin.qq.com/s/CmIVwGFqrSD0wcSN_hgH1A">《BERT重计算：用22.5%的训练时间节省5倍的显存开销（附代码）》</a>，里边介绍了一个叫做“重计算”的技巧，简单来说就是用来省显存的方法，让平均训练速度慢一点，但batch_size可以增大好几倍。该技巧首先发布于论文<a href="https://papers.cool/arxiv/1604.06174">《Training Deep Nets with Sublinear Memory Cost》</a>，其实在2016年就已经提出了，只不过似乎还没有特别流行起来。</p>
+<h2 id="_1">探索</h2>
+<p>公众号文章提到该技巧在pytorch和paddlepaddle都有原生实现了，但tensorflow还没有。但事实上从tensorflow 1.8开始，tensorflow就已经自带了该功能了，当时被列入了<code>tf.contrib</code>这个子库中，而从tensorflow 1.15开始，它就被内置为tensorflow的主函数之一，那就是<code>tf.recompute_grad</code>。</p>
+<p>找到<code>tf.recompute_grad</code>之后，笔者就琢磨了一下它的用法，经过一番折腾，最终居然真的成功地用起来了，居然成功地让<code>batch_size</code>从48增加到了144！然而，在继续整理测试的过程中，发现这玩意居然在tensorflow 2.x是失效的...于是再折腾了两天，查找了各种资料并反复调试，最终算是成功地补充了这一缺陷。</p>
+<p>最后是笔者自己的开源实现：</p>
+<blockquote>
+<p><strong>Github地址：<a href="https://github.com/bojone/keras_recompute">https://github.com/bojone/keras_recompute</a></strong></p>
+</blockquote>
+<p>该实现已经内置在<a href="https://github.com/bojone/bert4keras">bert4keras</a>中，使用bert4keras的读者可以升级到最新版本（0.7.5+）来测试该功能。</p>
+<h2 id="_2">使用</h2>
+<p>笔者的实现也命名为<code>recompute_grad</code>，它是一个装饰器，用于自定义Keras层的<code>call</code>函数，比如</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">recompute</span><span class="w"> </span><span class="kn">import</span> <span class="n">recompute_grad</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MyLayer</span><span class="p">(</span><span class="n">Layer</span><span class="p">):</span>
+    <span class="nd">@recompute_grad</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">inputs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">inputs</span> <span class="o">*</span> <span class="mi">2</span>
+</code></pre></div>
+
+<p>对于已经存在的层，可以通过继承的方式来装饰：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">recompute</span><span class="w"> </span><span class="kn">import</span> <span class="n">recompute_grad</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MyDense</span><span class="p">(</span><span class="n">Dense</span><span class="p">):</span>
+    <span class="nd">@recompute_grad</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">call</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">inputs</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">super</span><span class="p">(</span><span class="n">MyDense</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+</code></pre></div>
+
+<p>自定义好层之后，在代码中嵌入自定义层，然后在执行代码之前，加入环境变量<code>RECOMPUTE=1</code>来启用重计算。</p>
+<p>注意：不是在总模型里插入了<code>@recompute_grad</code>，就能达到省内存的目的，而是要在每个层都插入<code>@recompute_grad</code>才能更好地省显存。简单来说，就是插入的<code>@recompute_grad</code>越多，就省显存。具体原因请仔细理解重计算的原理。</p>
+<h2 id="_3">效果</h2>
+<p>bert4keras 0.7.5+已经内置了重计算，直接传入环境变量<code>RECOMPUTE=1</code>就会启用重计算，读者可以自行尝试，大概的效果是：</p>
+<blockquote>
+<p>1、在BERT Base版本下，batch_size可以增大为原来的3倍左右；</p>
+<p>2、在BERT Large版本下，batch_size可以增大为原来的4倍左右；</p>
+<p>3、平均每个样本的训练时间大约增加25%；</p>
+<p>4、理论上，层数越多，batch_size可以增大的倍数越大。</p>
+</blockquote>
+<h2 id="_4">环境</h2>
+<p>在下面的环境下测试通过：</p>
+<blockquote>
+<p>tensorflow 1.14 + keras 2.3.1</p>
+<p>tensorflow 1.15 + keras 2.3.1</p>
+<p>tensorflow 2.0 + keras 2.3.1</p>
+<p>tensorflow 2.1 + keras 2.3.1</p>
+<p>tensorflow 2.0 + 自带tf.keras</p>
+<p>tensorflow 2.1 + 自带tf.keras</p>
+</blockquote>
+<p>确认不支持的环境：</p>
+<blockquote>
+<p>tensorflow 1.x + 自带tf.keras</p>
+</blockquote>
+<p>欢迎报告更多的测试结果。</p>
+<p>顺便说一下，<strong>强烈建议用keras 2.3.1配合tensorflow 1.x/2.x来跑，强烈不建议使用tensorflow 2.x自带的tf.keras来跑</strong> 。</p>
+<h2 id="_5">参考</h2>
+<p>最后，笔者的实现主要参考自如下两个源码，在此表示感谢。</p>
+<blockquote>
+<p><a href="https://github.com/davisyoshida/tf2-gradient-checkpointing">https://github.com/davisyoshida/tf2-gradient-checkpointing</a></p>
+<p><a href="https://github.com/tensorflow/tensorflow/blob/v2.1.0/tensorflow/python/ops/custom_gradient.py#L454-L499">https://github.com/tensorflow/tensorflow/blob/v2.1.0/tensorflow/python/ops/custom_gradient.py#L454-L499</a></p>
+</blockquote>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7367">https://spaces.ac.cn/archives/7367</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Apr. 29, 2020). 《节省显存的重计算技巧也有了Keras版了 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7367">https://spaces.ac.cn/archives/7367</a></p>
+<p>@online{kexuefm-7367,<br />
+title={节省显存的重计算技巧也有了Keras版了},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={Apr},<br />
+url={\url{https://spaces.ac.cn/archives/7367}},<br />
+} </p>
+<hr />
+<h2 id="_6">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google新作Synthesizer：我们还不够了解自注意力</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>Google新作Synthesizer：我们还不够了解自注意力</h1>
+            <div class="meta">📅 最后更新: 2025-12-31 | 📄 大小: 12.8 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7430">https://spaces.ac.cn/archives/7430</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<blockquote>
+<p>深度学习这个箱子，远比我们想象的要黑。</p>
+</blockquote>
+<h2 id="_1">写在开头</h2>
+<p>据说物理学家费曼说过一句话[<a href="https://en.wikiquote.org/wiki/Talk:Richard_Feynman#%22If_you_think_you_understand_quantum_mechanics,_you_don't_understand_quantum_mechanics.%22">来源</a>]：“谁要是说他懂得量子力学，那他就是真的不懂量子力学。”我现在越来越觉得，这句话中的“量子力学”也可以替换为“深度学习”。尽管深度学习已经在越来越多的领域证明了其有效性，但我们对它的解释性依然相当无力。当然，这几年来已经有不少工作致力于打开深度学习这个黑箱，但是很无奈，这些工作基本都是“马后炮”式的，也就是在已有的实验结果基础上提出一些勉强能说服自己的解释，无法做到自上而下的构建和理解模型的原理，更不用说提出一些前瞻性的预测。</p>
+<p>本文关注的是自注意力机制。直观上来看，自注意力机制算是解释性比较强的模型之一了，它通过自己与自己的Attention来自动捕捉了token与token之间的关联，事实上在<a href="https://papers.cool/arxiv/1706.03762">《Attention is All You Need》</a>那篇论文中，就给出了如下的看上去挺合理的可视化效果：  </p>
+<p><a href="/usr/uploads/2020/05/2899947101.png" title="点击查看原图"><img alt="《Attention is All You Need》一文中对Attention的可视化例子" src="/usr/uploads/2020/05/2899947101.png" /></a></p>
+<p>《Attention is All You Need》一文中对Attention的可视化例子</p>
+<p>但自注意力机制真的是这样生效的吗？这种“token对token”的注意力是必须的吗？前不久Google的新论文<a href="https://papers.cool/arxiv/2005.00743">《Synthesizer: Rethinking Self-Attention in Transformer Models》</a>对自注意力机制做了一些“异想天开”的探索，里边的结果也许会颠覆我们对自注意力的认知。</p>
+<h2 id="_2">自注意力</h2>
+<p>自注意力模型的流行，始于2017年Google发表的<a href="https://papers.cool/arxiv/1706.03762">《Attention is All You Need》</a>一文，关于它的科普读者还可以参考笔者旧作<a href="/archives/4765">《Attention is All You Need》浅读（简介+代码）</a>。它的基础是Scaled-Dot Attention，定义如下：<br />
+\begin{equation}Attention(\boldsymbol{Q},\boldsymbol{K},\boldsymbol{V}) = softmax\left(\frac{\boldsymbol{Q}\boldsymbol{K}^{\top}}{\sqrt{d_k}}\right)\boldsymbol{V}\end{equation}<br />
+其中$\boldsymbol{Q}\in\mathbb{R}^{n\times d_k}, \boldsymbol{K}\in\mathbb{R}^{m\times d_k}, \boldsymbol{V}\in\mathbb{R}^{m\times d_v}$，softmax则是在$m$的那一维进行归一化。而自注意力，则是对于同一个$\boldsymbol{X}\in \mathbb{R}^{n\times d}$，通过不同的投影矩阵$\boldsymbol{W}_q,\boldsymbol{W}_k,\boldsymbol{W}_v\in\mathbb{R}^{d\times d'}$得到$\boldsymbol{Q}=\boldsymbol{X}\boldsymbol{W}_q,\boldsymbol{K}=\boldsymbol{X}\boldsymbol{W}_k,\boldsymbol{V}=\boldsymbol{X}\boldsymbol{W}_v$，然后再做Attention，即<br />
+\begin{equation}\begin{aligned}<br />
+SelfAttention(\boldsymbol{X}) =&amp;\, Attention(\boldsymbol{X}\boldsymbol{W}_q, \boldsymbol{X}\boldsymbol{W}_k, \boldsymbol{X}\boldsymbol{W}_v)\\\<br />
+=&amp;\, softmax\left(\frac{\boldsymbol{X}\boldsymbol{W}_q \boldsymbol{W}_k^{\top}\boldsymbol{X}^{\top}}{\sqrt{d_k}}\right)\boldsymbol{X}\boldsymbol{W}_v&amp;<br />
+\end{aligned}\end{equation}<br />
+至于Multi-Head Attention，则不过是Attention运算在不同的参数下重复多次然后将多个输出拼接起来，属于比较朴素的增强。而关于它的进一步推广，则可以参考<a href="/archives/7325">《突破瓶颈，打造更强大的Transformer》</a>。</p>
+<h2 id="_3">天马行空</h2>
+<p>本质上来看，自注意力就是通过一个$n\times n$的矩阵$\boldsymbol{A}$和$d\times d'$的矩阵$\boldsymbol{W}_v$，将原本是$n\times d$的矩阵$\boldsymbol{X}$，变成了$n\times d'$的矩阵$\boldsymbol{A}\boldsymbol{X}\boldsymbol{W}_v$。其中矩阵$\boldsymbol{A}$是动态生成的，即<br />
+\begin{equation}\boldsymbol{A}=softmax\left(\boldsymbol{B}\right),\quad\boldsymbol{B}=\frac{\boldsymbol{X}\boldsymbol{W}_q \boldsymbol{W}_k^{\top}\boldsymbol{X}^{\top}}{\sqrt{d_k}}\end{equation}<br />
+对于矩阵$\boldsymbol{B}$，本质上来说它就是$\boldsymbol{X}$里边两两向量的内积组合，所以我们称它为“token对token”的Attention。</p>
+<p><a href="/usr/uploads/2020/05/1952325966.png" title="点击查看原图"><img alt="Synthesizer自注意力与标准自注意力的对比" src="/usr/uploads/2020/05/1952325966.png" /></a></p>
+<p>Synthesizer自注意力与标准自注意力的对比</p>
+<p>那么，就到了前面提出的问题：“token对token”是必须的吗？能不能通过其他方式来生成这个矩阵$\boldsymbol{B}$？Google的这篇论文正是“天马行空”了几种新的形式并做了实验，这些形式统称为Synthesizer。</p>
+<h3 id="dense">Dense形式</h3>
+<p>第一种形式在原论文中称为Dense：$\boldsymbol{B}$需要是$n\times n$大小的，而$\boldsymbol{X}$是$n\times d$的，所以只需要一个$d\times n$的变换矩阵$\boldsymbol{W}_a$就可以将它变成$n\times n$了，即<br />
+\begin{equation}\boldsymbol{B}=\boldsymbol{X}\boldsymbol{W}_a\end{equation}<br />
+这其实就相当于把$\boldsymbol{K}$固定为常数矩阵$\boldsymbol{W}_a^{\top}$了。当然，原论文还做得更复杂一些，用到了两层Dense层：<br />
+\begin{equation}\boldsymbol{B}=\text{relu}\left(\boldsymbol{X}\boldsymbol{W}_1 + \boldsymbol{b}_1\right)\boldsymbol{W}_2 + \boldsymbol{b}_2\end{equation}<br />
+但思想上并没有什么变化。</p>
+<h3 id="random">Random形式</h3>
+<p>刚才说Dense形式相当于把$\boldsymbol{K}$固定为常数矩阵，我们还能不能更“异想天开”一些：把$\boldsymbol{Q}$固定为常数矩阵？这时候整个$\boldsymbol{B}$相当于是一个常数矩阵，即<br />
+\begin{equation}\boldsymbol{B}=\boldsymbol{R}\end{equation}<br />
+原论文中还真是实验了这种形式，称之为Random，顾名思义，就是$\boldsymbol{B}$是随机初始化的，然后可以选择随训练更新或不更新。据原论文描述，固定形式的Attention首次出现在论文<a href="https://papers.cool/arxiv/2002.10260">《Fixed Encoder Self-Attention Patterns in Transformer-Based Machine Translation》</a>，不同点是那里的Attention矩阵是由一个函数算出来的，而Google这篇论文则是完全随机初始化的。从形式上看，Random实际上就相当于可分离卷积（Depthwise Separable Convolution）运算。</p>
+<h3 id="_4">低秩分解</h3>
+<p>上面两种新形式，往往会面对着参数过多的问题，所以很自然地就想到通过低秩分解来降低参数量。对于Dense和Random，原论文也提出并验证了对应的低秩分解形式，分别称为Factorized Dense和Factorized Random。</p>
+<p>Factorized Dense通过Dense的方式，生成两个$n\times a, n\times b$的矩阵$\boldsymbol{B}_1,\boldsymbol{B}_2$，其中$ab=n$；然后将$\boldsymbol{B}_1$重复$b$次、然后将$\boldsymbol{B}_2$重复$a$次，得到对应的$n\times n$矩阵$\tilde{\boldsymbol{B}}_1,\tilde{\boldsymbol{B}}_2$，最后将它们逐位相乘（个人感觉相乘之前$\tilde{\boldsymbol{B}}_2$应该要转置一下比较合理，但原论文并没有提及），合成一个$n\times n$的矩阵：<br />
+\begin{equation}\boldsymbol{B}=\tilde{\boldsymbol{B}}_1 \otimes \tilde{\boldsymbol{B}}_2\end{equation}</p>
+<p>至于Factorized Random就很好理解了，本来是一整个$n\times n$的矩阵$\boldsymbol{R}$，现在变成两个$n\times k$的矩阵$\boldsymbol{R}_1,\boldsymbol{R}_2$，然后<br />
+\begin{equation}\boldsymbol{B}=\boldsymbol{R}_1\boldsymbol{R}_2^{\top} \end{equation}</p>
+<h3 id="_5">混合模式</h3>
+<p>到目前为止，连同标准的自注意力，我们有5种不同的生成矩阵$\boldsymbol{B}$的方案，它们也可以混合起来，即<br />
+\begin{equation}\boldsymbol{B}=\sum_{i=1}^N \alpha_i \boldsymbol{B}<em i="1">i\end{equation}<br />
+其中$\boldsymbol{B}_i$是不同形式的自注意力矩阵，而$\sum\limits</em>^N \alpha_i=1$是可学习参数。</p>
+<h2 id="_6">结果分析</h2>
+<p>前面介绍了统称为Synthesizer的几种新型自注意力形式，它们的共同特点是没有保持“token对token”形式，尤其是Random，则完全抛弃了原有注意力的动态特点，变成了静态的矩阵。</p>
+<p>那么，这些新型自注意力的效果如何呢？它们又怎样冲击我们对自注意力机制的认识呢？</p>
+<h3 id="_7">机器翻译</h3>
+<p>第一个评测任务是机器翻译，详细地比较了各种自注意力形式的效果：  </p>
+<p><a href="/usr/uploads/2020/05/3585336995.png" title="点击查看原图"><img alt="Synthesizer在机器翻译任务上的表现对比" src="/usr/uploads/2020/05/3585336995.png" /></a></p>
+<p>Synthesizer在机器翻译任务上的表现对比</p>
+<p>不知道读者怎么想，反正Synthesizer的这些结果是冲击了笔者对自注意力的认知的。表格显示，除了固定的Random外，所有的自注意力形式表现基本上都差不多，而且就算是固定的Random也有看得过去的效果，这表明我们以往对自注意力的认知和解释都太过片面了，并没有揭示自注意力生效的真正原因。</p>
+<h3 id="_8">摘要对话</h3>
+<p>接下来在摘要和对话生成任务上的结果：  </p>
+<p><a href="/usr/uploads/2020/05/476416403.png" title="点击查看原图"><img alt="Synthesizer在摘要和对话任务上的表现对比" src="/usr/uploads/2020/05/476416403.png" /></a></p>
+<p>Synthesizer在摘要和对话任务上的表现对比</p>
+<p>在自动摘要这个任务上，标准注意力效果比较好，但是对话生成这个任务上，结果则反过来：标准的自注意力是最差的，Dense（D）和Random（R）是最好的，而当Dense和Random混合了标准的自注意力后（即 D+V 和 R+V），效果也变差了。这说明标准注意力并没有什么“独占鳌头”的优势，而几个Synthesizer看起来是标准注意力的“退化”，但事实上它们互不从属，各有优势。</p>
+<h3 id="_9">预训练+微调</h3>
+<p>最后，对于我们这些普通读者来说，可能比较关心是“预训练+微调”的效果怎样，也就是说，将BERT之类的模型的自注意力替换之后表现如何？原论文确实也做了这个实验，不过Baseline不是BERT而是T5，结果如下：  </p>
+<p><a href="/usr/uploads/2020/05/1138641380.png" title="点击查看原图"><img alt="Synthesizer在“预训练+微调”的表现对比" src="/usr/uploads/2020/05/1138641380.png" /></a></p>
+<p>Synthesizer在“预训练+微调”的表现对比</p>
+<p>在这个结果中，相比标准自注意力，Dense和Random就显得逊色了，这表明Dense和Random也许会在单一任务上表现得比较好，而迁移能力则比较弱。但是不能否定的是，像Random这样的自注意力，由于直接省去了$\boldsymbol{Q}\boldsymbol{K}^{\top}$这个矩阵运算，因此计算效率会有明显提升，因此如果能想法子解决这个迁移性问题，说不准Transformer模型家族将会迎来大换血。</p>
+<h2 id="_10">文末小结</h2>
+<p>本文介绍了Google的新工作Synthesizer，它是对目前流行的自注意力机制的反思和探索。论文中提出了几种新型的自注意力机制，并做了相当充分的实验，而实验结果很可能会冲击我们对自注意力机制的已有认知，值得大家读读～</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7430">https://spaces.ac.cn/archives/7430</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (May. 25, 2020). 《Google新作Synthesizer：我们还不够了解自注意力 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7430">https://spaces.ac.cn/archives/7430</a></p>
+<p>@online{kexuefm-7430,<br />
+title={Google新作Synthesizer：我们还不够了解自注意力},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={May},<br />
+url={\url{https://spaces.ac.cn/archives/7430}},<br />
+} </p>
+<hr />
+<h2 id="_11">公式推导与注释</h2>
+<p>TODO: 添加详细的数学公式推导和注释</p>
+        </div>
+    </div>
+</body>
+</html>

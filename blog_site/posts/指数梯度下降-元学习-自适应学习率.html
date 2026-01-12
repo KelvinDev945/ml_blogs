@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>指数梯度下降 + 元学习 = 自适应学习率</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>指数梯度下降 + 元学习 = 自适应学习率</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 30.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/8968">https://spaces.ac.cn/archives/8968</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>前两天刷到了Google的一篇论文<a href="https://papers.cool/arxiv/2202.00145">《Step-size Adaptation Using Exponentiated Gradient Updates》</a>，在其中学到了一些新的概念，所以在此记录分享一下。主要的内容有两个，一是非负优化的指数梯度下降，二是基于元学习思想的学习率调整算法，两者都颇有意思，有兴趣的读者也可以了解一下。</p>
+<h2 id="_1">指数梯度下降</h2>
+<p>梯度下降大家可能听说得多了，指的是对于无约束函数$\mathcal{L}(\boldsymbol{\theta})$的最小化，我们用如下格式进行更新：<br />
+\begin{equation}\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">{t+1} = \boldsymbol{\theta}_t - \eta\nabla</em>}}\mathcal{L}(\boldsymbol{\theta<em t_1="t+1">t)\end{equation}<br />
+其中$\eta$是学习率。然而很多任务并非总是无约束的，对于最简单的非负约束，我们可以改为如下格式更新：<br />
+\begin{equation}\boldsymbol{\theta}</em>} = \boldsymbol{\theta<em _boldsymbol_theta="\boldsymbol{\theta">t \odot \exp\left(- \eta\nabla</em>}}\mathcal{L}(\boldsymbol{\theta}_t)\right)\label{eq:egd}\end{equation<br />
+这里的$\odot$是逐位对应相乘（Hadamard积）。容易看到，只要初始化的$\boldsymbol{\theta}_0$是非负的，那么在整个更新过程中$\boldsymbol{\theta}_t$都会保持非负，这就是用于非负约束优化的“指数梯度下降”。</p>
+<p>怎么理解这个“指数梯度下降”呢？也不难，转化为无约束的情形进行推导就行了。如果$\boldsymbol{\theta}$是非负的，那么$\boldsymbol{\varphi}=\log\boldsymbol{\theta}$就是可正可负的了，因此可以设$\boldsymbol{\theta}=e^{\boldsymbol{\varphi}}$转化为关于$\boldsymbol{\varphi}$的无约束优化问题，继而就可以用梯度下降解决：<br />
+\begin{equation}\boldsymbol{\varphi}<em _boldsymbol_varphi="\boldsymbol{\varphi">{t+1} = \boldsymbol{\varphi}_t - \eta\nabla</em>}}\mathcal{L}(e^{\boldsymbol{\varphi<em e_boldsymbol_varphi="e^{\boldsymbol{\varphi">t}) = \boldsymbol{\varphi}_t - \eta e^{\boldsymbol{\varphi}_t}\odot\nabla</em>}}}\mathcal{L}(e^{\boldsymbol{\varphi<em t_1="t+1">t})\end{equation}<br />
+我们认为梯度的$e^{\boldsymbol{\varphi}_t}\odot$这部分只起到了调节学习率的作用，所以它不是本质重要的，我们将它舍去得到<br />
+\begin{equation}\boldsymbol{\varphi}</em>} = \boldsymbol{\varphi<em e_boldsymbol_varphi="e^{\boldsymbol{\varphi">t - \eta \nabla</em>}}}\mathcal{L}(e^{\boldsymbol{\varphi<em t_1="t+1">t})\end{equation}<br />
+两边取指数得<br />
+\begin{equation}e^{\boldsymbol{\varphi}</em>}} = e^{\boldsymbol{\varphi<em e_boldsymbol_varphi="e^{\boldsymbol{\varphi">t}\odot\exp\left( - \eta \nabla</em>}}}\mathcal{L}(e^{\boldsymbol{\varphi}_t})\right)\end{equation<br />
+换回$\boldsymbol{\theta}=e^{\boldsymbol{\varphi}}$就得到式$\eqref{eq:egd}$。</p>
+<h2 id="_2">元学习调学习率</h2>
+<p>对于元学习（Meta Learning），可能多数读者都跟笔者一样听得多，但几乎没接触过。简单来说，普通机器学习跟元学习的关系，就像是数学中“函数”跟“泛函”的关系，泛函是“函数的函数”，元学习则是“学习如何学习（Learning How to Learn）”，也就是说它是关于“学习”本身的方法论，比如接下来要介绍的，就是“用梯度下降去调整梯度下降”。</p>
+<p>我们从一般的梯度下降出发，记目标函数$\mathcal{L}$的梯度为$\boldsymbol{g}$，那么更新公式为<br />
+\begin{equation}\boldsymbol{\theta}<em t_1="t+1">{t+1} = \boldsymbol{\theta}_t - \eta\boldsymbol{g}_t\end{equation}<br />
+我们希望给每个分量都调节一下学习率，所以我们引入跟参数一样大小的非负变量$\boldsymbol{\nu}$，修改更新公式为<br />
+\begin{equation}\boldsymbol{\theta}</em>} = \boldsymbol{\theta<em t_1="t+1">t - \eta\boldsymbol{\nu}</em>}\odot\boldsymbol{g<em t_1="t+1">t\label{eq:update}\end{equation}<br />
+那么，$\boldsymbol{\nu}$要按照什么规则迭代呢？记住我们最终的目的是最小化$\mathcal{L}$，所以$\boldsymbol{\nu}$的更新规则应该也要是梯度下降，而这里$\boldsymbol{\nu}$要求是非负的，所以我们用指数梯度下降：<br />
+\begin{equation}\boldsymbol{\nu}</em>} = \boldsymbol{\nu<em _boldsymbol_nu="\boldsymbol{\nu">t \odot\exp\left(- \gamma\nabla</em><em t-1="t-1">t}\mathcal{L}\right)\label{eq:update-nu}\end{equation}<br />
+注意$\mathcal{L}$本来只是$\boldsymbol{\theta}$的函数，但根据$\eqref{eq:update}$，在$t$时刻我们有$\boldsymbol{\theta}_t = \boldsymbol{\theta}</em>} - \eta\boldsymbol{\nu<em t-1="t-1">t\odot\boldsymbol{g}</em>$，所以根据链式法则有<br />
+\begin{equation}\nabla_{\boldsymbol{\nu}<em t-1="t-1">t}\mathcal{L} = -\eta\boldsymbol{g}</em>} \odot\nabla_{\boldsymbol{\theta<em t-1="t-1">t}\mathcal{L}= -\eta\boldsymbol{g}</em>} \odot\boldsymbol{g<em t_1="t+1">t\end{equation}<br />
+代入到$\nu$的更新公式$\eqref{eq:update-nu}$，得到<br />
+\begin{equation}\boldsymbol{\nu}</em>} = \boldsymbol{\nu<em t-1="t-1">t \odot\exp\left( \gamma\eta\boldsymbol{g}</em>} \odot\boldsymbol{g<em t_1="t+1">t\right)\end{equation}<br />
+将$\gamma\eta$合成一个参数$\gamma$，于是整个模型的更新公式是：<br />
+\begin{equation}\begin{aligned}&amp;\boldsymbol{\nu}</em>} = \boldsymbol{\nu<em t-1="t-1">t \odot\exp\left( \gamma\boldsymbol{g}</em>} \odot\boldsymbol{g<em t_1="t+1">t\right) \\\<br />
+&amp;\boldsymbol{\theta}</em>} = \boldsymbol{\theta<em t_1="t+1">t - \eta\boldsymbol{\nu}</em>}\odot\boldsymbol{g<em t_1="t+1">t\end{aligned}\end{equation}<br />
+如果$\boldsymbol{\nu}$初始化为全1，那么将有<br />
+\begin{equation}\boldsymbol{\nu}</em>} = \exp\left(\gamma\sum_{k=1}^t\boldsymbol{g}_{k-1} \odot\boldsymbol{g}_k\right)\end{equation<br />
+可以看到，该方法的学习率调节思路是：如果某分量相邻两步的梯度经常同号，那么对应项的累加结果就是正的，意味着我们可以适当扩大一下学习率；如果相邻两步的梯度经常异号，那么对应项的累加结果很可能是负的，意味着我们可以适当缩小一下学习率。</p>
+<p>注意这跟Adam调学习率的思想是不一样的，Adam调节学习率的思想是如果某个分量的梯度长时间很小，那么就意味着该参数可能没学好，所以尝试放大它的学习率。两者也算是各有各的道理吧。</p>
+<h2 id="_3">简单做个小结</h2>
+<p>本文主要对“指数梯度下降”和“元学习调学习率”两个概念做了简单笔记，“指数梯度下降”是非负约束优化的一个简单有效的方案，而“元学习调学习率”则是元学习的一个简单易懂的应用。其中在介绍“元学习调学习率”时笔者做了一些简化，相比原论文的形式更为简单一些，但思想是一致的。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/8968">https://spaces.ac.cn/archives/8968</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Mar. 03, 2022). 《指数梯度下降 + 元学习 = 自适应学习率 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/8968">https://spaces.ac.cn/archives/8968</a></p>
+<p>@online{kexuefm-8968,<br />
+title={指数梯度下降 + 元学习 = 自适应学习率},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Mar},<br />
+url={\url{https://spaces.ac.cn/archives/8968}},<br />
+} </p>
+<hr />
+<h2 id="_4">公式推导与注释</h2>
+<h3 id="1">1. 指数梯度下降的理论基础</h3>
+<h4 id="11">1.1 非负约束优化问题</h4>
+<p>对于参数空间受限于非负象限的优化问题：
+\begin{equation}\min_{\boldsymbol{\theta} \geq \boldsymbol{0}} \mathcal{L}(\boldsymbol{\theta})\tag{1}\end{equation}</p>
+<p><strong>数学直觉</strong>：许多实际问题具有非负约束，如概率分布、注意力权重、资源分配等。</p>
+<p>标准梯度下降无法保证非负性：
+\begin{equation}\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">{t+1} = \boldsymbol{\theta}_t - \eta\nabla</em>}}\mathcal{L}(\boldsymbol{\theta}_t)\tag{2}\end{equation</p>
+<p>即使$\boldsymbol{\theta}<em t_1="t+1">t \geq \boldsymbol{0}$，也可能产生$\boldsymbol{\theta}</em>$的某些分量为负。</p>
+<h4 id="12">1.2 指数梯度下降更新规则</h4>
+<p>指数梯度下降（EGD）定义为：
+\begin{equation}\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">{t+1} = \boldsymbol{\theta}_t \odot \exp\left(- \eta\nabla</em>}}\mathcal{L}(\boldsymbol{\theta}_t)\right)\tag{3}\end{equation</p>
+<p><strong>关键性质</strong>：
+1. <strong>非负性保持</strong>：$\boldsymbol{\theta}_0 &gt; \boldsymbol{0} \Rightarrow \boldsymbol{\theta}_t &gt; \boldsymbol{0}, \forall t$
+2. <strong>乘性更新</strong>：相对变化与梯度成正比
+3. <strong>尺度不变性</strong>：对参数缩放具有良好性质</p>
+<p>分量形式：
+\begin{equation}\theta_{t+1,i} = \theta_{t,i} \exp\left(- \eta \frac{\partial \mathcal{L}}{\partial \theta_{t,i}}\right)\tag{4}\end{equation}</p>
+<h4 id="13">1.3 从对数空间的角度理解</h4>
+<p>引入对数参数化：
+\begin{equation}\boldsymbol{\varphi} = \log \boldsymbol{\theta} \quad \Leftrightarrow \quad \boldsymbol{\theta} = \exp(\boldsymbol{\varphi})\tag{5}\end{equation}</p>
+<p><strong>数学直觉</strong>：对数变换将非负约束$\boldsymbol{\theta} &gt; \boldsymbol{0}$转化为无约束问题$\boldsymbol{\varphi} \in \mathbb{R}^d$。</p>
+<p>链式法则给出梯度关系：
+\begin{equation}\nabla_{\boldsymbol{\varphi}}\mathcal{L}(e^{\boldsymbol{\varphi}}) = e^{\boldsymbol{\varphi}} \odot \nabla_{\boldsymbol{\theta}}\mathcal{L}(\boldsymbol{\theta})\tag{6}\end{equation}</p>
+<p>在对数空间进行标准梯度下降：
+\begin{equation}\boldsymbol{\varphi}<em _boldsymbol_varphi="\boldsymbol{\varphi">{t+1} = \boldsymbol{\varphi}_t - \eta \nabla</em>}}\mathcal{L}(e^{\boldsymbol{\varphi}_t})\tag{7}\end{equation</p>
+<p>代入式(6)：
+\begin{equation}\boldsymbol{\varphi}<em _boldsymbol_theta="\boldsymbol{\theta">{t+1} = \boldsymbol{\varphi}_t - \eta e^{\boldsymbol{\varphi}_t} \odot \nabla</em>}}\mathcal{L}(\boldsymbol{\theta}_t)\tag{8}\end{equation</p>
+<p><strong>预条件化解释</strong>：$e^{\boldsymbol{\varphi}<em t_1="t+1">t}$项可视为自适应学习率。忽略此项得到：
+\begin{equation}\boldsymbol{\varphi}</em>} = \boldsymbol{\varphi<em _boldsymbol_theta="\boldsymbol{\theta">t - \eta \nabla</em>}}\mathcal{L}(\boldsymbol{\theta}_t)\tag{9}\end{equation</p>
+<p>两边取指数：
+\begin{equation}e^{\boldsymbol{\varphi}<em _boldsymbol_theta="\boldsymbol{\theta">{t+1}} = e^{\boldsymbol{\varphi}_t} \odot \exp\left(- \eta \nabla</em>}}\mathcal{L}(\boldsymbol{\theta}_t)\right)\tag{10}\end{equation</p>
+<p>恢复原参数$\boldsymbol{\theta} = e^{\boldsymbol{\varphi}}$即得式(3)。</p>
+<h3 id="2-bregman">2. 镜像下降与Bregman散度</h3>
+<h4 id="21-bregman">2.1 Bregman散度</h4>
+<p>给定严格凸函数$\psi: \mathbb{R}^d \to \mathbb{R}$，Bregman散度定义为：
+\begin{equation}D_\psi(\boldsymbol{\theta}_1, \boldsymbol{\theta}_2) = \psi(\boldsymbol{\theta}_1) - \psi(\boldsymbol{\theta}_2) - \nabla\psi(\boldsymbol{\theta}_2)^{\top}(\boldsymbol{\theta}_1 - \boldsymbol{\theta}_2)\tag{11}\end{equation}</p>
+<p><strong>几何意义</strong>：函数值与其线性近似之差。</p>
+<p><strong>性质</strong>：
+1. $D_\psi(\boldsymbol{\theta}<em>1, \boldsymbol{\theta}_2) \geq 0$（凸性保证）
+2. $D</em>\psi(\boldsymbol{\theta}<em>1, \boldsymbol{\theta}_2) = 0 \Leftrightarrow \boldsymbol{\theta}_1 = \boldsymbol{\theta}_2$（严格凸保证）
+3. 一般不对称：$D</em>\psi(\boldsymbol{\theta}<em>1, \boldsymbol{\theta}_2) \neq D</em>\psi(\boldsymbol{\theta}_2, \boldsymbol{\theta}_1)$</p>
+<h4 id="22">2.2 镜像下降框架</h4>
+<p>镜像下降更新规则：
+\begin{equation}\boldsymbol{\theta}<em _boldsymbol_theta="\boldsymbol{\theta">{t+1} = \arg\min</em>}} \left{\eta \nabla\mathcal{L}(\boldsymbol{\theta<em>t)^{\top}\boldsymbol{\theta} + D</em>\psi(\boldsymbol{\theta}, \boldsymbol{\theta}_t)\right}\tag{12}\end{equation}</p>
+<p>一阶最优性条件：
+\begin{equation}\eta \nabla\mathcal{L}(\boldsymbol{\theta}<em t_1="t+1">t) + \nabla\psi(\boldsymbol{\theta}</em>}) - \nabla\psi(\boldsymbol{\theta}_t) = \boldsymbol{0}\tag{13}\end{equation</p>
+<p>即：
+\begin{equation}\nabla\psi(\boldsymbol{\theta}_{t+1}) = \nabla\psi(\boldsymbol{\theta}_t) - \eta \nabla\mathcal{L}(\boldsymbol{\theta}_t)\tag{14}\end{equation}</p>
+<h4 id="23">2.3 负熵作为镜像函数</h4>
+<p>对于非负单纯形$\Delta_d = {\boldsymbol{\theta} \geq \boldsymbol{0}: \sum_i \theta_i = 1}$，选择负熵：
+\begin{equation}\psi(\boldsymbol{\theta}) = \sum_{i=1}^d \theta_i \log \theta_i\tag{15}\end{equation}</p>
+<p>梯度为：
+\begin{equation}\nabla\psi(\boldsymbol{\theta}) = \boldsymbol{1} + \log \boldsymbol{\theta}\tag{16}\end{equation}</p>
+<p>代入式(14)：
+\begin{equation}\boldsymbol{1} + \log \boldsymbol{\theta}_{t+1} = \boldsymbol{1} + \log \boldsymbol{\theta}_t - \eta \nabla\mathcal{L}(\boldsymbol{\theta}_t)\tag{17}\end{equation}</p>
+<p>化简得：
+\begin{equation}\log \boldsymbol{\theta}_{t+1} = \log \boldsymbol{\theta}_t - \eta \nabla\mathcal{L}(\boldsymbol{\theta}_t)\tag{18}\end{equation}</p>
+<p>两边取指数：
+\begin{equation}\boldsymbol{\theta}_{t+1} = \boldsymbol{\theta}_t \odot \exp(-\eta \nabla\mathcal{L}(\boldsymbol{\theta}_t))\tag{19}\end{equation}</p>
+<p><strong>重要结论</strong>：指数梯度下降是以负熵为镜像函数的镜像下降。</p>
+<h4 id="24-klbregman">2.4 KL散度与负熵Bregman散度</h4>
+<p>负熵的Bregman散度正是KL散度：
+\begin{equation}\begin{aligned}
+D_\psi(\boldsymbol{p}, \boldsymbol{q}) &amp;= \sum_i p_i \log p_i - \sum_i q_i \log q_i - \sum_i (1 + \log q_i)(p_i - q_i)\
+&amp;= \sum_i p_i \log p_i - \sum_i p_i \log q_i\
+&amp;= \sum_i p_i \log \frac{p_i}{q_i}\
+&amp;= \text{KL}(\boldsymbol{p} | \boldsymbol{q})
+\end{aligned}\tag{20}\end{equation}</p>
+<h3 id="3">3. 在线学习理论与遗憾界</h3>
+<h4 id="31">3.1 在线凸优化设置</h4>
+<p>在线学习协议：
+1. 第$t$轮，学习者选择$\boldsymbol{\theta}_t \in \mathcal{K}$
+2. 环境揭示凸损失函数$\mathcal{L}_t: \mathcal{K} \to \mathbb{R}$
+3. 学习者遭受损失$\mathcal{L}_t(\boldsymbol{\theta}_t)$</p>
+<p><strong>遗憾（Regret）</strong>定义为累积损失与最优固定策略的差距：
+\begin{equation}R_T = \sum_{t=1}^T \mathcal{L}<em _boldsymbol_theta="\boldsymbol{\theta">t(\boldsymbol{\theta}_t) - \min</em>^<em> \in \mathcal{K}} \sum_{t=1}^T \mathcal{L}_t(\boldsymbol{\theta}^</em>)\tag{21}\end{equation}</p>
+<p><strong>目标</strong>：设计算法使$R_T = o(T)$（次线性遗憾）。</p>
+<h4 id="32">3.2 指数梯度下降的遗憾界</h4>
+<p><strong>定理1</strong>（EGD遗憾界）：设$\mathcal{K} = \Delta_d$（概率单纯形），损失函数$\mathcal{L}<em>t$凸且$|\nabla\mathcal{L}_t|</em>\infty \leq G$。指数梯度下降（学习率$\eta = \sqrt{\frac{2\log d}{GT}}$）保证：
+\begin{equation}R_T \leq \sqrt{2GT \log d}\tag{22}\end{equation}</p>
+<p><strong>证明</strong>：利用KL散度分析框架。对任意$\boldsymbol{\theta}^* \in \Delta_d$：</p>
+<p><strong>步骤1</strong>：凸函数性质
+\begin{equation}\mathcal{L}_t(\boldsymbol{\theta}_t) - \mathcal{L}_t(\boldsymbol{\theta}^<em>) \leq \nabla\mathcal{L}_t(\boldsymbol{\theta}_t)^{\top}(\boldsymbol{\theta}_t - \boldsymbol{\theta}^</em>)\tag{23}\end{equation}</p>
+<p><strong>步骤2</strong>：镜像下降基本不等式
+\begin{equation}\nabla\mathcal{L}<em>t(\boldsymbol{\theta}_t)^{\top}(\boldsymbol{\theta}_t - \boldsymbol{\theta}^<em>) \leq \frac{1}{\eta}\left[D_\psi(\boldsymbol{\theta}^</em>, \boldsymbol{\theta}_t) - D</em>\psi(\boldsymbol{\theta}^*, \boldsymbol{\theta}_{t+1})\right] + \frac{\eta}{2}|\nabla\mathcal{L}_t(\boldsymbol{\theta}_t)|^2\tag{24}\end{equation}</p>
+<p>其中$|\cdot|$是关于$\nabla^2\psi$的对偶范数。</p>
+<p><strong>步骤3</strong>：对$t$求和（望远镜和）
+\begin{equation}\sum_{t=1}^T \nabla\mathcal{L}<em t="1">t(\boldsymbol{\theta}_t)^{\top}(\boldsymbol{\theta}_t - \boldsymbol{\theta}^<em>) \leq \frac{D_\psi(\boldsymbol{\theta}^</em>, \boldsymbol{\theta}_1)}{\eta} + \frac{\eta}{2}\sum</em>}^T |\nabla\mathcal{L}_t(\boldsymbol{\theta}_t)|^2\tag{25}\end{equation</p>
+<p><strong>步骤4</strong>：界定各项</p>
+<p>负熵散度有界：
+\begin{equation}D_\psi(\boldsymbol{\theta}^<em>, \boldsymbol{\theta}_1) = \text{KL}(\boldsymbol{\theta}^</em> | \boldsymbol{\theta}_1) \leq \log d\tag{26}\end{equation}</p>
+<p>（当$\boldsymbol{\theta}_1 = (1/d, \ldots, 1/d)$均匀初始化时取等）</p>
+<p>梯度平方和：
+\begin{equation}\sum_{t=1}^T |\nabla\mathcal{L}_t(\boldsymbol{\theta}_t)|^2 \leq TG^2\tag{27}\end{equation}</p>
+<p><strong>步骤5</strong>：代入并优化学习率
+\begin{equation}R_T \leq \frac{\log d}{\eta} + \frac{\eta TG^2}{2}\tag{28}\end{equation}</p>
+<p>选择$\eta = \sqrt{\frac{2\log d}{TG^2}}$最小化右端：
+\begin{equation}R_T \leq \sqrt{2TG^2 \log d} = \sqrt{2GT\log d}\tag{29}\end{equation}</p>
+<p><strong>数学直觉</strong>：$O(\sqrt{T})$遗憾是最优的，KL散度的对数上界提供了维度依赖。</p>
+<h3 id="4">4. 元学习的数学框架</h3>
+<h4 id="41">4.1 双层优化视角</h4>
+<p>元学习目标：学习如何学习，即优化优化器本身。</p>
+<p><strong>外层优化</strong>：优化器参数（如学习率）
+\begin{equation}\min_{\boldsymbol{\nu}} \mathbb{E}<em _text_val="\text{val">{\text{task}} \left[\mathcal{L}</em>}}(\boldsymbol{\theta}^*(\boldsymbol{\nu}))\right]\tag{30}\end{equation</p>
+<p><strong>内层优化</strong>：模型参数
+\begin{equation}\boldsymbol{\theta}^*(\boldsymbol{\nu}) = \arg\min_{\boldsymbol{\theta}} \mathcal{L}_{\text{train}}(\boldsymbol{\theta}; \boldsymbol{\nu})\tag{31}\end{equation}</p>
+<h4 id="42">4.2 自适应学习率的元学习推导</h4>
+<p>目标函数：
+\begin{equation}\mathcal{L}(\boldsymbol{\theta})\tag{32}\end{equation}</p>
+<p>引入分量级学习率$\boldsymbol{\nu} \in \mathbb{R}<em t_1="t+1">{++}^d$：
+\begin{equation}\boldsymbol{\theta}</em>} = \boldsymbol{\theta<em t_1="t+1">t - \eta \boldsymbol{\nu}</em>} \odot \boldsymbol{g}_t\tag{33}\end{equation</p>
+<p>其中$\boldsymbol{g}<em _boldsymbol_theta="\boldsymbol{\theta">t = \nabla</em>_t)$。}}\mathcal{L}(\boldsymbol{\theta</p>
+<p><strong>元学习原则</strong>：$\boldsymbol{\nu}$的更新也应最小化$\mathcal{L}$。</p>
+<h4 id="43">4.3 学习率的梯度计算</h4>
+<p>链式法则：
+\begin{equation}\nabla_{\boldsymbol{\nu}<em _boldsymbol_nu="\boldsymbol{\nu">t} \mathcal{L}(\boldsymbol{\theta}_t) = \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t} \boldsymbol{\theta}_t \cdot \nabla</em>}_t} \mathcal{L}(\boldsymbol{\theta}_t)\tag{34}\end{equation</p>
+<p>由式(33)：
+\begin{equation}\frac{\partial \theta_{t,i}}{\partial \nu_{t,j}} = -\eta g_{t-1,i} \delta_{ij}\tag{35}\end{equation}</p>
+<p>矩阵形式：
+\begin{equation}\nabla_{\boldsymbol{\nu}<em t-1="t-1">t} \boldsymbol{\theta}_t = -\eta \text{diag}(\boldsymbol{g}</em>})\tag{36}\end{equation</p>
+<p>代入式(34)：
+\begin{equation}\nabla_{\boldsymbol{\nu}<em t-1="t-1">t} \mathcal{L} = -\eta \text{diag}(\boldsymbol{g}</em>}) \boldsymbol{g<em t-1="t-1">t = -\eta \boldsymbol{g}</em>} \odot \boldsymbol{g}_t\tag{37}\end{equation</p>
+<h4 id="44">4.4 指数梯度更新学习率</h4>
+<p>由于$\boldsymbol{\nu} &gt; \boldsymbol{0}$，使用指数梯度下降：
+\begin{equation}\boldsymbol{\nu}<em _boldsymbol_nu="\boldsymbol{\nu">{t+1} = \boldsymbol{\nu}_t \odot \exp\left(-\gamma \nabla</em>}_t} \mathcal{L}\right)\tag{38}\end{equation</p>
+<p>代入式(37)：
+\begin{equation}\boldsymbol{\nu}<em t-1="t-1">{t+1} = \boldsymbol{\nu}_t \odot \exp\left(\gamma \eta \boldsymbol{g}</em>} \odot \boldsymbol{g}_t\right)\tag{39}\end{equation</p>
+<p>定义$\gamma' = \gamma \eta$，合并超参数：
+\begin{equation}\boldsymbol{\nu}<em t-1="t-1">{t+1} = \boldsymbol{\nu}_t \odot \exp\left(\gamma' \boldsymbol{g}</em>} \odot \boldsymbol{g}_t\right)\tag{40}\end{equation</p>
+<p><strong>完整算法</strong>：
+\begin{equation}\begin{cases}
+\boldsymbol{\nu}<em t-1="t-1">{t+1} = \boldsymbol{\nu}_t \odot \exp\left(\gamma \boldsymbol{g}</em>} \odot \boldsymbol{g<em t_1="t+1">t\right)\
+\boldsymbol{\theta}</em>} = \boldsymbol{\theta<em t_1="t+1">t - \eta \boldsymbol{\nu}</em>_t
+\end{cases}\tag{41}\end{equation}} \odot \boldsymbol{g</p>
+<h4 id="45">4.5 累积形式与直觉</h4>
+<p>初始化$\boldsymbol{\nu}<em k="1">0 = \boldsymbol{1}$，递推展开：
+\begin{equation}\boldsymbol{\nu}_t = \exp\left(\gamma \sum</em>}^{t-1} \boldsymbol{g<em k_1="k+1">k \odot \boldsymbol{g}</em>}\right)\tag{42}\end{equation</p>
+<p><strong>数学直觉</strong>：
+1. <strong>同号梯度</strong>：若$g_{k,i} \cdot g_{k+1,i} &gt; 0$（方向一致），累积项增大，$\nu_{t,i}$增大，加速该方向
+2. <strong>异号梯度</strong>：若$g_{k,i} \cdot g_{k+1,i} &lt; 0$（方向振荡），累积项减小，$\nu_{t,i}$减小，抑制振荡
+3. <strong>自适应性</strong>：每个分量独立调整，实现分量级学习率自适应</p>
+<h3 id="5-adam">5. 与Adam的比较分析</h3>
+<h4 id="51-adam">5.1 Adam的学习率调整机制</h4>
+<p>Adam更新规则：
+\begin{equation}\begin{aligned}
+\boldsymbol{m}<em t-1="t-1">t &amp;= \beta_1 \boldsymbol{m}</em>} + (1-\beta_1) \boldsymbol{g<em t-1="t-1">t\
+\boldsymbol{v}_t &amp;= \beta_2 \boldsymbol{v}</em>} + (1-\beta_2) \boldsymbol{g<em t_1="t+1">t^2\
+\boldsymbol{\theta}</em>
+\end{aligned}\tag{43}\end{equation}} &amp;= \boldsymbol{\theta}_t - \eta \frac{\boldsymbol{m}_t}{\sqrt{\boldsymbol{v}_t} + \epsilon</p>
+<p>有效学习率：
+\begin{equation}\boldsymbol{\nu}_t^{\text{Adam}} = \frac{\eta}{\sqrt{\boldsymbol{v}_t} + \epsilon}\tag{44}\end{equation}</p>
+<p><strong>Adam原则</strong>：梯度小的分量需要更大学习率（可能未充分学习）。</p>
+<h4 id="52">5.2 元学习方法的原则</h4>
+<p>元学习有效学习率（从式(42)）：
+\begin{equation}\boldsymbol{\nu}<em k="1">t^{\text{Meta}} = \eta \exp\left(\gamma \sum</em>}^{t-1} \boldsymbol{g<em k_1="k+1">k \odot \boldsymbol{g}</em>}\right)\tag{45}\end{equation</p>
+<p><strong>元学习原则</strong>：梯度方向一致的分量需要更大学习率（稳定优化方向）。</p>
+<h4 id="53">5.3 定量比较</h4>
+<p>考虑单个分量$i$：</p>
+<p><strong>场景1：持续小梯度</strong>
+- Adam：$v_{t,i}$小 → $\nu_{t,i}^{\text{Adam}}$大
+- 元学习：若$g_{k,i}$同号但小，累积慢 → $\nu_{t,i}^{\text{Meta}}$增长慢</p>
+<p><strong>场景2：大梯度稳定方向</strong>
+- Adam：$v_{t,i}$大 → $\nu_{t,i}^{\text{Adam}}$小
+- 元学习：$g_{k,i} \cdot g_{k+1,i}$持续大正值 → $\nu_{t,i}^{\text{Meta}}$指数增长</p>
+<p><strong>场景3：梯度振荡</strong>
+- Adam：$v_{t,i}$取决于$\beta_2$，相对稳定
+- 元学习：$g_{k,i} \cdot g_{k+1,i}$正负交替 → $\nu_{t,i}^{\text{Meta}}$被抑制</p>
+<p><strong>结论</strong>：两种方法基于不同启发式，适用于不同优化景观。</p>
+<h3 id="6">6. 收敛性分析</h3>
+<h4 id="61">6.1 凸情况的收敛率</h4>
+<p><strong>定理2</strong>（元学习EGD收敛）：设$\mathcal{L}$为$L$-Lipschitz凸函数，学习率$\eta = O(1/\sqrt{T})$，$\gamma = O(1)$。则元学习指数梯度下降满足：
+\begin{equation}\frac{1}{T}\sum_{t=1}^T \mathcal{L}(\boldsymbol{\theta}_t) - \mathcal{L}(\boldsymbol{\theta}^*) = O\left(\frac{\log T}{\sqrt{T}}\right)\tag{46}\end{equation}</p>
+<p><strong>证明思路</strong>：
+1. 利用凸性：$\mathcal{L}(\boldsymbol{\theta}_t) - \mathcal{L}(\boldsymbol{\theta}^<em>) \leq \boldsymbol{g}_t^{\top}(\boldsymbol{\theta}_t - \boldsymbol{\theta}^</em>)$
+2. 分析$|\boldsymbol{\theta}_t - \boldsymbol{\theta}^*|^2$的递推
+3. $\boldsymbol{\nu}_t$的指数增长需要额外$\log T$因子控制</p>
+<h4 id="62">6.2 强凸情况</h4>
+<p><strong>定理3</strong>：若$\mathcal{L}$为$\mu$-强凸，则存在$\eta, \gamma$使得：
+\begin{equation}\mathbb{E}[|\boldsymbol{\theta}_T - \boldsymbol{\theta}^<em>|^2] \leq \left(1 - \frac{\mu\eta}{2}\right)^T |\boldsymbol{\theta}_0 - \boldsymbol{\theta}^</em>|^2 + O\left(\frac{\eta^2 \sigma^2}{\mu}\right)\tag{47}\end{equation}</p>
+<p>其中$\sigma^2$是梯度方差上界。</p>
+<p><strong>收敛速率</strong>：线性收敛 + 方差主导的残差。</p>
+<h3 id="7">7. 数值稳定性分析</h3>
+<h4 id="71">7.1 指数溢出问题</h4>
+<p>式(40)中的指数运算可能导致数值溢出：
+\begin{equation}\nu_{t+1,i} = \nu_{t,i} \exp(\gamma g_{t-1,i} g_{t,i})\tag{48}\end{equation}</p>
+<p><strong>问题</strong>：若$\gamma g_{t-1,i} g_{t,i}$大，$\exp(\cdot)$可能超出浮点表示范围。</p>
+<p><strong>解决方案1：对数空间计算</strong>
+\begin{equation}\log \nu_{t+1,i} = \log \nu_{t,i} + \gamma g_{t-1,i} g_{t,i}\tag{49}\end{equation}</p>
+<p>使用时：
+\begin{equation}\theta_{t+1,i} = \theta_{t,i} - \eta \exp(\log \nu_{t+1,i}) g_{t,i}\tag{50}\end{equation}</p>
+<p><strong>解决方案2：裁剪机制</strong>
+\begin{equation}\nu_{t+1,i} = \nu_{t,i} \exp\left(\gamma \cdot \text{clip}(g_{t-1,i} g_{t,i}, -c, c)\right)\tag{51}\end{equation}</p>
+<p>其中$c &gt; 0$是裁剪阈值。</p>
+<h4 id="72">7.2 学习率爆炸防护</h4>
+<p>限制$\boldsymbol{\nu}<em t_i="t,i">t$的范围：
+\begin{equation}\nu</em>} \in [\nu_{\min}, \nu_{\max}]\tag{52}\end{equation</p>
+<p>投影操作：
+\begin{equation}\nu_{t+1,i} = \text{clip}\left(\nu_{t,i} \exp(\gamma g_{t-1,i} g_{t,i}), \nu_{\min}, \nu_{\max}\right)\tag{53}\end{equation}</p>
+<p>典型值：$\nu_{\min} = 10^{-3}, \nu_{\max} = 10^3$。</p>
+<h4 id="73">7.3 梯度噪声的影响</h4>
+<p>随机梯度情况：$\tilde{\boldsymbol{g}}_t = \boldsymbol{g}_t + \boldsymbol{\xi}_t$，其中$\mathbb{E}[\boldsymbol{\xi}_t] = \boldsymbol{0}$。</p>
+<p>噪声对学习率更新的影响：
+\begin{equation}\mathbb{E}[\tilde{g}<em t_i="t,i">{t-1,i} \tilde{g}</em>}] = g_{t-1,i} g_{t,i} + \mathbb{E}[\xi_{t-1,i} \xi_{t,i}]\tag{54}\end{equation</p>
+<p>若噪声独立：$\mathbb{E}[\xi_{t-1,i} \xi_{t,i}] = 0$，方法对噪声鲁棒。</p>
+<p>但方差影响：
+\begin{equation}\text{Var}(\tilde{g}<em t_i="t,i">{t-1,i} \tilde{g}</em>}) \approx g_{t-1,i}^2 \sigma_{t,i}^2 + g_{t,i}^2 \sigma_{t-1,i}^2\tag{55}\end{equation</p>
+<p><strong>建议</strong>：在噪声大的场景减小$\gamma$。</p>
+<h3 id="8">8. 实际算法实现</h3>
+<h4 id="81">8.1 完整伪代码</h4>
+<div class="codehilite"><pre><span></span><code>输入：初始参数 θ₀，基础学习率 η，元学习率 γ
+      最大迭代数 T
+初始化：ν₀ = 1（全1向量）
+       g₀ = 0
+
+for t = 1 to T do
+    # 计算梯度
+    g_t = ∇_θ L(θ_{t-1})
+
+    # 更新自适应学习率
+    ν_t = ν_{t-1} ⊙ exp(γ · g_{t-1} ⊙ g_t)
+
+    # 数值稳定性：裁剪学习率
+    ν_t = clip(ν_t, ν_min, ν_max)
+
+    # 更新参数
+    θ_t = θ_{t-1} - η · ν_t ⊙ g_t
+
+end for
+返回：θ_T
+</code></pre></div>
+
+<h4 id="82-pytorch">8.2 PyTorch实现示例</h4>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">MetaEGD</span><span class="p">(</span><span class="n">torch</span><span class="o">.</span><span class="n">optim</span><span class="o">.</span><span class="n">Optimizer</span><span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">params</span><span class="p">,</span> <span class="n">lr</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">meta_lr</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span>
+                 <span class="n">nu_min</span><span class="o">=</span><span class="mf">1e-3</span><span class="p">,</span> <span class="n">nu_max</span><span class="o">=</span><span class="mf">1e3</span><span class="p">):</span>
+        <span class="n">defaults</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">lr</span><span class="o">=</span><span class="n">lr</span><span class="p">,</span> <span class="n">meta_lr</span><span class="o">=</span><span class="n">meta_lr</span><span class="p">,</span>
+                       <span class="n">nu_min</span><span class="o">=</span><span class="n">nu_min</span><span class="p">,</span> <span class="n">nu_max</span><span class="o">=</span><span class="n">nu_max</span><span class="p">)</span>
+        <span class="nb">super</span><span class="p">(</span><span class="n">MetaEGD</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">params</span><span class="p">,</span> <span class="n">defaults</span><span class="p">)</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">step</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">closure</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">closure</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">closure</span><span class="p">()</span>
+
+        <span class="k">for</span> <span class="n">group</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">param_groups</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">group</span><span class="p">[</span><span class="s1">&#39;params&#39;</span><span class="p">]:</span>
+                <span class="k">if</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">continue</span>
+
+                <span class="n">grad</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">data</span>
+                <span class="n">state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">state</span><span class="p">[</span><span class="n">p</span><span class="p">]</span>
+
+                <span class="c1"># 状态初始化</span>
+                <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">state</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">state</span><span class="p">[</span><span class="s1">&#39;nu&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">ones_like</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>
+                    <span class="n">state</span><span class="p">[</span><span class="s1">&#39;prev_grad&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>
+
+                <span class="c1"># 获取状态</span>
+                <span class="n">nu</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s1">&#39;nu&#39;</span><span class="p">]</span>
+                <span class="n">prev_grad</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s1">&#39;prev_grad&#39;</span><span class="p">]</span>
+
+                <span class="c1"># 更新自适应学习率</span>
+                <span class="n">nu</span> <span class="o">=</span> <span class="n">nu</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span>
+                    <span class="n">group</span><span class="p">[</span><span class="s1">&#39;meta_lr&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">prev_grad</span> <span class="o">*</span> <span class="n">grad</span>
+                <span class="p">)</span>
+
+                <span class="c1"># 裁剪</span>
+                <span class="n">nu</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">clamp</span><span class="p">(</span><span class="n">nu</span><span class="p">,</span> <span class="n">group</span><span class="p">[</span><span class="s1">&#39;nu_min&#39;</span><span class="p">],</span> <span class="n">group</span><span class="p">[</span><span class="s1">&#39;nu_max&#39;</span><span class="p">])</span>
+
+                <span class="c1"># 更新参数</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">add_</span><span class="p">(</span><span class="n">grad</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=-</span><span class="n">group</span><span class="p">[</span><span class="s1">&#39;lr&#39;</span><span class="p">]</span><span class="o">*</span><span class="n">nu</span><span class="p">)</span>
+
+                <span class="c1"># 保存状态</span>
+                <span class="n">state</span><span class="p">[</span><span class="s1">&#39;nu&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">nu</span>
+                <span class="n">state</span><span class="p">[</span><span class="s1">&#39;prev_grad&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">grad</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">loss</span>
+</code></pre></div>
+
+<h3 id="9">9. 计算复杂度分析</h3>
+<h4 id="91">9.1 时间复杂度</h4>
+<p>每次迭代的操作：
+1. 梯度计算：$O(M)$（$M$为模型复杂度）
+2. 逐元素乘法 $\boldsymbol{g}_{t-1} \odot \boldsymbol{g}_t$：$O(d)$
+3. 指数运算：$O(d)$
+4. 参数更新：$O(d)$</p>
+<p><strong>总复杂度</strong>：$O(M + d)$，与标准SGD相同量级。</p>
+<h4 id="92">9.2 空间复杂度</h4>
+<p>需要额外存储：
+1. $\boldsymbol{\nu}<em t-1="t-1">t$：$O(d)$
+2. $\boldsymbol{g}</em>$：$O(d)$</p>
+<p><strong>总额外空间</strong>：$O(d)$</p>
+<p>与Adam（存储$\boldsymbol{m}_t, \boldsymbol{v}_t$，共$2d$）相比更节省。</p>
+<h3 id="10">10. 实践建议与超参数调优</h3>
+<h4 id="101">10.1 超参数选择指南</h4>
+<p><strong>基础学习率 $\eta$</strong>：
+- 初始尝试：$\eta \in [10^{-4}, 10^{-2}]$
+- 与标准SGD相比可略小（因为$\boldsymbol{\nu}_t$会放大）</p>
+<p><strong>元学习率 $\gamma$</strong>：
+- 推荐范围：$\gamma \in [0.01, 0.5]$
+- 梯度噪声大时减小$\gamma$
+- 损失landscape平滑时可增大$\gamma$</p>
+<p><strong>裁剪范围</strong>：
+- $\nu_{\min} = 10^{-3}, \nu_{\max} = 10^{3}$（默认）
+- 训练不稳定时收紧范围</p>
+<h4 id="102">10.2 适用场景</h4>
+<p><strong>推荐使用</strong>：
+1. 稀疏梯度问题（NLP、推荐系统）
+2. 不同参数有不同优化难度
+3. 梯度方向相对稳定</p>
+<p><strong>不推荐使用</strong>：
+1. 极高维问题（存储$\boldsymbol{g}_{t-1}$）
+2. 梯度噪声极大
+3. 需要快速收敛的场景（warmup慢）</p>
+<h4 id="103">10.3 调试技巧</h4>
+<p><strong>监控指标</strong>：
+1. $|\boldsymbol{\nu}<em>t|</em>\infty$：检查是否触及边界
+2. $\text{sign}(\boldsymbol{g}_{t-1} \odot \boldsymbol{g}_t)$的正负比例
+3. 有效学习率分布：$\eta \boldsymbol{\nu}_t$</p>
+<p><strong>常见问题</strong>：
+- <strong>学习率爆炸</strong>：减小$\gamma$或收紧$\nu_{\max}$
+- <strong>收敛慢</strong>：增大$\eta$或$\gamma$
+- <strong>损失振荡</strong>：减小$\gamma$（过度放大振荡方向）</p>
+<h3 id="11_1">11. 理论扩展与变体</h3>
+<h4 id="111">11.1 带动量的变体</h4>
+<p>结合Nesterov动量：
+\begin{equation}\begin{aligned}
+\boldsymbol{v}<em t-1="t-1">t &amp;= \beta \boldsymbol{v}</em>} + \boldsymbol{g<em t_1="t+1">t\
+\boldsymbol{\nu}</em>} &amp;= \boldsymbol{\nu<em t-1="t-1">t \odot \exp(\gamma \boldsymbol{v}</em>} \odot \boldsymbol{v<em t_1="t+1">t)\
+\boldsymbol{\theta}</em>} &amp;= \boldsymbol{\theta<em t_1="t+1">t - \eta \boldsymbol{\nu}</em>_t
+\end{aligned}\tag{56}\end{equation}} \odot \boldsymbol{v</p>
+<p><strong>优势</strong>：动量平滑梯度估计，减少噪声影响。</p>
+<h4 id="112">11.2 自适应元学习率</h4>
+<p>使$\gamma$也自适应：
+\begin{equation}\gamma_t = \gamma_0 \cdot \exp\left(-\alpha \cdot \frac{t}{T}\right)\tag{57}\end{equation}</p>
+<p><strong>动机</strong>：训练后期梯度更稳定，可减小元学习率避免过拟合。</p>
+<h4 id="113">11.3 分组学习率</h4>
+<p>将参数分组${\boldsymbol{\theta}^{(1)}, \ldots, \boldsymbol{\theta}^{(K)}}$，每组独立$\boldsymbol{\nu}^{(k)}$：
+\begin{equation}\nu_{t+1}^{(k)} = \nu_t^{(k)} \odot \exp\left(\gamma_k \boldsymbol{g}_{t-1}^{(k)} \odot \boldsymbol{g}_t^{(k)}\right)\tag{58}\end{equation}</p>
+<p><strong>应用</strong>：神经网络不同层使用不同$\gamma_k$。</p>
+<h3 id="12_1">12. 实验建议与基准测试</h3>
+<h4 id="121">12.1 玩具问题验证</h4>
+<p><strong>二次碗测试</strong>：
+\begin{equation}\mathcal{L}(\boldsymbol{\theta}) = \frac{1}{2}\boldsymbol{\theta}^{\top} Q \boldsymbol{\theta}\tag{59}\end{equation}</p>
+<p>其中$Q = \text{diag}(1, 10, 100)$（不同曲率）。</p>
+<p><strong>期望行为</strong>：$\nu_{t,3} &gt; \nu_{t,2} &gt; \nu_{t,1}$（高曲率方向更大学习率）。</p>
+<h4 id="122">12.2 标准基准</h4>
+<ol>
+<li><strong>MNIST/CIFAR-10</strong>：小规模视觉任务</li>
+<li><strong>Penn TreeBank</strong>：语言建模</li>
+<li><strong>IMDB情感分析</strong>：稀疏特征场景</li>
+</ol>
+<p><strong>对比优化器</strong>：SGD, Adam, RMSProp, AdaGrad。</p>
+<p><strong>评估指标</strong>：
+- 训练损失曲线
+- 验证准确率
+- 收敛步数（达到目标损失的迭代次数）</p>
+<h3 id="_5">总结</h3>
+<p>本文详细推导了指数梯度下降与元学习自适应学习率的数学基础：</p>
+<ol>
+<li><strong>指数梯度下降</strong>：通过对数空间变换和镜像下降框架，建立了非负约束优化的理论基础</li>
+<li><strong>KL散度联系</strong>：证明了负熵Bregman散度即KL散度，连接信息几何与优化</li>
+<li><strong>在线学习理论</strong>：给出了$O(\sqrt{T\log d})$遗憾界</li>
+<li><strong>元学习推导</strong>：从双层优化出发，严格推导了自适应学习率更新规则</li>
+<li><strong>数值稳定性</strong>：提供了对数空间计算和裁剪机制</li>
+<li><strong>实践指导</strong>：包含完整实现、超参数建议和调试技巧</li>
+</ol>
+<p>核心洞察：梯度方向的一致性（$\boldsymbol{g}_{t-1} \odot \boldsymbol{g}_t$）可作为学习率调整的信号，这与Adam基于梯度大小的策略形成互补。</p>
+        </div>
+    </div>
+</body>
+</html>

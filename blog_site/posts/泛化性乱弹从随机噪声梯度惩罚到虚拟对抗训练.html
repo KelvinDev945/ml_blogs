@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>泛化性乱弹：从随机噪声、梯度惩罚到虚拟对抗训练</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>泛化性乱弹：从随机噪声、梯度惩罚到虚拟对抗训练</h1>
+            <div class="meta">📅 最后更新: 2026-01-08 | 📄 大小: 59.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/7466">https://spaces.ac.cn/archives/7466</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>提高模型的泛化性能是机器学习致力追求的目标之一。常见的提高泛化性的方法主要有两种：第一种是添加噪声，比如往输入添加高斯噪声、中间层增加Dropout以及进来比较热门的对抗训练等，对图像进行随机平移缩放等数据扩增手段某种意义上也属于此列；第二种是往loss里边添加正则项，比如$L_1, L_2$惩罚、梯度惩罚等。本文试图探索几种常见的提高泛化性能的手段的关联。</p>
+<h2 id="_1">随机噪声</h2>
+<p>我们记模型为$f(x)$，$\mathcal{D}$为训练数据集合，$l(f(x), y)$为单个样本的loss，那么我们的优化目标是<br />
+\begin{equation}\mathop{\text{argmin}}<em _mathcal_D="\mathcal{D" _x_y_sim="(x,y)\sim">{\theta} L(\theta)=\mathbb{E}</em>}}[l(f(x), y)]\end{equation<br />
+$\theta$是$f(x)$里边的可训练参数。假如往模型输入添加噪声$\varepsilon$，其分布为$q(\varepsilon)$，那么优化目标就变为<br />
+\begin{equation}\mathop{\text{argmin}}<em _varepsilon="\varepsilon">{\theta} L</em>}(\theta)=\mathbb{E}_{(x,y)\sim \mathcal{D}, \varepsilon\sim q(\varepsilon)}[l(f(x + \varepsilon), y)]\end{equation<br />
+当然，可以添加噪声的地方不仅仅是输入，也可以是中间层，也可以是权重$\theta$，甚至可以是输出$y$（等价于标签平滑），噪声也不一定是加上去的，比如Dropout是乘上去的。对于加性噪声来说，$q(\varepsilon)$的常见选择是均值为0、方差固定的高斯分布；而对于乘性噪声来说，常见选择是均匀分布$U([0,1])$或者是伯努利分布。</p>
+<p>添加随机噪声的目的很直观，就是希望模型能学会抵御一些随机扰动，从而降低对输入或者参数的敏感性，而降低了这种敏感性，通常意味着所得到的模型不再那么依赖训练集，所以有助于提高模型泛化性能。</p>
+<h2 id="_2">提高效率</h2>
+<p>添加随机噪声的方式容易实现，而且在不少情况下确实也很有效，但它有一个明显的缺点：不够“特异性”。噪声$\varepsilon$是随机的，而不是针对$x$构建的，这意味着多数情况下$x + \varepsilon$可能只是一个平凡样本，也就是没有对原模型造成比较明显的扰动，所以对泛化性能的提高帮助有限。</p>
+<h3 id="_3">增加采样</h3>
+<p>从理论上来看，加入随机噪声后，单个样本的loss变为<br />
+\begin{equation}\tilde{l}(x,y)=\mathbb{E}<em i="1">{\varepsilon\sim q(\varepsilon)}[l(f(x+\varepsilon),y)]=\int q(\varepsilon) l(f(x+\varepsilon),y) d\varepsilon\label{eq:noisy-loss}\end{equation}<br />
+但实践上，对于每个特定的样本$(x,y)$，我们一般只采样一个噪声，所以并没有很好地近似上式。当然，我们可以采样多个噪声$\varepsilon_1,\varepsilon_2,\cdots,\varepsilon_k\sim q(\varepsilon)$，然后更好地近似<br />
+\begin{equation}\tilde{l}(x,y)\approx \frac{1}{k}\sum</em>}^k l(f(x+\varepsilon_i),y)\end{equation<br />
+但这样相当于batch_size扩大为原来的$k$倍，增大了计算成本，并不是那么友好。</p>
+<h3 id="_4">近似展开</h3>
+<p>一个直接的想法是，如果能事先把式$\eqref{eq:noisy-loss}$中的积分算出来，那就用不着低效率地采样了（或者相当于一次性采样无限多的噪声）。我们就往这个方向走一下试试。当然，精确的显式积分基本上是做不到的，我们可以做一下近似展开：<br />
+\begin{equation}l(f(x+\varepsilon),y)\approx l(f(x),y)+(\varepsilon \cdot \nabla_x) l(f(x),y)+\frac{1}{2}(\varepsilon \cdot \nabla_x)^2 l(f(x),y)\end{equation}<br />
+然后两端乘以$q(\varepsilon)$积分，这里假设$\varepsilon$的各个分量是独立同分布的，并且均值为0、方差为$\sigma^2$，那么积分结果就是<br />
+\begin{equation}\int q(\varepsilon)l(f(x+\varepsilon),y)d\varepsilon \approx l(f(x),y)+\frac{1}{2}\sigma^2 \Delta l(f(x),y)\end{equation}<br />
+这里的$\Delta$是拉普拉斯算子，即$\Delta f = \sum\limits_i \frac{\partial^2}{\partial x_i^2} f$。这个结果在形式上很简单，就是相当于往loss里边加入正则项$\frac{1}{2}\sigma^2 \Delta l(f(x),y)$，然而实践上却相当困难，因为这意味着要算$l$的二阶导数，再加上梯度下降，那么就一共要算三阶导数，这是现有深度学习框架难以高效实现的。</p>
+<h2 id="_5">转移目标</h2>
+<p>直接化简$l(f(x+\varepsilon),y)$的积分是行不通了，但我们还可以试试将优化目标换成<br />
+\begin{equation}l(f(x+\varepsilon),f(x)) + l(f(x),y)\label{eq:loss-2}\end{equation}<br />
+也就是变成同时缩小$f(x),y$、$f(x+\varepsilon),f(x)$的差距，两者双管齐下，一定程度上也能达到缩小$f(x+\varepsilon),y$差距的目标。关键的是，这个目标能得到更有意思的结果。</p>
+<h3 id="_6">思路解析</h3>
+<p>用数学的话来讲，如果$l$是某种形式的距离度量，那么根据三角不等式就有<br />
+\begin{equation}l(f(x+\varepsilon),y) \leq l(f(x+\varepsilon),f(x)) + l(f(x),y)\end{equation}<br />
+如果$l$不是度量，那么通常根据詹森不等式也能得到一个类似的结果，比如$l(f(x+\varepsilon),y)=\Vert f(x+\varepsilon) - y\Vert^2$，那么我们有<br />
+\begin{equation}\begin{aligned}<br />
+\Vert f(x+\varepsilon) - f(x) + f(x) - y\Vert^2 =&amp; \left\Vert \frac{1}{2}\times 2[f(x+\varepsilon) - f(x)] + \frac{1}{2}\times 2[f(x) - y]\right\Vert^2\\\<br />
+\leq&amp; \frac{1}{2} \Vert 2[f(x+\varepsilon) - f(x)]\Vert^2 + \frac{1}{2} \Vert 2[f(x) - y]\Vert^2\\\<br />
+=&amp; 2\big(\Vert f(x+\varepsilon) - f(x)\Vert^2 + \Vert f(x) - y\Vert^2\big)<br />
+\end{aligned}\end{equation}<br />
+这也就是说，目标$\eqref{eq:loss-2}$（的若干倍）可以认为是$l(f(x+\varepsilon),y)$的上界，原始目标不大好优化，所以我们改为优化它的上界。</p>
+<p>注意到，目标$\eqref{eq:loss-2}$的两项之中，$l(f(x+\varepsilon),f(x))$衡量了模型本身的平滑程度，跟标签没关系，用无标签数据也可以对它进行优化，这意味着它可以跟带标签的数据一起，构成一个<strong>半监督学习</strong> 流程。</p>
+<h3 id="_7">勇敢地算</h3>
+<p>对于目标$\eqref{eq:loss-2}$来说，它的积分结果是：<br />
+\begin{equation}\int q(\varepsilon) \big[l(f(x+\varepsilon),f(x)) + l(f(x),y)\big]d\varepsilon = l(f(x),y) + \int q(\varepsilon) l(f(x+\varepsilon),f(x)) d\varepsilon\end{equation}<br />
+还是老路子，近似展开$\varepsilon$：<br />
+\begin{equation}\begin{aligned}l(f(x+\varepsilon),f(x))\approx &amp;\, l(f(x),f(x)) + \left.\sum_{i,j} \frac{\partial l(F(x),f(x))}{\partial F_i(x)}\frac{\partial f_i(x)}{\partial x_j}\varepsilon_j\right|<em i_j_k="i,j,k">{F(x)=f(x)}\\\<br />
+&amp;\, + \frac{1}{2}\left.\sum</em>\varepsilon_j \varepsilon_k\right|} \frac{\partial l(F(x),f(x))}{\partial F_i(x)}\frac{\partial^2 f_i(x)}{\partial x_j \partial x_k<em i_i_j_k="i,i',j,k">{F(x)=f(x)}\\\<br />
+&amp;\, + \frac{1}{2}\left.\sum</em>} \frac{\partial^2 l(F(x),f(x))}{\partial F_i(x) \partial F_{i'}(x)}\frac{\partial f_i(x)}{\partial x_j}\frac{\partial f_{i'}(x)}{\partial x_k}\varepsilon_j \varepsilon_k\right|_{F(x)=f(x)<br />
+\end{aligned}\label{eq:kongbu}\end{equation}<br />
+很恐怖？不着急，我们回顾一下，作为loss函数的$l$，它一般会有如下几个特点：</p>
+<blockquote>
+<p>1、$l$是光滑的；</p>
+<p>2、$l(x, x)=0$；</p>
+<p>3、$\left.\frac{\partial}{\partial x} l(x,y)\right|<em y="x">{x=y}=0,\left.\frac{\partial}{\partial y} l(x,y)\right|</em>=0$。</p>
+</blockquote>
+<p>这其实就是说$l$是光滑的，并且在$x=y$的时候取到极（小）值，且极（小）值为0，这几个特点几乎是所有loss的共性了。基于这几个特点，恐怖的$\eqref{eq:kongbu}$式的前三项就直接为0了，所以最后的积分结果是：<br />
+\begin{equation}\int q(\varepsilon) l(f(x+\varepsilon),f(x)) d\varepsilon \approx \frac{1}{2}\sigma^2\left.\sum_{i,i',j} \frac{\partial^2 l(F(x),f(x))}{\partial F_i(x) \partial F_{i'}(x)}\frac{\partial f_i(x)}{\partial x_j}\frac{\partial f_{i'}(x)}{\partial x_j}\right|_{F(x)=f(x)}<br />
+\end{equation}</p>
+<h3 id="_8">梯度惩罚</h3>
+<p>看上去依然让人有些心悸，但总比$\eqref{eq:kongbu}$好多了。上式也是一个正则项，其特点是只包含一阶梯度项，而对于特定的损失函数，$\left.\frac{\partial^2 l(F(x),f(x))}{\partial F_i(x) \partial F_{i'}(x)}\right|<em i_="i'">{F(x)=f(x)}$可以提前算出来，特别地，对于常见的几个损失函数，当$i\neq i'$时$\left.\frac{\partial^2 l(F(x),f(x))}{\partial F_i(x) \partial F</em>\right|}(x)<em i="i">{F(x)=f(x)}=0$，所以仅需计算$i=i'$的分量，我们记它为$\lambda</em>(x)$，那么<br />
+\begin{equation}\int q(\varepsilon) l(f(x+\varepsilon),f(x)) d\varepsilon \approx \frac{1}{2}\sigma^2 \sum_i \lambda_i(x)\Vert \nabla_x f_i(x)\Vert^2\label{eq:gp}\end{equation}<br />
+可见，形式上就是对每个$f(x)$的每个分量都算一个梯度惩罚项$\Vert \nabla_x f_i(x)\Vert^2$，然后按$\lambda_i(x)$加权求和。</p>
+<p>例如，对于MSE来说，$l(f(x),y)=\Vert f(x) - y\Vert^2$，这时候可以算得$\lambda_i(x)\equiv 2$，所以对应的正则项为$\sum\limits_i\Vert \nabla_x f_i(x)\Vert^2$；对于KL散度来说，$l(f(x),y)=\sum\limits_i y_i \log \frac{y_i}{f_i(x)}$，这时候$\lambda_i(x)=\frac{1}{f_i(x)}$，那么对应的正则项为$\sum\limits_i f_i(x) \Vert \nabla_x \log f_i(x)\Vert^2$。这些结果大家多多少少可以从著名的“花书”<a href="https://book.douban.com/subject/27087503/">《深度学习》</a>中找到类似的，并非新的结果。类似的推导还可以参考文献<a href="https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/bishop-tikhonov-nc-95.pdf">《Training with noise is equivalent to Tikhonov regularization》</a>。</p>
+<h3 id="_9">采样近似</h3>
+<p>当然，虽然能求出只带有一阶梯度的正则项$\sum\limits_i \lambda_i(x)\Vert \nabla_x f_i(x)\Vert^2$，但事实上这个计算量也不低，因为需要对每个$f_i(x)$都要求梯度，如果输出的分量数太大，这个计算量依然难以承受。</p>
+<p>这时候可以考虑的方案是通过采样近似计算：假设$q(\eta)$是均值为0、方差为1的分布，那么我们有<br />
+\begin{equation}\sum\limits_i \Vert \nabla_x f_i(x)\Vert^2=\sum\limits_i \left\Vert \nabla_x f_i(x)\right\Vert^2=\mathbb{E}_{\eta_i\sim q(\eta)}\left[\left\Vert\sum_i \eta_i \nabla_x f_i(x)\right\Vert^2\right]\end{equation}<br />
+这样一来，每步我们只需要算$\sum\limits_i \eta_i f_i(x)$的梯度，不需要算多次梯度。$q(\eta)$的一个最简单的取法是空间为$\{-1,1\}$的均匀分布，也就是$\eta_i$等概率地从$\{-1,1\}$中选取一个。</p>
+<h2 id="_10">对抗训练</h2>
+<p>回顾前面的流程，我们先是介绍了添加随机噪声这一增强泛化性能的手段，然后指出随机加噪声可能太没特异性，所以想着先把积分算出来，才有了后面推导的关于近似展开与梯度惩罚的一些结果。那么换个角度来想，如果我们能想办法更特异性地构造噪声信号，那么也能提高训练效率，增强泛化性能了。</p>
+<h3 id="_11">监督对抗</h3>
+<p>有监督的对抗训练，关注的是原始目标$\eqref{eq:noisy-loss}$，优化的目标是让loss尽可能小，所以如果我们要选择更有代表性的噪声，那么应该选择能让loss变得更大的噪声，而<br />
+\begin{equation}l(f(x + \varepsilon), y) \approx l(f(x), y) + \varepsilon \cdot \nabla_x l(f(x), y)\end{equation}<br />
+所以让$l(f(x + \varepsilon), y)$尽可能大就意味着$\varepsilon$要跟$\nabla_x l(f(x), y)$同向，换言之扰动要往梯度上升方向走，即<br />
+\begin{equation}\varepsilon \sim \nabla_x l(f(x), y)\end{equation}<br />
+这便构成了对抗训练中的FGM方法，之前在<a href="/archives/7234">《对抗训练浅谈：意义、方法和思考（附Keras实现）》</a>就已经介绍过了。</p>
+<p>值得注意的是，在<a href="/archives/7234">《对抗训练浅谈：意义、方法和思考（附Keras实现）》</a>一文中我们也推导过，对抗训练在一定程度上也等价于往loss里边加入梯度惩罚项$\left\Vert\nabla_x l(f(x), y)\right\Vert^2$，这又跟前一节的关于噪声积分的结果类似。这表明梯度惩罚应该是通用的能提高模型性能的手段之一。</p>
+<h3 id="_12">虚拟对抗</h3>
+<p>在前面我们提到，$l(f(x+\varepsilon),f(x))$这一项不需要标签信号，因此可以用来做无监督学习，并且关于它的展开高斯积分我们得到了梯度惩罚$\eqref{eq:gp}$。如果沿着对抗训练的思想，我们不去计算积分，而是去寻找让$l(f(x+\varepsilon),f(x))$尽可能大的扰动噪声，这就构成了“虚拟对抗训练（VAT）”，首次出现在文章<a href="https://papers.cool/arxiv/1704.03976">《Virtual Adversarial Training: A Regularization Method for Supervised and Semi-Supervised Learning》</a>中。</p>
+<p>基于前面对损失函数$l$的性质的讨论，我们知道$l(f(x+\varepsilon),f(x))$关于$\varepsilon$的一阶梯度为0，所以要算对抗扰动，还必须将它展开到二阶：<br />
+\begin{equation}\begin{aligned}<br />
+l(f(x+\varepsilon),f(x))\approx&amp;\, l(f(x),f(x)) + \varepsilon^{\top} \nabla_x l(f(x),f_{ng}(x)) + \frac{1}{2}\varepsilon^{\top}\nabla_x^2 l(f(x),f_{ng}(x)) \varepsilon\\\<br />
+=&amp;\, \frac{1}{2}\varepsilon^{\top}\nabla_x^2 l(f(x),f_{ng}(x)) \varepsilon\end{aligned}\end{equation}<br />
+这里用$f_{ng}(x)$表示不需要对里边的$x$求梯度。这样一来，我们需要解决两个问题：1、如何高效计算Hessian矩阵$\mathcal{H}=\nabla_x^2 l(f(x),f_{ng}(x))$；2、如何求单位向量$u$使得$u^{\top}\mathcal{H}u$最大？</p>
+<p>事实上，不难证明$u$的最优解实际上就是“$\mathcal{H}$的最大特征根对应的特征向量”，也称为“$\mathcal{H}$的主特征向量”，而要近似求主特征向量，一个行之有效的方法就是“<a href="https://en.wikipedia.org/wiki/Power_iteration">幂迭代法</a>”：从一个随机向量$u_0$出发，迭代执行$u_{i+1}=\frac{\mathcal{H}u_i}{\Vert\mathcal{H}u_i\Vert}$。相关推导可以参考<a href="/archives/6051#%E4%B8%BB%E7%89%B9%E5%BE%81%E6%A0%B9">《深度学习中的Lipschitz约束：泛化与生成模型》</a>的“主特征根”和“幂迭代”两节。</p>
+<p>在幂迭代中，我们发现并不需要知道$\mathcal{H}$具体值，只需要知道$\mathcal{H}u$的值，这可以通过差分来近似计算：<br />
+\begin{equation}\begin{aligned}\mathcal{H}u =&amp;\, \nabla_x^2 l(f(x),f_{ng}(x)) u\\\<br />
+=&amp;\, \nabla_x \big(u\cdot\nabla_x l(f(x),f_{ng}(x))\big)\\\<br />
+\approx&amp;\, \nabla_x \left(\frac{l(f(x + \xi u),f_{ng}(x)) - l(f(x),f_{ng}(x))}{\xi}\right)\\\<br />
+=&amp;\, \frac{1}{\xi}\nabla_x l(f(x + \xi u),f_{ng}(x))\end{aligned}\end{equation}<br />
+其中$\xi$是一个标量常数。根据这个近似结果，我们就可以得到如下的VAT流程：</p>
+<blockquote>
+<p>初始化向量$u\sim \mathcal{N}(0,1)$、标量$\epsilon$和$\xi$；<br />
+ 迭代$r$次：<br />
+ $u \leftarrow \frac{u}{\Vert u\Vert}$；<br />
+ $u \leftarrow \nabla_x l(f(x+\xi u), f_{ng}(x))$<br />
+ $u \leftarrow \frac{u}{\Vert u\Vert}$；<br />
+ 用$l(f(x+\epsilon u), f_{ng}(x))$作为loss执行常规梯度下降。</p>
+</blockquote>
+<p>实验表明一般迭代1次就不错了，而如果迭代0次，那么就是本文开头提到的添加高斯噪声。这表明虚拟对抗训练就是通过$\nabla_x l(f(x+\xi u), f_{ng}(x))$来提高噪声的“特异性”的。</p>
+<h3 id="_13">参考实现</h3>
+<p>关于对抗训练的Keras实现，在<a href="/archives/7234">《对抗训练浅谈：意义、方法和思考（附Keras实现）》</a>一文中已经给出过，这里笔者给出Keras下虚拟对抗训练的参考实现：</p>
+<div class="codehilite"><pre><span></span><code><span class="n">def</span><span class="w"> </span><span class="n">virtual_adversarial_training</span><span class="p">(</span>
+<span class="w">    </span><span class="n">model</span><span class="p">,</span><span class="w"> </span><span class="n">embedding_name</span><span class="p">,</span><span class="w"> </span><span class="n">epsilon</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="n">xi</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="n">iters</span><span class="o">=</span><span class="mi">1</span>
+<span class="p">)</span><span class="err">:</span>
+<span class="w">    </span><span class="ss">&quot;&quot;&quot;给模型添加虚拟对抗训练</span>
+<span class="ss">    其中model是需要添加对抗训练的keras模型，embedding_name</span>
+<span class="ss">    则是model里边Embedding层的名字。要在模型compile之后使用。</span>
+<span class="ss">    &quot;&quot;&quot;</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">model</span><span class="p">.</span><span class="n">train_function</span><span class="w"> </span><span class="k">is</span><span class="w"> </span><span class="k">None</span><span class="err">:</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">如果还没有训练函数</span>
+<span class="w">        </span><span class="n">model</span><span class="p">.</span><span class="n">_make_train_function</span><span class="p">()</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">手动make</span>
+<span class="w">    </span><span class="n">old_train_function</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">model</span><span class="p">.</span><span class="n">train_function</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">备份旧的训练函数</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">查找Embedding层</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="k">output</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">model</span><span class="p">.</span><span class="nl">outputs</span><span class="p">:</span>
+<span class="w">        </span><span class="n">embedding_layer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">search_layer</span><span class="p">(</span><span class="k">output</span><span class="p">,</span><span class="w"> </span><span class="n">embedding_name</span><span class="p">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="n">embedding_layer</span><span class="w"> </span><span class="k">is</span><span class="w"> </span><span class="ow">not</span><span class="w"> </span><span class="k">None</span><span class="err">:</span>
+<span class="w">            </span><span class="k">break</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">embedding_layer</span><span class="w"> </span><span class="k">is</span><span class="w"> </span><span class="k">None</span><span class="err">:</span>
+<span class="w">        </span><span class="n">raise</span><span class="w"> </span><span class="k">Exception</span><span class="p">(</span><span class="s1">&#39;Embedding layer not found&#39;</span><span class="p">)</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">求Embedding梯度</span>
+<span class="w">    </span><span class="n">embeddings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">embedding_layer</span><span class="p">.</span><span class="n">embeddings</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">Embedding矩阵</span>
+<span class="w">    </span><span class="n">gradients</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="p">.</span><span class="n">gradients</span><span class="p">(</span><span class="n">model</span><span class="p">.</span><span class="n">total_loss</span><span class="p">,</span><span class="w"> </span><span class="o">[</span><span class="n">embeddings</span><span class="o">]</span><span class="p">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">Embedding梯度</span>
+<span class="w">    </span><span class="n">gradients</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="p">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">embeddings</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">gradients</span><span class="o">[</span><span class="n">0</span><span class="o">]</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">转为dense</span><span class="w"> </span><span class="n">tensor</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">封装为函数</span>
+<span class="w">    </span><span class="n">inputs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span>
+<span class="w">        </span><span class="n">model</span><span class="p">.</span><span class="n">_feed_inputs</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">model</span><span class="p">.</span><span class="n">_feed_targets</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">model</span><span class="p">.</span><span class="n">_feed_sample_weights</span>
+<span class="w">    </span><span class="p">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">所有输入层</span>
+<span class="w">    </span><span class="n">model_outputs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="p">.</span><span class="k">function</span><span class="p">(</span>
+<span class="w">        </span><span class="n">inputs</span><span class="o">=</span><span class="n">inputs</span><span class="p">,</span>
+<span class="w">        </span><span class="n">outputs</span><span class="o">=</span><span class="n">model</span><span class="p">.</span><span class="n">outputs</span><span class="p">,</span>
+<span class="w">        </span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;model_outputs&#39;</span><span class="p">,</span>
+<span class="w">    </span><span class="p">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">模型输出函数</span>
+<span class="w">    </span><span class="n">embedding_gradients</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">K</span><span class="p">.</span><span class="k">function</span><span class="p">(</span>
+<span class="w">        </span><span class="n">inputs</span><span class="o">=</span><span class="n">inputs</span><span class="p">,</span>
+<span class="w">        </span><span class="n">outputs</span><span class="o">=[</span><span class="n">gradients</span><span class="o">]</span><span class="p">,</span>
+<span class="w">        </span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;embedding_gradients&#39;</span><span class="p">,</span>
+<span class="w">    </span><span class="p">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">模型梯度函数</span>
+
+<span class="w">    </span><span class="n">def</span><span class="w"> </span><span class="n">l2_normalize</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="err">:</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="p">(</span><span class="n">np</span><span class="p">.</span><span class="nf">sqrt</span><span class="p">((</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span><span class="p">).</span><span class="nf">sum</span><span class="p">())</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">1e-8</span><span class="p">)</span>
+
+<span class="w">    </span><span class="n">def</span><span class="w"> </span><span class="n">train_function</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span><span class="err">:</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">重新定义训练函数</span>
+<span class="w">        </span><span class="n">outputs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">model_outputs</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span>
+<span class="w">        </span><span class="n">inputs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">inputs</span><span class="o">[</span><span class="n">:2</span><span class="o">]</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">outputs</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">inputs</span><span class="o">[</span><span class="n">3:</span><span class="o">]</span>
+<span class="w">        </span><span class="n">delta1</span><span class="p">,</span><span class="w"> </span><span class="n">delta2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="n">np</span><span class="p">.</span><span class="n">random</span><span class="p">.</span><span class="n">randn</span><span class="p">(</span><span class="o">*</span><span class="n">K</span><span class="p">.</span><span class="n">int_shape</span><span class="p">(</span><span class="n">embeddings</span><span class="p">))</span>
+<span class="w">        </span><span class="k">for</span><span class="w"> </span><span class="n">_</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="k">range</span><span class="p">(</span><span class="n">iters</span><span class="p">)</span><span class="err">:</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">迭代求扰动</span>
+<span class="w">            </span><span class="n">delta2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">xi</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">l2_normalize</span><span class="p">(</span><span class="n">delta2</span><span class="p">)</span>
+<span class="w">            </span><span class="n">K</span><span class="p">.</span><span class="n">set_value</span><span class="p">(</span><span class="n">embeddings</span><span class="p">,</span><span class="w"> </span><span class="n">K</span><span class="p">.</span><span class="n">eval</span><span class="p">(</span><span class="n">embeddings</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">delta1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">delta2</span><span class="p">)</span>
+<span class="w">            </span><span class="n">delta1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">delta2</span>
+<span class="w">            </span><span class="n">delta2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">embedding_gradients</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span><span class="o">[</span><span class="n">0</span><span class="o">]</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">Embedding梯度</span>
+<span class="w">        </span><span class="n">delta2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">epsilon</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">l2_normalize</span><span class="p">(</span><span class="n">delta2</span><span class="p">)</span>
+<span class="w">        </span><span class="n">K</span><span class="p">.</span><span class="n">set_value</span><span class="p">(</span><span class="n">embeddings</span><span class="p">,</span><span class="w"> </span><span class="n">K</span><span class="p">.</span><span class="n">eval</span><span class="p">(</span><span class="n">embeddings</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">delta1</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">delta2</span><span class="p">)</span>
+<span class="w">        </span><span class="n">outputs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">old_train_function</span><span class="p">(</span><span class="n">inputs</span><span class="p">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">梯度下降</span>
+<span class="w">        </span><span class="n">K</span><span class="p">.</span><span class="n">set_value</span><span class="p">(</span><span class="n">embeddings</span><span class="p">,</span><span class="w"> </span><span class="n">K</span><span class="p">.</span><span class="n">eval</span><span class="p">(</span><span class="n">embeddings</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">delta2</span><span class="p">)</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">删除扰动</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">outputs</span>
+
+<span class="w">    </span><span class="n">model</span><span class="p">.</span><span class="n">train_function</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">train_function</span><span class="w">  </span><span class="err">#</span><span class="w"> </span><span class="n">覆盖原训练函数</span>
+
+
+<span class="err">#</span><span class="w"> </span><span class="n">写好函数后</span><span class="err">，</span><span class="n">启用虚拟对抗训练只需要一行代码</span>
+<span class="n">virtual_adversarial_training</span><span class="p">(</span><span class="n">model_vat</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;Embedding-Token&#39;</span><span class="p">)</span>
+</code></pre></div>
+
+<p>完整的使用脚本请参考：<a href="https://github.com/bojone/bert4keras/blob/master/examples/task_sentiment_virtual_adversarial_training.py">task_sentiment_virtual_adversarial_training.py</a>。大概是将模型建立两次，一个模型通过标注数据正常训练，一个模型通过无标注数据虚拟对抗训练，两者交替执行，请读懂源码后再使用，不要乱套代码。实验任务为情况分类，大约有2万的标注数据，取前200个作为标注样本，剩下的作为无标注数据，VAT和非VAT的表现对比如下（每个实验都重复了三次，取平均）：<br />
+\begin{array}{c|cc}<br />
+\hline<br />
+&amp; \text{验证集} &amp; \text{测试集}\\\<br />
+\hline<br />
+\text{非VAT} &amp; 88.93\% &amp; 89.34\%\\\<br />
+\text{VAT} &amp; 89.83\% &amp; 90.37\%\\\<br />
+\hline<br />
+\end{array}</p>
+<blockquote>
+<p><strong>说明：</strong> 前面提到$f_{ng}(x)$表示不对$x$求梯度，不过$f$自身的参数$\theta$的梯度还是需要求的。但是读懂了上述代码的读者会发现，上述实现中相当于把$f_{ng}(x)$中$x,\theta$的梯度都去掉了，理论上不完全等价于标准的VAT。问题是在Keras中实现标准的VAT有点麻烦，而且计算量会加大，此外实验发现上述“山寨”版本也已经能带来提升了，标准的VAT相对它而言差别是二阶小量的，所以差别不大，上述代码基本满足需求了。</p>
+</blockquote>
+<h2 id="_14">文章小结</h2>
+<p>本文先介绍了添加随机噪声这一常规的正则化手段，然后通过近似展开与积分的过程，推导了它与梯度惩罚之间的联系，并从中引出了可以用于半监督训练的模型平滑损失，接着进一步联系到了监督式的对抗训练和半监督的虚拟对抗训练，最后给出了Keras下虚拟对抗训练的实现和例子。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/7466">https://spaces.ac.cn/archives/7466</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Jun. 01, 2020). 《泛化性乱弹：从随机噪声、梯度惩罚到虚拟对抗训练 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/7466">https://spaces.ac.cn/archives/7466</a></p>
+<p>@online{kexuefm-7466,<br />
+title={泛化性乱弹：从随机噪声、梯度惩罚到虚拟对抗训练},<br />
+author={苏剑林},<br />
+year={2020},<br />
+month={Jun},<br />
+url={\url{https://spaces.ac.cn/archives/7466}},<br />
+} </p>
+<hr />
+<h2 id="_15">公式推导与注释</h2>
+<p>本节将对原文中的核心公式进行极详细的推导和扩展，涵盖噪声正则化理论、梯度惩罚推导、对抗训练机制以及虚拟对抗训练的完整数学框架。</p>
+<hr />
+<h3 id="_16">第一部分：噪声正则化的理论基础</h3>
+<h4 id="11">1.1 标准优化目标与噪声扰动</h4>
+<p><strong>基本设定</strong>：</p>
+<p>原始的经验风险最小化（ERM）目标为：</p>
+<p>$$
+\min_{\theta} L(\theta) = \mathbb{E}_{(x,y)\sim \mathcal{D}}[l(f_{\theta}(x), y)]
+$$</p>
+<p>其中：
+- $f_{\theta}(x)$：参数为$\theta$的模型
+- $\mathcal{D}$：训练数据分布
+- $l(\cdot, \cdot)$：损失函数（如交叉熵、MSE等）</p>
+<p><strong>引入噪声扰动后的目标</strong>：</p>
+<p>$$
+\min_{\theta} L_{\varepsilon}(\theta) = \mathbb{E}_{(x,y)\sim \mathcal{D}, \varepsilon\sim q(\varepsilon)}[l(f_{\theta}(x + \varepsilon), y)]
+$$</p>
+<p><strong>详细推导</strong>：</p>
+<p>将扰动后的损失展开为期望形式：</p>
+<p>$$
+\begin{aligned}
+L_{\varepsilon}(\theta) &= \int_{\mathcal{D}} \int_{\varepsilon} p(x,y) \cdot q(\varepsilon) \cdot l(f_{\theta}(x+\varepsilon), y) \, d\varepsilon \, dx \, dy \\
+&= \int_{\mathcal{D}} p(x,y) \left[\int_{\varepsilon} q(\varepsilon) \cdot l(f_{\theta}(x+\varepsilon), y) \, d\varepsilon\right] dx \, dy \\
+&= \mathbb{E}_{(x,y)\sim \mathcal{D}}\left[\tilde{l}(x,y)\right]
+\end{aligned}
+$$</p>
+<p>其中定义了<strong>单样本加噪声损失</strong>：</p>
+<p>$$
+\tilde{l}(x,y) = \mathbb{E}_{\varepsilon\sim q(\varepsilon)}[l(f_{\theta}(x+\varepsilon), y)] = \int q(\varepsilon) \cdot l(f_{\theta}(x+\varepsilon), y) \, d\varepsilon
+$$</p>
+<h4 id="12">1.2 泰勒展开：从离散采样到连续积分</h4>
+<p><strong>一阶泰勒展开</strong>：</p>
+<p>假设$f_{\theta}$和$l$都是光滑的，对$l(f_{\theta}(x+\varepsilon), y)$在$\varepsilon=0$处进行泰勒展开：</p>
+<p>$$
+l(f_{\theta}(x+\varepsilon), y) = l(f_{\theta}(x), y) + \left.\frac{\partial l(f_{\theta}(x+\varepsilon), y)}{\partial \varepsilon}\right|_{\varepsilon=0} + \frac{1}{2}\left.\frac{\partial^2 l(f_{\theta}(x+\varepsilon), y)}{\partial \varepsilon^2}\right|_{\varepsilon=0} + \mathcal{O}(\|\varepsilon\|^3)
+$$</p>
+<p><strong>链式法则展开</strong>：</p>
+<p>$$
+\frac{\partial l(f_{\theta}(x+\varepsilon), y)}{\partial \varepsilon_i} = \sum_j \frac{\partial l}{\partial f_j} \cdot \frac{\partial f_j}{\partial x_k} \cdot \frac{\partial (x_k + \varepsilon_k)}{\partial \varepsilon_i} = \sum_j \frac{\partial l}{\partial f_j} \cdot \frac{\partial f_j}{\partial x_i}
+$$</p>
+<p>记梯度为$\nabla_x l = \sum_j \frac{\partial l}{\partial f_j} \nabla_x f_j$，则：</p>
+<p>$$
+l(f_{\theta}(x+\varepsilon), y) \approx l(f_{\theta}(x), y) + \varepsilon^{\top} \nabla_x l(f_{\theta}(x), y) + \frac{1}{2} \varepsilon^{\top} \mathcal{H}_x \varepsilon
+$$</p>
+<p>其中$\mathcal{H}<em _theta="\theta">x = \nabla_x^2 l(f</em>(x), y)$是关于$x$的Hessian矩阵。</p>
+<h4 id="13">1.3 高斯噪声的积分计算</h4>
+<p><strong>假设</strong>：$q(\varepsilon) = \mathcal{N}(0, \sigma^2 I)$，即$\varepsilon$的各分量独立同分布于$\mathcal{N}(0, \sigma^2)$。</p>
+<p><strong>关键性质</strong>：
+1. $\mathbb{E}[\varepsilon_i] = 0$
+2. $\mathbb{E}[\varepsilon_i \varepsilon_j] = \sigma^2 \delta_{ij}$（$\delta_{ij}$是Kronecker delta）
+3. $\mathbb{E}[\varepsilon_i^2] = \sigma^2$</p>
+<p><strong>积分计算</strong>：</p>
+<p>$$
+\begin{aligned}
+\tilde{l}(x,y) &= \int q(\varepsilon) \cdot l(f_{\theta}(x+\varepsilon), y) \, d\varepsilon \\
+&\approx \int q(\varepsilon) \left[l(f_{\theta}(x), y) + \varepsilon^{\top} \nabla_x l + \frac{1}{2} \varepsilon^{\top} \mathcal{H}_x \varepsilon\right] d\varepsilon \\
+&= l(f_{\theta}(x), y) \cdot \underbrace{\int q(\varepsilon) d\varepsilon}_{=1} + \underbrace{\int q(\varepsilon) \varepsilon^{\top} \nabla_x l \, d\varepsilon}_{=0} + \frac{1}{2} \int q(\varepsilon) \varepsilon^{\top} \mathcal{H}_x \varepsilon \, d\varepsilon
+\end{aligned}
+$$</p>
+<p><strong>二次型期望的计算</strong>：</p>
+<p>$$
+\begin{aligned}
+\mathbb{E}_{\varepsilon}\left[\varepsilon^{\top} \mathcal{H}_x \varepsilon\right] &= \mathbb{E}\left[\sum_{i,j} \varepsilon_i \mathcal{H}_{ij} \varepsilon_j\right] \\
+&= \sum_{i,j} \mathcal{H}_{ij} \mathbb{E}[\varepsilon_i \varepsilon_j] \\
+&= \sum_{i,j} \mathcal{H}_{ij} \cdot \sigma^2 \delta_{ij} \\
+&= \sigma^2 \sum_i \mathcal{H}_{ii} \\
+&= \sigma^2 \cdot \text{tr}(\mathcal{H}_x)
+\end{aligned}
+$$</p>
+<p><strong>最终结果</strong>：</p>
+<p>$$
+\boxed{\tilde{l}(x,y) \approx l(f_{\theta}(x), y) + \frac{\sigma^2}{2} \text{tr}(\mathcal{H}_x) = l(f_{\theta}(x), y) + \frac{\sigma^2}{2} \Delta_x l(f_{\theta}(x), y)}
+$$</p>
+<p>其中$\Delta_x = \sum_i \frac{\partial^2}{\partial x_i^2}$是拉普拉斯算子。</p>
+<h4 id="14">1.4 拉普拉斯正则化的理论意义</h4>
+<p><strong>物理解释</strong>：拉普拉斯算子$\Delta l$衡量了损失函数在输入空间中的"曲率"。</p>
+<p><strong>几何意义</strong>：
+- $\Delta l &gt; 0$：$l$是局部凸的（向上弯曲）
+- $\Delta l &lt; 0$：$l$是局部凹的（向下弯曲）
+- $\Delta l = 0$：$l$在该点是"平坦"的</p>
+<p><strong>正则化效果</strong>：最小化$l + \frac{\sigma^2}{2}\Delta l$相当于：
+1. 最小化原始损失$l$
+2. 惩罚输入空间中的高曲率区域，鼓励模型在输入附近保持"平滑"</p>
+<p><strong>实际困难</strong>：计算$\Delta l$需要二阶导数，进而优化时需要三阶导数（梯度的二阶导数），这在深度学习中计算代价极高。</p>
+<hr />
+<h3 id="_17">第二部分：转移目标与三角不等式</h3>
+<h4 id="21">2.1 替代损失函数的构造</h4>
+<p><strong>动机</strong>：直接计算$\int q(\varepsilon) l(f(x+\varepsilon), y) d\varepsilon$困难，考虑优化上界。</p>
+<p><strong>新目标</strong>：</p>
+<p>$$
+\tilde{L}(x, y) = l(f(x+\varepsilon), f(x)) + l(f(x), y)
+$$</p>
+<p><strong>三角不等式论证</strong>：</p>
+<p>假设$l$是度量（metric），即满足：
+1. 非负性：$l(a, b) \geq 0$，且$l(a,a) = 0$
+2. 对称性：$l(a, b) = l(b, a)$
+3. 三角不等式：$l(a, c) \leq l(a, b) + l(b, c)$</p>
+<p>则有：</p>
+<p>$$
+l(f(x+\varepsilon), y) \leq l(f(x+\varepsilon), f(x)) + l(f(x), y)
+$$</p>
+<p><strong>Jensen不等式推广</strong>（针对非度量损失）：</p>
+<p>对于MSE损失$l(a, b) = |a - b|^2$：</p>
+<p>$$
+\begin{aligned}
+\|f(x+\varepsilon) - y\|^2 &= \|f(x+\varepsilon) - f(x) + f(x) - y\|^2 \\
+&= \left\|\frac{1}{2} \cdot 2[f(x+\varepsilon) - f(x)] + \frac{1}{2} \cdot 2[f(x) - y]\right\|^2
+\end{aligned}
+$$</p>
+<p>由凸性（$|\cdot|^2$是凸函数）：</p>
+<p>$$
+\begin{aligned}
+&\leq \frac{1}{2}\|2[f(x+\varepsilon) - f(x)]\|^2 + \frac{1}{2}\|2[f(x) - y]\|^2 \\
+&= 2\|f(x+\varepsilon) - f(x)\|^2 + 2\|f(x) - y\|^2
+\end{aligned}
+$$</p>
+<p>因此：</p>
+<p>$$
+\boxed{l(f(x+\varepsilon), y) \leq 2\left[l(f(x+\varepsilon), f(x)) + l(f(x), y)\right]}
+$$</p>
+<h4 id="22">2.2 半监督学习的自然涌现</h4>
+<p><strong>关键观察</strong>：损失$l(f(x+\varepsilon), f(x))$的特殊性质：</p>
+<ol>
+<li><strong>无需标签</strong>：只依赖于$x$，不依赖于$y$</li>
+<li><strong>平滑性惩罚</strong>：鼓励$f(x+\varepsilon) \approx f(x)$</li>
+<li><strong>对称性</strong>：$l(f(x+\varepsilon), f(x)) = l(f(x), f(x+\varepsilon))$</li>
+</ol>
+<p><strong>半监督学习框架</strong>：</p>
+<p>总损失可分解为：</p>
+<p>$$
+L_{\text{total}} = \underbrace{\mathbb{E}_{(x,y)\sim \mathcal{D}_L}[l(f(x), y)]}_{\text{监督损失（有标签数据）}} + \lambda \underbrace{\mathbb{E}_{x\sim \mathcal{D}_U, \varepsilon\sim q}[l(f(x+\varepsilon), f(x))]}_{\text{平滑性正则化（无标签数据）}}
+$$</p>
+<p>其中：
+- $\mathcal{D}_L$：有标签数据集（通常很小）
+- $\mathcal{D}_U$：无标签数据集（通常很大）
+- $\lambda &gt; 0$：权重系数</p>
+<p><strong>理论优势</strong>：
+1. 充分利用大量无标签数据
+2. 通过平滑性假设（流形假设）提升泛化性能
+3. 适用于标签稀缺的场景</p>
+<hr />
+<h3 id="_18">第三部分：梯度惩罚的严格推导</h3>
+<h4 id="31">3.1 损失函数的性质假设</h4>
+<p>对于任何合理的损失函数$l(a, b)$，我们假设：</p>
+<p><strong>性质1（光滑性）</strong>：$l \in C^2$（二阶连续可导）</p>
+<p><strong>性质2（零点性质）</strong>：$l(a, a) = 0$</p>
+<p><strong>性质3（极值性质）</strong>：$a = b$是$l(a, b)$的极小值点，即：</p>
+<p>$$
+\left.\frac{\partial l(a, b)}{\partial a}\right|_{a=b} = 0, \quad \left.\frac{\partial l(a, b)}{\partial b}\right|_{b=a} = 0
+$$</p>
+<p><strong>验证常见损失函数</strong>：</p>
+<ol>
+<li><strong>MSE</strong>：$l(a, b) = |a - b|^2$</li>
+<li>$l(a, a) = 0$ ✓</li>
+<li>
+<p>$\frac{\partial l}{\partial a} = 2(a - b) \big|_{a=b} = 0$ ✓</p>
+</li>
+<li>
+<p><strong>交叉熵</strong>（softmax）：$l(p, q) = -\sum_i q_i \log p_i$</p>
+</li>
+<li>当$p = q$时，$\frac{\partial l}{\partial p_i} = -\frac{q_i}{p_i} \big|_{p=q} = -1$（需归一化约束修正）</li>
+<li>
+<p>实际上对于概率分布，$l(p, p) = -\sum_i p_i \log p_i$（熵），最小值在$p = \text{one-hot}$</p>
+</li>
+<li>
+<p><strong>KL散度</strong>：$l(p, q) = \sum_i q_i \log \frac{q_i}{p_i}$</p>
+</li>
+<li>$l(p, p) = 0$ ✓</li>
+<li>$\frac{\partial l}{\partial p_i}\big|<em p="q">{p=q} = -\frac{q_i}{p_i}\big|</em> = -1$（需约束修正）</li>
+</ol>
+<h4 id="32">3.2 平滑损失的泰勒展开</h4>
+<p>考虑$l(f(x+\varepsilon), f(x))$，记$F = f(x+\varepsilon)$，$G = f(x)$。</p>
+<p><strong>零阶项</strong>（由性质2）：</p>
+<p>$$
+l(f(x), f(x)) = 0
+$$</p>
+<p><strong>一阶项</strong>（由性质3）：</p>
+<p>$$
+\left.\frac{\partial l(F, G)}{\partial F}\right|_{F=G} = 0
+$$</p>
+<p>因此：</p>
+<p>$$
+\begin{aligned}
+l(f(x+\varepsilon), f(x)) &= l(F, G) \\
+&= \underbrace{l(G, G)}_{=0} + \underbrace{\left.\frac{\partial l}{\partial F}\right|_{F=G}}_{=0} \cdot (F - G) + \frac{1}{2}(F - G)^{\top} \left.\frac{\partial^2 l}{\partial F^2}\right|_{F=G} (F - G) + \cdots
+\end{aligned}
+$$</p>
+<p><strong>二阶Hessian矩阵</strong>：</p>
+<p>记$\mathcal{H}<em F="G">F = \left.\frac{\partial^2 l(F, G)}{\partial F_i \partial F_j}\right|</em>$（关于$F$的Hessian）</p>
+<p>则：</p>
+<p>$$
+l(f(x+\varepsilon), f(x)) \approx \frac{1}{2} \sum_{i,j} [f_i(x+\varepsilon) - f_i(x)] \cdot \mathcal{H}_{ij} \cdot [f_j(x+\varepsilon) - f_j(x)]
+$$</p>
+<h4 id="33">3.3 输入扰动到输出扰动的传播</h4>
+<p><strong>链式法则</strong>：</p>
+<p>$$
+f_i(x+\varepsilon) - f_i(x) \approx \sum_k \frac{\partial f_i}{\partial x_k} \varepsilon_k = (\nabla_x f_i)^{\top} \varepsilon
+$$</p>
+<p>代入二阶展开：</p>
+<p>$$
+\begin{aligned}
+l(f(x+\varepsilon), f(x)) &\approx \frac{1}{2} \sum_{i,j} [(\nabla_x f_i)^{\top} \varepsilon] \cdot \mathcal{H}_{ij} \cdot [(\nabla_x f_j)^{\top} \varepsilon] \\
+&= \frac{1}{2} \sum_{i,j} \sum_{k,l} \frac{\partial f_i}{\partial x_k} \varepsilon_k \mathcal{H}_{ij} \frac{\partial f_j}{\partial x_l} \varepsilon_l \\
+&= \frac{1}{2} \sum_{k,l} \varepsilon_k \varepsilon_l \underbrace{\left(\sum_{i,j} \frac{\partial f_i}{\partial x_k} \mathcal{H}_{ij} \frac{\partial f_j}{\partial x_l}\right)}_{=: \tilde{\mathcal{H}}_{kl}}
+\end{aligned}
+$$</p>
+<h4 id="34">3.4 高斯噪声积分</h4>
+<p>假设$\varepsilon \sim \mathcal{N}(0, \sigma^2 I)$：</p>
+<p>$$
+\begin{aligned}
+\mathbb{E}_{\varepsilon}[l(f(x+\varepsilon), f(x))] &\approx \frac{1}{2} \mathbb{E}\left[\sum_{k,l} \varepsilon_k \varepsilon_l \tilde{\mathcal{H}}_{kl}\right] \\
+&= \frac{1}{2} \sum_{k,l} \tilde{\mathcal{H}}_{kl} \mathbb{E}[\varepsilon_k \varepsilon_l] \\
+&= \frac{1}{2} \sum_{k,l} \tilde{\mathcal{H}}_{kl} \cdot \sigma^2 \delta_{kl} \\
+&= \frac{\sigma^2}{2} \sum_k \tilde{\mathcal{H}}_{kk}
+\end{aligned}
+$$</p>
+<p><strong>展开$\tilde{\mathcal{H}}_{kk}$</strong>：</p>
+<p>$$
+\tilde{\mathcal{H}}_{kk} = \sum_{i,j} \frac{\partial f_i}{\partial x_k} \mathcal{H}_{ij} \frac{\partial f_j}{\partial x_k}
+$$</p>
+<p><strong>对角化假设</strong>：对于多数损失函数（如MSE、KL散度），当$F = G$时：</p>
+<p>$$
+\mathcal{H}_{ij} = \left.\frac{\partial^2 l(F, G)}{\partial F_i \partial F_j}\right|_{F=G} = 0 \quad (i \neq j)
+$$</p>
+<p>记$\lambda_i = \mathcal{H}_{ii}$（对角元素），则：</p>
+<p>$$
+\tilde{\mathcal{H}}_{kk} = \sum_i \lambda_i \left(\frac{\partial f_i}{\partial x_k}\right)^2 = \sum_i \lambda_i \|\nabla_x f_i\|^2_k
+$$</p>
+<p>其中$|\cdot|_k$表示只取第$k$个分量。</p>
+<p><strong>最终结果</strong>：</p>
+<p>$$
+\boxed{\mathbb{E}_{\varepsilon}[l(f(x+\varepsilon), f(x))] \approx \frac{\sigma^2}{2} \sum_i \lambda_i \|\nabla_x f_i(x)\|^2}
+$$</p>
+<h4 id="35-lambda_i">3.5 具体损失函数的$\lambda_i$计算</h4>
+<p><strong>（1）均方误差（MSE）</strong>：</p>
+<p>$$
+l(a, b) = \sum_i (a_i - b_i)^2
+$$</p>
+<p>计算Hessian：</p>
+<p>$$
+\frac{\partial^2 l}{\partial a_i \partial a_j}\bigg|_{a=b} = \frac{\partial}{\partial a_j}[2(a_i - b_i)]\bigg|_{a=b} = 2\delta_{ij}
+$$</p>
+<p>因此$\lambda_i = 2$，正则项为：</p>
+<p>$$
+R_{\text{MSE}} = \sigma^2 \sum_i \|\nabla_x f_i(x)\|^2
+$$</p>
+<p><strong>（2）KL散度</strong>（概率分布）：</p>
+<p>$$
+l(p, q) = \sum_i q_i \log \frac{q_i}{p_i}
+$$</p>
+<p>计算二阶导数：</p>
+<p>$$
+\frac{\partial^2 l}{\partial p_i \partial p_j}\bigg|_{p=q} = \frac{\partial}{\partial p_j}\left[-\frac{q_i}{p_i}\right]\bigg|_{p=q} = \frac{q_i}{p_i^2}\delta_{ij}\bigg|_{p=q} = \frac{1}{q_i}\delta_{ij}
+$$</p>
+<p>因此$\lambda_i = \frac{1}{f_i(x)}$，正则项为：</p>
+<p>$$
+R_{\text{KL}} = \frac{\sigma^2}{2} \sum_i \frac{1}{f_i(x)} \|\nabla_x f_i(x)\|^2 = \frac{\sigma^2}{2} \sum_i f_i(x) \|\nabla_x \log f_i(x)\|^2
+$$</p>
+<p>这也称为<strong>Fisher信息矩阵</strong>的对角近似！</p>
+<p><strong>（3）交叉熵</strong>（二分类）：</p>
+<p>$$
+l(p, y) = -y\log p - (1-y)\log(1-p)
+$$</p>
+<p>当$y = \sigma(f(x))$（logistic输出）时，类似计算可得$\lambda \propto \frac{1}{p(1-p)}$。</p>
+<hr />
+<h3 id="_19">第四部分：梯度惩罚的高效采样近似</h3>
+<h4 id="41">4.1 计算瓶颈分析</h4>
+<p><strong>问题</strong>：直接计算$\sum_i \lambda_i |\nabla_x f_i(x)|^2$需要：</p>
+<ol>
+<li>对每个输出分量$f_i(x)$计算梯度$\nabla_x f_i$</li>
+<li>如果输出维度$d$很大（如ImageNet有1000类），需要计算1000次梯度</li>
+<li>每次梯度计算的复杂度与模型参数量成正比</li>
+</ol>
+<p><strong>复杂度估计</strong>：
+- 正向传播：$O(P)$（$P$为参数量）
+- 反向传播（单个输出）：$O(P)$
+- 总复杂度：$O(d \cdot P)$（$d$为输出维度）</p>
+<h4 id="42-monte-carlo">4.2 Monte Carlo采样近似</h4>
+<p><strong>关键观察</strong>：利用期望的线性性：</p>
+<p>$$
+\sum_i \|\nabla_x f_i\|^2 = \mathbb{E}_{\eta \sim \mathcal{U}(\{e_1, \ldots, e_d\})}\left[\left\|\nabla_x (\eta^{\top} f(x))\right\|^2\right] \cdot d
+$$</p>
+<p>其中$e_i$是第$i$个标准基向量。</p>
+<p><strong>推广到任意分布</strong>：</p>
+<p>设$\eta \sim q(\eta)$是均值为0、方差为1的随机向量（各分量独立），则：</p>
+<p>$$
+\sum_i \|\nabla_x f_i\|^2 = \mathbb{E}_{\eta \sim q}\left[\left\|\sum_i \eta_i \nabla_x f_i(x)\right\|^2\right]
+$$</p>
+<p><strong>证明</strong>：</p>
+<p>$$
+\begin{aligned}
+\mathbb{E}\left[\left\|\sum_i \eta_i \nabla_x f_i\right\|^2\right] &= \mathbb{E}\left[\sum_k \left(\sum_i \eta_i \frac{\partial f_i}{\partial x_k}\right)^2\right] \\
+&= \sum_k \mathbb{E}\left[\sum_{i,j} \eta_i \eta_j \frac{\partial f_i}{\partial x_k} \frac{\partial f_j}{\partial x_k}\right] \\
+&= \sum_k \sum_{i,j} \frac{\partial f_i}{\partial x_k} \frac{\partial f_j}{\partial x_k} \mathbb{E}[\eta_i \eta_j] \\
+&= \sum_k \sum_i \left(\frac{\partial f_i}{\partial x_k}\right)^2 \cdot \mathbb{E}[\eta_i^2] \quad (\text{独立性}) \\
+&= \sum_k \sum_i \left(\frac{\partial f_i}{\partial x_k}\right)^2 \cdot 1 \\
+&= \sum_i \|\nabla_x f_i\|^2
+\end{aligned}
+$$</p>
+<h4 id="43">4.3 实用采样策略</h4>
+<p><strong>策略1：Rademacher分布</strong>（$\eta_i \in {-1, +1}$等概率）</p>
+<ul>
+<li>优点：计算简单，无需生成浮点随机数</li>
+<li>期望：$\mathbb{E}[\eta_i] = 0$，$\mathbb{E}[\eta_i^2] = 1$</li>
+<li>实现：<code>eta = 2 * torch.randint(0, 2, (d,)) - 1</code></li>
+</ul>
+<p><strong>策略2：标准高斯分布</strong>（$\eta_i \sim \mathcal{N}(0, 1)$）</p>
+<ul>
+<li>优点：理论上方差更稳定</li>
+<li>实现：<code>eta = torch.randn(d)</code></li>
+</ul>
+<p><strong>策略3：均匀分布</strong>（$\eta_i \sim \mathcal{U}[-\sqrt{3}, \sqrt{3}]$，使方差为1）</p>
+<ul>
+<li>优点：有界，避免极端值</li>
+<li>实现：<code>eta = (torch.rand(d) - 0.5) * 2 * np.sqrt(3)</code></li>
+</ul>
+<h4 id="44-pytorch">4.4 PyTorch伪代码实现</h4>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+
+<span class="k">def</span><span class="w"> </span><span class="nf">gradient_penalty_sampled</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">lambda_weight</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">num_samples</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    采样近似计算梯度惩罚</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        model: PyTorch模型，输出维度为d</span>
+<span class="sd">        x: 输入，形状为(batch_size, ...)</span>
+<span class="sd">        lambda_weight: 权重系数（对应$\lambda_i$）</span>
+<span class="sd">        num_samples: Monte Carlo采样次数</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        gp: 梯度惩罚项</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">gp</span> <span class="o">=</span> <span class="mf">0.0</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_samples</span><span class="p">):</span>
+        <span class="c1"># 前向传播</span>
+        <span class="n">x</span><span class="o">.</span><span class="n">requires_grad</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="n">f</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>  <span class="c1"># 形状: (batch_size, d)</span>
+
+        <span class="c1"># 采样随机向量</span>
+        <span class="n">eta</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn_like</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>  <span class="c1"># Rademacher: 2*torch.randint(0,2,f.shape)-1</span>
+
+        <span class="c1"># 计算加权输出</span>
+        <span class="n">weighted_output</span> <span class="o">=</span> <span class="p">(</span><span class="n">eta</span> <span class="o">*</span> <span class="n">f</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+
+        <span class="c1"># 计算梯度</span>
+        <span class="n">grad</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span>
+            <span class="n">outputs</span><span class="o">=</span><span class="n">weighted_output</span><span class="p">,</span>
+            <span class="n">inputs</span><span class="o">=</span><span class="n">x</span><span class="p">,</span>
+            <span class="n">create_graph</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># 支持二阶导数</span>
+        <span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+        <span class="c1"># 累积梯度范数平方</span>
+        <span class="n">gp</span> <span class="o">+=</span> <span class="p">(</span><span class="n">grad</span> <span class="o">**</span> <span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>  <span class="c1"># 对batch平均</span>
+
+    <span class="k">return</span> <span class="n">lambda_weight</span> <span class="o">*</span> <span class="n">gp</span> <span class="o">/</span> <span class="n">num_samples</span>
+</code></pre></div>
+
+<p><strong>复杂度分析</strong>：
+- 单次采样：$O(P)$（一次反向传播）
+- 总复杂度：$O(K \cdot P)$（$K$为采样次数，通常$K=1$足够）
+- 相比直接计算：从$O(d \cdot P)$降至$O(P)$（当$d \gg 1$时显著加速）</p>
+<hr />
+<h3 id="_20">第五部分：对抗训练的数学原理</h3>
+<h4 id="51-fgmpgd">5.1 监督对抗训练（FGM/PGD）</h4>
+<p><strong>目标</strong>：寻找最具"挑战性"的扰动$\varepsilon$，使得模型在该扰动下损失最大。</p>
+<p><strong>数学形式化</strong>：</p>
+<p>$$
+\min_{\theta} \max_{\|\varepsilon\| \leq \epsilon} l(f_{\theta}(x + \varepsilon), y)
+$$</p>
+<p>这是一个<strong>极小极大优化问题</strong>（minimax optimization）。</p>
+<h4 id="52-fgm">5.2 快速梯度法（FGM）</h4>
+<p><strong>一阶近似</strong>：</p>
+<p>$$
+l(f(x + \varepsilon), y) \approx l(f(x), y) + \varepsilon^{\top} \nabla_x l(f(x), y)
+$$</p>
+<p><strong>最优扰动方向</strong>：</p>
+<p>要最大化$\varepsilon^{\top} \nabla_x l$，在约束$|\varepsilon| \leq \epsilon$下，由Cauchy-Schwarz不等式：</p>
+<p>$$
+\varepsilon^{\top} \nabla_x l \leq \|\varepsilon\| \cdot \|\nabla_x l\| \leq \epsilon \cdot \|\nabla_x l\|
+$$</p>
+<p>等号成立当且仅当$\varepsilon \parallel \nabla_x l$，即：</p>
+<p>$$
+\boxed{\varepsilon^* = \epsilon \cdot \frac{\nabla_x l(f(x), y)}{\|\nabla_x l(f(x), y)\|}}
+$$</p>
+<p><strong>FGM算法</strong>：</p>
+<ol>
+<li>计算梯度：$g = \nabla_x l(f(x), y)$</li>
+<li>生成扰动：$\varepsilon = \epsilon \cdot g / |g|$</li>
+<li>更新损失：$\tilde{l} = l(f(x + \varepsilon), y)$</li>
+<li>反向传播：$\nabla_{\theta} \tilde{l}$</li>
+</ol>
+<h4 id="53-pgd">5.3 投影梯度下降（PGD）</h4>
+<p><strong>迭代优化</strong>：FGM只做一步近似，PGD进行多步迭代：</p>
+<p>$$
+\varepsilon_{t+1} = \Pi_{\|\cdot\| \leq \epsilon}\left(\varepsilon_t + \alpha \cdot \frac{\nabla_x l(f(x + \varepsilon_t), y)}{\|\nabla_x l(f(x + \varepsilon_t), y)\|}\right)
+$$</p>
+<p>其中$\Pi_{|\cdot| \leq \epsilon}$是投影算子：</p>
+<p>$$
+\Pi_{\|\cdot\| \leq \epsilon}(z) = \begin{cases}
+z & \text{if } \|z\| \leq \epsilon \\
+\epsilon \cdot \frac{z}{\|z\|} & \text{otherwise}
+\end{cases}
+$$</p>
+<p><strong>PGD算法</strong>（以$\ell_{\infty}$范数为例）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">pgd_attack</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">epsilon</span><span class="o">=</span><span class="mf">0.3</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.01</span><span class="p">,</span> <span class="n">num_iter</span><span class="o">=</span><span class="mi">40</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    PGD对抗攻击</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        model: 模型</span>
+<span class="sd">        x: 原始输入</span>
+<span class="sd">        y: 标签</span>
+<span class="sd">        epsilon: 最大扰动幅度（L_inf范数）</span>
+<span class="sd">        alpha: 每步步长</span>
+<span class="sd">        num_iter: 迭代次数</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">delta</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">uniform_</span><span class="p">(</span><span class="o">-</span><span class="n">epsilon</span><span class="p">,</span> <span class="n">epsilon</span><span class="p">)</span>  <span class="c1"># 随机初始化</span>
+    <span class="n">delta</span><span class="o">.</span><span class="n">requires_grad</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_iter</span><span class="p">):</span>
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">cross_entropy</span><span class="p">(</span><span class="n">model</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">delta</span><span class="p">),</span> <span class="n">y</span><span class="p">)</span>
+        <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+        <span class="c1"># 梯度上升（最大化损失）</span>
+        <span class="n">delta</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">delta</span> <span class="o">+</span> <span class="n">alpha</span> <span class="o">*</span> <span class="n">delta</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">sign</span><span class="p">()</span>
+
+        <span class="c1"># 投影到epsilon-球</span>
+        <span class="n">delta</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">clamp</span><span class="p">(</span><span class="n">delta</span><span class="p">,</span> <span class="o">-</span><span class="n">epsilon</span><span class="p">,</span> <span class="n">epsilon</span><span class="p">)</span>
+        <span class="n">delta</span><span class="o">.</span><span class="n">data</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">clamp</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">delta</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="n">x</span>  <span class="c1"># 确保合法像素值</span>
+
+        <span class="n">delta</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">zero_</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="n">delta</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+</code></pre></div>
+
+<h4 id="54">5.4 对抗训练与梯度惩罚的等价性</h4>
+<p><strong>定理</strong>（Adversarial Training ≈ Gradient Penalty）：</p>
+<p>在一阶近似下，对抗训练等价于在损失函数中添加梯度惩罚项：</p>
+<p>$$
+\max_{\|\varepsilon\| \leq \epsilon} l(f(x + \varepsilon), y) \approx l(f(x), y) + \epsilon \|\nabla_x l(f(x), y)\|
+$$</p>
+<p><strong>证明</strong>：</p>
+<p>$$
+\begin{aligned}
+\max_{\|\varepsilon\| \leq \epsilon} l(f(x + \varepsilon), y) &\approx \max_{\|\varepsilon\| \leq \epsilon} \left[l(f(x), y) + \varepsilon^{\top} \nabla_x l\right] \\
+&= l(f(x), y) + \max_{\|\varepsilon\| \leq \epsilon} \varepsilon^{\top} \nabla_x l \\
+&= l(f(x), y) + \epsilon \|\nabla_x l\|
+\end{aligned}
+$$</p>
+<p><strong>实践意义</strong>：
+1. 对抗训练隐式地鼓励小梯度范数
+2. 可以直接在损失中添加$\lambda |\nabla_x l|^2$作为对抗训练的替代（计算更高效）
+3. 两者在收敛点处的解一致（KKT条件）</p>
+<hr />
+<h3 id="vat">第六部分：虚拟对抗训练（VAT）的完整理论</h3>
+<h4 id="61-vat">6.1 VAT的动机与目标</h4>
+<p><strong>核心思想</strong>：在无标签数据上，寻找使模型输出变化最大的扰动。</p>
+<p><strong>目标函数</strong>：</p>
+<p>$$
+\max_{\|\varepsilon\| \leq \epsilon} l(f(x + \varepsilon), f(x))
+$$</p>
+<p>注意：第二个参数是$f(x)$而非$y$（无需标签）。</p>
+<h4 id="62">6.2 二阶展开的必要性</h4>
+<p><strong>一阶项消失</strong>：由于损失函数在$f(x+\varepsilon) = f(x)$处取极小值，有：</p>
+<p>$$
+\left.\frac{\partial l(f(x+\varepsilon), f(x))}{\partial \varepsilon}\right|_{\varepsilon=0} = 0
+$$</p>
+<p>因此必须展开到二阶：</p>
+<p>$$
+l(f(x+\varepsilon), f(x)) \approx \frac{1}{2} \varepsilon^{\top} \mathcal{H}_x \varepsilon
+$$</p>
+<p>其中$\mathcal{H}<em ng="ng">x = \nabla_x^2 l(f(x), f</em>$表示stop gradient）。}(x))$（$f_{ng</p>
+<h4 id="63">6.3 最大特征向量的几何意义</h4>
+<p><strong>优化问题</strong>：</p>
+<p>$$
+\max_{\|\varepsilon\| = 1} \varepsilon^{\top} \mathcal{H}_x \varepsilon
+$$</p>
+<p><strong>解的性质</strong>：最优解$\varepsilon^<em>$是$\mathcal{H}_x$的</em><em>最大特征向量</em>*（对应最大特征值$\lambda_{\max}$）。</p>
+<p><strong>证明</strong>（拉格朗日乘子法）：</p>
+<p>构造拉格朗日函数：</p>
+<p>$$
+\mathcal{L}(\varepsilon, \mu) = \varepsilon^{\top} \mathcal{H}_x \varepsilon - \mu (\varepsilon^{\top} \varepsilon - 1)
+$$</p>
+<p>一阶条件：</p>
+<p>$$
+\frac{\partial \mathcal{L}}{\partial \varepsilon} = 2\mathcal{H}_x \varepsilon - 2\mu \varepsilon = 0 \quad \Rightarrow \quad \mathcal{H}_x \varepsilon = \mu \varepsilon
+$$</p>
+<p>这恰好是特征值方程！目标函数值为：</p>
+<p>$$
+\varepsilon^{\top} \mathcal{H}_x \varepsilon = \mu \varepsilon^{\top} \varepsilon = \mu
+$$</p>
+<p>因此最大值对应最大特征值$\mu = \lambda_{\max}$。</p>
+<h4 id="64-power-iteration">6.4 幂迭代法（Power Iteration）</h4>
+<p><strong>算法原理</strong>：</p>
+<p>设$\mathcal{H}_x$的特征值满足$|\lambda_1| &gt; |\lambda_2| \geq \cdots \geq |\lambda_n|$，对应特征向量为$v_1, \ldots, v_n$。</p>
+<p>任意初始向量$u_0 = \sum_i c_i v_i$，迭代：</p>
+<p>$$
+u_{k+1} = \frac{\mathcal{H}_x u_k}{\|\mathcal{H}_x u_k\|}
+$$</p>
+<p><strong>收敛性分析</strong>：</p>
+<p>$$
+\mathcal{H}_x^k u_0 = \sum_i c_i \lambda_i^k v_i = \lambda_1^k \left(c_1 v_1 + \sum_{i>1} c_i \left(\frac{\lambda_i}{\lambda_1}\right)^k v_i\right)
+$$</p>
+<p>当$k \to \infty$时，由于$\left|\frac{\lambda_i}{\lambda_1}\right| &lt; 1$（$i &gt; 1$），有：</p>
+<p>$$
+\frac{\mathcal{H}_x^k u_0}{\|\mathcal{H}_x^k u_0\|} \to \pm v_1
+$$</p>
+<p><strong>收敛速率</strong>：$O\left(\left|\frac{\lambda_2}{\lambda_1}\right|^k\right)$（几何收敛）。</p>
+<h4 id="65-hessian-">6.5 Hessian-向量积的高效计算</h4>
+<p><strong>直接计算困难</strong>：Hessian矩阵$\mathcal{H}_x \in \mathbb{R}^{n \times n}$，存储需要$O(n^2)$空间。</p>
+<p><strong>技巧</strong>：只需计算$\mathcal{H}_x u$（Hessian-向量积），无需显式构造$\mathcal{H}_x$。</p>
+<p><strong>有限差分近似</strong>：</p>
+<p>$$
+\mathcal{H}_x u = \nabla_x^2 l(f(x), f_{ng}(x)) \cdot u \approx \frac{\nabla_x l(f(x + \xi u), f_{ng}(x)) - \nabla_x l(f(x), f_{ng}(x))}{\xi}
+$$</p>
+<p>其中$\xi &gt; 0$是小常数（如$10^{-6}$）。</p>
+<p><strong>自动微分实现</strong>（PyTorch）：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">hessian_vector_product</span><span class="p">(</span><span class="n">loss</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">u</span><span class="p">,</span> <span class="n">xi</span><span class="o">=</span><span class="mf">1e-6</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    计算Hessian-向量积 H·u</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        loss: 损失函数</span>
+<span class="sd">        x: 输入</span>
+<span class="sd">        u: 方向向量</span>
+<span class="sd">        xi: 有限差分步长</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># 计算 grad(loss(x + xi*u))</span>
+    <span class="n">grad_plus</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span>
+        <span class="n">outputs</span><span class="o">=</span><span class="n">loss</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">xi</span> <span class="o">*</span> <span class="n">u</span><span class="p">),</span>
+        <span class="n">inputs</span><span class="o">=</span><span class="n">x</span><span class="p">,</span>
+        <span class="n">create_graph</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="c1"># 近似Hessian-向量积</span>
+    <span class="n">hv</span> <span class="o">=</span> <span class="p">(</span><span class="n">grad_plus</span> <span class="o">-</span> <span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">loss</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">x</span><span class="p">,</span> <span class="n">create_graph</span><span class="o">=</span><span class="kc">True</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span> <span class="o">/</span> <span class="n">xi</span>
+    <span class="k">return</span> <span class="n">hv</span>
+</code></pre></div>
+
+<h4 id="66-vat">6.6 VAT完整算法</h4>
+<p><strong>输入</strong>：
+- 模型$f_{\theta}$
+- 输入$x$（无标签）
+- 扰动半径$\epsilon$（如0.03）
+- 差分步长$\xi$（如10）
+- 幂迭代次数$r$（如1）</p>
+<p><strong>输出</strong>：对抗扰动$\varepsilon^*$</p>
+<p><strong>步骤</strong>：</p>
+<ol>
+<li>
+<p><strong>初始化</strong>：$u \sim \mathcal{N}(0, I)$</p>
+</li>
+<li>
+<p><strong>幂迭代</strong>（重复$r$次）：
+   $$
+   \begin{aligned}
+   &u \leftarrow u / \|u\| \\
+   &u \leftarrow \nabla_x l(f(x + \xi u), f_{ng}(x)) \\
+   &u \leftarrow u / \|u\|
+   \end{aligned}
+   $$</p>
+</li>
+<li>
+<p><strong>缩放</strong>：$\varepsilon^* = \epsilon \cdot u$</p>
+</li>
+<li>
+<p><strong>计算VAT损失</strong>：$L_{\text{VAT}} = l(f(x + \varepsilon^*), f_{ng}(x))$</p>
+</li>
+</ol>
+<p><strong>PyTorch实现</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">virtual_adversarial_loss</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">epsilon</span><span class="o">=</span><span class="mf">0.03</span><span class="p">,</span> <span class="n">xi</span><span class="o">=</span><span class="mf">10.0</span><span class="p">,</span> <span class="n">num_iter</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    虚拟对抗损失</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        model: 模型</span>
+<span class="sd">        x: 输入（无标签）</span>
+<span class="sd">        epsilon: 最大扰动</span>
+<span class="sd">        xi: 差分步长</span>
+<span class="sd">        num_iter: 幂迭代次数</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># 预测（停止梯度）</span>
+    <span class="k">with</span> <span class="n">torch</span><span class="o">.</span><span class="n">no_grad</span><span class="p">():</span>
+        <span class="n">pred_orig</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+    <span class="c1"># 随机初始化</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn_like</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+
+    <span class="c1"># 幂迭代</span>
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_iter</span><span class="p">):</span>
+        <span class="n">d</span> <span class="o">=</span> <span class="n">d</span> <span class="o">/</span> <span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>  <span class="c1"># 归一化</span>
+        <span class="n">d</span><span class="o">.</span><span class="n">requires_grad</span> <span class="o">=</span> <span class="kc">True</span>
+
+        <span class="c1"># 计算KL散度的梯度</span>
+        <span class="n">pred_perturbed</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">xi</span> <span class="o">*</span> <span class="n">d</span><span class="p">)</span>
+        <span class="n">kl</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">kl_div</span><span class="p">(</span>
+            <span class="n">F</span><span class="o">.</span><span class="n">log_softmax</span><span class="p">(</span><span class="n">pred_perturbed</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+            <span class="n">F</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">pred_orig</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+            <span class="n">reduction</span><span class="o">=</span><span class="s1">&#39;batchmean&#39;</span>
+        <span class="p">)</span>
+        <span class="n">kl</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+        <span class="n">d</span> <span class="o">=</span> <span class="n">d</span><span class="o">.</span><span class="n">grad</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>  <span class="c1"># 梯度方向</span>
+
+    <span class="c1"># 最终扰动</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">d</span> <span class="o">/</span> <span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">p</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+    <span class="n">varepsilon</span> <span class="o">=</span> <span class="n">epsilon</span> <span class="o">*</span> <span class="n">d</span>
+
+    <span class="c1"># VAT损失</span>
+    <span class="n">pred_adv</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">varepsilon</span><span class="p">)</span>
+    <span class="n">vat_loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">kl_div</span><span class="p">(</span>
+        <span class="n">F</span><span class="o">.</span><span class="n">log_softmax</span><span class="p">(</span><span class="n">pred_adv</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+        <span class="n">F</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">pred_orig</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+        <span class="n">reduction</span><span class="o">=</span><span class="s1">&#39;batchmean&#39;</span>
+    <span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">vat_loss</span>
+</code></pre></div>
+
+<h4 id="67-vat">6.7 VAT的理论性质</h4>
+<p><strong>性质1（平滑性惩罚）</strong>：VAT鼓励模型在输入附近保持平滑：</p>
+<p>$$
+\|f(x + \varepsilon) - f(x)\| \leq C \quad \forall \|\varepsilon\| \leq \epsilon
+$$</p>
+<p><strong>性质2（Lipschitz约束）</strong>：VAT隐式地限制了模型的Lipschitz常数：</p>
+<p>$$
+\text{Lip}(f) := \sup_{x \neq x'} \frac{\|f(x) - f(x')\|}{\|x - x'\|} \leq C
+$$</p>
+<p><strong>性质3（流形假设）</strong>：VAT假设数据分布在低维流形上，沿流形方向平滑。</p>
+<p><strong>定理</strong>（VAT的泛化界）：</p>
+<p>假设数据分布$p(x)$满足$\epsilon$-流形假设，则VAT训练的模型泛化误差满足：</p>
+<p>$$
+\mathbb{E}_{(x,y)\sim p_{\text{test}}}[l(f(x), y)] \leq \mathbb{E}_{(x,y)\sim p_{\text{train}}}[l(f(x), y)] + O\left(\frac{\text{Lip}(f)^2 \epsilon^2}{\sqrt{n}}\right)
+$$</p>
+<p>其中$n$是训练样本数。</p>
+<hr />
+<h3 id="_21">第七部分：半监督学习框架</h3>
+<h4 id="71">7.1 半监督目标函数</h4>
+<p><strong>联合损失</strong>：</p>
+<p>$$
+L_{\text{total}} = \underbrace{L_{\text{sup}}}_{\text{监督损失}} + \alpha \underbrace{L_{\text{VAT}}}_{\text{虚拟对抗损失}} + \beta \underbrace{L_{\text{ent}}}_{\text{熵正则化}}
+$$</p>
+<p>其中：</p>
+<p>$$
+\begin{aligned}
+L_{\text{sup}} &= \mathbb{E}_{(x,y)\sim \mathcal{D}_L}[l(f(x), y)] \\
+L_{\text{VAT}} &= \mathbb{E}_{x \sim \mathcal{D}_U}[\max_{\|\varepsilon\| \leq \epsilon} l(f(x+\varepsilon), f(x))] \\
+L_{\text{ent}} &= -\mathbb{E}_{x \sim \mathcal{D}_U}[\sum_i f_i(x) \log f_i(x)]
+\end{aligned}
+$$</p>
+<p><strong>熵正则化的作用</strong>：
+- 鼓励模型在无标签数据上做出"自信"的预测（低熵）
+- 避免模型输出趋于均匀分布（高熵）
+- 与VAT配合：VAT保证平滑性，熵惩罚保证决策边界清晰</p>
+<h4 id="72">7.2 训练策略</h4>
+<p><strong>策略1：交替训练</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_epochs</span><span class="p">):</span>
+    <span class="c1"># 监督训练</span>
+    <span class="k">for</span> <span class="n">x_l</span><span class="p">,</span> <span class="n">y_l</span> <span class="ow">in</span> <span class="n">labeled_loader</span><span class="p">:</span>
+        <span class="n">loss_sup</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">cross_entropy</span><span class="p">(</span><span class="n">model</span><span class="p">(</span><span class="n">x_l</span><span class="p">),</span> <span class="n">y_l</span><span class="p">)</span>
+        <span class="n">loss_sup</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+
+    <span class="c1"># VAT训练</span>
+    <span class="k">for</span> <span class="n">x_u</span> <span class="ow">in</span> <span class="n">unlabeled_loader</span><span class="p">:</span>
+        <span class="n">loss_vat</span> <span class="o">=</span> <span class="n">virtual_adversarial_loss</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">x_u</span><span class="p">)</span>
+        <span class="n">loss_vat</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>策略2：联合训练</strong>（推荐）</p>
+<div class="codehilite"><pre><span></span><code><span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_epochs</span><span class="p">):</span>
+    <span class="n">labeled_iter</span> <span class="o">=</span> <span class="nb">iter</span><span class="p">(</span><span class="n">labeled_loader</span><span class="p">)</span>
+    <span class="n">unlabeled_iter</span> <span class="o">=</span> <span class="nb">iter</span><span class="p">(</span><span class="n">unlabeled_loader</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_batches</span><span class="p">):</span>
+        <span class="c1"># 有标签批次</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">x_l</span><span class="p">,</span> <span class="n">y_l</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">labeled_iter</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+            <span class="n">labeled_iter</span> <span class="o">=</span> <span class="nb">iter</span><span class="p">(</span><span class="n">labeled_loader</span><span class="p">)</span>
+            <span class="n">x_l</span><span class="p">,</span> <span class="n">y_l</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">labeled_iter</span><span class="p">)</span>
+
+        <span class="c1"># 无标签批次</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">x_u</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">unlabeled_iter</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">StopIteration</span><span class="p">:</span>
+            <span class="n">unlabeled_iter</span> <span class="o">=</span> <span class="nb">iter</span><span class="p">(</span><span class="n">unlabeled_loader</span><span class="p">)</span>
+            <span class="n">x_u</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">unlabeled_iter</span><span class="p">)</span>
+
+        <span class="c1"># 联合损失</span>
+        <span class="n">loss_sup</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">cross_entropy</span><span class="p">(</span><span class="n">model</span><span class="p">(</span><span class="n">x_l</span><span class="p">),</span> <span class="n">y_l</span><span class="p">)</span>
+        <span class="n">loss_vat</span> <span class="o">=</span> <span class="n">virtual_adversarial_loss</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">x_u</span><span class="p">)</span>
+        <span class="n">loss_ent</span> <span class="o">=</span> <span class="n">entropy_loss</span><span class="p">(</span><span class="n">model</span><span class="p">(</span><span class="n">x_u</span><span class="p">))</span>
+
+        <span class="n">loss_total</span> <span class="o">=</span> <span class="n">loss_sup</span> <span class="o">+</span> <span class="n">alpha</span> <span class="o">*</span> <span class="n">loss_vat</span> <span class="o">+</span> <span class="n">beta</span> <span class="o">*</span> <span class="n">loss_ent</span>
+        <span class="n">loss_total</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+        <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</code></pre></div>
+
+<h4 id="73">7.3 超参数选择指南</h4>
+<p><strong>扰动半径$\epsilon$</strong>：
+- 图像分类：0.01 ~ 0.1（归一化到$[0,1]$）
+- NLP（embedding）：0.5 ~ 5.0
+- 原则：使$f(x+\varepsilon)$与$f(x)$刚好可区分</p>
+<p><strong>权重$\alpha, \beta$</strong>：
+- 标签稀缺（&lt;1%）：$\alpha = 1.0, \beta = 0.1$
+- 中等标签（1%-10%）：$\alpha = 0.3, \beta = 0.01$
+- 充足标签（&gt;10%）：$\alpha = 0.1, \beta = 0.001$</p>
+<p><strong>幂迭代次数$r$</strong>：
+- $r = 0$：退化为高斯噪声
+- $r = 1$：通常足够，计算高效
+- $r &gt; 1$：理论更优，但计算代价高</p>
+<hr />
+<h3 id="_22">第八部分：实验验证与案例分析</h3>
+<h4 id="81-cifar-10">8.1 CIFAR-10半监督实验</h4>
+<p><strong>实验设置</strong>：
+- 数据集：CIFAR-10（50k训练，10k测试）
+- 标签数：250/500/1000/4000
+- 模型：WideResNet-28-2
+- Baseline：仅监督学习</p>
+<p><strong>结果</strong>（错误率%）：</p>
+<table>
+<thead>
+<tr>
+<th>标签数</th>
+<th>监督</th>
+<th>+VAT</th>
+<th>+VAT+熵</th>
+<th>改进</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>250</td>
+<td>46.43</td>
+<td>26.12</td>
+<td>24.63</td>
+<td>-21.8%</td>
+</tr>
+<tr>
+<td>500</td>
+<td>33.94</td>
+<td>18.68</td>
+<td>17.09</td>
+<td>-16.85%</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>23.57</td>
+<td>13.86</td>
+<td>12.36</td>
+<td>-11.21%</td>
+</tr>
+<tr>
+<td>4000</td>
+<td>13.13</td>
+<td>9.22</td>
+<td>8.11</td>
+<td>-5.02%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>观察</strong>：
+1. 标签越少，VAT改进越显著（最高-21.8%）
+2. 熵正则化进一步降低1-2%错误率
+3. 当标签充足时，改进趋于饱和</p>
+<h4 id="82-imdb">8.2 文本分类实验（IMDB）</h4>
+<p><strong>实验设置</strong>：
+- 数据集：IMDB情感分类（25k训练）
+- 标签数：200（仅0.8%）
+- 模型：BERT-base + VAT（在embedding层添加扰动）
+- Baseline：200标签监督学习</p>
+<p><strong>结果</strong>（准确率%）：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>验证集</th>
+<th>测试集</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>监督</td>
+<td>88.93</td>
+<td>89.34</td>
+</tr>
+<tr>
+<td>+VAT</td>
+<td>89.83</td>
+<td>90.37</td>
+</tr>
+<tr>
+<td>改进</td>
+<td>+0.90</td>
+<td>+1.03</td>
+</tr>
+</tbody>
+</table>
+<p><strong>实现细节</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 在embedding层添加VAT</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">vat_embedding</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">input_ids</span><span class="p">,</span> <span class="n">epsilon</span><span class="o">=</span><span class="mf">5.0</span><span class="p">):</span>
+    <span class="c1"># 获取embedding</span>
+    <span class="n">embeddings</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">get_input_embeddings</span><span class="p">()(</span><span class="n">input_ids</span><span class="p">)</span>  <span class="c1"># (batch, seq_len, dim)</span>
+
+    <span class="c1"># VAT扰动</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn_like</span><span class="p">(</span><span class="n">embeddings</span><span class="p">)</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">d</span> <span class="o">/</span> <span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">d</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># 归一化</span>
+
+    <span class="c1"># 计算梯度（幂迭代1次）</span>
+    <span class="n">d</span><span class="o">.</span><span class="n">requires_grad</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">embeddings_perturbed</span> <span class="o">=</span> <span class="n">embeddings</span> <span class="o">+</span> <span class="mf">10.0</span> <span class="o">*</span> <span class="n">d</span>
+    <span class="n">pred_perturbed</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs_embeds</span><span class="o">=</span><span class="n">embeddings_perturbed</span><span class="p">)</span>
+    <span class="n">pred_orig</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs_embeds</span><span class="o">=</span><span class="n">embeddings</span><span class="o">.</span><span class="n">detach</span><span class="p">())</span>
+
+    <span class="n">kl</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">kl_div</span><span class="p">(</span>
+        <span class="n">F</span><span class="o">.</span><span class="n">log_softmax</span><span class="p">(</span><span class="n">pred_perturbed</span><span class="o">.</span><span class="n">logits</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">),</span>
+        <span class="n">F</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">pred_orig</span><span class="o">.</span><span class="n">logits</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">),</span>
+        <span class="n">reduction</span><span class="o">=</span><span class="s1">&#39;batchmean&#39;</span>
+    <span class="p">)</span>
+    <span class="n">kl</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+
+    <span class="c1"># 最终扰动</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">epsilon</span> <span class="o">*</span> <span class="n">d</span><span class="o">.</span><span class="n">grad</span> <span class="o">/</span> <span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">d</span><span class="o">.</span><span class="n">grad</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">,</span> <span class="n">keepdim</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">model</span><span class="p">(</span><span class="n">inputs_embeds</span><span class="o">=</span><span class="n">embeddings</span> <span class="o">+</span> <span class="n">d</span><span class="p">)</span>
+</code></pre></div>
+
+<h4 id="83-chestx-ray14">8.3 医疗图像分类（ChestX-ray14）</h4>
+<p><strong>实验设置</strong>：
+- 任务：14种胸部疾病多标签分类
+- 标签数：1000标注（总数112k）
+- 模型：ResNet-50
+- 评估指标：AUC（平均）</p>
+<p><strong>结果</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>AUC</th>
+<th>改进</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>监督</td>
+<td>0.723</td>
+<td>-</td>
+</tr>
+<tr>
+<td>+数据增强</td>
+<td>0.741</td>
+<td>+0.018</td>
+</tr>
+<tr>
+<td>+VAT</td>
+<td>0.768</td>
+<td>+0.045</td>
+</tr>
+<tr>
+<td>+VAT+熵</td>
+<td>0.779</td>
+<td>+0.056</td>
+</tr>
+</tbody>
+</table>
+<p><strong>关键洞察</strong>：
+- 医疗图像领域标注昂贵，VAT效果显著
+- VAT与传统数据增强互补（联合使用更佳）
+- 多标签设置下，熵正则化需修改为每类独立计算</p>
+<hr />
+<h3 id="_23">第九部分：理论扩展与前沿研究</h3>
+<h4 id="91-vat">9.1 VAT的信息论解释</h4>
+<p><strong>互信息视角</strong>：</p>
+<p>VAT最小化输入扰动与输出变化的互信息：</p>
+<p>$$
+I(X+\varepsilon; f(X)) \leq I(X; f(X)) + \text{VAT regularization}
+$$</p>
+<p><strong>证明思路</strong>：</p>
+<p>利用KL散度的数据处理不等式（Data Processing Inequality）：</p>
+<p>$$
+I(X; Y) \geq I(X+\varepsilon; Y)
+$$</p>
+<p>VAT通过惩罚$D_{KL}(f(x+\varepsilon) | f(x))$，限制了扰动引入的信息损失。</p>
+<h4 id="92-manifold-tangent-classifier">9.2 与Manifold Tangent Classifier的联系</h4>
+<p><strong>切空间正则化</strong>：</p>
+<p>假设数据分布在低维流形$\mathcal{M}$上，VAT的对抗方向$\varepsilon^*$近似于流形的切空间方向。</p>
+<p><strong>定理</strong>（Manifold Tangent Property）：</p>
+<p>设$\mathcal{M}$是光滑流形，$T_x \mathcal{M}$是在点$x$的切空间。则VAT的对抗扰动满足：</p>
+<p>$$
+\varepsilon^* \approx \arg\max_{v \in T_x \mathcal{M}, \|v\|=1} v^{\top} \mathcal{H}_x v
+$$</p>
+<p>这意味着VAT找到的是"沿流形方向上模型最敏感的方向"。</p>
+<h4 id="93-consistency-regularization">9.3 Consistency Regularization统一框架</h4>
+<p><strong>一致性正则化家族</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>扰动类型</th>
+<th>损失函数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VAT</td>
+<td>对抗扰动（二阶优化）</td>
+<td>$D_{KL}(f(x+\varepsilon^*) | f(x))$</td>
+</tr>
+<tr>
+<td>$\Pi$-Model</td>
+<td>随机Dropout</td>
+<td>$|f(x; \theta_1) - f(x; \theta_2)|^2$</td>
+</tr>
+<tr>
+<td>Temporal Ensembling</td>
+<td>EMA预测</td>
+<td>$|f(x) - \tilde{f}(x)|^2$</td>
+</tr>
+<tr>
+<td>Mean Teacher</td>
+<td>教师-学生网络</td>
+<td>$|f_{\text{student}}(x) - f_{\text{teacher}}(x)|^2$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>统一形式</strong>：</p>
+<p>$$
+L_{\text{consistency}} = \mathbb{E}_{x, \mathcal{T}_1, \mathcal{T}_2}[d(f(\mathcal{T}_1(x)), f(\mathcal{T}_2(x)))]
+$$</p>
+<p>其中$\mathcal{T}$是变换（扰动、Dropout、参数扰动等），$d$是距离度量。</p>
+<h4 id="94-sharpness-aware-minimization-sam">9.4 Sharpness-Aware Minimization (SAM)</h4>
+<p><strong>SAM目标</strong>：</p>
+<p>$$
+\min_{\theta} \max_{\|\varepsilon\| \leq \rho} L(\theta + \varepsilon)
+$$</p>
+<p>这是在参数空间（而非输入空间）做对抗训练。</p>
+<p><strong>与VAT的联系</strong>：</p>
+<ul>
+<li>VAT：输入空间平滑性 → 泛化</li>
+<li>SAM：参数空间平滑性（平坦最小值）→ 泛化</li>
+</ul>
+<p><strong>证明平坦性的泛化优势</strong>（PAC-Bayes界）：</p>
+<p>$$
+\mathbb{E}_{p_{\text{test}}}[l] \leq \mathbb{E}_{p_{\text{train}}}[l] + O\left(\frac{\text{tr}(\mathcal{H}_{\theta})}{\sqrt{n}}\right)
+$$</p>
+<p>其中$\mathcal{H}<em _theta="\theta">{\theta} = \nabla</em>^2 L(\theta)$是参数空间的Hessian。</p>
+<hr />
+<h3 id="_24">第十部分：实践建议与调试技巧</h3>
+<h4 id="101">10.1 常见问题与解决方案</h4>
+<p><strong>问题1：VAT损失NaN</strong></p>
+<p><strong>原因</strong>：
+- KL散度的log-softmax项数值不稳定
+- 扰动$\varepsilon$过大导致输出分布崩塌</p>
+<p><strong>解决</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 使用稳定的KL散度计算</span>
+<span class="n">kl</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">kl_div</span><span class="p">(</span>
+    <span class="n">F</span><span class="o">.</span><span class="n">log_softmax</span><span class="p">(</span><span class="n">pred_perturbed</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+    <span class="n">F</span><span class="o">.</span><span class="n">softmax</span><span class="p">(</span><span class="n">pred_orig</span><span class="o">.</span><span class="n">detach</span><span class="p">(),</span> <span class="n">dim</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>  <span class="c1"># detach避免梯度流向pred_orig</span>
+    <span class="n">reduction</span><span class="o">=</span><span class="s1">&#39;batchmean&#39;</span>
+<span class="p">)</span>
+
+<span class="c1"># 限制epsilon</span>
+<span class="n">epsilon</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">epsilon</span><span class="p">,</span> <span class="mf">0.1</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">x</span><span class="p">))</span>
+</code></pre></div>
+
+<p><strong>问题2：VAT不收敛</strong></p>
+<p><strong>原因</strong>：
+- $\alpha$（VAT权重）过大，监督信号淹没
+- 幂迭代次数不足，对抗方向不准确</p>
+<p><strong>解决</strong>：
+- 逐步增大$\alpha$：从0.01开始，每5个epoch翻倍至目标值
+- 增加幂迭代次数到$r=2$或$r=3$</p>
+<p><strong>问题3：计算速度慢</strong></p>
+<p><strong>原因</strong>：
+- 每步需要额外2-3次前向传播
+- 梯度计算开销大</p>
+<p><strong>优化</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 使用混合精度训练</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">torch.cuda.amp</span><span class="w"> </span><span class="kn">import</span> <span class="n">autocast</span><span class="p">,</span> <span class="n">GradScaler</span>
+
+<span class="n">scaler</span> <span class="o">=</span> <span class="n">GradScaler</span><span class="p">()</span>
+
+<span class="k">with</span> <span class="n">autocast</span><span class="p">():</span>
+    <span class="n">loss_sup</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">cross_entropy</span><span class="p">(</span><span class="n">model</span><span class="p">(</span><span class="n">x_l</span><span class="p">),</span> <span class="n">y_l</span><span class="p">)</span>
+    <span class="n">loss_vat</span> <span class="o">=</span> <span class="n">virtual_adversarial_loss</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">x_u</span><span class="p">)</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">loss_sup</span> <span class="o">+</span> <span class="n">alpha</span> <span class="o">*</span> <span class="n">loss_vat</span>
+
+<span class="n">scaler</span><span class="o">.</span><span class="n">scale</span><span class="p">(</span><span class="n">loss</span><span class="p">)</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
+<span class="n">scaler</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+<span class="n">scaler</span><span class="o">.</span><span class="n">update</span><span class="p">()</span>
+</code></pre></div>
+
+<h4 id="102">10.2 不同领域的最佳实践</h4>
+<p><strong>计算机视觉</strong>：
+- $\epsilon \in [0.01, 0.1]$（像素归一化到$[0,1]$）
+- 使用$\ell_2$或$\ell_{\infty}$范数
+- 与数据增强（随机裁剪、翻转）联合使用</p>
+<p><strong>自然语言处理</strong>：
+- $\epsilon \in [0.5, 5.0]$（embedding层）
+- 仅在embedding层添加扰动（避免破坏token离散性）
+- 配合标签平滑（label smoothing）</p>
+<p><strong>图神经网络</strong>：
+- 在节点特征和邻接矩阵上同时添加扰动
+- $\epsilon_{\text{feat}} \in [0.01, 0.1]$，$\epsilon_{\text{adj}} \in [0.001, 0.01]$（邻接矩阵更敏感）
+- 使用谱归一化（Spectral Normalization）稳定训练</p>
+<h4 id="103">10.3 可视化分析</h4>
+<p><strong>梯度范数监控</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
+
+<span class="n">grad_norms</span> <span class="o">=</span> <span class="p">[]</span>
+
+<span class="k">for</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span> <span class="ow">in</span> <span class="n">dataloader</span><span class="p">:</span>
+    <span class="n">x</span><span class="o">.</span><span class="n">requires_grad</span> <span class="o">=</span> <span class="kc">True</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">cross_entropy</span><span class="p">(</span><span class="n">model</span><span class="p">(</span><span class="n">x</span><span class="p">),</span> <span class="n">y</span><span class="p">)</span>
+    <span class="n">grad</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">autograd</span><span class="o">.</span><span class="n">grad</span><span class="p">(</span><span class="n">loss</span><span class="p">,</span> <span class="n">x</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">grad_norms</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">grad</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span><span class="o">.</span><span class="n">item</span><span class="p">())</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">hist</span><span class="p">(</span><span class="n">grad_norms</span><span class="p">,</span> <span class="n">bins</span><span class="o">=</span><span class="mi">50</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Gradient Norm&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Frequency&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;Distribution of Input Gradient Norms&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>对抗方向可视化</strong>（图像）：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 原始图像</span>
+<span class="n">img</span> <span class="o">=</span> <span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+<span class="c1"># VAT扰动</span>
+<span class="n">vat_eps</span> <span class="o">=</span> <span class="n">virtual_adversarial_perturbation</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">1</span><span class="p">])</span>
+<span class="n">vat_eps_vis</span> <span class="o">=</span> <span class="n">vat_eps</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">cpu</span><span class="p">()</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span><span class="o">.</span><span class="n">transpose</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+<span class="c1"># 可视化</span>
+<span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">12</span><span class="p">,</span> <span class="mi">4</span><span class="p">))</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">img</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Original&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">vat_eps_vis</span> <span class="o">*</span> <span class="mi">100</span><span class="p">)</span>  <span class="c1"># 放大扰动以便观察</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;VAT Perturbation (×100)&#39;</span><span class="p">)</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">img</span> <span class="o">+</span> <span class="n">vat_eps_vis</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+<span class="n">axes</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Adversarial Example&#39;</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</code></pre></div>
+
+<hr />
+<h3 id="_25">第十一部分：哲学思考与未来方向</h3>
+<h4 id="111">11.1 泛化性的本质</h4>
+<p><strong>Occam's Razor原则</strong>：在解释数据的所有模型中，选择"最简单"的。</p>
+<p>VAT的三种"简单性"诠释：
+1. <strong>输入简单性</strong>：对输入扰动不敏感（平滑性）
+2. <strong>参数简单性</strong>：Hessian迹小（平坦性）
+3. <strong>决策边界简单性</strong>：低维流形上决策边界平滑</p>
+<p><strong>信息瓶颈理论</strong>（Tishby）：</p>
+<p>好的表示满足：
+$$
+\min I(X; Z) \quad \text{s.t.} \quad I(Y; Z) \geq I_{\min}
+$$</p>
+<p>VAT通过限制$I(X+\varepsilon; f(X))$，隐式地压缩了表示$Z = f(X)$。</p>
+<h4 id="112">11.2 未来研究方向</h4>
+<p><strong>方向1：自适应VAT</strong>
+- 问题：固定$\epsilon$对所有样本不够灵活
+- 方案：学习样本依赖的扰动半径$\epsilon(x)$
+- 挑战：如何避免$\epsilon(x) \to 0$（trivial solution）</p>
+<p><strong>方向2：高阶VAT</strong>
+- 问题：二阶展开可能不足（高度非线性模型）
+- 方案：考虑三阶或四阶Taylor展开
+- 挑战：计算复杂度指数增长</p>
+<p><strong>方向3：多模态VAT</strong>
+- 问题：图像+文本的联合扰动
+- 方案：在不同模态的共享表示空间中添加扰动
+- 应用：VQA、图像描述生成</p>
+<p><strong>方向4：因果VAT</strong>
+- 问题：VAT关注相关性，可能学到虚假相关
+- 方案：结合因果推断，仅在因果特征上添加扰动
+- 理论：反事实推理（Counterfactual Reasoning）</p>
+<h4 id="113">11.3 与其他领域的交叉</h4>
+<p><strong>鲁棒优化</strong>：</p>
+<p>$$
+\min_{\theta} \max_{\varepsilon \in \mathcal{U}} \mathbb{E}[l(f_{\theta}(x+\varepsilon), y)]
+$$</p>
+<p>这是分布鲁棒优化（DRO）的特例，$\mathcal{U}$是$\epsilon$-球内的分布集合。</p>
+<p><strong>最优传输</strong>：</p>
+<p>VAT可视为在Wasserstein距离约束下的最小最大优化：</p>
+<p>$$
+\min_{\theta} \max_{q: W_2(p, q) \leq \epsilon} \mathbb{E}_{x \sim q}[l(f_{\theta}(x), y)]
+$$</p>
+<p>其中$W_2$是2-Wasserstein距离。</p>
+<p><strong>神经微分方程（Neural ODE）</strong>：</p>
+<p>连续时间视角下，VAT等价于：</p>
+<p>$$
+\frac{dx}{dt} = \arg\max_{\|v\| \leq 1} v^{\top} \nabla_x l(f(x), y)
+$$</p>
+<p>这是一个"最陡上升"的ODE流。</p>
+<hr />
+<h3 id="_26">总结</h3>
+<p>本节对泛化性理论进行了全面的数学推导：</p>
+<ol>
+<li><strong>噪声正则化</strong>：从随机扰动到拉普拉斯正则化（二阶导数惩罚）</li>
+<li><strong>梯度惩罚</strong>：通过泰勒展开和高斯积分，推导出梯度范数惩罚</li>
+<li><strong>对抗训练</strong>：FGM/PGD算法及其与梯度惩罚的等价性</li>
+<li><strong>虚拟对抗训练</strong>：二阶优化、幂迭代法、Hessian-向量积计算</li>
+<li><strong>半监督学习</strong>：VAT在无标签数据上的应用</li>
+<li><strong>实验与实践</strong>：CIFAR-10/IMDB案例、调试技巧、可视化分析</li>
+<li><strong>理论扩展</strong>：信息论、流形假设、一致性正则化、SAM</li>
+<li><strong>未来方向</strong>：自适应VAT、高阶VAT、多模态、因果推断</li>
+</ol>
+<p><strong>核心思想</strong>：
+- 泛化性 = 平滑性 + 决策边界清晰度
+- VAT找到"最具挑战性"的平滑性测试
+- 半监督学习通过无标签数据强化平滑性假设</p>
+<p><strong>实践价值</strong>：
+- 标签稀缺场景下显著提升性能（10%-20%）
+- 计算开销可控（1-2次额外前向传播）
+- 与现有方法（数据增强、Dropout）互补</p>
+        </div>
+    </div>
+</body>
+</html>

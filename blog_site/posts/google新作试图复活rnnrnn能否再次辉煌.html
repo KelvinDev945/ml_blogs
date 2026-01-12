@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google新作试图“复活”RNN：RNN能否再次辉煌？</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>Google新作试图“复活”RNN：RNN能否再次辉煌？</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 40.0 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9554">https://spaces.ac.cn/archives/9554</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>当前，像ChatGPT之类的LLM可谓是“风靡全球”。有读者留意到，几乎所有LLM都还是用最初的<a href="/archives/4765">Multi-Head Scaled-Dot Attention</a>，近年来大量的Efficient工作如<a href="/archives/7546">线性Attention</a>、<a href="/archives/8934">FLASH</a>等均未被采用。是它们版本效果太差，还是根本没有必要考虑效率？其实答案笔者在<a href="/archives/8610">《线性Transformer应该不是你要等的那个模型》</a>已经分析过了，只有序列长度明显超过hidden size时，标准Attention才呈现出二次复杂度，在此之前它还是接近线性的，它的速度比很多Efficient改进都快，而像GPT3用到了上万的hidden size，这意味着只要你的LLM不是面向数万长度的文本生成，那么用Efficient改进是没有必要的，很多时候速度没提上去，效果还降低了。</p>
+<p>那么，真有数万甚至数十万长度的序列处理需求时，我们又该用什么模型呢？近日，Google的一篇论文<a href="https://papers.cool/arxiv/2303.06349">《Resurrecting Recurrent Neural Networks for Long Sequences》</a>重新优化了RNN模型，特别指出了RNN在处理超长序列场景下的优势。那么，RNN能否再次辉煌？</p>
+<h2 id="_1">线性化</h2>
+<p>文章提出的RNN叫做LRU（Linear Recurrent Unit，线性循环单元），它是既可以并行又可以串行的极简线性RNN，训练和推断都具备高效的优势。LRU跟<a href="https://papers.cool/arxiv/2111.00396">SSM（Structured State Model）</a>、<a href="https://github.com/BlinkDL/RWKV-LM">RWKV</a>等工作有颇多相似之处。事实上，LRU的出发点就是发现SSM在LRA上表现很好，于是想办法将原生的RNN也能在LRA表现良好，其结果就是LRU。遗憾的是，原论文只在LRA（Long Range Arena，一个测试远程依赖能力的榜单）上做了实验，本文最后则会补充一些自己在语言模型上的实验结果。</p>
+<p>原论文的介绍从SSM出发，并且花了不少篇幅描写LRU与SSM的关联。而在本文中，我们略过这些关联的描写，直接将LRU作为一个独立的RNN模型进行推演介绍。我们知道，最简单的RNN可以写为<br />
+\begin{equation}x_t = f(Ax_{t-1} + u_t)\end{equation}<br />
+其中$x_t,u_t\in\mathbb{R}^d,A\in\mathbb{R}^{d\times d}$，$f$是激活函数。一般情况下$u_t$之前、$x_t$之后都还有一个投影矩阵，但这里我们重点关注循环本身，因此就不把它显式写出来了。</p>
+<p>传统的认知中，激活函数是非线性的，常见的选择有$\text{sigmoid},\tanh,\text{relu}$等，特别是有工作表明带有$\text{sigmoid}$或$\tanh$激活函数的单层RNN是图灵完备的，这就让人坚信非线性激活函数的必要性。然而，在深度学习中，实验才是检验真理的唯一标准，作者发现，如果将Transformer的Self Attention替换为RNN的话，线性RNN效果才是最好的：  </p>
+<p><a href="/usr/uploads/2023/03/1715157784.png" title="点击查看原图"><img alt="在LRA的各个任务上，线性RNN反而是最好的" src="/usr/uploads/2023/03/1715157784.png" /></a></p>
+<p>在LRA的各个任务上，线性RNN反而是最好的</p>
+<p>这是一个让人意外的好消息。“意外”是因为可能会颠覆某些读者关于模型对非线性需求的认知；当然有些读者可能也不意外，因为<a href="https://papers.cool/arxiv/2111.11418">MetaFormer</a>等工作也表明过，得益于FFN层的强大，Self Attention等负责混合token的层的非线性可以很弱，甚至Pooling层都行。至于“好消息”，则是因为线性RNN有并行的实现算法，计算速度会大大快于非线性RNN。</p>
+<p>于是，作者围绕线性RNN，进行了一系列探讨。</p>
+<h2 id="_2">对角化</h2>
+<p>去掉激活函数，RNN就再次简化为<br />
+\begin{equation}x_t = Ax_{t-1} + u_t\label{eq:lr}\end{equation}<br />
+反复迭代得到<br />
+\begin{equation}x_0 = u_0\\\ x_1 = Au_0 + u_1\\\ x_2 = A^2 u_0 + Au_1 + u_2\\\ \vdots \\\ x_t = \sum_{k=0}^t A^{t-k}u_k\label{eq:lr-e}\end{equation}<br />
+可以看到，主要的计算量集中在矩阵$A$的幂运算上。这时候不难联想到矩阵对角化，它是计算矩阵幂的高效方法，然而一般的矩阵在实数域不一定能对角化。这时候我们该怎么办？格局打开点，既然实数域做不了，我们到复数域去！几乎所有矩阵都可以在复数域对角化，这意味着$A$总能写成<br />
+\begin{equation}A = P\Lambda P^{-1}\quad\Rightarrow\quad A^n = P\Lambda^n P^{-1}\end{equation}<br />
+其中$P,\Lambda\in\mathbb{C}^{d\times d}$，$\Lambda$是特征值组成的对角阵。代入式$\eqref{eq:lr-e}$我们得到：<br />
+\begin{equation}x_t = \sum_{k=0}^t P\Lambda^{t-k}P^{-1}u_k = P\left(\sum_{k=0}^t \Lambda^{t-k}(P^{-1}u_k)\right)\end{equation}<br />
+刚才我们说了，一般情况下$u_t$之前、$x_t$之后都还有一个投影矩阵，只要我们约定这两个投影矩阵都是复数矩阵，那么理论上$P$、$P^{-1}$都可以合并到它们的投影运算中，这就意味着，如果一切运算都在复数域中考虑，那么将线性RNN中的一般矩阵$A$换成对角阵$\Lambda$，模型能力不会有任何损失！所以我们只需考虑如下的极简RNN<br />
+\begin{equation}x_t = \Lambda x_{t-1} + u_t\quad\Rightarrow\quad x_t = \sum_{k=0}^t \Lambda^{t-k}u_k\label{eq:lr-x}\end{equation}</p>
+<h2 id="_3">参数化</h2>
+<p>对角矩阵的好处是一切运算都是element-wise的，所以每个维度的运算可以充分并行，同时也意味着只要分析一个维度就相当于分析了所有维度，模型的分析只需要在一维空间进行。不妨设$\Lambda=\text{diag}(\lambda_1,\lambda_2,\cdots,\lambda_d)$，$\lambda$代表$\lambda_1,\lambda_2,\cdots,\lambda_d$中的一个，同时在不至于混淆的情况下，$x_t$、$u_t$同样也用来表示$\lambda$在它们之中对应的分量，于是$\eqref{eq:lr-x}$简化为标量运算：<br />
+\begin{equation}x_t = \lambda x_{t-1} + u_t\quad\Rightarrow\quad x_t = \sum_{k=0}^t \lambda^{t-k}u_k\label{eq:lr-xx}\end{equation}<br />
+注意别忘了，$\lambda$是复数，所以我们可以设$\lambda = re^{i\theta}$，其中$r \geq 0, \theta\in[0, 2\pi)$都是实数：<br />
+\begin{equation}x_t = \sum_{k=0}^t r^{t-k}e^{i(t-k)\theta}u_k\label{eq:lr-e-r-theta}\end{equation}<br />
+求和过程中$t-k$都是非负数，因此$r \leq 1$，要不然历史项的权重将会逐渐趋于无穷大，这跟直觉不符（直觉上对历史信息的依赖应该是逐步减弱的），也会梯度爆炸的风险；另一方面，如果$r \ll 1$，那么就会有梯度消失的风险。这就对$r$提出了两个要求：1、保证$r\in[0,1]$；2、初始化阶段$r$应该尽量接近1。</p>
+<p>为此，我们先设$r = e^{-\nu}$，那么$r\in[0,1]$就要求$\nu\geq 0$，于是我们再设$\nu=e^{\nu^{\log}}$，这时候就有$\nu^{\log}\in\mathbb{R}$而转化为无约束优化了。这里的$\nu^{\log}$是另一个变量的记号，并非代表什么特殊的运算。而既然$\nu$被参数化为了$e^{\nu^{\log}}$，那么为了保持一致性，我们也将$\theta$参数化为$e^{\theta^{\log}}$。</p>
+<p>可能读者要问，约束$r\in[0,1]$的方法有很多呀，为什么要搞这么复杂？直接加sigmoid不好吗？首先，将$r$参数化为$e^{-\nu}$后，幂运算可以跟$\theta$的结合在一起，即$r^k e^{ik\theta}=e^{k(-\nu+i\theta)}$，这样不管从实现角度还是计算角度都比较好；接着，因为$\nu\geq 0$，能将任何实数能映射为非负数的最简单的光滑函数，可能就是指数函数的，于是容易想到$\nu=e^{\nu^{\log}}$。SSM中采用的$\text{relu}$激活，即直接$r=e^{-\max(\nu,0)}$，但这会有个饱和区，可能不利于优化。</p>
+<h2 id="_4">初始化</h2>
+<p>接下来考虑初始化问题。我们回到原始形式$\eqref{eq:lr}$，一个$d\times d$的实矩阵，标准的Glorot初始化是均值为0、方差为$1/d$的正态分布或者均匀分布（参考<a href="/archives/7180">《从几何视角来理解模型参数的初始化策略》</a>）。可以从理论或者实验上表明，这样的初始化矩阵，其特征值大致上均匀分布在复平面上的单位圆内：  </p>
+<p><a href="/usr/uploads/2023/03/2418679127.png" title="点击查看原图"><img alt="Glorot初始化的矩阵的特征值均匀分布在单位圆盘内" src="/usr/uploads/2023/03/2418679127.png" /></a></p>
+<p>Glorot初始化的矩阵的特征值均匀分布在单位圆盘内</p>
+<p>由此，我们可以想到$\Lambda$的标准初始化方式是在复平面上的单位圆内均匀取点。而从笛卡尔坐标换到极坐标，我们有$dxdy=rdrd\theta=\frac{1}{2}d(r^2)d\theta$，这就告诉我们，要实现单位圆内均匀取点，只需要$\theta\sim U[0,2\pi]$以及$r^2\sim U[0,1]$。</p>
+<p><a href="/usr/uploads/2023/03/4209029449.png" title="点击查看原图"><img alt="改为圆环初始化，大部分任务的效果更好" src="/usr/uploads/2023/03/4209029449.png" /></a></p>
+<p>改为圆环初始化，大部分任务的效果更好</p>
+<p>然而，刚才我们说为了尽可能地预防梯度消失，我们至少要在初始化阶段让$r$尽量接近于1，所以改进方式是改在$r\in[r_{\min},r_{\max}]$的圆环内均匀采样，这样采样方式就变为$\theta\sim U[0,2\pi]$以及$r^2\sim U[r_{\min}^2,r_{\max}^2]$。原论文的实验结果显示，$r_{\min}=0.9,r_{\max}=0.999$对多数实验都有较好效果。</p>
+<p>这里有一个问题，就是$r$初始化接近1，而初始阶段$u_t$也比较接近独立同分布的，那么式$\eqref{eq:lr-e-r-theta}$就接近若干个模长不变的求和（而不是平均），这就可能有爆炸风险。为了分析这一点，我们先写出<br />
+\begin{equation}|x_t|^2 = x_t x_t^<em> = \sum_{k=0}^t\sum_{l=0}^t r^{(t-k)+(t-l)}e^{i[(t-k)-(t-l)]\theta}u_k u_l^</em>\end{equation}<br />
+这里的$<em>$是复数的共轭运算，$|\cdot|$是复数的模。接着两端求期望，这里我们假设$u_k,u_l$独立地服从同一均值为0的分布，那么当$k\neq l$时，$\mathbb{E}[u_k u_l^</em>]=\mathbb{E}[u_k]\mathbb{E}[u_l^<em>]=0$，于是只剩下$k=l$的项非零，于是：<br />
+\begin{equation}\mathbb{E}[|x_t|^2] = \sum_{k=0}^t r^{2(t-k)}\mathbb{E}[u_k u_k^</em>] = \mathbb{E}[|u_k|^2]\sum_{k=0}^t r^{2(t-k)} = \frac{(1 - r^{2(t+1)})\mathbb{E}[|u_k|^2]}{1-r^2}\end{equation}<br />
+由于$r \in (0, 1)$，当$t$足够大时$r^{2(t+1)}\to 0$。这也就是说，当$t$比较大时，平均意义下$x_t$的模长与$u_k$的模长之比为$\frac{1}{\sqrt{1-r^2}}$，当$r$很接近1时，这个比例很大，也就是序列经过RNN后会膨胀得比较大，这不利于训练的稳定性。于是作者想了个简单的技巧，多引入一个element-wise的参数$\gamma$，初始化为$\sqrt{1-r^2}$，然后将式$\eqref{eq:lr-xx}$改为：<br />
+\begin{equation}x_t = \lambda x_{t-1} + \gamma u_t\quad\Rightarrow\quad x_t = \gamma\sum_{k=0}^t \lambda^{t-k} u_k\label{eq:lr-xxx}\end{equation}<br />
+这样一来，至少在初始阶段模型的输出就稳定了，剩下就让模型自己学就好了。综合以上结果，就是原论文所提的LRU（Linear Recurrent Unit）模型了，如下图：  </p>
+<p><a href="/usr/uploads/2023/03/2942152814.png" title="点击查看原图"><img alt="LRU模型示意图" src="/usr/uploads/2023/03/2942152814.png" /></a></p>
+<p>LRU模型示意图</p>
+<h2 id="_5">相关化</h2>
+<p>这里介绍LRU的两个相关变体。</p>
+<h3 id="slru">SLRU</h3>
+<p>LRU的出发点是对一般的线性RNN模型$\eqref{eq:lr}$进行简化，而为了在理论上达到一般矩阵的效果，就不得不引入复的投影矩阵，以及复的特征值对角阵$\Lambda$。如果我们不考虑达到一般矩阵的效果，纯粹关心$r$所带来的衰减作用，那么我们可以进一步简化LRU模型——假设投影矩阵和特征值对角阵都是实数——这个简化版我们称为SLRU（Simpler Linear Recurrent Unit）。</p>
+<p>原论文并没有研究SLRU，但笔者感觉它更符合我们的直觉（主要是相位$\theta$的变化不容易从直觉上理解），所以在后面也补充了SLRU的实验。</p>
+<h3 id="rwkv">RWKV</h3>
+<p>谈到RNN，可能有读者听说过最近小有名气的<a href="https://github.com/BlinkDL/RWKV-LM">RWKV</a>，它可以看作SLRU/<a href="https://papers.cool/arxiv/2209.07484">Hydra Attention</a>和GLU（Gated Linear Unit）的结合。RWKV的RNN部分为：<br />
+\begin{equation}x_t = \sigma(r_t) \times\frac{y_t + (\gamma \lambda - 1)e^{k_t}v_t}{z_t + (\gamma \lambda - 1)e^{k_t}},\quad\begin{aligned}y_t =&amp;\, \lambda y_{t-1} + e^{k_t}v_t \\\ z_t =&amp;\, \lambda z_{t-1} + e^{k_t}\end{aligned}\end{equation}<br />
+可以看到，递归部分就是两个SLRU，RWKV的特点是两个SLRU的结果相除，起到归一化的效果，所以就不需要LRU中的gamma技巧了。另外也许是为了跟Self Attention对齐参数量，或者是为了进一步提升效果，在归一化之后RWKV再添加了一个门$\sigma(r_t)$与之相乘。虽然作者在LM任务上已经验证过了RWKV的有效性，但它与常见模型的对照实验似乎没有出现过，本文也将补充这部分。</p>
+<p><strong>注：这里的RWKV特指负责token混合的RNN模块，并非指作者给出的完整模型（即没有用作者的Channel-Mix层、Time Shift等内容）。</strong></p>
+<h2 id="_6">代码化</h2>
+<p>这一节我们来讨论LRU的实现问题。原论文附录中给出了Jax版本的LRU参考代码，这里笔者也给出Keras版本的：</p>
+<blockquote>
+<p><strong>Github：<a href="https://github.com/bojone/rnn">https://github.com/bojone/rnn</a></strong></p>
+</blockquote>
+<p>实现LRU有两个技术难点：<strong>复数化</strong> 和<strong>并行化</strong> 。</p>
+<h3 id="_7">复数化</h3>
+<p>LRU的投影矩阵和特征值都是复的，作者给出的Jax版代码是直接使用复数矩阵的，换到Keras这意味着我们无法用回已有的<code>Dense</code>层，这未免有些遗憾。事实上，根据$(B+iC)u=Bu + iCu$我们可以看出，复数投影矩阵只不过是将投影维度增加一倍而已，所以投影部分我们就不用复数矩阵了，直接用两倍units的<code>Dense</code>层就行。</p>
+<p>接着是$e^{i(t-k)}u_k$部分，这既可以直接展开为纯实数运算，也可以直接按照公式用复数运算。如果展开为实数运算的话，其形式跟<a href="/archives/8265">RoPE</a>是一样的，所以笔者刚开始看到LRU时就很激动，以为这不就是“RoPE is all you need”哈。不过笔者对比过速度，发现直接按照公式实现的复数版速度会稍快一些，所以建议还是用复数版的。</p>
+<p>最后，就是复数输出投影回实矩阵问题，根据$\Re[(B+iC)(x+iy)]=Bx-Cy=[B,-C][x,y]^{\top}$，这意味着我们只需要将实部和虚部拼接起来，然后接一个<code>Dense</code>层就能实现了。</p>
+<h3 id="_8">并行化</h3>
+<p>如果直接按照递归公式实现串行版的RNN，那么训练速度将会非常慢（预测都是串行的自回归，所以预测没问题）。前面说了，线性RNN的一个重要特性是它本身有并行算法，可以大大加快训练速度。</p>
+<p>事实上，我们可以将$\eqref{eq:lr-xx}$改写为<br />
+\begin{equation}x_t = \lambda^t \sum_{k=0}^t \lambda^{-k} u_k\end{equation}<br />
+这其实已经告诉了我们一种快速的算法：每个$u_k$都乘以$\lambda^{-k}$，这是element-wise的，可以并行；然后$\sum\limits_{k=0}^t$这一步实际上就是<code>cumsum</code>运算，各个框架自带的实现都很快；最后就是<code>cumsum</code>的结果都乘以各自的$\lambda^t$，这一步也是element-wise的，可以并行。然而，因为$|\lambda| &lt; 1$，所以当$k$很大时$\lambda^{-k}$几乎必定会爆炸，别说fp16精度了，在长序列时FP32甚至FP64都不一定能兜住。因此，这个看上去很简明的方案，理论上没有问题，实际上却没什么价值。</p>
+<p>并行加速的关键，是留意到分解（$T &gt; t$）<br />
+\begin{equation}\begin{aligned}<br />
+x_T =&amp;\, \sum_{k=0}^T \lambda^{T-k} u_k \\\<br />
+=&amp;\, \sum_{k=0}^t \lambda^{T-k} u_k + \sum_{k=t+1}^T \lambda^{T-k} u_k \\\<br />
+=&amp;\, \lambda^{T-t}\sum_{k=0}^t \lambda^{t-k} u_k + \sum_{k=t+1}^T \lambda^{T-k} u_k \\\<br />
+\end{aligned}\end{equation}<br />
+这个分解告诉我们，对整个序列做$\eqref{eq:lr-xx}$的结果，等价于将序列分为两半各自做$\eqref{eq:lr-xx}$，然后将前一半的最后一个结果加权到后一半各个位置上，如下图左：  </p>
+<p><a href="/usr/uploads/2023/03/242734272.svg" title="点击查看原图"><img alt="线性RNN的并行递归分解" src="/usr/uploads/2023/03/242734272.svg" /></a></p>
+<p>线性RNN的并行递归分解</p>
+<p><a href="/usr/uploads/2023/03/3505509394.svg" title="点击查看原图"><img alt="线性RNN递归分解的完全展开" src="/usr/uploads/2023/03/3505509394.svg" /></a></p>
+<p>线性RNN递归分解的完全展开</p>
+<p>这里的关键是“分开两半各自做$\eqref{eq:lr-xx}$”这两半是可以并行的！于是递归下去，我们就将原本是$\mathcal{O}(L)$的循环步数改为了$\mathcal{O}(\log L)$，从而大大加快训练速度，如上图右。</p>
+<p>事实上，这就是<a href="https://en.wikipedia.org/wiki/Prefix_sum">Prefix Sum</a>问题的“Upper/Lower”并行算法，代码细节可以参考笔者上面给出的代码。因为Tensorflow 1.x不支持直接写递归，笔者是用<code>tf.while_loop</code>或者<code>for</code>从下到上实现的，训练时只能勉强接近Self Attention的速度。事实上如果将循环部分重写为CUDA内核的话，应该是可以超过Self Attention速度的（可惜笔者不会）。RWKV的作者只是将RWKV的RNN格式写成了CUDA内核，没有考虑并行化，但就这已经可以媲美Self Attention的速度了。</p>
+<p>此外，Prefix Sum还有“Odd/Even”并行算法，理论上它的计算效率更高一些，但它的结构更复杂些，如果用tensorflow实现的话，它涉及到更多的循环步数以及更多的reshape和concat操作，实际效率未必比得上“Upper/Lower”并行算法，因此笔者就没有实现它了（主要还是tensorflow 1.x不支持递归导致的，如果用递归写倒不是太复杂）。</p>
+<h2 id="_9">效果化</h2>
+<p>这一节我们将演示原论文在LRA上的实验结果，以及笔者在语言模型（LM）任务上的实验结果。</p>
+<p>原论文中，作者主要是通过理论和实验相结合的方式，演示了如何一步步地优化普通的RNN，直到在LRA上取得接近SOTA的效果，这个分析和改进的过程可谓是引人入胜，值得反复品味。但由于原论文的实验都是在LRA上反复进行的，所以实验本身并无过多精彩之处，这里只演示论文中的Table 8：  </p>
+<p><a href="/usr/uploads/2023/03/4039504491.png" title="点击查看原图"><img alt="LRU论文的实验结果汇总" src="/usr/uploads/2023/03/4039504491.png" /></a></p>
+<p>LRU论文的实验结果汇总</p>
+<p>对于本文的读者来说，可能更关心它在NLP尤其是近来很火的LM上的效果，可惜原论文没有这部分内容，笔者自己做了一些对比实验，供大家参考。对比的模型包括GAU（同<a href="/archives/9052">GAU-α</a>）、SA（同<a href="/archives/8998">RoFormerV2</a>）、LRU、SLRU和RWKV，其中LRU、SLRU、RWKV都只是将RoFormerV2中的Self Attention换成参数量和计算量相似的LRU、SLRU、RWKV。模型参数量均为1亿左右的base版，在当前算是小模型了，初始化均使用<a href="/archives/8978">DeepNorm</a>，优化器用的是<a href="/archives/9512">Tiger</a>，其他所有超参数都一致，基本上做到了比较严格的控制变量。</p>
+<p><a href="/usr/uploads/2023/03/2221237948.svg" title="点击查看原图"><img alt="训练长度为128时的LOSS曲线" src="/usr/uploads/2023/03/2221237948.svg" /></a></p>
+<p>训练长度为128时的LOSS曲线</p>
+<p><a href="/usr/uploads/2023/03/3197692837.svg" title="点击查看原图"><img alt="训练长度为128时的ACC曲线" src="/usr/uploads/2023/03/3197692837.svg" /></a></p>
+<p>训练长度为128时的ACC曲线</p>
+<p><a href="/usr/uploads/2023/03/3125147889.svg" title="点击查看原图"><img alt="训练长度为512时的LOSS曲线" src="/usr/uploads/2023/03/3125147889.svg" /></a></p>
+<p>训练长度为512时的LOSS曲线</p>
+<p><a href="/usr/uploads/2023/03/2242417740.svg" title="点击查看原图"><img alt="训练长度为512时的ACC曲线" src="/usr/uploads/2023/03/2242417740.svg" /></a></p>
+<p>训练长度为512时的ACC曲线</p>
+<p>可以看到，从效果上排序，应该是<br />
+$$\text{GAU} > \text{SA} > \text{RWKV} > \text{LRU} > \text{SLRU}$$</p>
+<p>从实验结果上我们可以得出：</p>
+<blockquote>
+<p>1、LRU优于SLRU，表明引入复投影矩阵和复特征值确实是有帮助的，但计算效率会有一定损失（哪怕保持参数量不变）；</p>
+<p>2、当序列长度增加时，Attention系列（GAU、SA）的效果会变好，而RNN系列（LRU、SLRU、RWKV）的效果则会下降，这是两者的本质差异，原因应该是RNN的长程记忆能力受限于hidden_size；</p>
+<p>3、RWKV确实有可能是目前最好的RNN模型，但跟Attention类（GAU、SA）模型还有明显的差距；</p>
+<p>4、根据第2点，RNN系列需要追平Attention系列，那么应该需要继续放大hidden_size，所以在LM任务上RNN系列或许需要更大尺度才有优势；</p>
+<p>5、结合第1点和第3点，下一个改进版的RNN是否就是复数版RWKV了？</p>
+</blockquote>
+<p>此外，还有几点实验过程中的经验。由于GAU是单头的，因此在长序列、大尺度的场景下它的计算效率明显优于SA，并且它的效果也优于SA，所以GAU应该是在相当大的一个范围内是语言模型的最佳选择，拍脑袋想的话，百亿参数以内、序列长度5000以内，都建议优先考虑GAU。但不可否认，同尺度的RNN系列模型在推理效率上更优（每步递归的计算量和cache大小都一致），而训练效率上也不输于Attention系列，因此模型放大之后，应该还是有机会跟Attention系列一较高低的。</p>
+<p>值得指出的是，RWKV虽然整体表现不错，但与GAU和SA的差距还是有的，所以公平比较之下，RWKV也没有传说中那么完美无暇。事实上，RWKV作者自己的实现中，就包含了一系列据说有助于增强LM效果但相当晦涩的trick（按照作者的意思，他这些trick才是“精华”），这些trick需要读作者给的源代码才能发现，它们没有考虑进笔者的实验中。不排除这些trick有助于更好训练一个LM的可能性，但笔者更多的是想做一个公平的对照实验而非实际训练一个LM模型，一旦引入这些trick，变量就太多了，笔者算力有限，无法一一对照。</p>
+<p>当然，以上结论都只是在1亿级别的“小模型”中得出的，更大尺度的模型笔者还在尝试中，暂时没法给大家结论。</p>
+<h2 id="_10">结论化</h2>
+<p>本文介绍了Google“拯救”RNN的一次尝试，自上而下地构建了一个在LRA上表现接近SOTA的高效RNN模型。除了原论文在LRA上的实验外，本文还给出了笔者自己在语言模型上的实验结果，包括与RWKV等相关模型的对比。总的来说，经过优化的RNN模型在训练效率上并不逊色于Attention类模型，同时有着更好的推理性能，但语言模型效果上离Attention类模型还有一定差距，也许需要将模型做得更大，才能进一步体现出RNN的优势。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9554">https://spaces.ac.cn/archives/9554</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Mar. 28, 2023). 《Google新作试图“复活”RNN：RNN能否再次辉煌？ 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9554">https://spaces.ac.cn/archives/9554</a></p>
+<p>@online{kexuefm-9554,<br />
+title={Google新作试图“复活”RNN：RNN能否再次辉煌？},<br />
+author={苏剑林},<br />
+year={2023},<br />
+month={Mar},<br />
+url={\url{https://spaces.ac.cn/archives/9554}},<br />
+} </p>
+<hr />
+<h2 id="_11">详细数学推导与注释</h2>
+<h3 id="1-rnn">1. RNN的数学基础</h3>
+<p><strong>标准RNN的递归定义</strong>：</p>
+<p>最基本的循环神经网络可以表示为：
+$$
+x_t = f(Ax_{t-1} + Bu_t + b) \tag{1}
+$$</p>
+<p>其中：
+- $x_t \in \mathbb{R}^d$ 是时刻 $t$ 的隐状态向量
+- $u_t \in \mathbb{R}^m$ 是时刻 $t$ 的输入向量
+- $A \in \mathbb{R}^{d \times d}$ 是状态转移矩阵
+- $B \in \mathbb{R}^{d \times m}$ 是输入权重矩阵
+- $b \in \mathbb{R}^d$ 是偏置向量
+- $f: \mathbb{R}^d \to \mathbb{R}^d$ 是非线性激活函数</p>
+<p><strong>注释</strong>：这个递归定义说明RNN的核心是一个动力学系统，当前状态 $x_t$ 依赖于上一时刻状态 $x_{t-1}$ 和当前输入 $u_t$。</p>
+<h3 id="2-rnn">2. 线性RNN的定义与性质</h3>
+<p><strong>线性化</strong>：</p>
+<p>当我们移除激活函数 $f$，得到线性RNN：
+$$
+x_t = Ax_{t-1} + Bu_t \tag{2}
+$$</p>
+<p><strong>状态展开</strong>：</p>
+<p>通过反复迭代，我们可以将 $x_t$ 展开为输入序列的函数：
+$$
+\begin{aligned}
+x_0 &= Bu_0 \tag{3}\\
+x_1 &= A(Bu_0) + Bu_1 = ABu_0 + Bu_1 \tag{4}\\
+x_2 &= A(ABu_0 + Bu_1) + Bu_2 = A^2Bu_0 + ABu_1 + Bu_2 \tag{5}\\
+&\vdots \\
+x_t &= \sum_{k=0}^t A^{t-k}Bu_k \tag{6}
+\end{aligned}
+$$</p>
+<p><strong>数学直觉</strong>：式(6)表明，时刻 $t$ 的状态是所有历史输入的加权和，权重由矩阵幂 $A^{t-k}$ 决定。这个权重随时间的衰减方式取决于 $A$ 的谱性质。</p>
+<h3 id="3">3. 矩阵对角化理论</h3>
+<p><strong>对角化的定义</strong>：</p>
+<p>矩阵 $A \in \mathbb{C}^{d \times d}$ 可对角化，当且仅当存在可逆矩阵 $P \in \mathbb{C}^{d \times d}$ 和对角矩阵 $\Lambda = \text{diag}(\lambda_1, \ldots, \lambda_d)$，使得：
+$$
+A = P\Lambda P^{-1} \tag{7}
+$$</p>
+<p>其中 $\lambda_1, \ldots, \lambda_d$ 是 $A$ 的特征值，$P$ 的列向量是对应的特征向量。</p>
+<p><strong>对角化的性质</strong>：</p>
+<p>对于对角化矩阵，幂运算变得简单：
+$$
+A^n = P\Lambda^n P^{-1} = P \text{diag}(\lambda_1^n, \ldots, \lambda_d^n) P^{-1} \tag{8}
+$$</p>
+<p><strong>复数域的必要性</strong>：</p>
+<p><strong>定理</strong>：任何 $n \times n$ 复矩阵都有 $n$ 个复特征值（计重数）。</p>
+<p><strong>证明思路</strong>：根据代数基本定理，特征多项式 $\det(\lambda I - A) = 0$ 在复数域内总有 $n$ 个根。</p>
+<p><strong>注释</strong>：实矩阵不一定有实特征值（例如旋转矩阵），但在复数域内一定可以找到特征值。这就是为什么LRU需要在复数域工作。</p>
+<h3 id="4-lru">4. LRU的参数化推导</h3>
+<p><strong>从一般矩阵到对角矩阵</strong>：</p>
+<p>根据对角化理论，设 $A = P\Lambda P^{-1}$，代入式(6)：
+$$
+\begin{aligned}
+x_t &= \sum_{k=0}^t A^{t-k}Bu_k \\
+&= \sum_{k=0}^t P\Lambda^{t-k}P^{-1}Bu_k \tag{9}\\
+&= P \sum_{k=0}^t \Lambda^{t-k}(P^{-1}Bu_k) \tag{10}
+\end{aligned}
+$$</p>
+<p><strong>维度匹配</strong>：</p>
+<p>令 $\tilde{B} = P^{-1}B$，$\tilde{x}_t = P^{-1}x_t$，则：
+$$
+\tilde{x}_t = \sum_{k=0}^t \Lambda^{t-k}\tilde{B}u_k \tag{11}
+$$</p>
+<p><strong>element-wise分解</strong>：</p>
+<p>由于 $\Lambda$ 是对角矩阵，式(11)在每个维度上独立：
+$$
+\tilde{x}_t^{(i)} = \sum_{k=0}^t \lambda_i^{t-k}\tilde{B}^{(i)}u_k, \quad i = 1, \ldots, d \tag{12}
+$$</p>
+<p><strong>注释</strong>：这个分解非常关键，它将 $d \times d$ 的矩阵运算降低为 $d$ 个独立的标量递归。</p>
+<h3 id="5">5. 极坐标参数化</h3>
+<p><strong>复特征值的表示</strong>：</p>
+<p>对于复特征值 $\lambda \in \mathbb{C}$，采用极坐标表示：
+$$
+\lambda = re^{i\theta} \tag{13}
+$$</p>
+<p>其中 $r = |\lambda| \geq 0$ 是模，$\theta \in [0, 2\pi)$ 是幅角。</p>
+<p><strong>代入递归公式</strong>：
+$$
+\begin{aligned}
+\tilde{x}_t^{(i)} &= \sum_{k=0}^t (re^{i\theta})^{t-k}\tilde{B}^{(i)}u_k \\
+&= \sum_{k=0}^t r^{t-k}e^{i(t-k)\theta}\tilde{B}^{(i)}u_k \tag{14}
+\end{aligned}
+$$</p>
+<p><strong>稳定性约束</strong>：</p>
+<p>为保证数值稳定，需要 $r \leq 1$：</p>
+<p><strong>定理（稳定性条件）</strong>：若 $r &gt; 1$，则当 $t \to \infty$ 时，$\tilde{x}_t^{(i)}$ 指数增长，导致数值不稳定。</p>
+<p><strong>证明</strong>：考虑常数输入 $u_k = c$：
+$$
+|\tilde{x}_t^{(i)}| = \left|\sum_{k=0}^t r^{t-k}e^{i(t-k)\theta}\tilde{B}^{(i)}c\right| = |\tilde{B}^{(i)}c| \sum_{k=0}^t r^{t-k} = |\tilde{B}^{(i)}c| r^t \frac{1 - r^{-(t+1)}}{1 - r^{-1}} \tag{15}
+$$</p>
+<p>当 $r &gt; 1$ 时，$r^t \to \infty$，导致数值爆炸。</p>
+<h3 id="6">6. 无约束优化的参数化技巧</h3>
+<p><strong>问题</strong>：如何在优化过程中保证 $r \in [0, 1]$？</p>
+<p><strong>方案1</strong>：直接约束
+$$
+r = \sigma(\nu) = \frac{1}{1 + e^{-\nu}} \tag{16}
+$$</p>
+<p>其中 $\nu \in \mathbb{R}$ 是无约束参数。</p>
+<p><strong>方案2</strong>：指数衰减（LRU采用）
+$$
+r = e^{-\nu}, \quad \nu = e^{\nu^{\log}} \tag{17}
+$$</p>
+<p>其中 $\nu^{\log} \in \mathbb{R}$ 是无约束参数。</p>
+<p><strong>方案2的优势</strong>：</p>
+<ol>
+<li><strong>组合优雅</strong>：$r^k = e^{-k\nu}$，与 $e^{ik\theta}$ 可以组合为 $e^{k(-\nu + i\theta)}$</li>
+<li><strong>导数性质好</strong>：$\frac{\partial r}{\partial \nu^{\log}} = -e^{-\nu} \cdot e^{\nu^{\log}} = -re^{\nu^{\log}}$，没有饱和区</li>
+</ol>
+<p><strong>完整参数化</strong>：
+$$
+\lambda = e^{-\nu + i\theta} = e^{-e^{\nu^{\log}} + ie^{\theta^{\log}}} \tag{18}
+$$</p>
+<h3 id="7">7. 初始化策略的数学分析</h3>
+<p><strong>Glorot初始化的特征值分布</strong>：</p>
+<p>对于 $d \times d$ 实矩阵，Glorot初始化从 $\mathcal{N}(0, 1/d)$ 采样每个元素。</p>
+<p><strong>定理（Ginibre分布）</strong>：当 $d \to \infty$ 时，特征值均匀分布在复平面单位圆盘内。</p>
+<p><strong>密度函数</strong>：
+$$
+\rho(\lambda) = \frac{1}{\pi}, \quad |\lambda| \leq 1 \tag{19}
+$$</p>
+<p><strong>圆盘内均匀采样</strong>：</p>
+<p>在笛卡尔坐标系：$\lambda = x + iy$，均匀分布意味着 $dx \, dy = \text{const}$</p>
+<p>在极坐标系：$\lambda = re^{i\theta}$，$dx \, dy = r \, dr \, d\theta$</p>
+<p>因此均匀分布需要：
+$$
+r \, dr \, d\theta = \text{const} \tag{20}
+$$</p>
+<p><strong>推导</strong>：</p>
+<p>设 $r^2 \sim U[0, 1]$，$\theta \sim U[0, 2\pi]$，则：
+$$
+P(r \leq R) = P(r^2 \leq R^2) = R^2 \tag{21}
+$$</p>
+<p>密度函数：$p(r) = \frac{d}{dr}(r^2) = 2r$，这正好对应 $r \, dr$ 的均匀性。</p>
+<h3 id="8">8. 圆环初始化的改进</h3>
+<p><strong>问题</strong>：单位圆盘内的均匀初始化意味着很多 $r$ 接近0，导致记忆快速衰减。</p>
+<p><strong>解决方案</strong>：圆环初始化</p>
+<p>在 $r \in [r_{\min}, r_{\max}]$ 的圆环内均匀采样：
+$$
+r^2 \sim U[r_{\min}^2, r_{\max}^2], \quad \theta \sim U[0, 2\pi] \tag{22}
+$$</p>
+<p><strong>LRU的选择</strong>：$r_{\min} = 0.9$, $r_{\max} = 0.999$</p>
+<p><strong>数学直觉</strong>：这保证了大部分特征值的模接近1，从而有更好的长期记忆能力。</p>
+<h3 id="9-gamma">9. 稳定性分析：$\gamma$ 参数的引入</h3>
+<p><strong>问题</strong>：当 $r \approx 1$ 时，输出的方差会膨胀。</p>
+<p><strong>方差分析</strong>：</p>
+<p>假设 $u_k \sim i.i.d.$，均值为0，方差为 $\sigma_u^2$，则：
+$$
+\begin{aligned}
+\mathbb{E}[|\tilde{x}_t^{(i)}|^2] &= \mathbb{E}\left[\left|\sum_{k=0}^t r^{t-k}e^{i(t-k)\theta}\tilde{B}^{(i)}u_k\right|^2\right] \\
+&= |\tilde{B}^{(i)}|^2 \sum_{k=0}^t r^{2(t-k)} \mathbb{E}[|u_k|^2] \tag{23}\\
+&= |\tilde{B}^{(i)}|^2 \sigma_u^2 \sum_{k=0}^t r^{2(t-k)} \\
+&= |\tilde{B}^{(i)}|^2 \sigma_u^2 \frac{1 - r^{2(t+1)}}{1 - r^2} \tag{24}
+\end{aligned}
+$$</p>
+<p><strong>当 $t \to \infty$ 且 $r &lt; 1$</strong>：
+$$
+\mathbb{E}[|\tilde{x}_t^{(i)}|^2] \to |\tilde{B}^{(i)}|^2 \sigma_u^2 \frac{1}{1 - r^2} \tag{25}
+$$</p>
+<p><strong>放大因子</strong>：
+$$
+\text{Amplification} = \frac{1}{\sqrt{1 - r^2}} \tag{26}
+$$</p>
+<p>当 $r = 0.999$ 时，放大因子 $\approx 22.4$，这会导致训练不稳定。</p>
+<p><strong>解决方案</strong>：引入缩放参数 $\gamma$</p>
+<p>修改递归为：
+$$
+\tilde{x}_t^{(i)} = \lambda \tilde{x}_{t-1}^{(i)} + \gamma \tilde{B}^{(i)}u_t \tag{27}
+$$</p>
+<p><strong>初始化</strong>：$\gamma = \sqrt{1 - r^2}$</p>
+<p><strong>稳态方差</strong>：
+$$
+\mathbb{E}[|\tilde{x}_t^{(i)}|^2] \to \gamma^2 |\tilde{B}^{(i)}|^2 \sigma_u^2 \frac{1}{1 - r^2} = |\tilde{B}^{(i)}|^2 \sigma_u^2 \tag{28}
+$$</p>
+<p><strong>注释</strong>：通过这个技巧，输出方差与输入方差保持同一量级，提高训练稳定性。</p>
+<h3 id="10-prefix-sum">10. 并行计算：Prefix Sum算法</h3>
+<p><strong>问题</strong>：直接递归计算式(2)是串行的，无法并行。</p>
+<p><strong>线性RNN的卷积形式</strong>：
+$$
+x_t = \sum_{k=0}^t \Lambda^{t-k}Bu_k \tag{29}
+$$</p>
+<p><strong>分治策略</strong>：</p>
+<p>将序列 $[0, T]$ 分为 $[0, t]$ 和 $[t+1, T]$ 两部分：
+$$
+\begin{aligned}
+x_T &= \sum_{k=0}^T \Lambda^{T-k}Bu_k \\
+&= \sum_{k=0}^t \Lambda^{T-k}Bu_k + \sum_{k=t+1}^T \Lambda^{T-k}Bu_k \tag{30}\\
+&= \Lambda^{T-t} \sum_{k=0}^t \Lambda^{t-k}Bu_k + \sum_{k=t+1}^T \Lambda^{T-k}Bu_k \\
+&= \Lambda^{T-t} x_t + \sum_{k=t+1}^T \Lambda^{T-k}Bu_k \tag{31}
+\end{aligned}
+$$</p>
+<p><strong>算法复杂度分析</strong>：</p>
+<p>设序列长度为 $L$，递归深度为 $\log_2 L$。</p>
+<p>每层需要的操作：
+- 分治：$O(L)$（并行）
+- 合并：$O(L)$（element-wise乘法和加法）</p>
+<p>总复杂度：$O(L \log L)$（时间，并行模型）</p>
+<p><strong>实际实现</strong>：</p>
+<p>由于 $\Lambda$ 是对角矩阵，$\Lambda^{T-t}$ 的计算是element-wise的：
+$$
+\Lambda^{T-t} = \text{diag}(\lambda_1^{T-t}, \ldots, \lambda_d^{T-t}) \tag{32}
+$$</p>
+<h3 id="11-associative-scan">11. 关联扫描（Associative Scan）算法</h3>
+<p><strong>二元操作符的定义</strong>：</p>
+<p>定义操作符 $\oplus: (A, x) \times (A, x) \to (A, x)$：
+$$
+(A_2, x_2) \oplus (A_1, x_1) = (A_2 A_1, A_2 x_1 + x_2) \tag{33}
+$$</p>
+<p><strong>结合律验证</strong>：
+$$
+\begin{aligned}
+&[(A_3, x_3) \oplus (A_2, x_2)] \oplus (A_1, x_1) \\
+&= (A_3 A_2, A_3 x_2 + x_3) \oplus (A_1, x_1) \\
+&= (A_3 A_2 A_1, A_3 A_2 x_1 + A_3 x_2 + x_3) \tag{34}
+\end{aligned}
+$$</p>
+<p>这与 $(A_3, x_3) \oplus [(A_2, x_2) \oplus (A_1, x_1)]$ 的结果相同。</p>
+<p><strong>Prefix Scan的应用</strong>：</p>
+<p>输入序列：$(A, Bu_0), (A, Bu_1), \ldots, (A, Bu_{L-1})$</p>
+<p>输出序列：通过 $\oplus$ 的前缀和得到所有 $x_t$</p>
+<h3 id="12">12. 计算复杂度的严格分析</h3>
+<p><strong>标准RNN</strong>：</p>
+<ul>
+<li>每步：矩阵-向量乘法 $Ax_{t-1}$：$O(d^2)$</li>
+<li>$L$ 步：$O(Ld^2)$</li>
+<li>无法并行</li>
+</ul>
+<p><strong>LRU（对角化）</strong>：</p>
+<ul>
+<li>每步：element-wise乘法：$O(d)$</li>
+<li>串行：$O(Ld)$</li>
+<li>并行（Prefix Sum）：$O(L \log L \cdot d)$</li>
+</ul>
+<p><strong>Self-Attention</strong>：</p>
+<ul>
+<li>注意力矩阵：$O(L^2d)$</li>
+<li>无法流式推理</li>
+</ul>
+<p><strong>对比表</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>模型</th>
+<th>训练复杂度</th>
+<th>推理复杂度（流式）</th>
+<th>并行性</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>标准RNN</td>
+<td>$O(Ld^2)$</td>
+<td>$O(d^2)$/step</td>
+<td>低</td>
+</tr>
+<tr>
+<td>LRU</td>
+<td>$O(L \log L \cdot d)$</td>
+<td>$O(d)$/step</td>
+<td>高</td>
+</tr>
+<tr>
+<td>Self-Attention</td>
+<td>$O(L^2d)$</td>
+<td>$O(Ld)$/step</td>
+<td>高</td>
+</tr>
+</tbody>
+</table>
+<h3 id="13">13. 梯度传播分析</h3>
+<p><strong>BPTT的梯度消失/爆炸</strong>：</p>
+<p>考虑损失函数 $\mathcal{L}(x_T)$，其关于 $x_0$ 的梯度：
+$$
+\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_T} \frac{\partial x_T}{\partial x_{T-1}} \cdots \frac{\partial x_1}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_T} \prod_{t=1}^T \frac{\partial x_t}{\partial x_{t-1}} \tag{35}
+$$</p>
+<p>对于线性RNN，$\frac{\partial x_t}{\partial x_{t-1}} = A$，因此：
+$$
+\frac{\partial \mathcal{L}}{\partial x_0} = \frac{\partial \mathcal{L}}{\partial x_T} A^T \tag{36}
+$$</p>
+<p><strong>谱半径的影响</strong>：</p>
+<p>设 $\rho(A) = \max_i |\lambda_i|$ 是 $A$ 的谱半径，则：
+$$
+\|A^T\| \sim \rho(A)^T \tag{37}
+$$</p>
+<ul>
+<li>若 $\rho(A) &lt; 1$：梯度消失</li>
+<li>若 $\rho(A) &gt; 1$：梯度爆炸</li>
+<li>若 $\rho(A) = 1$：理想情况</li>
+</ul>
+<p><strong>LRU的优势</strong>：通过初始化 $r \approx 1$，保证梯度稳定传播。</p>
+<h3 id="14-transformer">14. 与Transformer的理论对比</h3>
+<p><strong>表达能力</strong>：</p>
+<p><strong>定理</strong>：单层自注意力可以表示任何排列不变函数。</p>
+<p><strong>证明思路</strong>：通过构造合适的 $Q, K, V$ 矩阵，可以实现任意的加权平均。</p>
+<p><strong>RNN的限制</strong>：</p>
+<p>RNN是马尔可夫模型，受到状态维度 $d$ 的限制。但LRU通过：
+1. 复数参数化，增加表达能力
+2. 多头设计，类似多头注意力</p>
+<p>可以部分缓解这个限制。</p>
+<h3 id="15">15. 收敛性理论</h3>
+<p><strong>定理（线性RNN的收敛性）</strong>：</p>
+<p>对于线性RNN $x_t = \Lambda x_{t-1} + Bu_t$，其中 $\Lambda = \text{diag}(\lambda_1, \ldots, \lambda_d)$，若：
+1. $|\lambda_i| &lt; 1$ 对所有 $i$
+2. 输入序列有界：$|u_t| \leq C$</p>
+<p>则存在唯一稳态 $x_\infty$，使得当 $t \to \infty$ 时，$x_t \to x_\infty$。</p>
+<p><strong>证明</strong>：</p>
+<p>稳态满足：
+$$
+x_\infty = \Lambda x_\infty + Bu_\infty \Rightarrow x_\infty = (I - \Lambda)^{-1} Bu_\infty \tag{38}
+$$</p>
+<p>由于 $|\lambda_i| &lt; 1$，$(I - \Lambda)^{-1}$ 存在。</p>
+<h3 id="16">16. 数值稳定性的实践建议</h3>
+<p><strong>建议1</strong>：使用混合精度训练</p>
+<ul>
+<li>前向传播：FP16</li>
+<li>梯度累积：FP32</li>
+<li>$\lambda$ 参数：FP32（避免精度损失）</li>
+</ul>
+<p><strong>建议2</strong>：梯度裁剪
+$$
+g \leftarrow \begin{cases} g & \text{if } \|g\| \leq \theta \\ \frac{\theta}{\|g\|} g & \text{otherwise} \end{cases} \tag{39}
+$$</p>
+<p>推荐 $\theta = 1.0$</p>
+<p><strong>建议3</strong>：正则化</p>
+<p>L2正则化 $\lambda$ 参数，防止 $r \to 1$：
+$$
+\mathcal{L}_{\text{reg}} = \alpha \sum_i (\nu_i - \nu_{\text{target}})^2 \tag{40}
+$$</p>
+<p>其中 $\nu_{\text{target}}$ 对应 $r = 0.95$</p>
+<h3 id="17-lru">17. 多头LRU的设计</h3>
+<p><strong>并行多头</strong>：
+$$
+y = \text{Concat}(\text{head}_1, \ldots, \text{head}_h) W^O \tag{41}
+$$</p>
+<p>其中每个头：
+$$
+\text{head}_i = C_i^* x_t^{(i)}, \quad x_t^{(i)} = \Lambda_i x_{t-1}^{(i)} + \gamma_i B_i u_t \tag{42}
+$$</p>
+<p><strong>参数量</strong>：</p>
+<ul>
+<li>单头LRU：$2d$（$\lambda$ 和 $\gamma$）+ $2dm$（$B$ 和 $C$）</li>
+<li>$h$ 头LRU：$h(2d/h + 2dm/h) = 2d + 2dm$</li>
+</ul>
+<p>与单头相同！（假设总维度固定）</p>
+<h3 id="18-slru">18. SLRU：简化版本</h3>
+<p><strong>定义</strong>：</p>
+<p>SLRU = Simpler LRU，假设所有参数都是实数：
+$$
+x_t = \text{diag}(r_1, \ldots, r_d) x_{t-1} + Bu_t \tag{43}
+$$</p>
+<p>其中 $r_i \in [0, 1]$ 是实数。</p>
+<p><strong>优势</strong>：
+1. 实现简单
+2. 计算效率高（无复数运算）</p>
+<p><strong>劣势</strong>：
+1. 表达能力弱于LRU
+2. 无法表示振荡模式（需要复数相位）</p>
+<h3 id="19-rwkv">19. RWKV的数学结构</h3>
+<p><strong>RWKV的RNN部分</strong>：
+$$
+x_t = \sigma(r_t) \frac{y_t + (\gamma \lambda - 1)e^{k_t}v_t}{z_t + (\gamma \lambda - 1)e^{k_t}} \tag{44}
+$$</p>
+<p>其中：
+$$
+\begin{aligned}
+y_t &= \lambda y_{t-1} + e^{k_t}v_t \\
+z_t &= \lambda z_{t-1} + e^{k_t}
+\end{aligned} \tag{45}
+$$</p>
+<p><strong>归一化机制</strong>：</p>
+<p>RWKV通过 $y_t / z_t$ 实现自动归一化，不需要额外的 $\gamma$ 参数。</p>
+<p><strong>与Attention的联系</strong>：</p>
+<p>RWKV可以视为线性注意力的一种形式，其中：
+- $y_t$：累积的值向量
+- $z_t$：累积的归一化系数
+- $e^{k_t}$：注意力权重</p>
+<h3 id="20">20. 实验结果的数学解释</h3>
+<p><strong>LRA任务的特性</strong>：</p>
+<p>LRA（Long Range Arena）测试长距离依赖能力，需要：
+1. 长期记忆（$r \approx 1$）
+2. 选择性注意（复数相位 $\theta$）</p>
+<p><strong>为什么线性RNN在LRA上表现好？</strong></p>
+<p><strong>原因1</strong>：常数复杂度</p>
+<p>对于长度 $L = 16384$ 的序列，Self-Attention需要 $O(L^2)$ 的内存，而LRU只需要 $O(d)$。</p>
+<p><strong>原因2</strong>：归纳偏置</p>
+<p>LRU的指数衰减假设符合很多实际任务的特性（近期信息更重要）。</p>
+<h3 id="21">21. 语言建模的挑战</h3>
+<p><strong>问题</strong>：为什么LRU在LM任务上不如Attention？</p>
+<p><strong>理论分析</strong>：</p>
+<p><strong>信息瓶颈</strong>：</p>
+<p>设输入序列长度为 $L$，信息量为 $I(u_{&lt;L})$。RNN需要将其压缩到 $d$ 维状态：
+$$
+I(x_L) \leq d \log_2 C \tag{46}
+$$</p>
+<p>其中 $C$ 是每个维度的量化级别。</p>
+<p><strong>Attention的优势</strong>：</p>
+<p>Attention直接访问所有历史，无信息瓶颈：
+$$
+I(\text{Attention}(u_{<L})) \leq I(u_{<L}) \tag{47}
+$$</p>
+<p><strong>缓解策略</strong>：</p>
+<ol>
+<li>增大 $d$（但增加计算量）</li>
+<li>分层结构</li>
+<li>混合架构（RNN + Attention）</li>
+</ol>
+<h3 id="22">22. 频域分析</h3>
+<p><strong>离散傅里叶变换的视角</strong>：</p>
+<p>对于LRU，设输入为正弦信号：
+$$
+u_t = A \sin(\omega t + \phi) \tag{48}
+$$</p>
+<p>输出的频率响应：
+$$
+H(\omega) = \frac{C^* \gamma B}{1 - \lambda e^{-i\omega}} \tag{49}
+$$</p>
+<p><strong>幅频特性</strong>：
+$$
+|H(\omega)| = \frac{|C^* \gamma B|}{|1 - re^{i(\theta - \omega)}|} \tag{50}
+$$</p>
+<p>当 $\omega = \theta$ 时，$|H(\omega)|$ 最大，说明LRU对特定频率有选择性。</p>
+<h3 id="23">23. 与连续时间系统的联系</h3>
+<p><strong>状态空间模型（SSM）</strong>：</p>
+<p>LRU可以视为离散化的线性SSM：
+$$
+\begin{aligned}
+\frac{dx(t)}{dt} &= Ax(t) + Bu(t) \\
+y(t) &= Cx(t)
+\end{aligned} \tag{51}
+$$</p>
+<p><strong>离散化方法（Zero-Order Hold）</strong>：
+$$
+x_{k+1} = e^{A\Delta t} x_k + \int_0^{\Delta t} e^{A\tau} d\tau \cdot B u_k \tag{52}
+$$</p>
+<p>当 $A$ 是对角矩阵时：
+$$
+e^{A\Delta t} = \text{diag}(e^{\lambda_1 \Delta t}, \ldots, e^{\lambda_d \Delta t}) \tag{53}
+$$</p>
+<h3 id="24">24. 训练技巧总结</h3>
+<p><strong>学习率调度</strong>：</p>
+<p>推荐使用warmup + cosine衰减：
+$$
+\eta_t = \eta_{\max} \cdot \min\left(\frac{t}{T_{\text{warmup}}}, \frac{1 + \cos(\pi \frac{t - T_{\text{warmup}}}{T_{\max} - T_{\text{warmup}}})}{2}\right) \tag{54}
+$$</p>
+<p><strong>权重初始化总结</strong>：</p>
+<ol>
+<li>$\nu^{\log}$：使得 $r \in [0.9, 0.999]$</li>
+<li>$\theta^{\log}$：均匀 $U[0, 2\pi]$</li>
+<li>$B, C$：Xavier初始化</li>
+<li>$\gamma$：$\sqrt{1 - r^2}$</li>
+</ol>
+<h3 id="25">25. 理论与实践的差距</h3>
+<p><strong>理论优势</strong>：
+- 线性复杂度
+- 常数推理成本
+- 可并行训练</p>
+<p><strong>实践挑战</strong>：
+- 效果不如Attention（在LM上）
+- 需要更大的隐藏维度
+- 超参数调优困难</p>
+<p><strong>未来方向</strong>：
+1. 更好的初始化策略
+2. 自适应的 $\lambda$ 参数
+3. 与Attention的混合架构</p>
+        </div>
+    </div>
+</body>
+</html>

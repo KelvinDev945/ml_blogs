@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成扩散模型漫谈（九）：条件控制生成结果</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>生成扩散模型漫谈（九）：条件控制生成结果</h1>
+            <div class="meta">📅 最后更新: 2025-11-26 | 📄 大小: 49.7 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9257">https://spaces.ac.cn/archives/9257</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>前面的几篇文章都是比较偏理论的结果，这篇文章我们来讨论一个比较有实用价值的主题——条件控制生成。</p>
+<p>作为生成模型，扩散模型跟VAE、GAN、flow等模型的发展史很相似，都是先出来了无条件生成，然后有条件生成就紧接而来。无条件生成往往是为了探索效果上限，而有条件生成则更多是应用层面的内容，因为它可以实现根据我们的意愿来控制输出结果。从DDPM至今，已经出来了很多条件扩散模型的工作，甚至可以说真正带火了扩散模型的就是条件扩散模型，比如脍炙人口的文生图模型<a href="https://papers.cool/arxiv/2204.06125">DALL·E 2</a>、<a href="https://papers.cool/arxiv/2205.11487">Imagen</a>。</p>
+<p>在这篇文章中，我们对条件扩散模型的理论基础做个简单的学习和总结。</p>
+<h2 id="_1">技术分析</h2>
+<p>从方法上来看，条件控制生成的方式分两种：事后修改（Classifier-Guidance）和事前训练（Classifier-Free）。</p>
+<p>对于大多数人来说，一个SOTA级别的扩散模型训练成本太大了，而分类器（Classifier）的训练还能接受，所以就想着直接复用别人训练好的无条件扩散模型，用一个分类器来调整生成过程以实现控制生成，这就是事后修改的Classifier-Guidance方案；而对于“财大气粗”的Google、OpenAI等公司来说，它们不缺数据和算力，所以更倾向于往扩散模型的训练过程中就加入条件信号，达到更好的生成效果，这就是事前训练的Classifier-Free方案。</p>
+<p>Classifier-Guidance方案最早出自<a href="https://papers.cool/arxiv/2105.05233">《Diffusion Models Beat GANs on Image Synthesis》</a>，最初就是用来实现按类生成的；后来<a href="https://papers.cool/arxiv/2112.05744">《More Control for Free! Image Synthesis with Semantic Diffusion Guidance》</a>推广了“Classifier”的概念，使得它也可以按图、按文来生成。Classifier-Guidance方案的训练成本比较低（熟悉NLP的读者可能还会想起与之很相似的<a href="https://papers.cool/arxiv/1912.02164">PPLM模型</a>），但是推断成本会高些，而且控制细节上通常没那么到位。</p>
+<p>至于Classifier-Free方案，最早出自<a href="https://papers.cool/arxiv/2207.12598">《Classifier-Free Diffusion Guidance》</a>，后来的<a href="https://papers.cool/arxiv/2204.06125">DALL·E 2</a>、<a href="https://papers.cool/arxiv/2205.11487">Imagen</a>等吸引人眼球的模型基本上都是以它为基础做的，值得一提的是，该论文上个月才放到Arxiv上，但事实上去年已经中了NeurIPS 2021。应该说，Classifier-Free方案本身没什么理论上的技巧，它是条件扩散模型最朴素的方案，出现得晚只是因为重新训练扩散模型的成本较大吧，在数据和算力都比较充裕的前提下，Classifier-Free方案表现出了令人惊叹的细节控制能力。</p>
+<h2 id="_2">条件输入</h2>
+<p>说白了，Classifier-Free方案就是训练成本大，本身“没什么技术含量”，所以接下来的主要篇幅都是Classifier-Guidance方案，而Classifier-Free方案则是在最后简单介绍一下。</p>
+<p>经过前面一系列文章的分析，想必读者已经知道，生成扩散模型最关键的步骤就是生成过程$p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t)$的构建，而对于以$\boldsymbol{y}$为输入条件的生成来说，无非就是将$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)$换成$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{y})$而已，也就是说生成过程中增加输入$\boldsymbol{y}$。为了重用已经训练好的无条件生成模型$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)$，我们利用贝叶斯定理得<br />
+\begin{equation}p(\boldsymbol{x}</em>}|\boldsymbol{y}) = \frac{p(\boldsymbol{x<em t-1="t-1">{t-1})p(\boldsymbol{y}|\boldsymbol{x}</em>})}{p(\boldsymbol{y})}\end{equation<br />
+在每一项上面补上条件$\boldsymbol{x}<em t-1="t-1">t$，就得到<br />
+\begin{equation}p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{y}) = \frac{p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)p(\boldsymbol{y}|\boldsymbol{x}</em>}, \boldsymbol{x<em t-1="t-1">t)}{p(\boldsymbol{y}|\boldsymbol{x}_t)}\label{eq:bayes-1}\end{equation}<br />
+注意，在前向过程中，$\boldsymbol{x}_t$是由$\boldsymbol{x}</em>}$加噪声得到的，噪声不会对分类有帮助，所以$\boldsymbol{x<em t-1="t-1">t$的加入对分类不会有任何收益，因此有$p(\boldsymbol{y}|\boldsymbol{x}</em>}, \boldsymbol{x<em t-1="t-1">t)=p(\boldsymbol{y}|\boldsymbol{x}</em>)$，从而<br />
+\begin{equation}p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) = \frac{p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)p(\boldsymbol{y}|\boldsymbol{x}</em>})}{p(\boldsymbol{y}|\boldsymbol{x<em t-1="t-1">t)} = p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t) e^{\log p(\boldsymbol{y}|\boldsymbol{x}</em>}) - \log p(\boldsymbol{y}|\boldsymbol{x}_t)}\label{eq:bayes-2}\end{equation</p>
+<h2 id="_3">近似分布</h2>
+<p>对于已经看过<a href="/archives/9209">《生成扩散模型漫谈（五）：一般框架之SDE篇》</a>的读者，大概会觉得接下来的过程似曾相识。不过即便没读过也不要紧，下面我们依旧完整推导一下。</p>
+<p>当$T$足够大时，$p(\boldsymbol{x}<em t-1="t-1">t|\boldsymbol{x}</em>})$的方差足够小，也就是说只有$\boldsymbol{x<em t-1="t-1">t$与$\boldsymbol{x}</em>}$很接近时概率才会明显大于0。反过来也是成立的，即也只有$\boldsymbol{x<em t-1="t-1">t$与$\boldsymbol{x}</em>}$很接近时$p(\boldsymbol{x<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{y})$或$p(\boldsymbol{x}_t|\boldsymbol{x}</em>)$才明显大于0，我们只需要重点考虑这个范围内的概率变化。为此，我们用泰勒展开：}, \boldsymbol{y<br />
+\begin{equation}\log p(\boldsymbol{y}|\boldsymbol{x}<em t-1="t-1">{t-1}) - \log p(\boldsymbol{y}|\boldsymbol{x}_t)\approx (\boldsymbol{x}</em>} - \boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)\cdot\nabla</em><em t-1="t-1">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)\end{equation}<br />
+严格来讲还有一项关于$t$的变化项，但是那一项跟$\boldsymbol{x}</em>}$无关，属于不影响$\boldsymbol{x<em t-1="t-1">{t-1}$概率的常数项，因此我们没有写出。假设原来有$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)=\mathcal{N}(\boldsymbol{x}</em>};\boldsymbol{\mu}(\boldsymbol{x<em t-1="t-1">t),\sigma_t^2\boldsymbol{I})\propto e^{-\Vert \boldsymbol{x}</em>} - \boldsymbol{\mu}(\boldsymbol{x<em t-1="t-1">t)\Vert^2/2\sigma_t^2}$，那么此时近似地有<br />
+\begin{equation}\begin{aligned}<br />
+p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{y}) \propto&amp;\, e^{-\Vert \boldsymbol{x}</em>} - \boldsymbol{\mu}(\boldsymbol{x<em t-1="t-1">t)\Vert^2/2\sigma_t^2 + (\boldsymbol{x}</em>} - \boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)\cdot\nabla</em><em t-1="t-1">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)} \\\<br />
+\propto&amp;\, e^{-\Vert \boldsymbol{x}</em>} - \boldsymbol{\mu}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t) - \sigma_t^2 \nabla</em><em t-1="t-1">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t))\Vert^2/2\sigma_t^2}<br />
+\end{aligned}\end{equation}<br />
+从这个结果可以看出，$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{y})$近似于$\mathcal{N}(\boldsymbol{x}</em>};\boldsymbol{\mu}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t) + \sigma_t^2 \nabla</em><em t-1="t-1">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t),\sigma_t^2\boldsymbol{I})$，所以只需要把生成过程的采样改为<br />
+\begin{equation}\boldsymbol{x}</em>} = \boldsymbol{\mu}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t) \color{skyblue}{+} {\color{skyblue}{\underbrace{\sigma_t^2 \nabla</em><em _text_新增项="\text{新增项">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)}</em>}}}} + \sigma_t\boldsymbol{\varepsilon},\quad \boldsymbol{\varepsilon}\sim \mathcal{N}(\boldsymbol{0},\boldsymbol{I})\end{equation<br />
+这就是Classifier-Guidance方案的核心结果。注意，$p(\boldsymbol{y}|\boldsymbol{x}<em o="o">t)$的输入是加噪后的样本$\boldsymbol{x}_t$，也就是说我们需要一个能够对加噪样本进行预测的模型。如果我们只有对无噪样本预测的模型$p_o(\boldsymbol{y}|\boldsymbol{x})$，那么可以考虑的$p(\boldsymbol{y}|\boldsymbol{x}_t)$是<br />
+\begin{equation}p(\boldsymbol{y}|\boldsymbol{x}_t) = p</em>}(\boldsymbol{y}|\boldsymbol{\mu}(\boldsymbol{x}_t))\end{equation<br />
+即利用$\boldsymbol{\mu}(\cdot)$对$\boldsymbol{x}_t$去噪后再传入到$p(\boldsymbol{y}|\boldsymbol{x}_t)$中，这样就免除了另外用加噪样本训练分类器的成本。</p>
+<h2 id="_4">梯度缩放</h2>
+<p>原论文（<a href="https://papers.cool/arxiv/2105.05233">《Diffusion Models Beat GANs on Image Synthesis》</a>）发现，往分类器的梯度中引入一个缩放参数$\gamma$，可以更好地调节生成效果：<br />
+\begin{equation}\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">{t-1} = \boldsymbol{\mu}(\boldsymbol{x}_t) \color{skyblue}{+} \color{skyblue}{\sigma_t^2 \color{red}{\gamma}\nabla</em>}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)} + \sigma_t\boldsymbol{\varepsilon},\quad \boldsymbol{\varepsilon}\sim \mathcal{N}(\boldsymbol{0},\boldsymbol{I})\label{eq:gamma-sample}\end{equation<br />
+当$\gamma &gt; 1$时，生成过程将使用更多的分类器信号，结果将会提高生成结果与输入信号$\boldsymbol{y}$的相关性，但是会相应地降低生成结果的多样性；反之，则会降低生成结果与输入信号之间的相关性，但增加了多样性。</p>
+<p>怎么从理论上理解这个参数呢？原论文提出将它理解为通过幂操作来提高分布的聚焦程度，即定义<br />
+\begin{equation}\tilde{p}(\boldsymbol{y}|\boldsymbol{x}<em _boldsymbol_y="\boldsymbol{y">t) = \frac{p^{\gamma}(\boldsymbol{y}|\boldsymbol{x}_t)}{Z(\boldsymbol{x}_t)},\quad Z(\boldsymbol{x}_t)=\sum</em>}} p^{\gamma}(\boldsymbol{y}|\boldsymbol{x}_t)\end{equation<br />
+随着$\gamma$的增加，$\tilde{p}(\boldsymbol{y}|\boldsymbol{x}_t)$的预测会越来越接近one hot分布，用它来代替$p(\boldsymbol{y}|\boldsymbol{x}_t)$作为分类器做Classifier-Guidance，生成过程会倾向于挑出分类置信度很高的样本。</p>
+<p>然而，这个角度虽然能提供一定的参考价值，但其实不完全对，因为<br />
+\begin{equation}\nabla_{\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t}\log \tilde{p}(\boldsymbol{y}|\boldsymbol{x}_t) = \gamma\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) - \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log Z(\boldsymbol{x}_t) \neq \gamma\nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)\end{equation}<br />
+原论文错误地认为$Z(\boldsymbol{x}_t)$是一个常数，所以$\nabla</em>_t)=1$）的梯度性质能近似地泛化到$\gamma\neq 1$的情形。}_t} \log Z(\boldsymbol{x}_t)=0$，但事实上$\gamma\neq 1$时，$Z(\boldsymbol{x}_t)$会显式地依赖于$\boldsymbol{x}_t$。笔者也继续思考了一下有没有什么补救方法，但很遗憾没什么结果，仿佛只能很勉强地认为$\gamma=1$时（此时$Z(\boldsymbol{x</p>
+<h2 id="_5">相似控制</h2>
+<p>事实上，理解$\gamma\neq 1$的最佳方案，就是放弃从贝叶斯定理的式$\eqref{eq:bayes-1}$和式$\eqref{eq:bayes-2}$来理解$p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{y})$，而是直接定义<br />
+\begin{equation}p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{y}) = \frac{p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t) e^{\gamma\cdot\text{sim}(\boldsymbol{x}</em>}, \boldsymbol{y})}}{Z(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, \boldsymbol{y})},\quad Z(\boldsymbol{x}_t,\boldsymbol{y})=\sum</em><em t-1="t-1">{t-1}} p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t) e^{\gamma\cdot\text{sim}(\boldsymbol{x}</em>}, \boldsymbol{y})}\end{equation<br />
+其中$\text{sim}(\boldsymbol{x}<em t-1="t-1">{t-1}, \boldsymbol{y})$是生成结果$\boldsymbol{x}</em>}$与条件$\boldsymbol{y}$的某个相似或相关度量。在这个角度下，$\gamma$直接融于$p(\boldsymbol{x<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{y})$的定义中，直接控制结果与条件的相关性，当$\gamma$越大，模型会倾向于生成跟$\boldsymbol{y}$越相关的$\boldsymbol{x}</em>$。</p>
+<p>为了进一步得到可采样的近似结果，我们可以在$\boldsymbol{x}<em t-1="t-1">{t-1}=\boldsymbol{x}_t$处（也可以在$\boldsymbol{x}</em>}=\boldsymbol{\mu}(\boldsymbol{x<em t-1="t-1">t)$，跟前面类似）展开<br />
+\begin{equation}e^{\gamma\cdot\text{sim}(\boldsymbol{x}</em>}, \boldsymbol{y})}\approx e^{\gamma\cdot\text{sim}(\boldsymbol{x<em t-1="t-1">t, \boldsymbol{y}) + \gamma\cdot(\boldsymbol{x}</em>}-\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)\cdot\nabla</em><em t-1="t-1">t}\text{sim}(\boldsymbol{x}_t, \boldsymbol{y})}<br />
+\end{equation}<br />
+假设此近似程度已经足够，那么除去与$\boldsymbol{x}</em>$无关的项，我们得到<br />
+\begin{equation}p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{y})\propto p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)e^{\gamma\cdot(\boldsymbol{x}</em>}-\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t)\cdot\nabla</em><em t-1="t-1">t}\text{sim}(\boldsymbol{x}_t, \boldsymbol{y})}<br />
+\end{equation}<br />
+跟前面一样，代入$p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t)=\mathcal{N}(\boldsymbol{x}</em>};\boldsymbol{\mu}(\boldsymbol{x<em t-1="t-1">t),\sigma_t^2\boldsymbol{I})$，配方后得到<br />
+\begin{equation}p(\boldsymbol{x}</em>}|\boldsymbol{x<em t-1="t-1">t, \boldsymbol{y})\approx \mathcal{N}(\boldsymbol{x}</em>}; \boldsymbol{\mu}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t) + \sigma_t^2\gamma \nabla</em>)}_t} \text{sim}(\boldsymbol{x}_t, \boldsymbol{y}),\sigma_t^2\boldsymbol{I<br />
+\end{equation}</p>
+<p>这样一来，我们就不需要纠结$p(\boldsymbol{y}|\boldsymbol{x}_t)$的概率意义，而是只需要直接定义度量函数$\text{sim}(\boldsymbol{x}_t, \boldsymbol{y})$，这里的$\boldsymbol{y}$也不再是仅限于“类别”，也可以是文本、图像等任意输入信号，通常的处理方式是用各自的编码器将其编码为特征向量，然后用cos相似度：<br />
+\begin{equation}\text{sim}(\boldsymbol{x}_t, \boldsymbol{y}) = \frac{E_1(\boldsymbol{x}_t)\cdot E_2(\boldsymbol{y})}{\Vert E_1(\boldsymbol{x}_t)\Vert \Vert E_2(\boldsymbol{y})\Vert}\end{equation}<br />
+要指出的是，中间过程的$\boldsymbol{x}_t$是带高斯噪声的，所以编码器$E_1$一般不能直接调用干净数据训练的编码器，而是要用加噪声后的数据对它进行微调才比较好。此外，如果做风格迁移的，通常则是用Gram矩阵距离而不是cos相似度，这些都看场景发挥了。以上便是论文<a href="https://papers.cool/arxiv/2112.05744">《More Control for Free! Image Synthesis with Semantic Diffusion Guidance》</a>的一系列结果，更多细节可以自行参考原论文。</p>
+<h2 id="_6">连续情形</h2>
+<p>经过前面的推导，我们得到均值的修正项为$\sigma_t^2 \gamma \nabla_{\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)$或$\sigma_t^2\gamma \nabla</em>)$，它们都有一个共同特点，就是$\sigma_t=0$时，修正项也等于0，修正就失效了。}_t} \text{sim}(\boldsymbol{x}_t, \boldsymbol{y</p>
+<p>那么生成过程的$\sigma_t$可以等于0吗？肯定可以，比如<a href="/archives/9181">《生成扩散模型漫谈（四）：DDIM = 高观点DDPM》</a>介绍的DDIM，就是方差为0的生成过程，这种情况下应该怎样做控制生成呢？此时我们需要用到<a href="/archives/9228">《生成扩散模型漫谈（六）：一般框架之ODE篇》</a>介绍的基于SDE的一般结果了，在里边我们介绍到，对于前向SDE：<br />
+\begin{equation}d\boldsymbol{x} = \boldsymbol{f}<em _boldsymbol_x="\boldsymbol{x">t(\boldsymbol{x}) dt + g_t d\boldsymbol{w}\end{equation}<br />
+对应的最一般的反向SDE为<br />
+\begin{equation}d\boldsymbol{x} = \left(\boldsymbol{f}_t(\boldsymbol{x}) - \frac{1}{2}(g_t^2 + \sigma_t^2)\nabla</em>}}\log p_t(\boldsymbol{x})\right) dt + \sigma_t d\boldsymbol{w}\end{equation<br />
+这里允许我们自由选择反向方差$\sigma_t^2$，DDPM、DDIM都可以认为是它的特例，其中$\sigma_t=0$时就是一般化的DDIM。可以看到，反向SDE跟输入有关的就是$\nabla_{\boldsymbol{x}}\log p_t(\boldsymbol{x})$，如果要做条件生成，自然是要将它换成$\nabla_{\boldsymbol{x}}\log p_t(\boldsymbol{x}|\boldsymbol{y})$，然后利用贝叶斯定理，有<br />
+\begin{equation}\nabla_{\boldsymbol{x}}\log p_t(\boldsymbol{x}|\boldsymbol{y}) = \nabla_{\boldsymbol{x}}\log p_t(\boldsymbol{x}) + \nabla_{\boldsymbol{x}}\log p_t(\boldsymbol{y}|\boldsymbol{x})\end{equation}<br />
+在一般的参数化下有$\nabla_{\boldsymbol{x}}\log p_t(\boldsymbol{x}) = -\frac{\boldsymbol{\epsilon}<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)}{\bar{\beta}_t}$，因此<br />
+\begin{equation}\nabla</em>}}\log p_t(\boldsymbol{x}|\boldsymbol{y}) = -\frac{\boldsymbol{\epsilon<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)}{\bar{\beta}_t} + \nabla</em>}}\log p_t(\boldsymbol{y}|\boldsymbol{x}) = -\frac{\boldsymbol{\epsilon<em _boldsymbol_x="\boldsymbol{x">{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) - \bar{\beta}_t\nabla</em>}}\log p_t(\boldsymbol{y}|\boldsymbol{x})}{\bar{\beta<em _boldsymbol_theta="\boldsymbol{\theta">t}\end{equation}<br />
+这就意味着，不管生成方差是多少，我们只需要用$\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, t) - \bar{\beta}_t\nabla</em>_t, t)$就可以实现条件控制生成了。因此，在SDE的统一视角下，我们可以非常简单而直接地得到Classifier-Guidance方案的最一般结果。}}\log p_t(\boldsymbol{y}|\boldsymbol{x})$代替$\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x</p>
+<h2 id="_7">无分类器</h2>
+<p>最后，我们来简单介绍一下Classifier-Free方案。其实很简单，它就是直接定义<br />
+\begin{equation}p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) = \mathcal{N}(\boldsymbol{x}</em>}; \boldsymbol{\mu}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, \boldsymbol{y}),\sigma_t^2\boldsymbol{I})<br />
+\end{equation}<br />
+沿用前面DDPM的几篇文章的结果，$\boldsymbol{\mu}(\boldsymbol{x}_t, \boldsymbol{y})$一般参数化为<br />
+\begin{equation}\boldsymbol{\mu}(\boldsymbol{x}_t, \boldsymbol{y}) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_x="\boldsymbol{x">t, \boldsymbol{y}, t)\right)\end{equation}<br />
+训练的损失函数就是<br />
+\begin{equation}\mathbb{E}</em><em _boldsymbol_theta="\boldsymbol{\theta">0,\boldsymbol{y}\sim\tilde{p}(\boldsymbol{x}_0,\boldsymbol{y}), \boldsymbol{\varepsilon}\sim\mathcal{N}(\boldsymbol{0}, \boldsymbol{I})}\left[\left\Vert\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}</em>}}(\bar{\alpha}_t \boldsymbol{x}_0 + \bar{\beta}_t \boldsymbol{\varepsilon}, \boldsymbol{y}, t)\right\Vert^2\right]\end{equation<br />
+它的优点是在训练过程中就引入了额外的输入$\boldsymbol{y}$，理论上输入信息越多越容易训练；它的缺点也是在训练过程中就引入了额外的输入$\boldsymbol{y}$，意味着每做一组信号控制，就要重新训练整个扩散模型。</p>
+<p>特别地，Classifier-Free方案也模仿Classifier-Guidance方案加入了$\gamma$参数的缩放机制来平衡相关性与多样性。具体来说，式$\eqref{eq:gamma-sample}$的均值可以改写成：<br />
+\begin{equation}\boldsymbol{\mu}(\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t) + \sigma_t^2 \gamma \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) = \gamma\left[\boldsymbol{\mu}(\boldsymbol{x}_t) + \sigma_t^2 \nabla</em><em _boldsymbol_x="\boldsymbol{x">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)\right] - (\gamma - 1) \boldsymbol{\mu}(\boldsymbol{x}_t)\end{equation}<br />
+Classifier-Free方案相当于直接用直接用模型拟合了$\boldsymbol{\mu}(\boldsymbol{x}_t) + \sigma_t^2 \nabla</em><em _boldsymbol_theta="\boldsymbol{\theta">t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)$，那么类比上式，我们也可以在Classifier-Free方案中引入$w=\gamma - 1$参数，用<br />
+\begin{equation}\tilde{\boldsymbol{\epsilon}}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, \boldsymbol{y}, t) = (1 + w)\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, \boldsymbol{y}, t) - w \boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)\end{equation}<br />
+代替$\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, \boldsymbol{y}, t)$来做生成。那无条件的$\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)$怎么来呢？我们可以新引入一个特定的输入$\boldsymbol{\phi}$，它对应的目标图像为全体图像，加到了模型的训练中，这样我们就可以认为$\boldsymbol{\epsilon}</em>}}(\boldsymbol{x<em _boldsymbol_theta="\boldsymbol{\theta">t, t)=\boldsymbol{\epsilon}</em>, t)$了。}}(\boldsymbol{x}_t, \boldsymbol{\phi</p>
+<h2 id="_8">文章小结</h2>
+<p>本文简单介绍了建立条件扩散模型的相关理论结果，主要包含事后修改（Classifier-Guidance）和事前训练（Classifier-Free）两种方案。其中，前者不需要重新训练扩散模型，可以低成本实现简单的控制；后者需要重新训练扩散模型，成本较大，但可以实现比较精细的控制。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9257">https://spaces.ac.cn/archives/9257</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Aug. 30, 2022). 《生成扩散模型漫谈（九）：条件控制生成结果 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9257">https://spaces.ac.cn/archives/9257</a></p>
+<p>@online{kexuefm-9257,<br />
+title={生成扩散模型漫谈（九）：条件控制生成结果},<br />
+author={苏剑林},<br />
+year={2022},<br />
+month={Aug},<br />
+url={\url{https://spaces.ac.cn/archives/9257}},<br />
+} </p>
+<hr />
+<h2 id="_9">公式推导与注释</h2>
+<h3 id="1">1. 核心概念与理论基础</h3>
+<h4 id="11">1.1 条件生成的动机</h4>
+<p>在无条件扩散模型中,生成过程为:
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) \tag{1}$$</p>
+<p>这会随机生成数据分布中的样本,但我们无法控制生成什么内容。</p>
+<p><strong>条件生成的目标:</strong> 给定条件$\boldsymbol{y}$(如类别、文本、图像等),生成满足该条件的样本:
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) \tag{2}$$</p>
+<p><strong>两种主要方案:</strong>
+1. <strong>Classifier-Guidance (CG):</strong> 事后修改,使用分类器引导已训练的无条件模型
+2. <strong>Classifier-Free (CF):</strong> 事前训练,在训练时直接加入条件信号</p>
+<h4 id="12">1.2 扩散模型的生成过程回顾</h4>
+<p>标准的DDPM生成过程建模为:
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{x}_{t-1}; \boldsymbol{\mu}(\boldsymbol{x}_t), \sigma_t^2\boldsymbol{I}) \tag{3}$$</p>
+<p>其中均值参数化为:
+$$\boldsymbol{\mu}(\boldsymbol{x}_t) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)\right) \tag{4}$$</p>
+<p>采样过程为:
+$$\boldsymbol{x}_{t-1} = \boldsymbol{\mu}(\boldsymbol{x}_t) + \sigma_t\boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{5}$$</p>
+<h3 id="2-classifier-guidance">2. Classifier-Guidance方案的推导</h3>
+<h4 id="21">2.1 贝叶斯定理的应用</h4>
+<p><strong>目标:</strong> 将无条件分布$p(\boldsymbol{x}<em t-1="t-1">{t-1}|\boldsymbol{x}_t)$转化为条件分布$p(\boldsymbol{x}</em>)$。}|\boldsymbol{x}_t, \boldsymbol{y</p>
+<p><strong>基本贝叶斯定理:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{y}) = \frac{p(\boldsymbol{x}_{t-1})p(\boldsymbol{y}|\boldsymbol{x}_{t-1})}{p(\boldsymbol{y})} \tag{6}$$</p>
+<p><strong>在每项上添加条件$\boldsymbol{x}_t$:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) = \frac{p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)p(\boldsymbol{y}|\boldsymbol{x}_{t-1}, \boldsymbol{x}_t)}{p(\boldsymbol{y}|\boldsymbol{x}_t)} \tag{7}$$</p>
+<p><strong>关键观察:</strong> 在前向扩散过程中,$\boldsymbol{x}<em t-1="t-1">t$由$\boldsymbol{x}</em>$加噪声得到:
+$$\boldsymbol{x}_t = \alpha_t\boldsymbol{x}_{t-1} + \beta_t\boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{8}$$</p>
+<p><strong>直觉理解:</strong> 噪声$\boldsymbol{\varepsilon}$不包含任何语义信息,因此:
+$$p(\boldsymbol{y}|\boldsymbol{x}_{t-1}, \boldsymbol{x}_t) = p(\boldsymbol{y}|\boldsymbol{x}_{t-1}) \tag{9}$$</p>
+<p><strong>最终贝叶斯形式:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) = \frac{p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t)p(\boldsymbol{y}|\boldsymbol{x}_{t-1})}{p(\boldsymbol{y}|\boldsymbol{x}_t)} \tag{10}$$</p>
+<p><strong>对数形式改写:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) = p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) \exp\left[\log p(\boldsymbol{y}|\boldsymbol{x}_{t-1}) - \log p(\boldsymbol{y}|\boldsymbol{x}_t)\right] \tag{11}$$</p>
+<h4 id="22">2.2 泰勒展开与近似</h4>
+<p><strong>假设:</strong> 当$T$足够大时,$\sigma_t^2$足够小,$\boldsymbol{x}_{t-1}$和$\boldsymbol{x}_t$非常接近。</p>
+<p><strong>在$\boldsymbol{x}_t$处对对数概率进行一阶泰勒展开:</strong>
+$$\log p(\boldsymbol{y}|\boldsymbol{x}_{t-1}) \approx \log p(\boldsymbol{y}|\boldsymbol{x}_t) + (\boldsymbol{x}_{t-1} - \boldsymbol{x}_t) \cdot \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) + \frac{1}{2}(\boldsymbol{x}_{t-1} - \boldsymbol{x}_t)^T H (\boldsymbol{x}_{t-1} - \boldsymbol{x}_t) \tag{12}$$</p>
+<p>其中$H$是Hessian矩阵。</p>
+<p><strong>简化近似(忽略二阶项):</strong>
+$$\log p(\boldsymbol{y}|\boldsymbol{x}_{t-1}) - \log p(\boldsymbol{y}|\boldsymbol{x}_t) \approx (\boldsymbol{x}_{t-1} - \boldsymbol{x}_t) \cdot \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) \tag{13}$$</p>
+<p><strong>注意:</strong> 关于时间$t$的变化项$\frac{\partial}{\partial t}\log p(\boldsymbol{y}|\boldsymbol{x}<em t-1="t-1">t)$与$\boldsymbol{x}</em>$无关,因此在概率归一化时会被吸收为常数。</p>
+<h4 id="23">2.3 配方得到条件分布</h4>
+<p><strong>代入无条件高斯分布:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) = \mathcal{N}(\boldsymbol{x}_{t-1}; \boldsymbol{\mu}(\boldsymbol{x}_t), \sigma_t^2\boldsymbol{I}) \propto \exp\left[-\frac{1}{2\sigma_t^2}\|\boldsymbol{x}_{t-1} - \boldsymbol{\mu}(\boldsymbol{x}_t)\|^2\right] \tag{14}$$</p>
+<p><strong>结合泰勒展开结果:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) \propto \exp\left[-\frac{1}{2\sigma_t^2}\|\boldsymbol{x}_{t-1} - \boldsymbol{\mu}(\boldsymbol{x}_t)\|^2 + (\boldsymbol{x}_{t-1} - \boldsymbol{x}_t) \cdot \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)\right] \tag{15}$$</p>
+<p><strong>展开二次项:</strong>
+$$-\frac{1}{2\sigma_t^2}\|\boldsymbol{x}_{t-1} - \boldsymbol{\mu}(\boldsymbol{x}_t)\|^2 = -\frac{1}{2\sigma_t^2}\left[\|\boldsymbol{x}_{t-1}\|^2 - 2\boldsymbol{x}_{t-1} \cdot \boldsymbol{\mu}(\boldsymbol{x}_t) + \|\boldsymbol{\mu}(\boldsymbol{x}_t)\|^2\right] \tag{16}$$</p>
+<p><strong>一次项:</strong>
+$$(\boldsymbol{x}_{t-1} - \boldsymbol{x}_t) \cdot \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) = \boldsymbol{x}_{t-1} \cdot \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) - \boldsymbol{x}_t \cdot \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) \tag{17}$$</p>
+<p><strong>合并$\boldsymbol{x}_{t-1}$的一次项:</strong>
+$$\boldsymbol{x}_{t-1} \cdot \left[\frac{1}{\sigma_t^2}\boldsymbol{\mu}(\boldsymbol{x}_t) + \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)\right] \tag{18}$$</p>
+<p><strong>配方得到新的均值:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) \propto \exp\left[-\frac{1}{2\sigma_t^2}\left\|\boldsymbol{x}_{t-1} - \left[\boldsymbol{\mu}(\boldsymbol{x}_t) + \sigma_t^2 \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)\right]\right\|^2\right] \tag{19}$$</p>
+<p><strong>最终条件分布:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) \approx \mathcal{N}(\boldsymbol{x}_{t-1}; \boldsymbol{\mu}(\boldsymbol{x}_t) + \sigma_t^2 \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t), \sigma_t^2\boldsymbol{I}) \tag{20}$$</p>
+<h4 id="24">2.4 条件采样算法</h4>
+<p><strong>修正后的采样公式:</strong>
+$$\boldsymbol{x}_{t-1} = \boldsymbol{\mu}(\boldsymbol{x}_t) + \sigma_t^2 \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) + \sigma_t\boldsymbol{\varepsilon}, \quad \boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I}) \tag{21}$$</p>
+<p><strong>梯度项$\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)$的含义:</strong>
+- 这是对数似然的梯度,指向使条件概率$p(\boldsymbol{y}|\boldsymbol{x}_t)$增大的方向
+- 本质上是一个"引导力",将生成过程推向满足条件$\boldsymbol{y}$的样本</p>
+<p><strong>分类器的选择:</strong>
+- <strong>理想情况:</strong> 训练对加噪样本$\boldsymbol{x}_t$的分类器$p(\boldsymbol{y}|\boldsymbol{x}_t)$
+- <strong>实践替代:</strong> 使用无噪分类器$p_o(\boldsymbol{y}|\boldsymbol{x})$,先去噪再分类:
+  $$p(\boldsymbol{y}|\boldsymbol{x}_t) \approx p_o(\boldsymbol{y}|\boldsymbol{\mu}(\boldsymbol{x}_t)) \tag{22}$$</p>
+<h3 id="3">3. 梯度缩放与强度控制</h3>
+<h4 id="31-gamma">3.1 引入缩放参数$\gamma$</h4>
+<p><strong>动机:</strong> 原始梯度可能过强或过弱,需要调节控制强度。</p>
+<p><strong>修正的采样公式:</strong>
+$$\boldsymbol{x}_{t-1} = \boldsymbol{\mu}(\boldsymbol{x}_t) + \sigma_t^2 \gamma \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) + \sigma_t\boldsymbol{\varepsilon} \tag{23}$$</p>
+<p><strong>效果分析:</strong>
+- $\gamma &gt; 1$: 增强条件信号,提高相关性,降低多样性
+- $\gamma &lt; 1$: 减弱条件信号,降低相关性,提高多样性
+- $\gamma = 1$: 原始理论推导的结果</p>
+<h4 id="32">3.2 幂操作的理论解释(有瑕疵)</h4>
+<p><strong>原论文的尝试:</strong> 定义锐化的条件分布
+$$\tilde{p}(\boldsymbol{y}|\boldsymbol{x}_t) = \frac{p^{\gamma}(\boldsymbol{y}|\boldsymbol{x}_t)}{Z(\boldsymbol{x}_t)}, \quad Z(\boldsymbol{x}_t) = \sum_{\boldsymbol{y}} p^{\gamma}(\boldsymbol{y}|\boldsymbol{x}_t) \tag{24}$$</p>
+<p><strong>对数梯度:</strong>
+$$\nabla_{\boldsymbol{x}_t} \log \tilde{p}(\boldsymbol{y}|\boldsymbol{x}_t) = \gamma \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) - \nabla_{\boldsymbol{x}_t} \log Z(\boldsymbol{x}_t) \tag{25}$$</p>
+<p><strong>问题:</strong> 原论文错误地认为$Z(\boldsymbol{x}_t)$是常数,但实际上:
+$$Z(\boldsymbol{x}_t) = \sum_{\boldsymbol{y}} p^{\gamma}(\boldsymbol{y}|\boldsymbol{x}_t) \tag{26}$$</p>
+<p>显式依赖于$\boldsymbol{x}<em _boldsymbol_x="\boldsymbol{x">t$,因此$\nabla</em>_t) \neq 0$。}_t} \log Z(\boldsymbol{x</p>
+<p><strong>展开归一化常数的梯度:</strong>
+$$\nabla_{\boldsymbol{x}_t} \log Z(\boldsymbol{x}_t) = \frac{1}{Z(\boldsymbol{x}_t)} \nabla_{\boldsymbol{x}_t} Z(\boldsymbol{x}_t) = \frac{1}{Z(\boldsymbol{x}_t)} \sum_{\boldsymbol{y}} \gamma p^{\gamma}(\boldsymbol{y}|\boldsymbol{x}_t) \nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t) \tag{27}$$</p>
+<p>简化为:
+$$\nabla_{\boldsymbol{x}_t} \log Z(\boldsymbol{x}_t) = \gamma \mathbb{E}_{\boldsymbol{y} \sim \tilde{p}(\boldsymbol{y}|\boldsymbol{x}_t)}[\nabla_{\boldsymbol{x}_t} \log p(\boldsymbol{y}|\boldsymbol{x}_t)] \tag{28}$$</p>
+<p><strong>结论:</strong> 这个理论解释不完全正确,但在$\gamma = 1$附近可能有一定的近似性。</p>
+<h4 id="33">3.3 基于相似度的更好理解</h4>
+<p><strong>重新定义条件分布:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) = \frac{p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) \exp[\gamma \cdot \text{sim}(\boldsymbol{x}_{t-1}, \boldsymbol{y})]}{Z(\boldsymbol{x}_t, \boldsymbol{y})} \tag{29}$$</p>
+<p>其中$\text{sim}(\boldsymbol{x}_{t-1}, \boldsymbol{y})$是任意相似度函数。</p>
+<p><strong>归一化常数:</strong>
+$$Z(\boldsymbol{x}_t, \boldsymbol{y}) = \int p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) \exp[\gamma \cdot \text{sim}(\boldsymbol{x}_{t-1}, \boldsymbol{y})] d\boldsymbol{x}_{t-1} \tag{30}$$</p>
+<p><strong>泰勒展开(在$\boldsymbol{x}_{t-1} = \boldsymbol{x}_t$处):</strong>
+$$\text{sim}(\boldsymbol{x}_{t-1}, \boldsymbol{y}) \approx \text{sim}(\boldsymbol{x}_t, \boldsymbol{y}) + (\boldsymbol{x}_{t-1} - \boldsymbol{x}_t) \cdot \nabla_{\boldsymbol{x}_t} \text{sim}(\boldsymbol{x}_t, \boldsymbol{y}) \tag{31}$$</p>
+<p><strong>代入条件分布(忽略归一化常数):</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) \propto p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t) \exp[\gamma(\boldsymbol{x}_{t-1} - \boldsymbol{x}_t) \cdot \nabla_{\boldsymbol{x}_t} \text{sim}(\boldsymbol{x}_t, \boldsymbol{y})] \tag{32}$$</p>
+<p><strong>配方得到:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) \approx \mathcal{N}(\boldsymbol{x}_{t-1}; \boldsymbol{\mu}(\boldsymbol{x}_t) + \sigma_t^2 \gamma \nabla_{\boldsymbol{x}_t} \text{sim}(\boldsymbol{x}_t, \boldsymbol{y}), \sigma_t^2\boldsymbol{I}) \tag{33}$$</p>
+<p><strong>常用相似度函数:</strong></p>
+<ol>
+<li>
+<p><strong>对数概率(原始CG):</strong>
+   $$\text{sim}(\boldsymbol{x}_t, \boldsymbol{y}) = \log p(\boldsymbol{y}|\boldsymbol{x}_t) \tag{34}$$</p>
+</li>
+<li>
+<p><strong>余弦相似度(适用于图像/文本编码):</strong>
+   $$\text{sim}(\boldsymbol{x}_t, \boldsymbol{y}) = \frac{E_1(\boldsymbol{x}_t) \cdot E_2(\boldsymbol{y})}{\|E_1(\boldsymbol{x}_t)\| \|E_2(\boldsymbol{y})\|} \tag{35}$$
+   其中$E_1, E_2$是编码器。</p>
+</li>
+<li>
+<p><strong>负欧氏距离:</strong>
+   $$\text{sim}(\boldsymbol{x}_t, \boldsymbol{y}) = -\|E_1(\boldsymbol{x}_t) - E_2(\boldsymbol{y})\|^2 \tag{36}$$</p>
+</li>
+</ol>
+<p><strong>优点:</strong> 这个框架更灵活,可以处理各种条件信号(类别、文本、图像等)。</p>
+<h3 id="4-sde">4. SDE视角下的统一理论</h3>
+<h4 id="41-sde">4.1 随机微分方程(SDE)框架</h4>
+<p><strong>前向SDE:</strong>
+$$d\boldsymbol{x} = \boldsymbol{f}_t(\boldsymbol{x})dt + g_t d\boldsymbol{w} \tag{37}$$</p>
+<p>其中:
+- $\boldsymbol{f}_t(\boldsymbol{x})$: 漂移项
+- $g_t$: 扩散系数
+- $d\boldsymbol{w}$: 维纳过程(布朗运动)</p>
+<p><strong>反向SDE(最一般形式):</strong>
+$$d\boldsymbol{x} = \left[\boldsymbol{f}_t(\boldsymbol{x}) - \frac{1}{2}(g_t^2 + \sigma_t^2)\nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x})\right]dt + \sigma_t d\boldsymbol{w} \tag{38}$$</p>
+<p><strong>重要参数:</strong> $\sigma_t^2$是反向扩散系数,可以自由选择:
+- $\sigma_t = 0$: 对应DDIM(确定性ODE)
+- $\sigma_t = g_t$: 对应DDPM(标准反向SDE)</p>
+<h4 id="42-sde">4.2 条件生成的SDE形式</h4>
+<p><strong>无条件得分函数:</strong>
+$$\nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x}) \tag{39}$$</p>
+<p>在DDPM参数化下:
+$$\nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x}) = -\frac{\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)}{\bar{\beta}_t} \tag{40}$$</p>
+<p><strong>条件得分函数(应用贝叶斯):</strong>
+$$\nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x}|\boldsymbol{y}) = \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x}) + \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{y}|\boldsymbol{x}) \tag{41}$$</p>
+<p><strong>参数化形式:</strong>
+$$\nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x}|\boldsymbol{y}) = -\frac{\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t)}{\bar{\beta}_t} + \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{y}|\boldsymbol{x}) \tag{42}$$</p>
+<p><strong>等价于修正噪声预测:</strong>
+$$\nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{x}|\boldsymbol{y}) = -\frac{\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) - \bar{\beta}_t \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{y}|\boldsymbol{x})}{\bar{\beta}_t} \tag{43}$$</p>
+<p><strong>定义修正后的噪声预测器:</strong>
+$$\tilde{\boldsymbol{\epsilon}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, \boldsymbol{y}) = \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t) - \bar{\beta}_t \nabla_{\boldsymbol{x}} \log p_t(\boldsymbol{y}|\boldsymbol{x}) \tag{44}$$</p>
+<h4 id="43">4.3 统一的条件采样算法</h4>
+<p><strong>核心思想:</strong> 无论反向方差$\sigma_t$取何值,只需用$\tilde{\boldsymbol{\epsilon}}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}$替换$\boldsymbol{\epsilon}</em>$。}</p>
+<p><strong>DDPM式采样($\sigma_t = \beta_t$):</strong>
+$$\boldsymbol{x}_{t-1} = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\tilde{\boldsymbol{\epsilon}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, \boldsymbol{y})\right) + \sigma_t\boldsymbol{\varepsilon} \tag{45}$$</p>
+<p><strong>DDIM式采样($\sigma_t = 0$):</strong>
+$$\boldsymbol{x}_{t-1} = \sqrt{\bar{\alpha}_{t-1}}\left(\frac{\boldsymbol{x}_t - \bar{\beta}_t\tilde{\boldsymbol{\epsilon}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, \boldsymbol{y})}{\sqrt{\bar{\alpha}_t}}\right) + \sqrt{1 - \bar{\alpha}_{t-1}}\tilde{\boldsymbol{\epsilon}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, t, \boldsymbol{y}) \tag{46}$$</p>
+<p><strong>优点:</strong> SDE框架下,条件生成的处理非常统一和简洁,适用于所有反向过程变种。</p>
+<h3 id="5-classifier-free-guidance">5. Classifier-Free Guidance的推导</h3>
+<h4 id="51">5.1 直接建模条件分布</h4>
+<p><strong>策略:</strong> 在训练时直接学习条件生成过程。</p>
+<p><strong>条件分布定义:</strong>
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) = \mathcal{N}(\boldsymbol{x}_{t-1}; \boldsymbol{\mu}(\boldsymbol{x}_t, \boldsymbol{y}), \sigma_t^2\boldsymbol{I}) \tag{47}$$</p>
+<p><strong>参数化均值:</strong>
+$$\boldsymbol{\mu}(\boldsymbol{x}_t, \boldsymbol{y}) = \frac{1}{\alpha_t}\left(\boldsymbol{x}_t - \frac{\beta_t^2}{\bar{\beta}_t}\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t)\right) \tag{48}$$</p>
+<p><strong>训练目标:</strong>
+$$\mathcal{L}_{\text{CF}} = \mathbb{E}_{\boldsymbol{x}_0, \boldsymbol{y}, \boldsymbol{\varepsilon}, t}\left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}, \boldsymbol{y}, t)\|^2\right] \tag{49}$$</p>
+<p>其中:
+- $\boldsymbol{x}_0, \boldsymbol{y} \sim \tilde{p}(\boldsymbol{x}_0, \boldsymbol{y})$: 从训练数据采样
+- $\boldsymbol{\varepsilon} \sim \mathcal{N}(\boldsymbol{0}, \boldsymbol{I})$: 噪声
+- $t \sim \text{Uniform}(1, T)$: 时间步</p>
+<h4 id="52">5.2 引入无条件训练</h4>
+<p><strong>动机:</strong> 为了实现guidance缩放,需要同时学习条件和无条件模型。</p>
+<p><strong>混合训练策略:</strong>
+以概率$p_{\text{uncond}}$(如10-20%)随机丢弃条件$\boldsymbol{y}$:
+$$\boldsymbol{y}_{\text{train}} = \begin{cases}
+\boldsymbol{y} & \text{概率 } 1 - p_{\text{uncond}} \\
+\boldsymbol{\phi} & \text{概率 } p_{\text{uncond}}
+\end{cases} \tag{50}$$</p>
+<p>其中$\boldsymbol{\phi}$是特殊的"空条件"标记。</p>
+<p><strong>训练目标(修正):</strong>
+$$\mathcal{L}_{\text{CF}} = \mathbb{E}_{\boldsymbol{x}_0, \boldsymbol{y}_{\text{train}}, \boldsymbol{\varepsilon}, t}\left[\|\boldsymbol{\varepsilon} - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}, \boldsymbol{y}_{\text{train}}, t)\|^2\right] \tag{51}$$</p>
+<p><strong>学到的模型:</strong>
+- $\boldsymbol{\epsilon}<em _boldsymbol_theta="\boldsymbol{\theta">{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t)$: 条件噪声预测
+- $\boldsymbol{\epsilon}</em>, t)$: 无条件噪声预测}}(\boldsymbol{x}_t, \boldsymbol{\phi</p>
+<h4 id="53-guidance">5.3 Guidance缩放的推导</h4>
+<p><strong>目标:</strong> 类比Classifier-Guidance,引入缩放参数$w$来控制条件强度。</p>
+<p><strong>回顾CG的均值修正(式23):</strong>
+$$\boldsymbol{\mu}_{\text{CG}} = \boldsymbol{\mu}(\boldsymbol{x}_t) + \sigma_t^2\gamma\nabla_{\boldsymbol{x}_t}\log p(\boldsymbol{y}|\boldsymbol{x}_t) \tag{52}$$</p>
+<p><strong>贝叶斯分解:</strong>
+$$\nabla_{\boldsymbol{x}_t}\log p(\boldsymbol{y}|\boldsymbol{x}_t) = \nabla_{\boldsymbol{x}_t}\log p(\boldsymbol{x}_t|\boldsymbol{y}) - \nabla_{\boldsymbol{x}_t}\log p(\boldsymbol{x}_t) \tag{53}$$</p>
+<p><strong>用噪声预测表示得分:</strong>
+$$\nabla_{\boldsymbol{x}_t}\log p(\boldsymbol{x}_t|\boldsymbol{y}) = -\frac{\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t)}{\bar{\beta}_t} \tag{54}$$
+$$\nabla_{\boldsymbol{x}_t}\log p(\boldsymbol{x}_t) = -\frac{\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{\phi}, t)}{\bar{\beta}_t} \tag{55}$$</p>
+<p><strong>条件对数似然的梯度:</strong>
+$$\nabla_{\boldsymbol{x}_t}\log p(\boldsymbol{y}|\boldsymbol{x}_t) = -\frac{1}{\bar{\beta}_t}\left[\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t) - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{\phi}, t)\right] \tag{56}$$</p>
+<p><strong>CG均值修正改写:</strong>
+$$\boldsymbol{\mu}_{\text{CG}} = \boldsymbol{\mu}(\boldsymbol{x}_t) - \frac{\sigma_t^2\gamma}{\bar{\beta}_t}\left[\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t) - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{\phi}, t)\right] \tag{57}$$</p>
+<p><strong>进一步改写(提取公因子):</strong>
+$$\boldsymbol{\mu}_{\text{CG}} = \boldsymbol{\mu}(\boldsymbol{x}_t) - \frac{\sigma_t^2}{\bar{\beta}_t}\gamma\left[\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t) - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{\phi}, t)\right] \tag{58}$$</p>
+<p><strong>CF的类比思路:</strong>
+观察到CG的修正项形式为$\gamma[\text{conditional} - \text{unconditional}]$,CF采用类似的线性组合:</p>
+<p><strong>定义guidance scale:</strong> 令$w = \gamma - 1$,则:
+$$\gamma[\text{cond} - \text{uncond}] = (w+1)[\text{cond} - \text{uncond}] = (w+1)\text{cond} - (w+1)\text{uncond} \tag{59}$$</p>
+<p>改写为:
+$$= w\cdot\text{cond} + \text{cond} - w\cdot\text{uncond} - \text{uncond} = (1+w)\text{cond} - w\cdot\text{uncond} \tag{60}$$</p>
+<p><strong>CF的修正噪声预测:</strong>
+$$\tilde{\boldsymbol{\epsilon}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t) = (1+w)\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t) - w\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{\phi}, t) \tag{61}$$</p>
+<p><strong>常见的等价写法(令$s = 1+w$):</strong>
+$$\tilde{\boldsymbol{\epsilon}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t) = s\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t) + (1-s)\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{\phi}, t) \tag{62}$$</p>
+<p>或者:
+$$\tilde{\boldsymbol{\epsilon}}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t) = \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{\phi}, t) + w\left[\boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{y}, t) - \boldsymbol{\epsilon}_{\boldsymbol{\theta}}(\boldsymbol{x}_t, \boldsymbol{\phi}, t)\right] \tag{63}$$</p>
+<p><strong>参数效果:</strong>
+- $w = 0$ (或$s=1$): 纯条件生成
+- $w &gt; 0$ (或$s&gt;1$): 增强条件信号,提高相关性
+- $w &lt; 0$ (或$s&lt;1$): 减弱条件信号,提高多样性</p>
+<h4 id="54-cf">5.4 CF采样算法</h4>
+<p><strong>完整采样过程:</strong></p>
+<div class="codehilite"><pre><span></span><code><span class="err">输入</span><span class="o">:</span><span class="w"> </span><span class="err">条件</span><span class="n">y</span><span class="o">,</span><span class="w"> </span><span class="n">guidance</span><span class="w"> </span><span class="n">scale</span><span class="w"> </span><span class="n">w</span>
+<span class="err">初始化</span><span class="o">:</span><span class="w"> </span><span class="n">x_T</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">N</span><span class="o">(</span><span class="mi">0</span><span class="o">,</span><span class="w"> </span><span class="n">I</span><span class="o">)</span>
+
+<span class="k">for</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="mi">1</span><span class="o">:</span>
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">预测噪声</span><span class="o">(</span><span class="err">条件和无条件</span><span class="o">)</span>
+<span class="w">    </span><span class="n">eps_cond</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">epsilon_theta</span><span class="o">(</span><span class="n">x_t</span><span class="o">,</span><span class="w"> </span><span class="n">y</span><span class="o">,</span><span class="w"> </span><span class="n">t</span><span class="o">)</span>
+<span class="w">    </span><span class="n">eps_uncond</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">epsilon_theta</span><span class="o">(</span><span class="n">x_t</span><span class="o">,</span><span class="w"> </span><span class="err">φ</span><span class="o">,</span><span class="w"> </span><span class="n">t</span><span class="o">)</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="n">Guidance缩放</span>
+<span class="w">    </span><span class="n">eps_guided</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">(</span><span class="mi">1</span><span class="o">+</span><span class="n">w</span><span class="o">)*</span><span class="n">eps_cond</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">w</span><span class="o">*</span><span class="n">eps_uncond</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">计算均值</span>
+<span class="w">    </span><span class="n">mu</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">(</span><span class="n">x_t</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="o">(</span><span class="n">beta_t</span><span class="o">^</span><span class="mi">2</span><span class="w"> </span><span class="sr">/ bar_beta_t) * eps_guided) /</span><span class="w"> </span><span class="n">alpha_t</span>
+
+<span class="w">    </span><span class="err">#</span><span class="w"> </span><span class="err">采样</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="n">t</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mi">1</span><span class="o">:</span>
+<span class="w">        </span><span class="n">x_</span><span class="o">{</span><span class="n">t</span><span class="o">-</span><span class="mi">1</span><span class="o">}</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mu</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">sigma_t</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">epsilon</span><span class="o">,</span><span class="w"> </span><span class="n">epsilon</span><span class="w"> </span><span class="o">~</span><span class="w"> </span><span class="n">N</span><span class="o">(</span><span class="mi">0</span><span class="o">,</span><span class="w"> </span><span class="n">I</span><span class="o">)</span>
+<span class="w">    </span><span class="k">else</span><span class="o">:</span>
+<span class="w">        </span><span class="n">x_0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mu</span>
+
+<span class="k">return</span><span class="w"> </span><span class="n">x_0</span>
+</code></pre></div>
+
+<h3 id="6">6. 两种方案的深入对比</h3>
+<h4 id="61">6.1 理论对比</h4>
+<table>
+<thead>
+<tr>
+<th>维度</th>
+<th>Classifier-Guidance</th>
+<th>Classifier-Free</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>训练成本</td>
+<td>低(复用预训练模型)</td>
+<td>高(重新训练扩散模型)</td>
+</tr>
+<tr>
+<td>推理成本</td>
+<td>高(需要分类器梯度)</td>
+<td>中(需要两次前向传播)</td>
+</tr>
+<tr>
+<td>灵活性</td>
+<td>高(可后期更换分类器)</td>
+<td>低(条件固定在训练中)</td>
+</tr>
+<tr>
+<td>控制质量</td>
+<td>中等</td>
+<td>高(训练时直接优化)</td>
+</tr>
+<tr>
+<td>理论基础</td>
+<td>贝叶斯+泰勒展开</td>
+<td>直接建模</td>
+</tr>
+</tbody>
+</table>
+<h4 id="62">6.2 计算复杂度分析</h4>
+<p><strong>Classifier-Guidance每步:</strong>
+1. 扩散模型前向传播: $O(M)$
+2. 分类器前向传播: $O(C)$
+3. 分类器反向传播(求梯度): $O(C)$</p>
+<p>总计: $O(M + 2C)$</p>
+<p><strong>Classifier-Free每步:</strong>
+1. 条件模型前向传播: $O(M)$
+2. 无条件模型前向传播: $O(M)$</p>
+<p>总计: $O(2M)$</p>
+<p><strong>注:</strong> 实践中可以通过批处理同时计算两个前向传播,效率更高。</p>
+<h4 id="63">6.3 适用场景</h4>
+<p><strong>Classifier-Guidance适合:</strong>
+- 快速原型开发
+- 条件信号频繁变化
+- 预算有限,无法重新训练大模型
+- 需要多种控制方式</p>
+<p><strong>Classifier-Free适合:</strong>
+- 追求最高生成质量
+- 条件类型固定
+- 有充足的训练资源
+- 生产环境部署</p>
+<h3 id="7">7. 高级技巧与扩展</h3>
+<h4 id="71">7.1 多条件组合</h4>
+<p><strong>场景:</strong> 同时满足多个条件$\boldsymbol{y}_1, \boldsymbol{y}_2, \ldots, \boldsymbol{y}_K$。</p>
+<p><strong>CG的组合:</strong>
+$$\nabla_{\boldsymbol{x}_t}\log p(\boldsymbol{y}_1, \ldots, \boldsymbol{y}_K|\boldsymbol{x}_t) = \sum_{i=1}^K w_i \nabla_{\boldsymbol{x}_t}\log p(\boldsymbol{y}_i|\boldsymbol{x}_t) \tag{64}$$</p>
+<p>其中$w_i$是各条件的权重。</p>
+<p><strong>CF的组合:</strong> 需要训练联合条件模型或使用组合策略:
+$$\tilde{\boldsymbol{\epsilon}} = \boldsymbol{\epsilon}_{\text{uncond}} + \sum_{i=1}^K w_i[\boldsymbol{\epsilon}(\boldsymbol{y}_i) - \boldsymbol{\epsilon}_{\text{uncond}}] \tag{65}$$</p>
+<h4 id="72-negative-prompts">7.2 负条件(Negative Prompts)</h4>
+<p><strong>目标:</strong> 避免生成某些特征。</p>
+<p><strong>CF实现:</strong>
+$$\tilde{\boldsymbol{\epsilon}} = \boldsymbol{\epsilon}(\boldsymbol{y}_{\text{pos}}) + w_{\text{pos}}[\boldsymbol{\epsilon}(\boldsymbol{y}_{\text{pos}}) - \boldsymbol{\epsilon}_{\text{uncond}}] - w_{\text{neg}}[\boldsymbol{\epsilon}(\boldsymbol{y}_{\text{neg}}) - \boldsymbol{\epsilon}_{\text{uncond}}] \tag{66}$$</p>
+<h4 id="73-guidance">7.3 时间依赖的guidance</h4>
+<p><strong>动机:</strong> 不同时间步对guidance的敏感度不同。</p>
+<p><strong>时间依赖权重:</strong>
+$$w(t) = w_0 \cdot f(t) \tag{67}$$</p>
+<p>常见选择:
+- 线性: $f(t) = t/T$
+- 余弦: $f(t) = \cos(\pi t / 2T)$
+- 分段: $f(t) = \begin{cases} 0 &amp; t &lt; t_0 \ w_{\max} &amp; t_0 \leq t &lt; t_1 \ w_{\max}(T-t)/(T-t_1) &amp; t \geq t_1 \end{cases}$</p>
+<h3 id="8">8. 实现细节与技巧</h3>
+<h4 id="81">8.1 梯度计算的数值稳定性</h4>
+<p><strong>问题:</strong> 直接计算$\nabla_{\boldsymbol{x}_t}\log p(\boldsymbol{y}|\boldsymbol{x}_t)$可能数值不稳定。</p>
+<p><strong>解决方案:</strong>
+1. <strong>梯度裁剪:</strong>
+   $$\tilde{\nabla} = \begin{cases}
+   \nabla & \|\nabla\| \leq \tau \\
+   \tau \frac{\nabla}{\|\nabla\|} & \|\nabla\| > \tau
+   \end{cases} \tag{68}$$</p>
+<ol>
+<li><strong>归一化:</strong>
+   $$\tilde{\nabla} = \frac{\nabla}{\|\nabla\| + \epsilon} \tag{69}$$</li>
+</ol>
+<h4 id="82">8.2 编码器的训练</h4>
+<p><strong>对于基于相似度的CG:</strong> 编码器$E_1$需要对加噪样本鲁棒。</p>
+<p><strong>微调策略:</strong>
+1. 在干净数据上预训练编码器
+2. 对$\boldsymbol{x}_t = \bar{\alpha}_t\boldsymbol{x}_0 + \bar{\beta}_t\boldsymbol{\varepsilon}$进行微调
+3. 使用对比学习目标:
+   $$\mathcal{L}_{\text{enc}} = -\log \frac{\exp[\text{sim}(\boldsymbol{x}_t, \boldsymbol{y})/\tau]}{\sum_{\boldsymbol{y}'} \exp[\text{sim}(\boldsymbol{x}_t, \boldsymbol{y}')/\tau]} \tag{70}$$</p>
+<h4 id="83-classifier-free">8.3 Classifier-Free的高效实现</h4>
+<p><strong>批处理技巧:</strong> 将条件和无条件样本打包在同一批次:</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 输入</span>
+<span class="n">x_t</span><span class="p">:</span> <span class="p">[</span><span class="n">B</span><span class="p">,</span> <span class="n">C</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">W</span><span class="p">]</span>
+<span class="n">y</span><span class="p">:</span> <span class="p">[</span><span class="n">B</span><span class="p">,</span> <span class="n">D</span><span class="p">]</span>  <span class="c1"># 条件向量</span>
+
+<span class="c1"># 构建批次</span>
+<span class="n">x_double</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">x_t</span><span class="p">,</span> <span class="n">x_t</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># [2B, C, H, W]</span>
+<span class="n">y_double</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">y</span><span class="p">,</span> <span class="n">phi</span><span class="o">.</span><span class="n">expand</span><span class="p">(</span><span class="n">B</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)],</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># [2B, D]</span>
+
+<span class="c1"># 一次前向传播</span>
+<span class="n">eps_double</span> <span class="o">=</span> <span class="n">model</span><span class="p">(</span><span class="n">x_double</span><span class="p">,</span> <span class="n">y_double</span><span class="p">,</span> <span class="n">t</span><span class="p">)</span>  <span class="c1"># [2B, C, H, W]</span>
+
+<span class="c1"># 分离结果</span>
+<span class="n">eps_cond</span><span class="p">,</span> <span class="n">eps_uncond</span> <span class="o">=</span> <span class="n">eps_double</span><span class="o">.</span><span class="n">chunk</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+<span class="c1"># Guidance</span>
+<span class="n">eps_guided</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">w</span><span class="p">)</span> <span class="o">*</span> <span class="n">eps_cond</span> <span class="o">-</span> <span class="n">w</span> <span class="o">*</span> <span class="n">eps_uncond</span>
+</code></pre></div>
+
+<h3 id="9">9. 理论深入与数学洞察</h3>
+<h4 id="91-guidance">9.1 为什么guidance能工作?</h4>
+<p><strong>能量视角:</strong> 将条件分布看作能量模型:
+$$p(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) \propto \exp[-E(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y})] \tag{71}$$</p>
+<p>其中能量函数:
+$$E(\boldsymbol{x}_{t-1}|\boldsymbol{x}_t, \boldsymbol{y}) = \frac{1}{2\sigma_t^2}\|\boldsymbol{x}_{t-1} - \boldsymbol{\mu}(\boldsymbol{x}_t)\|^2 - \gamma\log p(\boldsymbol{y}|\boldsymbol{x}_{t-1}) \tag{72}$$</p>
+<p><strong>梯度下降解释:</strong> 采样过程相当于在能量景观上进行带噪声的梯度下降。</p>
+<h4 id="92-guidance">9.2 guidance的几何直观</h4>
+<p><strong>无条件采样:</strong> 沿着数据密度梯度$\nabla_{\boldsymbol{x}}\log p(\boldsymbol{x})$移动。</p>
+<p><strong>条件采样:</strong> 在数据密度梯度基础上,加上条件似然梯度$\nabla_{\boldsymbol{x}}\log p(\boldsymbol{y}|\boldsymbol{x})$,相当于在高维空间中:
+- 寻找数据流形
+- 同时满足条件约束</p>
+<p><strong>类比:</strong> 在山地上找路径:
+- 无条件: 顺着任意下山方向走
+- 条件: 在下山的同时,沿着指定方向(如向北)走</p>
+<h4 id="93-guidance">9.3 最优guidance强度的理论分析</h4>
+<p><strong>权衡:</strong> guidance强度$\gamma$控制两个目标:
+1. <strong>样本质量:</strong> 生成的样本应该像真实数据
+2. <strong>条件匹配:</strong> 生成的样本应该满足条件$\boldsymbol{y}$</p>
+<p><strong>形式化:</strong> 定义优化目标
+$$\max_{\boldsymbol{x}_0} \left[\log p(\boldsymbol{x}_0) + \lambda\log p(\boldsymbol{y}|\boldsymbol{x}_0)\right] \tag{73}$$</p>
+<p>其中$\lambda$对应guidance强度。</p>
+<p><strong>贝叶斯视角:</strong> 相当于调整先验和似然的相对权重:
+$$p(\boldsymbol{x}_0|\boldsymbol{y}) \propto p(\boldsymbol{x}_0) p(\boldsymbol{y}|\boldsymbol{x}_0)^{\lambda} \tag{74}$$</p>
+<p><strong>最优选择:</strong> 取决于具体应用:
+- 创意生成: 较小的$\lambda$
+- 精确控制: 较大的$\lambda$
+- 实践中通常$\lambda \in [5, 20]$</p>
+<h3 id="10">10. 应用案例与实验观察</h3>
+<h4 id="101-text-to-image">10.1 文生图(Text-to-Image)</h4>
+<p><strong>任务:</strong> 给定文本描述$\boldsymbol{y}_{\text{text}}$,生成对应图像。</p>
+<p><strong>技术栈:</strong>
+- 文本编码: CLIP, T5, BERT
+- CF guidance with $w \in [7, 15]$
+- 典型NFE: 50-100步</p>
+<p><strong>观察:</strong>
+- 过小的$w$: 图像质量高但与文本不符
+- 过大的$w$: 严格符合文本但可能过饱和、失真</p>
+<h4 id="102">10.2 超分辨率</h4>
+<p><strong>任务:</strong> 给定低分辨率图像$\boldsymbol{y}_{\text{lr}}$,生成高分辨率图像。</p>
+<p><strong>CG实现:</strong> 使用下采样一致性作为guidance:
+$$\text{sim}(\boldsymbol{x}_t, \boldsymbol{y}_{\text{lr}}) = -\|\text{Downsample}(\boldsymbol{x}_t) - \boldsymbol{y}_{\text{lr}}\|^2 \tag{75}$$</p>
+<h4 id="103">10.3 图像编辑</h4>
+<p><strong>任务:</strong> 给定源图像和编辑指令,生成编辑后的图像。</p>
+<p><strong>策略:</strong> 结合多种guidance:
+1. 文本guidance(编辑指令)
+2. 源图像的结构保持
+3. 局部区域的精确控制</p>
+<h3 id="11_1">11. 总结与展望</h3>
+<h4 id="111">11.1 核心要点回顾</h4>
+<p><strong>Classifier-Guidance:</strong>
+- 理论基础: 贝叶斯定理 + 泰勒展开
+- 核心公式: $\boldsymbol{\mu}<em _text_old="\text{old">{\text{new}} = \boldsymbol{\mu}</em>_t)$
+- 优点: 灵活,低训练成本
+- 缺点: 需要额外分类器,推理成本高}} + \sigma_t^2\gamma\nabla\log p(\boldsymbol{y}|\boldsymbol{x</p>
+<p><strong>Classifier-Free:</strong>
+- 理论基础: 直接建模条件分布
+- 核心公式: $\tilde{\boldsymbol{\epsilon}} = (1+w)\boldsymbol{\epsilon}(\boldsymbol{y}) - w\boldsymbol{\epsilon}(\boldsymbol{\phi})$
+- 优点: 高质量,无需额外模型
+- 缺点: 训练成本高,条件固定</p>
+<h4 id="112">11.2 未来研究方向</h4>
+<ol>
+<li><strong>自适应guidance:</strong> 根据生成阶段自动调整guidance强度</li>
+<li><strong>高效训练:</strong> 减少CF的训练成本</li>
+<li><strong>多模态融合:</strong> 更好地结合多种条件信号</li>
+<li><strong>理论完善:</strong> guidance缩放的严格理论基础</li>
+<li><strong>新型guidance:</strong> 探索基于物理约束、美学评分等新型guidance</li>
+</ol>
+<hr />
+<p><strong>参考文献:</strong>
+- Classifier-Guidance: <a href="https://papers.cool/arxiv/2105.05233">Diffusion Models Beat GANs on Image Synthesis</a>
+- Classifier-Free: <a href="https://papers.cool/arxiv/2207.12598">Classifier-Free Diffusion Guidance</a>
+- Semantic Guidance: <a href="https://papers.cool/arxiv/2112.05744">More Control for Free!</a></p>
+        </div>
+    </div>
+</body>
+</html>

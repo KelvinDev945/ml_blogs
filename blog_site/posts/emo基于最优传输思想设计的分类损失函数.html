@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EMO：基于最优传输思想设计的分类损失函数</title>
+    <style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6; color: #333; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f5f5;
+}
+.container { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+header { border-bottom: 2px solid #e0e0e0; padding-bottom: 20px; margin-bottom: 30px; }
+h1 { color: #2c3e50; margin-bottom: 10px; font-size: 2em; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 20px; }
+.content { margin-top: 30px; overflow-wrap: break-word; }
+.content h2 { color: #34495e; margin-top: 30px; margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
+.content p { margin-bottom: 15px; }
+.content pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; border-left: 3px solid #3498db; margin: 15px 0; }
+.content code { background: #f8f8f8; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.9em; }
+.content blockquote { border-left: 4px solid #3498db; padding-left: 20px; margin: 20px 0; color: #555; font-style: italic; }
+.content table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+.content th, .content td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+.back-link { display: inline-block; margin-bottom: 20px; color: #3498db; text-decoration: none; font-weight: 500; }
+</style>
+    
+<script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\(', '\)']],
+            displayMath: [['$$', '$$'], ['\[', '\]']],
+            processEscapes: true
+        }
+    };
+</script>
+<script id="MathJax-script" async src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</head>
+<body>
+    <div class="container">
+        <a href="../index.html" class="back-link">← 返回首页</a>
+        <header>
+            <h1>EMO：基于最优传输思想设计的分类损失函数</h1>
+            <div class="meta">📅 最后更新: 2026-01-05 | 📄 大小: 50.5 KB</div>
+        </header>
+        <div class="content">
+            <p><strong>原文链接</strong>: <a href="https://spaces.ac.cn/archives/9797">https://spaces.ac.cn/archives/9797</a></p>
+<p><strong>发布日期</strong>: </p>
+<hr />
+<p>众所周知，分类任务的标准损失是交叉熵（Cross Entropy，等价于最大似然MLE，即Maximum Likelihood Estimation），它有着简单高效的特点，但在某些场景下也暴露出一些问题，如偏离评价指标、过度自信等，相应的改进工作也有很多，此前我们也介绍过一些，比如<a href="/archives/7708">《再谈类别不平衡问题：调节权重与魔改Loss的对比联系》</a>、<a href="/archives/9098">《如何训练你的准确率？》</a>、<a href="/archives/9526">《缓解交叉熵过度自信的一个简明方案》</a>等。由于LLM的训练也可以理解为逐token的分类任务，默认损失也是交叉熵，因此这些改进工作在LLM流行的今天依然有一定的价值。</p>
+<p>在这篇文章中，我们介绍一篇名为<a href="https://papers.cool/arxiv/2310.04691">《EMO: Earth Mover Distance Optimization for Auto-Regressive Language Modeling》</a>的工作，它基于最优传输思想提出了新的改进损失函数EMO，声称能大幅提高LLM的微调效果。其中细节如何？让我们一探究竟。</p>
+<h2 id="_1">概率散度</h2>
+<p>假设$p_i$是模型预测的第$i$个类别的概率，$i=1,2,\cdots,n$，$t$则是目标类别，那么交叉熵损失为<br />
+\begin{equation}\mathcal{L} = - \log p_t\end{equation}<br />
+如果将标签$t$用one hot形式的分布$\tau$表示出来（即$\tau_t=1,\tau_i=0|i\neq t, i\in[1,n]$），那么它可以重写成<br />
+\begin{equation}\mathcal{L} = - \sum_i \tau_i\log p_i\end{equation}<br />
+这个形式同时适用于非one hot的标签$\tau$（即软标签），它等价于优化$\tau,p$的KL散度：<br />
+\begin{equation}KL(\tau\Vert p) = \sum_i \tau_i\log \frac{\tau_i}{p_i} = \color{skyblue}{\sum_i \tau_i\log \tau_i} - \sum_i \tau_i\log p_i\end{equation}<br />
+当$\tau$给定时，最右端第一项就是一个常数，所以它跟交叉熵目标是等价的。</p>
+<p>这个结果表明，我们在做MLE，或者说以交叉熵为损失时，实则就是在最小化目标分布和预测分布的KL散度。由于KL散度的一般推广是f散度（参考<a href="/archives/6016#f%E6%95%A3%E5%BA%A6">《f-GAN简介：GAN模型的生产车间》</a>），所以很自然想到换用其他f散度或许有改良作用。事实上，确实有不少工作是按照这个思路进行的，比如<a href="/archives/9526">《缓解交叉熵过度自信的一个简明方案》</a>介绍的方法，其论文的出发点是“Total Variation距离”，也是f散度的一种。</p>
+<h2 id="_2">最优传输</h2>
+<p>不过，每种f散度或多或少有些问题，要说概率分布之间的理想度量，当属基于最优传输思想的“推土机距离（Earth Mover's Distance，EMD）”，不了解的读者可以参考一下笔者之前写的<a href="/archives/6280">《从Wasserstein距离、对偶理论到WGAN》</a>。</p>
+<p>简单来说，推土机距离定义为两个分布之间的最优传输成本：<br />
+\begin{equation}\mathcal{C}[p,\tau]=\inf_{\gamma\in \Pi[p,\tau]} \sum_{i,j} \gamma_{i,j} c_{i,j} \end{equation}<br />
+这里的$\gamma\in \Pi[p,\tau]$说的是$\gamma$是任意以$p,\tau$为边缘分布的联合分布，$c_{i,j}$是实现给定的成本函数，代表“从$i$搬运到$j$的成本”，$\inf$是下确界，意思就是说将最低的运输成本作为$p,\tau$之间的差异度量。正如基于f散度的Vanilla GAN换成基于最优传输的Wasserstein GAN能够更好的收敛性质，我们期望如果将分类的损失函数换成两个分布的W距离，也能收敛到更好的结果。</p>
+<p>当$\tau$是one hot分布时，目标分布就是一个点$t$，那么就无所谓最不最优了，传输方案就只有一个，即把$p$的所有东西都搬到同一个点$t$，所以此时就有<br />
+\begin{equation}\mathcal{C}[p,\tau]= \sum_i p_i c_{i,t} \label{eq:emo}\end{equation}</p>
+<p>如果$\tau$是一般的软标签分布，那么$\mathcal{C}[p,\tau]$的计算是一个线性规划问题，求解起来比较复杂，由于$p_i \tau_j$所定义的分布也属于$\Pi[p,\tau]$，那么我们有<br />
+\begin{equation}\mathcal{C}[p,\tau]=\inf_{\gamma\in \Pi[p,\tau]} \sum_{i,j} \gamma_{i,j} c_{i,j} \leq \sum_{i,j} p_i \tau_j c_{i,j} \end{equation}<br />
+这是一个容易计算的上界，也可以作为优化目标，式$\eqref{eq:emo}$则对应$\tau_j = \delta_{j,t}$，其中$\delta$是“<a href="https://en.wikipedia.org/wiki/Kronecker_delta">克罗内克δ函数</a>”。</p>
+<h2 id="_3">成本函数</h2>
+<p>现在回到原论文所关心的场景——LLM的微调，包括二次预训练和微调到下游任务等。正如本文开头所述，LLM的训练可以理解为逐token的分类任务（类别即所有token），每个标签是one hot的，所以适用于式$\eqref{eq:emo}$。</p>
+<p>式$\eqref{eq:emo}$还差成本函数$c_{i,t}$还没定下来。如果简单地认为只要$i\neq t$，那么成本都是1，即$c_{i,t}=1 - \delta_{i,t}$，那么<br />
+\begin{equation}\mathcal{C}[p,\tau]= \sum_i p_i c_{i,t} = \sum_i (p_i - p_i \delta_{i, t}) = 1 - p_t\end{equation}<br />
+这其实就是在最大化准确率的光滑近似（参考<a href="/archives/6620#%E6%AD%A3%E7%A1%AE%E7%8E%87">《函数光滑化杂谈：不可导函数的可导逼近》</a>）。但直觉上，所有$i\neq t$都给予同样程度的惩罚似乎过于简单了，理想情况下应该根据相似度来给每个不同的$i$设计不同的成本，即相似度越大，传输成本越低，那么我们可以将传输成本设计为<br />
+\begin{equation}c_{i,t} = 1 - \cos(\boldsymbol{e}_i,\boldsymbol{e}_t) = 1 - \left\langle\frac{\boldsymbol{e}_i}{\Vert\boldsymbol{e}_i\Vert}, \frac{\boldsymbol{e}_t}{\Vert\boldsymbol{e}_t\Vert}\right\rangle\end{equation}<br />
+这里的$\boldsymbol{e}_i,\boldsymbol{e}_t$是事先获取到Token Embedding，原论文是将预训练模型的LM Head作为Token Embedding的，并且根据最优传输的定义成本函数是要实现给定的，因此计算相似度的Token Embedding要在训练过程中固定不变。</p>
+<p>有了成本函数后，我们就可以计算<br />
+\begin{equation}\mathcal{C}[p,\tau]= \sum_i p_i c_{i,t} = \sum_i \left(p_i - p_i \left\langle\frac{\boldsymbol{e}_i}{\Vert\boldsymbol{e}_i\Vert}, \frac{\boldsymbol{e}_t}{\Vert\boldsymbol{e}_t\Vert}\right\rangle\right) = 1 - \left\langle \sum_i p_i \frac{\boldsymbol{e}_i}{\Vert\boldsymbol{e}_i\Vert}, \frac{\boldsymbol{e}_t}{\Vert\boldsymbol{e}_t\Vert}\right\rangle\end{equation}<br />
+这就是EMO（<strong>E</strong> arth <strong>M</strong> over Distance <strong>O</strong> ptimization）最终的训练损失。由于embedding_size通常远小于vocab_size，所以先算$\sum\limits_i p_i \frac{\boldsymbol{e}_i}{\Vert\boldsymbol{e}_i\Vert}$能明显降低计算量。</p>
+<h2 id="_4">实验效果</h2>
+<p>由于笔者对LLM的研究还处于预训练阶段，还未涉及到微调，所以暂时没有自己的实验结果，只能先跟大家一起看看原论文的实验。不得不说，原论文的实验结果还是比较惊艳的。</p>
+<p>首先，是小模型上的继续预训练实验，相比交叉熵（MLE）的提升最多的有10个点，并且是全面SOTA：  </p>
+<p><a href="/usr/uploads/2023/10/765995927.png" title="点击查看原图"><img alt="小模型上的继续预训练对比实验" src="/usr/uploads/2023/10/765995927.png" /></a></p>
+<p>小模型上的继续预训练对比实验</p>
+<p>值得一提的是，这里的评价指标是MAUVE，越大越好，它提出自<a href="https://papers.cool/arxiv/2102.01454">《MAUVE: Measuring the Gap Between Neural Text and Human Text using Divergence Frontiers》</a>，是跟人工评价最相关的自动评测指标之一。此外，对比方法的TaiLr我们曾在<a href="/archives/9526">《缓解交叉熵过度自信的一个简明方案》</a>简单介绍过。</p>
+<p>可能有读者想EMO更好是不是单纯因为评价指标选得好？并不是，让人意外的是，EMO训练的模型，甚至PPL都更好（PPL跟MLE更相关）：  </p>
+<p><a href="/usr/uploads/2023/10/254031621.png" title="点击查看原图"><img alt="不同评价指标的对比" src="/usr/uploads/2023/10/254031621.png" /></a></p>
+<p>不同评价指标的对比</p>
+<p>然后是将LLAMA-7B/13B微调到下游任务做Few Shot的效果，同样很出色：  </p>
+<p><a href="/usr/uploads/2023/10/760182866.png" title="点击查看原图"><img alt="LLAMA-7B:13B微调到下游任务的效果" src="/usr/uploads/2023/10/760182866.png" /></a></p>
+<p>LLAMA-7B:13B微调到下游任务的效果</p>
+<p>最后对比了不同模型规模和数据规模的效果，显示出EMO在不同模型和数据规模上都有不错的表现：  </p>
+<p><a href="/usr/uploads/2023/10/1659559401.png" title="点击查看原图"><img alt="不同模型规模/数据规模上的效果" src="/usr/uploads/2023/10/1659559401.png" /></a></p>
+<p>不同模型规模/数据规模上的效果</p>
+<h2 id="_5">个人思考</h2>
+<p>总的来说，原论文的“成绩单”还是非常漂亮的，值得一试。唯一的疑虑可能是原论文的实验数据量其实都不算大，不清楚进一步增大数据量后是否会缩小EMO和MLE的差距。</p>
+<p>就笔者看来，EMO之所以能取得更好的结果，是因为它通过Embedding算相似度，来为“近义词”分配了更合理的损失，从而使得模型的学习更加合理。因为虽然形式上LLM也是分类任务，但它并不是一个简单的对与错问题，并不是说下一个预测的token跟标签token不一致，句子就不合理了，因此引入语义上的相似度来设计损失对LLM的训练是有帮助的。可以进一步猜测的是，vocab_size越大、token颗粒度越大的情况下，EMO的效果应该越好，因为vocab_size大了“近义词”就可能越多。</p>
+<p>当然，引入语义相似度也导致了EMO不适用于从零训练，因为它需要一个训练好的LM Head作为Token Embedding。当然，一个可能的解决方案是考虑用其他方式，比如经典的Word2Vec来事先训练好Token Embedding，但这可能会有一个风险，即经典方式训练的Token Embedding是否会降低LLM能力的天花板（毕竟存在不一致性）。</p>
+<p>此外，即便Token Embedding没问题，从零预训练时单纯用EMO可能还存在收敛过慢的问题，这是因为根据笔者在<a href="/archives/9098">《如何训练你的准确率？》</a>的末尾提出的损失函数视角：</p>
+<blockquote>
+<p>首先寻找评测指标的一个光滑近似，最好能表达成每个样本的期望形式，然后将错误方向的误差逐渐拉到无穷大（保证模型能更关注错误样本），但同时在正确方向保证与原始形式是一阶近似。</p>
+</blockquote>
+<p>也就是说，为了保证（从零训练的）收敛速度，错误方向的损失最好能拉到无穷大，而EMO显然不满足这一点，因此将EMO用于从零训练的时候，大概率是EMO与MLE的某个加权组合，才能平衡收敛速度和最终效果。</p>
+<h2 id="_6">文章小结</h2>
+<p>本文介绍了交叉熵损失的一个新的“替代品”——基于最优传输思想的EMO，与以往的小提升不同，EMO在LLM的微调实验中取得了较为明显的提升。</p>
+<p><em><strong>转载到请包括本文地址：</strong><a href="https://spaces.ac.cn/archives/9797">https://spaces.ac.cn/archives/9797</a></em></p>
+<p><em><strong>更详细的转载事宜请参考：</strong></em><a href="https://spaces.ac.cn/archives/6508#%E6%96%87%E7%AB%A0%E5%A6%82%E4%BD%95%E8%BD%AC%E8%BD%BD/%E5%BC%95%E7%94%A8" title="《科学空间FAQ》">《科学空间FAQ》</a></p>
+<p><strong>如果您还有什么疑惑或建议，欢迎在下方评论区继续讨论。</strong></p>
+<p><strong>如果您觉得本文还不错，欢迎分享/打赏本文。打赏并非要从中获得收益，而是希望知道科学空间获得了多少读者的真心关注。当然，如果你无视它，也不会影响你的阅读。再次表示欢迎和感谢！</strong></p>
+<p>打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/wx.png" /></p>
+<p>微信打赏</p>
+<p><img alt="科学空间" src="https://spaces.ac.cn/usr/themes/geekg/payment/zfb.png" /></p>
+<p>支付宝打赏</p>
+<p>因为网站后台对打赏并无记录，因此欢迎在打赏时候备注留言。你还可以<a href="http://mail.qq.com/cgi-bin/qm_share?t=qm_mailme&amp;email=tN7d1drY3drrx8H0xcWa19vZ"><strong>点击这里</strong></a>或在下方评论区留言来告知你的建议或需求。</p>
+<p><strong>如果您需要引用本文，请参考：</strong></p>
+<p>苏剑林. (Oct. 13, 2023). 《EMO：基于最优传输思想设计的分类损失函数 》[Blog post]. Retrieved from <a href="https://spaces.ac.cn/archives/9797">https://spaces.ac.cn/archives/9797</a></p>
+<p>@online{kexuefm-9797,<br />
+title={EMO：基于最优传输思想设计的分类损失函数},<br />
+author={苏剑林},<br />
+year={2023},<br />
+month={Oct},<br />
+url={\url{https://spaces.ac.cn/archives/9797}},<br />
+} </p>
+<hr />
+<h2 id="_7">公式推导与注释</h2>
+<h3 id="1">1. 最优传输理论基础</h3>
+<p><strong>Monge问题（1781）</strong>：最优传输理论起源于Monge的"土方搬运"问题。给定两个概率测度$\mu$和$\nu$，寻找最优的运输方案$T: \mathcal{X} \to \mathcal{Y}$使得运输成本最小：</p>
+<p>\begin{equation}
+\inf_{T: T_{#}\mu = \nu} \int_{\mathcal{X}} c(x, T(x)) d\mu(x) \tag{1}
+\end{equation}</p>
+<p>其中$c(x,y)$是从$x$到$y$的运输成本，$T_{#}\mu$表示测度$\mu$在$T$下的推前（pushforward）。</p>
+<p><strong>Kantorovich松弛（1942）</strong>：Kantorovich将Monge问题松弛为寻找联合分布$\gamma \in \Pi(\mu, \nu)$：</p>
+<p>\begin{equation}
+\mathcal{C}[\mu, \nu] = \inf_{\gamma \in \Pi(\mu, \nu)} \int_{\mathcal{X} \times \mathcal{Y}} c(x, y) d\gamma(x, y) \tag{2}
+\end{equation}</p>
+<p>其中$\Pi(\mu, \nu)$是所有边缘分布为$\mu$和$\nu$的联合分布集合：</p>
+<p>\begin{equation}
+\Pi(\mu, \nu) = \left{\gamma \in \mathcal{P}(\mathcal{X} \times \mathcal{Y}): \int_{\mathcal{Y}} d\gamma = \mu, \int_{\mathcal{X}} d\gamma = \nu\right} \tag{3}
+\end{equation}</p>
+<p><strong>离散化</strong>：对于离散分布$p = (p_1, \ldots, p_n)$和$\tau = (\tau_1, \ldots, \tau_n)$，最优传输问题变为线性规划：</p>
+<p>\begin{equation}
+\mathcal{C}[p, \tau] = \min_{\Gamma \in \mathbb{R}^{n \times n}} \sum_{i,j=1}^{n} \Gamma_{ij} C_{ij} \tag{4}
+\end{equation}</p>
+<p>约束条件：</p>
+<p>\begin{equation}
+\begin{cases}
+\sum_{j=1}^{n} \Gamma_{ij} = p_i, &amp; \forall i \
+\sum_{i=1}^{n} \Gamma_{ij} = \tau_j, &amp; \forall j \
+\Gamma_{ij} \geq 0, &amp; \forall i,j
+\end{cases} \tag{5}
+\end{equation}</p>
+<p>其中$C_{ij} = c(i,j)$是成本矩阵。</p>
+<h3 id="2-wasserstein">2. Wasserstein距离详解</h3>
+<p><strong>$p$-Wasserstein距离</strong>：对于$p \geq 1$，$p$-Wasserstein距离定义为：</p>
+<p>\begin{equation}
+W_p(\mu, \nu) = \left(\inf_{\gamma \in \Pi(\mu, \nu)} \int_{\mathcal{X} \times \mathcal{Y}} d(x,y)^p d\gamma(x,y)\right)^{1/p} \tag{6}
+\end{equation}</p>
+<p>其中$d(x,y)$是基础度量空间上的距离。</p>
+<p><strong>常用情形</strong>：</p>
+<ol>
+<li><strong>1-Wasserstein距离</strong>（Earth Mover's Distance）：</li>
+</ol>
+<p>\begin{equation}
+   W_1(\mu, \nu) = \inf_{\gamma \in \Pi(\mu, \nu)} \int_{\mathcal{X} \times \mathcal{Y}} d(x,y) d\gamma(x,y) \tag{7}
+   \end{equation}</p>
+<ol>
+<li><strong>2-Wasserstein距离</strong>：</li>
+</ol>
+<p>\begin{equation}
+   W_2(\mu, \nu) = \sqrt{\inf_{\gamma \in \Pi(\mu, \nu)} \int_{\mathcal{X} \times \mathcal{Y}} d(x,y)^2 d\gamma(x,y)} \tag{8}
+   \end{equation}</p>
+<p><strong>Kantorovich-Rubinstein对偶</strong>：</p>
+<p>\begin{equation}
+W_1(\mu, \nu) = \sup_{f: |f|_L \leq 1} \left{\int f d\mu - \int f d\nu\right} \tag{9}
+\end{equation}</p>
+<p>其中$|f|_L$是Lipschitz常数。这是WGAN的理论基础。</p>
+<p><strong>离散1-Wasserstein距离</strong>：</p>
+<p>\begin{equation}
+W_1(p, \tau) = \min_{\Gamma \geq 0} \sum_{i,j} \Gamma_{ij} d_{ij}, \quad \text{s.t. } \Gamma \mathbf{1} = p, \Gamma^T \mathbf{1} = \tau \tag{10}
+\end{equation}</p>
+<h3 id="3-emo">3. EMO损失函数的推导</h3>
+<p><strong>从分类到最优传输</strong>：</p>
+<p>标准交叉熵损失：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{CE}} = -\log p_t = -\log \frac{e^{z_t}}{\sum_i e^{z_i}} \tag{11}
+\end{equation}</p>
+<p>KL散度形式：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{CE}} = \text{KL}(\tau | p) = \sum_i \tau_i \log \frac{\tau_i}{p_i} = -\sum_i \tau_i \log p_i + \text{const} \tag{12}
+\end{equation}</p>
+<p><strong>问题</strong>：KL散度不考虑类别之间的语义距离，所有错误类别的惩罚相同。</p>
+<p><strong>EMO的动机</strong>：使用最优传输距离$W_1(p, \tau)$替代KL散度，考虑类别间的语义相似性。</p>
+<p><strong>One-hot目标的简化</strong>：</p>
+<p>当$\tau = e_t$（one-hot）时，最优传输方案唯一：将$p$的所有质量都运送到$t$，成本为：</p>
+<p>\begin{equation}
+\mathcal{C}[p, \tau] = \sum_{i=1}^{n} p_i c_{i,t} \tag{13}
+\end{equation}</p>
+<p>其中$c_{i,t}$是从类别$i$到目标类别$t$的运输成本。</p>
+<p><strong>成本函数设计</strong>：</p>
+<p>基于embedding余弦距离：</p>
+<p>\begin{equation}
+c_{i,j} = 1 - \cos(\boldsymbol{e}_i, \boldsymbol{e}_j) = 1 - \frac{\langle \boldsymbol{e}_i, \boldsymbol{e}_j \rangle}{|\boldsymbol{e}_i| |\boldsymbol{e}_j|} \tag{14}
+\end{equation}</p>
+<p>其中${\boldsymbol{e}<em i="1">i}</em>^n$是预训练的token embeddings（固定不变）。</p>
+<p><strong>EMO损失</strong>：</p>
+<p>\begin{equation}
+\mathcal{L}<em i="1">{\text{EMO}} = \sum</em>
+\end{equation}}^{n} p_i c_{i,t} = \sum_{i=1}^{n} p_i (1 - \cos(\boldsymbol{e}_i, \boldsymbol{e}_t)) \tag{15</p>
+<p>展开：</p>
+<p>\begin{equation}
+\mathcal{L}<em i="1">{\text{EMO}} = 1 - \sum</em>}^{n} p_i \cos(\boldsymbol{e<em i="1">i, \boldsymbol{e}_t) = 1 - \left\langle \sum</em>
+\end{equation}}^{n} p_i \frac{\boldsymbol{e}_i}{|\boldsymbol{e}_i|}, \frac{\boldsymbol{e}_t}{|\boldsymbol{e}_t|} \right\rangle \tag{16</p>
+<p>定义加权平均embedding：</p>
+<p>\begin{equation}
+\bar{\boldsymbol{e}}<em i="1">p = \sum</em>
+\end{equation}}^{n} p_i \frac{\boldsymbol{e}_i}{|\boldsymbol{e}_i|} \tag{17</p>
+<p>则：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{EMO}} = 1 - \cos(\bar{\boldsymbol{e}}_p, \boldsymbol{e}_t) \tag{18}
+\end{equation}</p>
+<p><strong>几何解释</strong>：EMO损失衡量预测分布的加权平均embedding与目标embedding的余弦距离。</p>
+<h3 id="4">4. 梯度计算</h3>
+<p><strong>损失关于logits的梯度</strong>：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}<em i_t="i,t">{\text{EMO}}}{\partial z_j} = \frac{\partial}{\partial z_j} \left(\sum_i p_i c</em>
+\end{equation}}\right) \tag{19</p>
+<p>利用$p_j = \frac{e^{z_j}}{\sum_k e^{z_k}}$，有：</p>
+<p>\begin{equation}
+\frac{\partial p_j}{\partial z_k} = p_j (\delta_{jk} - p_k) \tag{20}
+\end{equation}</p>
+<p>其中$\delta_{jk}$是Kronecker delta。</p>
+<p>代入得：</p>
+<p>\begin{equation}
+\begin{aligned}
+\frac{\partial \mathcal{L}<em i_t="i,t">{\text{EMO}}}{\partial z_j} &amp;= \sum_i \frac{\partial p_i}{\partial z_j} c</em> \
+&amp;= \sum_i p_i (\delta_{ij} - p_j) c_{i,t} \
+&amp;= p_j (c_{j,t} - \sum_i p_i c_{i,t}) \
+&amp;= p_j (c_{j,t} - \mathcal{L}_{\text{EMO}})
+\end{aligned} \tag{21}
+\end{equation}</p>
+<p><strong>与交叉熵梯度的对比</strong>：</p>
+<p>交叉熵：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}<em jt="jt">{\text{CE}}}{\partial z_j} = p_j - \tau_j = p_j - \delta</em>
+\end{equation}} \tag{22</p>
+<p>EMO：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}<em j_t="j,t">{\text{EMO}}}{\partial z_j} = p_j (c</em>
+\end{equation}} - \mathcal{L}_{\text{EMO}}) \tag{23</p>
+<p><strong>关键区别</strong>：</p>
+<ol>
+<li><strong>加权</strong>：EMO梯度乘以相对成本$(c_{j,t} - \mathcal{L}_{\text{EMO}})$</li>
+<li><strong>自适应</strong>：成本低于平均的类别梯度为负（鼓励），成本高于平均的梯度为正（抑制）</li>
+<li><strong>语义感知</strong>：近义词（$c_{j,t}$小）受到的惩罚小</li>
+</ol>
+<h3 id="5-kl">5. 与KL散度等散度的对比</h3>
+<p><strong>f-散度族</strong>：</p>
+<p>一般形式：</p>
+<p>\begin{equation}
+D_f(p | \tau) = \sum_i \tau_i f\left(\frac{p_i}{\tau_i}\right) \tag{24}
+\end{equation}</p>
+<p>常见实例：</p>
+<ol>
+<li><strong>KL散度</strong>：$f(t) = t \log t$</li>
+</ol>
+<p>\begin{equation}
+   \text{KL}(p | \tau) = \sum_i p_i \log \frac{p_i}{\tau_i} \tag{25}
+   \end{equation}</p>
+<ol>
+<li><strong>反KL散度</strong>：$f(t) = -\log t$</li>
+</ol>
+<p>\begin{equation}
+   \text{KL}(\tau | p) = \sum_i \tau_i \log \frac{\tau_i}{p_i} \tag{26}
+   \end{equation}</p>
+<ol>
+<li><strong>Total Variation</strong>：$f(t) = |t-1|$</li>
+</ol>
+<p>\begin{equation}
+   \text{TV}(p, \tau) = \frac{1}{2}\sum_i |p_i - \tau_i| \tag{27}
+   \end{equation}</p>
+<ol>
+<li><strong>Hellinger距离</strong>：$f(t) = (\sqrt{t} - 1)^2$</li>
+</ol>
+<p>\begin{equation}
+   H^2(p, \tau) = \sum_i (\sqrt{p_i} - \sqrt{\tau_i})^2 \tag{28}
+   \end{equation}</p>
+<p><strong>Wasserstein vs f-散度</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>性质</th>
+<th>f-散度</th>
+<th>Wasserstein距离</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>度量结构</td>
+<td>非度量（不满足三角不等式）</td>
+<td>真度量</td>
+</tr>
+<tr>
+<td>弱收敛</td>
+<td>不连续</td>
+<td>连续（弱拓扑）</td>
+</tr>
+<tr>
+<td>语义感知</td>
+<td>否</td>
+<td>是（通过成本矩阵）</td>
+</tr>
+<tr>
+<td>计算复杂度</td>
+<td>$O(n)$</td>
+<td>$O(n^3)$或$O(n^2/\varepsilon^2)$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>定理（弱收敛）</strong>：设${p_n}$弱收敛到$p$，则：</p>
+<p>\begin{equation}
+W_1(p_n, p) \to 0, \quad \text{但} \quad \text{KL}(p_n | p) \not\to 0 \text{ (一般)} \tag{29}
+\end{equation}</p>
+<p>这解释了为什么Wasserstein距离在GAN训练中比f-散度更稳定。</p>
+<h3 id="6-sinkhorn">6. Sinkhorn算法详解</h3>
+<p><strong>熵正则化最优传输</strong>：</p>
+<p>标准最优传输求解困难（$O(n^3 \log n)$），Cuturi (2013) 提出熵正则化：</p>
+<p>\begin{equation}
+\mathcal{C}<em _Gamma="\Gamma" _Pi_p_="\Pi(p," _in="\in" _tau_="\tau)">{\varepsilon}[p, \tau] = \min</em>
+\end{equation}} \left{\sum_{ij} \Gamma_{ij} C_{ij} - \varepsilon H(\Gamma)\right} \tag{30</p>
+<p>其中熵为：</p>
+<p>\begin{equation}
+H(\Gamma) = -\sum_{ij} \Gamma_{ij} (\log \Gamma_{ij} - 1) \tag{31}
+\end{equation}</p>
+<p><strong>Sinkhorn-Knopp算法</strong>：</p>
+<p>最优解具有形式：</p>
+<p>\begin{equation}
+\Gamma^* = \text{diag}(u) K \text{diag}(v) \tag{32}
+\end{equation}</p>
+<p>其中$K_{ij} = e^{-C_{ij}/\varepsilon}$是Gibbs核，$u, v$通过迭代求解：</p>
+<p>\begin{equation}
+\begin{cases}
+u^{(k+1)} = \frac{p}{K v^{(k)}} \
+v^{(k+1)} = \frac{\tau}{K^T u^{(k+1)}}
+\end{cases} \tag{33}
+\end{equation}</p>
+<p><strong>对数空间稳定版本</strong>：</p>
+<p>定义$\alpha = \varepsilon \log u$，$\beta = \varepsilon \log v$，迭代：</p>
+<p>\begin{equation}
+\begin{cases}
+\alpha^{(k+1)} = \varepsilon \log p - \varepsilon \log\left(\sum_j e^{(\beta^{(k)}<em ij="ij">j - C</em>\right) \
+\beta^{(k+1)} = \varepsilon \log \tau - \varepsilon \log\left(\sum_i e^{(\alpha^{(k+1)}})/\varepsilon<em ij="ij">i - C</em>\right)
+\end{cases} \tag{34}
+\end{equation}})/\varepsilon</p>
+<p><strong>Log-sum-exp技巧</strong>：</p>
+<p>\begin{equation}
+\text{LSE}(x) = \log\sum_i e^{x_i} = \max_i x_i + \log\sum_i e^{x_i - \max_i x_i} \tag{35}
+\end{equation}</p>
+<p><strong>收敛速率</strong>：</p>
+<p>Sinkhorn算法以线性速率收敛：</p>
+<p>\begin{equation}
+|\Gamma^{(k)} - \Gamma^*|_F \leq C \cdot \rho^k, \quad \rho &lt; 1 \tag{36}
+\end{equation}</p>
+<p>其中$\rho$依赖于$\varepsilon$和边缘分布的正则性。</p>
+<p><strong>EMO中的应用</strong>：</p>
+<p>虽然EMO在one-hot情况下不需要Sinkhorn，但在soft label扩展中可以使用：</p>
+<p>\begin{equation}
+\mathcal{L}<em _Gamma="\Gamma" _Pi_p_="\Pi(p," _in="\in" _tau_="\tau)">{\text{EMO-soft}} = \min</em>
+\end{equation}} \sum_{ij} \Gamma_{ij} C_{ij} \tag{37</p>
+<p>用Sinkhorn近似求解。</p>
+<h3 id="7">7. 信息论解释</h3>
+<p><strong>互信息视角</strong>：</p>
+<p>定义联合分布$\gamma(i,j) = p_i \tau_j$（独立假设），则：</p>
+<p>\begin{equation}
+I(p; \tau) = \sum_{ij} \gamma(i,j) \log \frac{\gamma(i,j)}{p_i \tau_j} = 0 \tag{38}
+\end{equation}</p>
+<p>独立分布互信息为0，表示没有利用类别间关系。</p>
+<p><strong>运输计划的互信息</strong>：</p>
+<p>最优传输计划$\Gamma^*$定义的互信息：</p>
+<p>\begin{equation}
+I(\Gamma^<em>) = \sum_{ij} \Gamma^</em><em ij="ij">{ij} \log \frac{\Gamma^*</em>
+\end{equation}}}{p_i \tau_j} \tag{39</p>
+<p>衡量了运输方案中编码的类别关联信息。</p>
+<p><strong>熵正则化的作用</strong>：</p>
+<p>\begin{equation}
+\mathcal{C}_{\varepsilon} = \mathcal{C} + \varepsilon \cdot I(\Gamma) \tag{40}
+\end{equation}</p>
+<p>$\varepsilon$控制运输方案的"随机性"：
+- $\varepsilon \to 0$：确定性运输（可能不稳定）
+- $\varepsilon \to \infty$：完全随机（$\Gamma \to p \otimes \tau$）</p>
+<p><strong>条件熵</strong>：</p>
+<p>给定预测$p$，目标的条件熵：</p>
+<p>\begin{equation}
+H(\tau | p) = -\sum_{ij} \Gamma^<em>_{ij} \log \Gamma^</em>_{ij|i} \tag{41}
+\end{equation}</p>
+<p>其中$\Gamma^<em>_{ij|i} = \Gamma^</em>_{ij} / p_i$。</p>
+<h3 id="8">8. 概率论视角</h3>
+<p><strong>生成模型解释</strong>：</p>
+<p>将EMO视为生成过程：
+1. 从预测分布$p$采样类别$i$
+2. 以成本$c_{i,t}$"校正"到目标$t$</p>
+<p>期望成本即EMO损失。</p>
+<p><strong>Bayes风险</strong>：</p>
+<p>定义决策规则$\delta: \mathcal{X} \to \mathcal{Y}$，Bayes风险为：</p>
+<p>\begin{equation}
+R(\delta) = \mathbb{E}<em _sim="\sim" p_cdot_x_="p(\cdot|x)" y="y">{x \sim \mathcal{D}}[\mathbb{E}</em>
+\end{equation}}[c(\delta(x), y)]] \tag{42</p>
+<p>EMO损失是Bayes风险在成本$c_{i,t}$下的实例化。</p>
+<p><strong>Bayes最优分类器</strong>：</p>
+<p>\begin{equation}
+\delta^*(x) = \arg\min_{\hat{y}} \sum_{y} p(y|x) c(\hat{y}, y) \tag{43}
+\end{equation}</p>
+<p>当$c = 0$-$1$损失时，退化为MAP分类器。</p>
+<p><strong>后验校准</strong>：</p>
+<p>EMO隐式地鼓励后验校准：</p>
+<p>\begin{equation}
+p(\hat{y} = y | x) \approx \frac{#{x_i: \hat{y}_i = y}}{N} \tag{44}
+\end{equation}</p>
+<p>通过惩罚语义上远离目标的预测。</p>
+<h3 id="9">9. 几何理解</h3>
+<p><strong>Embedding空间的流形结构</strong>：</p>
+<p>Token embeddings ${\boldsymbol{e}_i}$定义了vocabulary流形$\mathcal{M} \subset \mathbb{R}^d$。</p>
+<p><strong>测地距离</strong>：</p>
+<p>在embedding空间中，成本$c_{i,j}$近似测地距离：</p>
+<p>\begin{equation}
+c_{i,j} \approx d_{\mathcal{M}}(\boldsymbol{e}_i, \boldsymbol{e}_j) \tag{45}
+\end{equation}</p>
+<p><strong>重心问题</strong>：</p>
+<p>EMO优化等价于寻找Wasserstein重心：</p>
+<p>\begin{equation}
+\arg\min_{\boldsymbol{e}} \sum_i p_i d(\boldsymbol{e}, \boldsymbol{e}_i) \tag{46}
+\end{equation}</p>
+<p>其解为：</p>
+<p>\begin{equation}
+\boldsymbol{e}^* = \frac{\sum_i p_i \boldsymbol{e}_i}{|\sum_i p_i \boldsymbol{e}_i|} \tag{47}
+\end{equation}</p>
+<p>（归一化后的加权平均）</p>
+<p><strong>曲率的影响</strong>：</p>
+<p>在正曲率空间（如超球面），Wasserstein距离满足：</p>
+<p>\begin{equation}
+W_2^2(p, \tau) \leq \frac{1}{\kappa} \left(1 - \cos(\sqrt{\kappa} \cdot d_{\text{Euclidean}}(p, \tau))\right) \tag{48}
+\end{equation}</p>
+<p>其中$\kappa &gt; 0$是曲率。</p>
+<h3 id="10">10. 理论性质</h3>
+<p><strong>性质1：非负性与恒等性</strong></p>
+<p>\begin{equation}
+\mathcal{L}<em _text_EMO="\text{EMO">{\text{EMO}} \geq 0, \quad \mathcal{L}</em>
+\end{equation}}} = 0 \Leftrightarrow p = e_t \tag{49</p>
+<p>证明：$\mathcal{L}_{\text{EMO}} = 0$当且仅当$\bar{\boldsymbol{e}}_p = \boldsymbol{e}_t$，即$p = e_t$。</p>
+<p><strong>性质2：Lipschitz连续性</strong></p>
+<p>\begin{equation}
+|\mathcal{L}<em _text_EMO="\text{EMO">{\text{EMO}}(p_1) - \mathcal{L}</em>
+\end{equation}}}(p_2)| \leq L |p_1 - p_2|_1 \tag{50</p>
+<p>其中$L = \max_{i,j} c_{i,j} \leq 2$（余弦距离界）。</p>
+<p><strong>性质3：凸性</strong></p>
+<p>$\mathcal{L}_{\text{EMO}}$关于$p$是凸函数：</p>
+<p>\begin{equation}
+\mathcal{L}<em _text_EMO="\text{EMO">{\text{EMO}}(\lambda p_1 + (1-\lambda)p_2) \leq \lambda \mathcal{L}</em>
+\end{equation}}}(p_1) + (1-\lambda)\mathcal{L}_{\text{EMO}}(p_2) \tag{51</p>
+<p>证明：余弦相似度是线性的，损失是余弦相似度的凸函数。</p>
+<p><strong>性质4：梯度范数界</strong></p>
+<p>\begin{equation}
+\left|\frac{\partial \mathcal{L}<em i_t="i,t">{\text{EMO}}}{\partial z}\right|_2 \leq \sqrt{n} \cdot \max_i |c</em>
+\end{equation}}| \leq 2\sqrt{n} \tag{52</p>
+<p><strong>性质5：Hessian矩阵</strong></p>
+<p>\begin{equation}
+H_{jk} = \frac{\partial^2 \mathcal{L}<em jk="jk">{\text{EMO}}}{\partial z_j \partial z_k} = p_j(\delta</em>
+\end{equation}} - p_k)(c_{j,t} - c_{k,t}) \tag{53</p>
+<h3 id="11">11. 数值稳定性</h3>
+<p><strong>问题1：Embedding归一化</strong></p>
+<p>当$|\boldsymbol{e}_i|$差异很大时，余弦相似度不稳定。</p>
+<p><strong>解决方案</strong>：预处理时L2归一化所有embeddings</p>
+<p>\begin{equation}
+\tilde{\boldsymbol{e}}_i = \frac{\boldsymbol{e}_i}{\max(|\boldsymbol{e}_i|, \epsilon)}, \quad \epsilon = 10^{-8} \tag{54}
+\end{equation}</p>
+<p><strong>问题2：数值下溢</strong></p>
+<p>当$p_i$非常小时，$\sum_i p_i \boldsymbol{e}_i$可能下溢。</p>
+<p><strong>解决方案</strong>：在log space计算</p>
+<p>\begin{equation}
+\log |\bar{\boldsymbol{e}}_p| = \text{LSE}(\log p + \log |\boldsymbol{e}|) \tag{55}
+\end{equation}</p>
+<p><strong>问题3：梯度消失</strong></p>
+<p>当预测非常准确时，梯度接近0。</p>
+<p><strong>缓解</strong>：结合交叉熵</p>
+<p>\begin{equation}
+\mathcal{L}<em _text_CE="\text{CE">{\text{hybrid}} = (1-\alpha) \mathcal{L}</em>
+\end{equation}}} + \alpha \mathcal{L}_{\text{EMO}}, \quad \alpha \in [0,1] \tag{56</p>
+<h3 id="12">12. 具体计算示例</h3>
+<p><strong>设置</strong>：
+- Vocabulary size = 4
+- Embedding dim = 2
+- Target class = 2
+- Logits $z = [1.0, 2.0, 0.5, 0.3]$</p>
+<p><strong>步骤1：计算Softmax</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+Z &amp;= \sum_i e^{z_i} = e^{1.0} + e^{2.0} + e^{0.5} + e^{0.3} = 2.718 + 7.389 + 1.649 + 1.350 = 13.106 \
+p &amp;= [0.207, 0.564, 0.126, 0.103]
+\end{aligned} \tag{57}
+\end{equation}</p>
+<p><strong>步骤2：Embeddings（归一化）</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+\boldsymbol{e}_1 &amp;= [0.6, 0.8] \
+\boldsymbol{e}_2 &amp;= [1.0, 0.0] \
+\boldsymbol{e}_3 &amp;= [0.6, -0.8] \
+\boldsymbol{e}_4 &amp;= [-0.8, 0.6]
+\end{aligned} \tag{58}
+\end{equation}</p>
+<p><strong>步骤3：计算成本</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+c_{1,2} &amp;= 1 - \langle [0.6, 0.8], [1.0, 0.0] \rangle = 1 - 0.6 = 0.4 \
+c_{2,2} &amp;= 1 - 1.0 = 0.0 \
+c_{3,2} &amp;= 1 - 0.6 = 0.4 \
+c_{4,2} &amp;= 1 - (-0.8) = 1.8
+\end{aligned} \tag{59}
+\end{equation}</p>
+<p><strong>步骤4：EMO损失</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+\mathcal{L}<em i_2="i,2">{\text{EMO}} &amp;= \sum_i p_i c</em> \
+&amp;= 0.207 \times 0.4 + 0.564 \times 0 + 0.126 \times 0.4 + 0.103 \times 1.8 \
+&amp;= 0.083 + 0 + 0.050 + 0.185 \
+&amp;= 0.318
+\end{aligned} \tag{60}
+\end{equation}</p>
+<p><strong>步骤5：梯度</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial z_1} &amp;= p_1(c_{1,2} - \mathcal{L}_{\text{EMO}}) = 0.207 \times (0.4 - 0.318) = 0.017 \
+\frac{\partial \mathcal{L}}{\partial z_2} &amp;= 0.564 \times (0 - 0.318) = -0.179 \
+\frac{\partial \mathcal{L}}{\partial z_3} &amp;= 0.126 \times (0.4 - 0.318) = 0.010 \
+\frac{\partial \mathcal{L}}{\partial z_4} &amp;= 0.103 \times (1.8 - 0.318) = 0.153
+\end{aligned} \tag{61}
+\end{equation}</p>
+<p><strong>对比交叉熵</strong>：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}_{\text{CE}}}{\partial z} = p - e_2 = [0.207, -0.436, 0.126, 0.103] \tag{62}
+\end{equation}</p>
+<p><strong>观察</strong>：EMO对语义相近的类别（1,3）惩罚更轻，对语义远离的类别（4）惩罚更重。</p>
+<h3 id="13">13. 与其他损失函数的对比</h3>
+<table>
+<thead>
+<tr>
+<th>损失函数</th>
+<th>形式</th>
+<th>语义感知</th>
+<th>计算复杂度</th>
+<th>适用场景</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>交叉熵</td>
+<td>$-\log p_t$</td>
+<td>否</td>
+<td>$O(n)$</td>
+<td>通用分类</td>
+</tr>
+<tr>
+<td>Focal Loss</td>
+<td>$-(1-p_t)^\gamma \log p_t$</td>
+<td>否</td>
+<td>$O(n)$</td>
+<td>类别不平衡</td>
+</tr>
+<tr>
+<td>Label Smoothing</td>
+<td>$\sum_i \tau_i' \log p_i$</td>
+<td>弱（uniform smoothing）</td>
+<td>$O(n)$</td>
+<td>正则化</td>
+</tr>
+<tr>
+<td>EMO</td>
+<td>$\sum_i p_i c_{i,t}$</td>
+<td>是（embedding-based）</td>
+<td>$O(nd)$</td>
+<td>LLM、大词表</td>
+</tr>
+<tr>
+<td>Sinkhorn Loss</td>
+<td>$\min_{\Gamma} \langle \Gamma, C \rangle$</td>
+<td>是</td>
+<td>$O(n^2 K)$</td>
+<td>Soft labels</td>
+</tr>
+</tbody>
+</table>
+<h3 id="14">14. 实践建议</h3>
+<p><strong>Embedding选择</strong>：</p>
+<ol>
+<li><strong>预训练Embeddings</strong>：使用模型的输出层权重</li>
+</ol>
+<p>\begin{equation}
+   \boldsymbol{e}<em _text_out="\text{out">i = W</em>
+   \end{equation}}}[i, :] \tag{63</p>
+<ol>
+<li>
+<p><strong>Word2Vec/GloVe</strong>：对于没有预训练模型的情况</p>
+</li>
+<li>
+<p><strong>Contextualized Embeddings</strong>：对每个token取平均</p>
+</li>
+</ol>
+<p><strong>超参数</strong>：</p>
+<ol>
+<li>
+<p><strong>混合系数$\alpha$</strong>（hybrid loss）：</p>
+</li>
+<li>
+<p>预训练from scratch：$\alpha = 0.1 \sim 0.3$</p>
+</li>
+<li>
+<p>Fine-tuning：$\alpha = 0.5 \sim 0.9$</p>
+</li>
+<li>
+<p><strong>Embedding固定 vs 微调</strong>：</p>
+</li>
+<li>
+<p>固定：保持成本矩阵不变（理论保证）</p>
+</li>
+<li>微调：可能提升性能但失去理论基础</li>
+</ol>
+<p><strong>实现技巧</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 伪代码</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">emo_loss</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">embeddings</span><span class="p">):</span>
+    <span class="c1"># logits: [B, V], targets: [B], embeddings: [V, D]</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">softmax</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># [B, V]</span>
+
+    <span class="c1"># 归一化embeddings</span>
+    <span class="n">emb_norm</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">embeddings</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># [V, D]</span>
+
+    <span class="c1"># 计算加权平均embedding</span>
+    <span class="n">weighted_emb</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">emb_norm</span><span class="p">)</span>  <span class="c1"># [B, D]</span>
+
+    <span class="c1"># 目标embedding</span>
+    <span class="n">target_emb</span> <span class="o">=</span> <span class="n">emb_norm</span><span class="p">[</span><span class="n">targets</span><span class="p">]</span>  <span class="c1"># [B, D]</span>
+
+    <span class="c1"># 余弦相似度</span>
+    <span class="n">cos_sim</span> <span class="o">=</span> <span class="p">(</span><span class="n">weighted_emb</span> <span class="o">*</span> <span class="n">target_emb</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># [B]</span>
+
+    <span class="c1"># EMO loss</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">cos_sim</span>
+
+    <span class="k">return</span> <span class="n">loss</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>调试checklist</strong>：</p>
+<ol>
+<li>验证embeddings已归一化</li>
+<li>检查成本矩阵对称性和三角不等式</li>
+<li>监控损失值范围（应在$[0, 2]$）</li>
+<li>对比梯度方向与交叉熵</li>
+</ol>
+<h3 id="15">15. 理论扩展</h3>
+<p><strong>扩展1：多标签EMO</strong></p>
+<p>\begin{equation}
+\mathcal{L}<em _in="\in" _mathcal_T="\mathcal{T" t="t">{\text{multi-EMO}} = \sum</em>
+\end{equation}}} w_t \sum_i p_i c_{i,t} \tag{64</p>
+<p>其中$\mathcal{T}$是目标类别集，$w_t$是权重。</p>
+<p><strong>扩展2：Soft Label EMO</strong></p>
+<p>\begin{equation}
+\mathcal{L}<em i_j="i,j">{\text{soft-EMO}} = \sum</em> \Gamma^*<em i_j="i,j">{ij} c</em>
+\end{equation}} \tag{65</p>
+<p>使用Sinkhorn求解$\Gamma^*$。</p>
+<p><strong>扩展3：成本学习</strong></p>
+<p>将成本矩阵$C$作为参数联合优化：</p>
+<p>\begin{equation}
+\min_{\theta, C} \mathbb{E}[\mathcal{L}<em>{\text{EMO}}(p</em>\theta, C)] + \lambda R(C) \tag{66}
+\end{equation}</p>
+<p>其中$R(C)$是正则项（如鼓励度量性质）。</p>
+<hr />
+<p><strong>总结</strong>：本节全面介绍了基于最优传输理论的EMO损失函数，从理论基础（Monge-Kantorovich问题）到实际应用（LLM微调），涵盖Wasserstein距离、Sinkhorn算法、信息论解释、几何视角等多个方面。详细的推导和实例展示了EMO如何通过考虑类别间语义距离来改进标准交叉熵损失。</p>
+<hr />
+<h2 id="_8">公式推导与注释</h2>
+<h3 id="1_1">1. 最优传输理论基础</h3>
+<p><strong>Monge问题（1781）</strong>：最优传输理论起源于Monge的"土方搬运"问题。给定两个概率测度$\mu$和$\nu$，寻找最优的运输方案$T: \mathcal{X} \to \mathcal{Y}$使得运输成本最小：</p>
+<p>\begin{equation}
+\inf_{T: T_{#}\mu = \nu} \int_{\mathcal{X}} c(x, T(x)) d\mu(x) \tag{1}
+\end{equation}</p>
+<p>其中$c(x,y)$是从$x$到$y$的运输成本，$T_{#}\mu$表示测度$\mu$在$T$下的推前（pushforward）。</p>
+<p><strong>Kantorovich松弛（1942）</strong>：Kantorovich将Monge问题松弛为寻找联合分布$\gamma \in \Pi(\mu, \nu)$：</p>
+<p>\begin{equation}
+\mathcal{C}[\mu, \nu] = \inf_{\gamma \in \Pi(\mu, \nu)} \int_{\mathcal{X} \times \mathcal{Y}} c(x, y) d\gamma(x, y) \tag{2}
+\end{equation}</p>
+<p>其中$\Pi(\mu, \nu)$是所有边缘分布为$\mu$和$\nu$的联合分布集合：</p>
+<p>\begin{equation}
+\Pi(\mu, \nu) = \left{\gamma \in \mathcal{P}(\mathcal{X} \times \mathcal{Y}): \int_{\mathcal{Y}} d\gamma = \mu, \int_{\mathcal{X}} d\gamma = \nu\right} \tag{3}
+\end{equation}</p>
+<p><strong>离散化</strong>：对于离散分布$p = (p_1, \ldots, p_n)$和$\tau = (\tau_1, \ldots, \tau_n)$，最优传输问题变为线性规划：</p>
+<p>\begin{equation}
+\mathcal{C}[p, \tau] = \min_{\Gamma \in \mathbb{R}^{n \times n}} \sum_{i,j=1}^{n} \Gamma_{ij} C_{ij} \tag{4}
+\end{equation}</p>
+<p>约束条件：</p>
+<p>\begin{equation}
+\begin{cases}
+\sum_{j=1}^{n} \Gamma_{ij} = p_i, &amp; \forall i \
+\sum_{i=1}^{n} \Gamma_{ij} = \tau_j, &amp; \forall j \
+\Gamma_{ij} \geq 0, &amp; \forall i,j
+\end{cases} \tag{5}
+\end{equation}</p>
+<p>其中$C_{ij} = c(i,j)$是成本矩阵。</p>
+<h3 id="2-wasserstein_1">2. Wasserstein距离详解</h3>
+<p><strong>$p$-Wasserstein距离</strong>：对于$p \geq 1$，$p$-Wasserstein距离定义为：</p>
+<p>\begin{equation}
+W_p(\mu, \nu) = \left(\inf_{\gamma \in \Pi(\mu, \nu)} \int_{\mathcal{X} \times \mathcal{Y}} d(x,y)^p d\gamma(x,y)\right)^{1/p} \tag{6}
+\end{equation}</p>
+<p>其中$d(x,y)$是基础度量空间上的距离。</p>
+<p><strong>常用情形</strong>：</p>
+<ol>
+<li><strong>1-Wasserstein距离</strong>（Earth Mover's Distance）：</li>
+</ol>
+<p>\begin{equation}
+   W_1(\mu, \nu) = \inf_{\gamma \in \Pi(\mu, \nu)} \int_{\mathcal{X} \times \mathcal{Y}} d(x,y) d\gamma(x,y) \tag{7}
+   \end{equation}</p>
+<ol>
+<li><strong>2-Wasserstein距离</strong>：</li>
+</ol>
+<p>\begin{equation}
+   W_2(\mu, \nu) = \sqrt{\inf_{\gamma \in \Pi(\mu, \nu)} \int_{\mathcal{X} \times \mathcal{Y}} d(x,y)^2 d\gamma(x,y)} \tag{8}
+   \end{equation}</p>
+<p><strong>Kantorovich-Rubinstein对偶</strong>：</p>
+<p>\begin{equation}
+W_1(\mu, \nu) = \sup_{f: |f|_L \leq 1} \left{\int f d\mu - \int f d\nu\right} \tag{9}
+\end{equation}</p>
+<p>其中$|f|_L$是Lipschitz常数。这是WGAN的理论基础。</p>
+<p><strong>离散1-Wasserstein距离</strong>：</p>
+<p>\begin{equation}
+W_1(p, \tau) = \min_{\Gamma \geq 0} \sum_{i,j} \Gamma_{ij} d_{ij}, \quad \text{s.t. } \Gamma \mathbf{1} = p, \Gamma^T \mathbf{1} = \tau \tag{10}
+\end{equation}</p>
+<h3 id="3-emo_1">3. EMO损失函数的推导</h3>
+<p><strong>从分类到最优传输</strong>：</p>
+<p>标准交叉熵损失：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{CE}} = -\log p_t = -\log \frac{e^{z_t}}{\sum_i e^{z_i}} \tag{11}
+\end{equation}</p>
+<p>KL散度形式：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{CE}} = \text{KL}(\tau | p) = \sum_i \tau_i \log \frac{\tau_i}{p_i} = -\sum_i \tau_i \log p_i + \text{const} \tag{12}
+\end{equation}</p>
+<p><strong>问题</strong>：KL散度不考虑类别之间的语义距离，所有错误类别的惩罚相同。</p>
+<p><strong>EMO的动机</strong>：使用最优传输距离$W_1(p, \tau)$替代KL散度，考虑类别间的语义相似性。</p>
+<p><strong>One-hot目标的简化</strong>：</p>
+<p>当$\tau = e_t$（one-hot）时，最优传输方案唯一：将$p$的所有质量都运送到$t$，成本为：</p>
+<p>\begin{equation}
+\mathcal{C}[p, \tau] = \sum_{i=1}^{n} p_i c_{i,t} \tag{13}
+\end{equation}</p>
+<p>其中$c_{i,t}$是从类别$i$到目标类别$t$的运输成本。</p>
+<p><strong>成本函数设计</strong>：</p>
+<p>基于embedding余弦距离：</p>
+<p>\begin{equation}
+c_{i,j} = 1 - \cos(\boldsymbol{e}_i, \boldsymbol{e}_j) = 1 - \frac{\langle \boldsymbol{e}_i, \boldsymbol{e}_j \rangle}{|\boldsymbol{e}_i| |\boldsymbol{e}_j|} \tag{14}
+\end{equation}</p>
+<p>其中${\boldsymbol{e}<em i="1">i}</em>^n$是预训练的token embeddings（固定不变）。</p>
+<p><strong>EMO损失</strong>：</p>
+<p>\begin{equation}
+\mathcal{L}<em i="1">{\text{EMO}} = \sum</em>
+\end{equation}}^{n} p_i c_{i,t} = \sum_{i=1}^{n} p_i (1 - \cos(\boldsymbol{e}_i, \boldsymbol{e}_t)) \tag{15</p>
+<p>展开：</p>
+<p>\begin{equation}
+\mathcal{L}<em i="1">{\text{EMO}} = 1 - \sum</em>}^{n} p_i \cos(\boldsymbol{e<em i="1">i, \boldsymbol{e}_t) = 1 - \left\langle \sum</em>
+\end{equation}}^{n} p_i \frac{\boldsymbol{e}_i}{|\boldsymbol{e}_i|}, \frac{\boldsymbol{e}_t}{|\boldsymbol{e}_t|} \right\rangle \tag{16</p>
+<p>定义加权平均embedding：</p>
+<p>\begin{equation}
+\bar{\boldsymbol{e}}<em i="1">p = \sum</em>
+\end{equation}}^{n} p_i \frac{\boldsymbol{e}_i}{|\boldsymbol{e}_i|} \tag{17</p>
+<p>则：</p>
+<p>\begin{equation}
+\mathcal{L}_{\text{EMO}} = 1 - \cos(\bar{\boldsymbol{e}}_p, \boldsymbol{e}_t) \tag{18}
+\end{equation}</p>
+<p><strong>几何解释</strong>：EMO损失衡量预测分布的加权平均embedding与目标embedding的余弦距离。</p>
+<h3 id="4_1">4. 梯度计算</h3>
+<p><strong>损失关于logits的梯度</strong>：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}<em i_t="i,t">{\text{EMO}}}{\partial z_j} = \frac{\partial}{\partial z_j} \left(\sum_i p_i c</em>
+\end{equation}}\right) \tag{19</p>
+<p>利用$p_j = \frac{e^{z_j}}{\sum_k e^{z_k}}$，有：</p>
+<p>\begin{equation}
+\frac{\partial p_j}{\partial z_k} = p_j (\delta_{jk} - p_k) \tag{20}
+\end{equation}</p>
+<p>其中$\delta_{jk}$是Kronecker delta。</p>
+<p>代入得：</p>
+<p>\begin{equation}
+\begin{aligned}
+\frac{\partial \mathcal{L}<em i_t="i,t">{\text{EMO}}}{\partial z_j} &amp;= \sum_i \frac{\partial p_i}{\partial z_j} c</em> \
+&amp;= \sum_i p_i (\delta_{ij} - p_j) c_{i,t} \
+&amp;= p_j (c_{j,t} - \sum_i p_i c_{i,t}) \
+&amp;= p_j (c_{j,t} - \mathcal{L}_{\text{EMO}})
+\end{aligned} \tag{21}
+\end{equation}</p>
+<p><strong>与交叉熵梯度的对比</strong>：</p>
+<p>交叉熵：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}<em jt="jt">{\text{CE}}}{\partial z_j} = p_j - \tau_j = p_j - \delta</em>
+\end{equation}} \tag{22</p>
+<p>EMO：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}<em j_t="j,t">{\text{EMO}}}{\partial z_j} = p_j (c</em>
+\end{equation}} - \mathcal{L}_{\text{EMO}}) \tag{23</p>
+<p><strong>关键区别</strong>：</p>
+<ol>
+<li><strong>加权</strong>：EMO梯度乘以相对成本$(c_{j,t} - \mathcal{L}_{\text{EMO}})$</li>
+<li><strong>自适应</strong>：成本低于平均的类别梯度为负（鼓励），成本高于平均的梯度为正（抑制）</li>
+<li><strong>语义感知</strong>：近义词（$c_{j,t}$小）受到的惩罚小</li>
+</ol>
+<h3 id="5-kl_1">5. 与KL散度等散度的对比</h3>
+<p><strong>f-散度族</strong>：</p>
+<p>一般形式：</p>
+<p>\begin{equation}
+D_f(p | \tau) = \sum_i \tau_i f\left(\frac{p_i}{\tau_i}\right) \tag{24}
+\end{equation}</p>
+<p>常见实例：</p>
+<ol>
+<li><strong>KL散度</strong>：$f(t) = t \log t$</li>
+</ol>
+<p>\begin{equation}
+   \text{KL}(p | \tau) = \sum_i p_i \log \frac{p_i}{\tau_i} \tag{25}
+   \end{equation}</p>
+<ol>
+<li><strong>反KL散度</strong>：$f(t) = -\log t$</li>
+</ol>
+<p>\begin{equation}
+   \text{KL}(\tau | p) = \sum_i \tau_i \log \frac{\tau_i}{p_i} \tag{26}
+   \end{equation}</p>
+<ol>
+<li><strong>Total Variation</strong>：$f(t) = |t-1|$</li>
+</ol>
+<p>\begin{equation}
+   \text{TV}(p, \tau) = \frac{1}{2}\sum_i |p_i - \tau_i| \tag{27}
+   \end{equation}</p>
+<ol>
+<li><strong>Hellinger距离</strong>：$f(t) = (\sqrt{t} - 1)^2$</li>
+</ol>
+<p>\begin{equation}
+   H^2(p, \tau) = \sum_i (\sqrt{p_i} - \sqrt{\tau_i})^2 \tag{28}
+   \end{equation}</p>
+<p><strong>Wasserstein vs f-散度</strong>：</p>
+<table>
+<thead>
+<tr>
+<th>性质</th>
+<th>f-散度</th>
+<th>Wasserstein距离</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>度量结构</td>
+<td>非度量（不满足三角不等式）</td>
+<td>真度量</td>
+</tr>
+<tr>
+<td>弱收敛</td>
+<td>不连续</td>
+<td>连续（弱拓扑）</td>
+</tr>
+<tr>
+<td>语义感知</td>
+<td>否</td>
+<td>是（通过成本矩阵）</td>
+</tr>
+<tr>
+<td>计算复杂度</td>
+<td>$O(n)$</td>
+<td>$O(n^3)$或$O(n^2/\varepsilon^2)$</td>
+</tr>
+</tbody>
+</table>
+<p><strong>定理（弱收敛）</strong>：设${p_n}$弱收敛到$p$，则：</p>
+<p>\begin{equation}
+W_1(p_n, p) \to 0, \quad \text{但} \quad \text{KL}(p_n | p) \not\to 0 \text{ (一般)} \tag{29}
+\end{equation}</p>
+<p>这解释了为什么Wasserstein距离在GAN训练中比f-散度更稳定。</p>
+<h3 id="6-sinkhorn_1">6. Sinkhorn算法详解</h3>
+<p><strong>熵正则化最优传输</strong>：</p>
+<p>标准最优传输求解困难（$O(n^3 \log n)$），Cuturi (2013) 提出熵正则化：</p>
+<p>\begin{equation}
+\mathcal{C}<em _Gamma="\Gamma" _Pi_p_="\Pi(p," _in="\in" _tau_="\tau)">{\varepsilon}[p, \tau] = \min</em>
+\end{equation}} \left{\sum_{ij} \Gamma_{ij} C_{ij} - \varepsilon H(\Gamma)\right} \tag{30</p>
+<p>其中熵为：</p>
+<p>\begin{equation}
+H(\Gamma) = -\sum_{ij} \Gamma_{ij} (\log \Gamma_{ij} - 1) \tag{31}
+\end{equation}</p>
+<p><strong>Sinkhorn-Knopp算法</strong>：</p>
+<p>最优解具有形式：</p>
+<p>\begin{equation}
+\Gamma^* = \text{diag}(u) K \text{diag}(v) \tag{32}
+\end{equation}</p>
+<p>其中$K_{ij} = e^{-C_{ij}/\varepsilon}$是Gibbs核，$u, v$通过迭代求解：</p>
+<p>\begin{equation}
+\begin{cases}
+u^{(k+1)} = \frac{p}{K v^{(k)}} \
+v^{(k+1)} = \frac{\tau}{K^T u^{(k+1)}}
+\end{cases} \tag{33}
+\end{equation}</p>
+<p><strong>对数空间稳定版本</strong>：</p>
+<p>定义$\alpha = \varepsilon \log u$，$\beta = \varepsilon \log v$，迭代：</p>
+<p>\begin{equation}
+\begin{cases}
+\alpha^{(k+1)} = \varepsilon \log p - \varepsilon \log\left(\sum_j e^{(\beta^{(k)}<em ij="ij">j - C</em>\right) \
+\beta^{(k+1)} = \varepsilon \log \tau - \varepsilon \log\left(\sum_i e^{(\alpha^{(k+1)}})/\varepsilon<em ij="ij">i - C</em>\right)
+\end{cases} \tag{34}
+\end{equation}})/\varepsilon</p>
+<p><strong>Log-sum-exp技巧</strong>：</p>
+<p>\begin{equation}
+\text{LSE}(x) = \log\sum_i e^{x_i} = \max_i x_i + \log\sum_i e^{x_i - \max_i x_i} \tag{35}
+\end{equation}</p>
+<p><strong>收敛速率</strong>：</p>
+<p>Sinkhorn算法以线性速率收敛：</p>
+<p>\begin{equation}
+|\Gamma^{(k)} - \Gamma^*|_F \leq C \cdot \rho^k, \quad \rho &lt; 1 \tag{36}
+\end{equation}</p>
+<p>其中$\rho$依赖于$\varepsilon$和边缘分布的正则性。</p>
+<p><strong>EMO中的应用</strong>：</p>
+<p>虽然EMO在one-hot情况下不需要Sinkhorn，但在soft label扩展中可以使用：</p>
+<p>\begin{equation}
+\mathcal{L}<em _Gamma="\Gamma" _Pi_p_="\Pi(p," _in="\in" _tau_="\tau)">{\text{EMO-soft}} = \min</em>
+\end{equation}} \sum_{ij} \Gamma_{ij} C_{ij} \tag{37</p>
+<p>用Sinkhorn近似求解。</p>
+<h3 id="7_1">7. 信息论解释</h3>
+<p><strong>互信息视角</strong>：</p>
+<p>定义联合分布$\gamma(i,j) = p_i \tau_j$（独立假设），则：</p>
+<p>\begin{equation}
+I(p; \tau) = \sum_{ij} \gamma(i,j) \log \frac{\gamma(i,j)}{p_i \tau_j} = 0 \tag{38}
+\end{equation}</p>
+<p>独立分布互信息为0，表示没有利用类别间关系。</p>
+<p><strong>运输计划的互信息</strong>：</p>
+<p>最优传输计划$\Gamma^*$定义的互信息：</p>
+<p>\begin{equation}
+I(\Gamma^<em>) = \sum_{ij} \Gamma^</em><em ij="ij">{ij} \log \frac{\Gamma^*</em>
+\end{equation}}}{p_i \tau_j} \tag{39</p>
+<p>衡量了运输方案中编码的类别关联信息。</p>
+<p><strong>熵正则化的作用</strong>：</p>
+<p>\begin{equation}
+\mathcal{C}_{\varepsilon} = \mathcal{C} + \varepsilon \cdot I(\Gamma) \tag{40}
+\end{equation}</p>
+<p>$\varepsilon$控制运输方案的"随机性"：
+- $\varepsilon \to 0$：确定性运输（可能不稳定）
+- $\varepsilon \to \infty$：完全随机（$\Gamma \to p \otimes \tau$）</p>
+<p><strong>条件熵</strong>：</p>
+<p>给定预测$p$，目标的条件熵：</p>
+<p>\begin{equation}
+H(\tau | p) = -\sum_{ij} \Gamma^<em>_{ij} \log \Gamma^</em>_{ij|i} \tag{41}
+\end{equation}</p>
+<p>其中$\Gamma^<em>_{ij|i} = \Gamma^</em>_{ij} / p_i$。</p>
+<h3 id="8_1">8. 概率论视角</h3>
+<p><strong>生成模型解释</strong>：</p>
+<p>将EMO视为生成过程：
+1. 从预测分布$p$采样类别$i$
+2. 以成本$c_{i,t}$"校正"到目标$t$</p>
+<p>期望成本即EMO损失。</p>
+<p><strong>Bayes风险</strong>：</p>
+<p>定义决策规则$\delta: \mathcal{X} \to \mathcal{Y}$，Bayes风险为：</p>
+<p>\begin{equation}
+R(\delta) = \mathbb{E}<em _sim="\sim" p_cdot_x_="p(\cdot|x)" y="y">{x \sim \mathcal{D}}[\mathbb{E}</em>
+\end{equation}}[c(\delta(x), y)]] \tag{42</p>
+<p>EMO损失是Bayes风险在成本$c_{i,t}$下的实例化。</p>
+<p><strong>Bayes最优分类器</strong>：</p>
+<p>\begin{equation}
+\delta^*(x) = \arg\min_{\hat{y}} \sum_{y} p(y|x) c(\hat{y}, y) \tag{43}
+\end{equation}</p>
+<p>当$c = 0$-$1$损失时，退化为MAP分类器。</p>
+<p><strong>后验校准</strong>：</p>
+<p>EMO隐式地鼓励后验校准：</p>
+<p>\begin{equation}
+p(\hat{y} = y | x) \approx \frac{#{x_i: \hat{y}_i = y}}{N} \tag{44}
+\end{equation}</p>
+<p>通过惩罚语义上远离目标的预测。</p>
+<h3 id="9_1">9. 几何理解</h3>
+<p><strong>Embedding空间的流形结构</strong>：</p>
+<p>Token embeddings ${\boldsymbol{e}_i}$定义了vocabulary流形$\mathcal{M} \subset \mathbb{R}^d$。</p>
+<p><strong>测地距离</strong>：</p>
+<p>在embedding空间中，成本$c_{i,j}$近似测地距离：</p>
+<p>\begin{equation}
+c_{i,j} \approx d_{\mathcal{M}}(\boldsymbol{e}_i, \boldsymbol{e}_j) \tag{45}
+\end{equation}</p>
+<p><strong>重心问题</strong>：</p>
+<p>EMO优化等价于寻找Wasserstein重心：</p>
+<p>\begin{equation}
+\arg\min_{\boldsymbol{e}} \sum_i p_i d(\boldsymbol{e}, \boldsymbol{e}_i) \tag{46}
+\end{equation}</p>
+<p>其解为：</p>
+<p>\begin{equation}
+\boldsymbol{e}^* = \frac{\sum_i p_i \boldsymbol{e}_i}{|\sum_i p_i \boldsymbol{e}_i|} \tag{47}
+\end{equation}</p>
+<p>（归一化后的加权平均）</p>
+<p><strong>曲率的影响</strong>：</p>
+<p>在正曲率空间（如超球面），Wasserstein距离满足：</p>
+<p>\begin{equation}
+W_2^2(p, \tau) \leq \frac{1}{\kappa} \left(1 - \cos(\sqrt{\kappa} \cdot d_{\text{Euclidean}}(p, \tau))\right) \tag{48}
+\end{equation}</p>
+<p>其中$\kappa &gt; 0$是曲率。</p>
+<h3 id="10_1">10. 理论性质</h3>
+<p><strong>性质1：非负性与恒等性</strong></p>
+<p>\begin{equation}
+\mathcal{L}<em _text_EMO="\text{EMO">{\text{EMO}} \geq 0, \quad \mathcal{L}</em>
+\end{equation}}} = 0 \Leftrightarrow p = e_t \tag{49</p>
+<p>证明：$\mathcal{L}_{\text{EMO}} = 0$当且仅当$\bar{\boldsymbol{e}}_p = \boldsymbol{e}_t$，即$p = e_t$。</p>
+<p><strong>性质2：Lipschitz连续性</strong></p>
+<p>\begin{equation}
+|\mathcal{L}<em _text_EMO="\text{EMO">{\text{EMO}}(p_1) - \mathcal{L}</em>
+\end{equation}}}(p_2)| \leq L |p_1 - p_2|_1 \tag{50</p>
+<p>其中$L = \max_{i,j} c_{i,j} \leq 2$（余弦距离界）。</p>
+<p><strong>性质3：凸性</strong></p>
+<p>$\mathcal{L}_{\text{EMO}}$关于$p$是凸函数：</p>
+<p>\begin{equation}
+\mathcal{L}<em _text_EMO="\text{EMO">{\text{EMO}}(\lambda p_1 + (1-\lambda)p_2) \leq \lambda \mathcal{L}</em>
+\end{equation}}}(p_1) + (1-\lambda)\mathcal{L}_{\text{EMO}}(p_2) \tag{51</p>
+<p>证明：余弦相似度是线性的，损失是余弦相似度的凸函数。</p>
+<p><strong>性质4：梯度范数界</strong></p>
+<p>\begin{equation}
+\left|\frac{\partial \mathcal{L}<em i_t="i,t">{\text{EMO}}}{\partial z}\right|_2 \leq \sqrt{n} \cdot \max_i |c</em>
+\end{equation}}| \leq 2\sqrt{n} \tag{52</p>
+<p><strong>性质5：Hessian矩阵</strong></p>
+<p>\begin{equation}
+H_{jk} = \frac{\partial^2 \mathcal{L}<em jk="jk">{\text{EMO}}}{\partial z_j \partial z_k} = p_j(\delta</em>
+\end{equation}} - p_k)(c_{j,t} - c_{k,t}) \tag{53</p>
+<h3 id="11_1">11. 数值稳定性</h3>
+<p><strong>问题1：Embedding归一化</strong></p>
+<p>当$|\boldsymbol{e}_i|$差异很大时，余弦相似度不稳定。</p>
+<p><strong>解决方案</strong>：预处理时L2归一化所有embeddings</p>
+<p>\begin{equation}
+\tilde{\boldsymbol{e}}_i = \frac{\boldsymbol{e}_i}{\max(|\boldsymbol{e}_i|, \epsilon)}, \quad \epsilon = 10^{-8} \tag{54}
+\end{equation}</p>
+<p><strong>问题2：数值下溢</strong></p>
+<p>当$p_i$非常小时，$\sum_i p_i \boldsymbol{e}_i$可能下溢。</p>
+<p><strong>解决方案</strong>：在log space计算</p>
+<p>\begin{equation}
+\log |\bar{\boldsymbol{e}}_p| = \text{LSE}(\log p + \log |\boldsymbol{e}|) \tag{55}
+\end{equation}</p>
+<p><strong>问题3：梯度消失</strong></p>
+<p>当预测非常准确时，梯度接近0。</p>
+<p><strong>缓解</strong>：结合交叉熵</p>
+<p>\begin{equation}
+\mathcal{L}<em _text_CE="\text{CE">{\text{hybrid}} = (1-\alpha) \mathcal{L}</em>
+\end{equation}}} + \alpha \mathcal{L}_{\text{EMO}}, \quad \alpha \in [0,1] \tag{56</p>
+<h3 id="12_1">12. 具体计算示例</h3>
+<p><strong>设置</strong>：
+- Vocabulary size = 4
+- Embedding dim = 2
+- Target class = 2
+- Logits $z = [1.0, 2.0, 0.5, 0.3]$</p>
+<p><strong>步骤1：计算Softmax</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+Z &amp;= \sum_i e^{z_i} = e^{1.0} + e^{2.0} + e^{0.5} + e^{0.3} = 2.718 + 7.389 + 1.649 + 1.350 = 13.106 \
+p &amp;= [0.207, 0.564, 0.126, 0.103]
+\end{aligned} \tag{57}
+\end{equation}</p>
+<p><strong>步骤2：Embeddings（归一化）</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+\boldsymbol{e}_1 &amp;= [0.6, 0.8] \
+\boldsymbol{e}_2 &amp;= [1.0, 0.0] \
+\boldsymbol{e}_3 &amp;= [0.6, -0.8] \
+\boldsymbol{e}_4 &amp;= [-0.8, 0.6]
+\end{aligned} \tag{58}
+\end{equation}</p>
+<p><strong>步骤3：计算成本</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+c_{1,2} &amp;= 1 - \langle [0.6, 0.8], [1.0, 0.0] \rangle = 1 - 0.6 = 0.4 \
+c_{2,2} &amp;= 1 - 1.0 = 0.0 \
+c_{3,2} &amp;= 1 - 0.6 = 0.4 \
+c_{4,2} &amp;= 1 - (-0.8) = 1.8
+\end{aligned} \tag{59}
+\end{equation}</p>
+<p><strong>步骤4：EMO损失</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+\mathcal{L}<em i_2="i,2">{\text{EMO}} &amp;= \sum_i p_i c</em> \
+&amp;= 0.207 \times 0.4 + 0.564 \times 0 + 0.126 \times 0.4 + 0.103 \times 1.8 \
+&amp;= 0.083 + 0 + 0.050 + 0.185 \
+&amp;= 0.318
+\end{aligned} \tag{60}
+\end{equation}</p>
+<p><strong>步骤5：梯度</strong></p>
+<p>\begin{equation}
+\begin{aligned}
+\frac{\partial \mathcal{L}}{\partial z_1} &amp;= p_1(c_{1,2} - \mathcal{L}_{\text{EMO}}) = 0.207 \times (0.4 - 0.318) = 0.017 \
+\frac{\partial \mathcal{L}}{\partial z_2} &amp;= 0.564 \times (0 - 0.318) = -0.179 \
+\frac{\partial \mathcal{L}}{\partial z_3} &amp;= 0.126 \times (0.4 - 0.318) = 0.010 \
+\frac{\partial \mathcal{L}}{\partial z_4} &amp;= 0.103 \times (1.8 - 0.318) = 0.153
+\end{aligned} \tag{61}
+\end{equation}</p>
+<p><strong>对比交叉熵</strong>：</p>
+<p>\begin{equation}
+\frac{\partial \mathcal{L}_{\text{CE}}}{\partial z} = p - e_2 = [0.207, -0.436, 0.126, 0.103] \tag{62}
+\end{equation}</p>
+<p><strong>观察</strong>：EMO对语义相近的类别（1,3）惩罚更轻，对语义远离的类别（4）惩罚更重。</p>
+<h3 id="13_1">13. 与其他损失函数的对比</h3>
+<table>
+<thead>
+<tr>
+<th>损失函数</th>
+<th>形式</th>
+<th>语义感知</th>
+<th>计算复杂度</th>
+<th>适用场景</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>交叉熵</td>
+<td>$-\log p_t$</td>
+<td>否</td>
+<td>$O(n)$</td>
+<td>通用分类</td>
+</tr>
+<tr>
+<td>Focal Loss</td>
+<td>$-(1-p_t)^\gamma \log p_t$</td>
+<td>否</td>
+<td>$O(n)$</td>
+<td>类别不平衡</td>
+</tr>
+<tr>
+<td>Label Smoothing</td>
+<td>$\sum_i \tau_i' \log p_i$</td>
+<td>弱（uniform smoothing）</td>
+<td>$O(n)$</td>
+<td>正则化</td>
+</tr>
+<tr>
+<td>EMO</td>
+<td>$\sum_i p_i c_{i,t}$</td>
+<td>是（embedding-based）</td>
+<td>$O(nd)$</td>
+<td>LLM、大词表</td>
+</tr>
+<tr>
+<td>Sinkhorn Loss</td>
+<td>$\min_{\Gamma} \langle \Gamma, C \rangle$</td>
+<td>是</td>
+<td>$O(n^2 K)$</td>
+<td>Soft labels</td>
+</tr>
+</tbody>
+</table>
+<h3 id="14_1">14. 实践建议</h3>
+<p><strong>Embedding选择</strong>：</p>
+<ol>
+<li><strong>预训练Embeddings</strong>：使用模型的输出层权重</li>
+</ol>
+<p>\begin{equation}
+   \boldsymbol{e}<em _text_out="\text{out">i = W</em>
+   \end{equation}}}[i, :] \tag{63</p>
+<ol>
+<li>
+<p><strong>Word2Vec/GloVe</strong>：对于没有预训练模型的情况</p>
+</li>
+<li>
+<p><strong>Contextualized Embeddings</strong>：对每个token取平均</p>
+</li>
+</ol>
+<p><strong>超参数</strong>：</p>
+<ol>
+<li>
+<p><strong>混合系数$\alpha$</strong>（hybrid loss）：</p>
+</li>
+<li>
+<p>预训练from scratch：$\alpha = 0.1 \sim 0.3$</p>
+</li>
+<li>
+<p>Fine-tuning：$\alpha = 0.5 \sim 0.9$</p>
+</li>
+<li>
+<p><strong>Embedding固定 vs 微调</strong>：</p>
+</li>
+<li>
+<p>固定：保持成本矩阵不变（理论保证）</p>
+</li>
+<li>微调：可能提升性能但失去理论基础</li>
+</ol>
+<p><strong>实现技巧</strong>：</p>
+<div class="codehilite"><pre><span></span><code><span class="c1"># 伪代码</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">emo_loss</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">targets</span><span class="p">,</span> <span class="n">embeddings</span><span class="p">):</span>
+    <span class="c1"># logits: [B, V], targets: [B], embeddings: [V, D]</span>
+    <span class="n">p</span> <span class="o">=</span> <span class="n">softmax</span><span class="p">(</span><span class="n">logits</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># [B, V]</span>
+
+    <span class="c1"># 归一化embeddings</span>
+    <span class="n">emb_norm</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">embeddings</span><span class="p">,</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># [V, D]</span>
+
+    <span class="c1"># 计算加权平均embedding</span>
+    <span class="n">weighted_emb</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">matmul</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">emb_norm</span><span class="p">)</span>  <span class="c1"># [B, D]</span>
+
+    <span class="c1"># 目标embedding</span>
+    <span class="n">target_emb</span> <span class="o">=</span> <span class="n">emb_norm</span><span class="p">[</span><span class="n">targets</span><span class="p">]</span>  <span class="c1"># [B, D]</span>
+
+    <span class="c1"># 余弦相似度</span>
+    <span class="n">cos_sim</span> <span class="o">=</span> <span class="p">(</span><span class="n">weighted_emb</span> <span class="o">*</span> <span class="n">target_emb</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># [B]</span>
+
+    <span class="c1"># EMO loss</span>
+    <span class="n">loss</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">cos_sim</span>
+
+    <span class="k">return</span> <span class="n">loss</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+</code></pre></div>
+
+<p><strong>调试checklist</strong>：</p>
+<ol>
+<li>验证embeddings已归一化</li>
+<li>检查成本矩阵对称性和三角不等式</li>
+<li>监控损失值范围（应在$[0, 2]$）</li>
+<li>对比梯度方向与交叉熵</li>
+</ol>
+<h3 id="15_1">15. 理论扩展</h3>
+<p><strong>扩展1：多标签EMO</strong></p>
+<p>\begin{equation}
+\mathcal{L}<em _in="\in" _mathcal_T="\mathcal{T" t="t">{\text{multi-EMO}} = \sum</em>
+\end{equation}}} w_t \sum_i p_i c_{i,t} \tag{64</p>
+<p>其中$\mathcal{T}$是目标类别集，$w_t$是权重。</p>
+<p><strong>扩展2：Soft Label EMO</strong></p>
+<p>\begin{equation}
+\mathcal{L}<em i_j="i,j">{\text{soft-EMO}} = \sum</em> \Gamma^*<em i_j="i,j">{ij} c</em>
+\end{equation}} \tag{65</p>
+<p>使用Sinkhorn求解$\Gamma^*$。</p>
+<p><strong>扩展3：成本学习</strong></p>
+<p>将成本矩阵$C$作为参数联合优化：</p>
+<p>\begin{equation}
+\min_{\theta, C} \mathbb{E}[\mathcal{L}<em>{\text{EMO}}(p</em>\theta, C)] + \lambda R(C) \tag{66}
+\end{equation}</p>
+<p>其中$R(C)$是正则项（如鼓励度量性质）。</p>
+<hr />
+<p><strong>总结</strong>：本节全面介绍了基于最优传输理论的EMO损失函数，从理论基础（Monge-Kantorovich问题）到实际应用（LLM微调），涵盖Wasserstein距离、Sinkhorn算法、信息论解释、几何视角等多个方面。详细的推导和实例展示了EMO如何通过考虑类别间语义距离来改进标准交叉熵损失。</p>
+        </div>
+    </div>
+</body>
+</html>
